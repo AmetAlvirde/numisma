@@ -1,7 +1,7 @@
 import "./App.css";
-import { Button } from "@/components/ui/button";
 import { PositionsList } from "./components/positionsList";
 import { Position, WalletType, PositionStatus, OrderStatus } from "./types";
+import { PositionForm } from "./components/PositionForm";
 
 const positions: Position[] = [
   {
@@ -71,10 +71,15 @@ const handlePositionClick = (position: Position) => {
   console.log(position);
 };
 
+const handlePositionSubmit = (position: Position) => {
+  console.log(position);
+};
+
 function App() {
   return (
     <>
-      <Button>Click me</Button>
+      <PositionForm onSubmit={handlePositionSubmit} />
+
       <PositionsList
         positions={positions}
         currentPrices={currentPrices}
