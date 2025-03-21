@@ -1,6 +1,16 @@
 import { useState } from "react";
 import { v4 as uuidv4 } from "uuid";
-import { Position, WalletType, PositionStatus } from "../types";
+import {
+  Position,
+  WalletType,
+  PositionStatus,
+  OrderType,
+  OrderStatus,
+  SizeUnit,
+  Order,
+  StopLossOrder,
+  TakeProfitOrder,
+} from "../types";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -56,6 +66,8 @@ export const PositionForm: React.FC<PositionFormProps> = ({ onSubmit }) => {
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [focusedInputs, setFocusedInputs] = useState<Set<string>>(new Set());
+  const [inputValues, setInputValues] = useState<Record<string, string>>({});
   const [options, setOptions] = useState({
     portfolio: PORTFOLIO_OPTIONS,
     seedCapitalTier: SEED_CAPITAL_TIER_OPTIONS,
@@ -514,6 +526,757 @@ export const PositionForm: React.FC<PositionFormProps> = ({ onSubmit }) => {
                   {errors["positionDetails.fractal"]}
                 </p>
               )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="positionDetails.dateOpened">Date Opened</Label>
+              <Input
+                id="positionDetails.dateOpened"
+                name="positionDetails.dateOpened"
+                type="datetime-local"
+                value={
+                  formData.positionDetails?.dateOpened
+                    ? new Date(formData.positionDetails.dateOpened)
+                        .toISOString()
+                        .slice(0, 16)
+                    : ""
+                }
+                onChange={e => {
+                  const date = e.target.value
+                    ? new Date(e.target.value)
+                    : undefined;
+                  setFormData(prev => ({
+                    ...prev,
+                    positionDetails: {
+                      ...prev.positionDetails!,
+                      dateOpened: date,
+                    },
+                  }));
+                }}
+                className={
+                  errors["positionDetails.dateOpened"] ? "border-red-500" : ""
+                }
+              />
+              {errors["positionDetails.dateOpened"] && (
+                <p className="text-sm text-red-500">
+                  {errors["positionDetails.dateOpened"]}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Orders Section */}
+          <div className="space-y-4">
+            <h3 className="text-lg font-medium">Entry Orders</h3>
+            <div className="space-y-4">
+              {formData.positionDetails?.orders.map((order, index) => (
+                <div key={order.id} className="p-4 border rounded-lg space-y-4">
+                  <div className="flex justify-between items-center">
+                    <h4 className="font-medium">Order {index + 1}</h4>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => {
+                        setFormData(prev => ({
+                          ...prev,
+                          positionDetails: {
+                            ...prev.positionDetails!,
+                            orders: prev.positionDetails!.orders.filter(
+                              o => o.id !== order.id
+                            ),
+                          },
+                        }));
+                      }}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Type</Label>
+                      <Select
+                        value={order.type}
+                        onValueChange={(value: OrderType) => {
+                          const newOrders = [
+                            ...(formData.positionDetails?.orders || []),
+                          ];
+                          newOrders[index] = { ...order, type: value };
+                          setFormData(prev => ({
+                            ...prev,
+                            positionDetails: {
+                              ...prev.positionDetails!,
+                              orders: newOrders,
+                            },
+                          }));
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="market">Market</SelectItem>
+                          <SelectItem value="limit">Limit</SelectItem>
+                          <SelectItem value="trigger">Trigger</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Status</Label>
+                      <Select
+                        value={order.status}
+                        onValueChange={(value: OrderStatus) => {
+                          const newOrders = [
+                            ...(formData.positionDetails?.orders || []),
+                          ];
+                          newOrders[index] = { ...order, status: value };
+                          setFormData(prev => ({
+                            ...prev,
+                            positionDetails: {
+                              ...prev.positionDetails!,
+                              orders: newOrders,
+                            },
+                          }));
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="submitted">Submitted</SelectItem>
+                          <SelectItem value="filled">Filled</SelectItem>
+                          <SelectItem value="cancelled">Cancelled</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Price</Label>
+                      <Input
+                        type="number"
+                        value={order.averagePrice || ""}
+                        onChange={e => {
+                          const newOrders = [
+                            ...(formData.positionDetails?.orders || []),
+                          ];
+                          newOrders[index] = {
+                            ...order,
+                            averagePrice: parseFloat(e.target.value),
+                          };
+                          setFormData(prev => ({
+                            ...prev,
+                            positionDetails: {
+                              ...prev.positionDetails!,
+                              orders: newOrders,
+                            },
+                          }));
+                        }}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Amount</Label>
+                      <div className="space-y-1">
+                        <div className="flex gap-2">
+                          <Input
+                            type="text"
+                            value={
+                              inputValues[`order-${order.id}`] ||
+                              order.filled ||
+                              ""
+                            }
+                            onChange={e => {
+                              const value = e.target.value;
+                              setInputValues(prev => ({
+                                ...prev,
+                                [`order-${order.id}`]: value,
+                              }));
+                            }}
+                            onFocus={() => {
+                              setFocusedInputs(prev =>
+                                new Set(prev).add(`order-${order.id}`)
+                              );
+                            }}
+                            onBlur={e => {
+                              const value = e.target.value;
+                              if (value === "") {
+                                const newOrders = [
+                                  ...(formData.positionDetails?.orders || []),
+                                ];
+                                newOrders[index] = {
+                                  ...order,
+                                  filled: undefined,
+                                };
+                                setFormData(prev => ({
+                                  ...prev,
+                                  positionDetails: {
+                                    ...prev.positionDetails!,
+                                    orders: newOrders,
+                                  },
+                                }));
+                              } else {
+                                const numValue = parseFloat(value);
+                                if (!isNaN(numValue)) {
+                                  const newOrders = [
+                                    ...(formData.positionDetails?.orders || []),
+                                  ];
+                                  newOrders[index] = {
+                                    ...order,
+                                    filled: numValue,
+                                  };
+                                  setFormData(prev => ({
+                                    ...prev,
+                                    positionDetails: {
+                                      ...prev.positionDetails!,
+                                      orders: newOrders,
+                                    },
+                                  }));
+                                }
+                              }
+                              setFocusedInputs(prev => {
+                                const newSet = new Set(prev);
+                                newSet.delete(`order-${order.id}`);
+                                return newSet;
+                              });
+                            }}
+                            className="flex-1"
+                          />
+                          <Select
+                            value={order.unit || "base"}
+                            onValueChange={(value: SizeUnit) => {
+                              const newOrders = [
+                                ...(formData.positionDetails?.orders || []),
+                              ];
+                              newOrders[index] = { ...order, unit: value };
+                              setFormData(prev => ({
+                                ...prev,
+                                positionDetails: {
+                                  ...prev.positionDetails!,
+                                  orders: newOrders,
+                                },
+                              }));
+                            }}
+                          >
+                            <SelectTrigger className="w-[120px]">
+                              <SelectValue placeholder="Select unit" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="base">Base</SelectItem>
+                              <SelectItem value="quote">Quote</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {order.averagePrice &&
+                          order.filled &&
+                          !focusedInputs.has(`order-${order.id}`) && (
+                            <p className="text-sm text-muted-foreground">
+                              {order.unit === "base"
+                                ? `≈ ${(
+                                    order.filled * order.averagePrice
+                                  ).toFixed(2)} ${
+                                    formData.asset?.pair.split("/")[1]
+                                  }`
+                                : `≈ ${(
+                                    order.filled / order.averagePrice
+                                  ).toFixed(8)} ${
+                                    formData.asset?.pair.split("/")[0]
+                                  }`}
+                            </p>
+                          )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  const newOrder: Order = {
+                    id: uuidv4(),
+                    type: "market",
+                    status: "submitted",
+                    unit: "base",
+                  };
+                  setFormData(prev => ({
+                    ...prev,
+                    positionDetails: {
+                      ...prev.positionDetails!,
+                      orders: [
+                        ...(prev.positionDetails?.orders || []),
+                        newOrder,
+                      ],
+                    },
+                  }));
+                }}
+              >
+                Add Entry Order
+              </Button>
+            </div>
+          </div>
+
+          {/* Stop Loss Section */}
+          <div className="space-y-4">
+            <h3 className="text-lg font-medium">Stop Loss Orders</h3>
+            <div className="space-y-4">
+              {formData.positionDetails?.stopLoss?.map((order, index) => (
+                <div key={order.id} className="p-4 border rounded-lg space-y-4">
+                  <div className="flex justify-between items-center">
+                    <h4 className="font-medium">Stop Loss {index + 1}</h4>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => {
+                        setFormData(prev => ({
+                          ...prev,
+                          positionDetails: {
+                            ...prev.positionDetails!,
+                            stopLoss: prev.positionDetails!.stopLoss?.filter(
+                              o => o.id !== order.id
+                            ),
+                          },
+                        }));
+                      }}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Type</Label>
+                      <Select
+                        value={order.type}
+                        onValueChange={(value: OrderType) => {
+                          const newOrders = [
+                            ...(formData.positionDetails?.stopLoss || []),
+                          ];
+                          newOrders[index] = { ...order, type: value };
+                          setFormData(prev => ({
+                            ...prev,
+                            positionDetails: {
+                              ...prev.positionDetails!,
+                              stopLoss: newOrders,
+                            },
+                          }));
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="trigger">Trigger</SelectItem>
+                          <SelectItem value="limit">Limit</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Status</Label>
+                      <Select
+                        value={order.status}
+                        onValueChange={(value: OrderStatus) => {
+                          const newOrders = [
+                            ...(formData.positionDetails?.stopLoss || []),
+                          ];
+                          newOrders[index] = { ...order, status: value };
+                          setFormData(prev => ({
+                            ...prev,
+                            positionDetails: {
+                              ...prev.positionDetails!,
+                              stopLoss: newOrders,
+                            },
+                          }));
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="submitted">Submitted</SelectItem>
+                          <SelectItem value="filled">Filled</SelectItem>
+                          <SelectItem value="cancelled">Cancelled</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <Label>Price</Label>
+                      <Input
+                        type="number"
+                        value={order.trigger || ""}
+                        onChange={e => {
+                          const newOrders = [
+                            ...(formData.positionDetails?.stopLoss || []),
+                          ];
+                          newOrders[index] = {
+                            ...order,
+                            trigger: parseFloat(e.target.value),
+                          };
+                          setFormData(prev => ({
+                            ...prev,
+                            positionDetails: {
+                              ...prev.positionDetails!,
+                              stopLoss: newOrders,
+                            },
+                          }));
+                        }}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Size</Label>
+                      <Input
+                        type="text"
+                        value={
+                          inputValues[`stopLoss-${order.id}`] ||
+                          order.size ||
+                          ""
+                        }
+                        onChange={e => {
+                          const value = e.target.value;
+                          setInputValues(prev => ({
+                            ...prev,
+                            [`stopLoss-${order.id}`]: value,
+                          }));
+                        }}
+                        onFocus={() => {
+                          setFocusedInputs(prev =>
+                            new Set(prev).add(`stopLoss-${order.id}`)
+                          );
+                        }}
+                        onBlur={e => {
+                          const value = e.target.value;
+                          if (value === "") {
+                            const newOrders = [
+                              ...(formData.positionDetails?.stopLoss || []),
+                            ];
+                            newOrders[index] = {
+                              ...order,
+                              size: 0,
+                            };
+                            setFormData(prev => ({
+                              ...prev,
+                              positionDetails: {
+                                ...prev.positionDetails!,
+                                stopLoss: newOrders,
+                              },
+                            }));
+                          } else {
+                            const numValue = parseFloat(value);
+                            if (!isNaN(numValue)) {
+                              const newOrders = [
+                                ...(formData.positionDetails?.stopLoss || []),
+                              ];
+                              newOrders[index] = {
+                                ...order,
+                                size: numValue,
+                              };
+                              setFormData(prev => ({
+                                ...prev,
+                                positionDetails: {
+                                  ...prev.positionDetails!,
+                                  stopLoss: newOrders,
+                                },
+                              }));
+                            }
+                          }
+                          setFocusedInputs(prev => {
+                            const newSet = new Set(prev);
+                            newSet.delete(`stopLoss-${order.id}`);
+                            return newSet;
+                          });
+                        }}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Unit</Label>
+                      <Select
+                        value={order.unit}
+                        onValueChange={(value: SizeUnit) => {
+                          const newOrders = [
+                            ...(formData.positionDetails?.stopLoss || []),
+                          ];
+                          newOrders[index] = { ...order, unit: value };
+                          setFormData(prev => ({
+                            ...prev,
+                            positionDetails: {
+                              ...prev.positionDetails!,
+                              stopLoss: newOrders,
+                            },
+                          }));
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select unit" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="percentage">Percentage</SelectItem>
+                          <SelectItem value="base">Base</SelectItem>
+                          <SelectItem value="quote">Quote</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  const newOrder: StopLossOrder = {
+                    id: uuidv4(),
+                    type: "trigger",
+                    status: "submitted",
+                    unit: "percentage",
+                    size: 0,
+                  };
+                  setFormData(prev => ({
+                    ...prev,
+                    positionDetails: {
+                      ...prev.positionDetails!,
+                      stopLoss: [
+                        ...(prev.positionDetails?.stopLoss || []),
+                        newOrder,
+                      ],
+                    },
+                  }));
+                }}
+              >
+                Add Stop Loss
+              </Button>
+            </div>
+          </div>
+
+          {/* Take Profit Section */}
+          <div className="space-y-4">
+            <h3 className="text-lg font-medium">Take Profit Orders</h3>
+            <div className="space-y-4">
+              {formData.positionDetails?.takeProfit?.map((order, index) => (
+                <div key={order.id} className="p-4 border rounded-lg space-y-4">
+                  <div className="flex justify-between items-center">
+                    <h4 className="font-medium">Take Profit {index + 1}</h4>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => {
+                        setFormData(prev => ({
+                          ...prev,
+                          positionDetails: {
+                            ...prev.positionDetails!,
+                            takeProfit:
+                              prev.positionDetails!.takeProfit?.filter(
+                                o => o.id !== order.id
+                              ),
+                          },
+                        }));
+                      }}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Type</Label>
+                      <Select
+                        value={order.type}
+                        onValueChange={(value: OrderType) => {
+                          const newOrders = [
+                            ...(formData.positionDetails?.takeProfit || []),
+                          ];
+                          newOrders[index] = { ...order, type: value };
+                          setFormData(prev => ({
+                            ...prev,
+                            positionDetails: {
+                              ...prev.positionDetails!,
+                              takeProfit: newOrders,
+                            },
+                          }));
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="trigger">Trigger</SelectItem>
+                          <SelectItem value="limit">Limit</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Status</Label>
+                      <Select
+                        value={order.status}
+                        onValueChange={(value: OrderStatus) => {
+                          const newOrders = [
+                            ...(formData.positionDetails?.takeProfit || []),
+                          ];
+                          newOrders[index] = { ...order, status: value };
+                          setFormData(prev => ({
+                            ...prev,
+                            positionDetails: {
+                              ...prev.positionDetails!,
+                              takeProfit: newOrders,
+                            },
+                          }));
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="submitted">Submitted</SelectItem>
+                          <SelectItem value="filled">Filled</SelectItem>
+                          <SelectItem value="cancelled">Cancelled</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <Label>Price</Label>
+                      <Input
+                        type="number"
+                        value={order.trigger || ""}
+                        onChange={e => {
+                          const newOrders = [
+                            ...(formData.positionDetails?.takeProfit || []),
+                          ];
+                          newOrders[index] = {
+                            ...order,
+                            trigger: parseFloat(e.target.value),
+                          };
+                          setFormData(prev => ({
+                            ...prev,
+                            positionDetails: {
+                              ...prev.positionDetails!,
+                              takeProfit: newOrders,
+                            },
+                          }));
+                        }}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Size</Label>
+                      <Input
+                        type="text"
+                        value={
+                          inputValues[`takeProfit-${order.id}`] ||
+                          order.size ||
+                          ""
+                        }
+                        onChange={e => {
+                          const value = e.target.value;
+                          setInputValues(prev => ({
+                            ...prev,
+                            [`takeProfit-${order.id}`]: value,
+                          }));
+                        }}
+                        onFocus={() => {
+                          setFocusedInputs(prev =>
+                            new Set(prev).add(`takeProfit-${order.id}`)
+                          );
+                        }}
+                        onBlur={e => {
+                          const value = e.target.value;
+                          if (value === "") {
+                            const newOrders = [
+                              ...(formData.positionDetails?.takeProfit || []),
+                            ];
+                            newOrders[index] = {
+                              ...order,
+                              size: 0,
+                            };
+                            setFormData(prev => ({
+                              ...prev,
+                              positionDetails: {
+                                ...prev.positionDetails!,
+                                takeProfit: newOrders,
+                              },
+                            }));
+                          } else {
+                            const numValue = parseFloat(value);
+                            if (!isNaN(numValue)) {
+                              const newOrders = [
+                                ...(formData.positionDetails?.takeProfit || []),
+                              ];
+                              newOrders[index] = {
+                                ...order,
+                                size: numValue,
+                              };
+                              setFormData(prev => ({
+                                ...prev,
+                                positionDetails: {
+                                  ...prev.positionDetails!,
+                                  takeProfit: newOrders,
+                                },
+                              }));
+                            }
+                          }
+                          setFocusedInputs(prev => {
+                            const newSet = new Set(prev);
+                            newSet.delete(`takeProfit-${order.id}`);
+                            return newSet;
+                          });
+                        }}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Unit</Label>
+                      <Select
+                        value={order.unit}
+                        onValueChange={(value: SizeUnit) => {
+                          const newOrders = [
+                            ...(formData.positionDetails?.takeProfit || []),
+                          ];
+                          newOrders[index] = { ...order, unit: value };
+                          setFormData(prev => ({
+                            ...prev,
+                            positionDetails: {
+                              ...prev.positionDetails!,
+                              takeProfit: newOrders,
+                            },
+                          }));
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select unit" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="percentage">Percentage</SelectItem>
+                          <SelectItem value="base">Base</SelectItem>
+                          <SelectItem value="quote">Quote</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  const newOrder: TakeProfitOrder = {
+                    id: uuidv4(),
+                    type: "trigger",
+                    status: "submitted",
+                    unit: "percentage",
+                    size: 0,
+                  };
+                  setFormData(prev => ({
+                    ...prev,
+                    positionDetails: {
+                      ...prev.positionDetails!,
+                      takeProfit: [
+                        ...(prev.positionDetails?.takeProfit || []),
+                        newOrder,
+                      ],
+                    },
+                  }));
+                }}
+              >
+                Add Take Profit
+              </Button>
             </div>
           </div>
 

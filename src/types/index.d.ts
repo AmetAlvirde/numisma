@@ -279,8 +279,8 @@ export interface Order {
   /** Amount of base currency acquired/sold */
   filled?: number;
 
-  /** Unit for the filled amount (typically base currency) */
-  filledUnit?: string;
+  /** Unit for the filled amount (base or quote) */
+  unit?: SizeUnit;
 
   /**
    * Price level that triggers the order
