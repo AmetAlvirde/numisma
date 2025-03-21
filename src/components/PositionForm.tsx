@@ -178,17 +178,7 @@ export const PositionForm: React.FC<PositionFormProps> = ({ onSubmit }) => {
           {/* Basic Information */}
           <div className="space-y-4">
             <h3 className="text-lg font-medium">Basic Information</h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="id">Position ID</Label>
-                <Input
-                  id="id"
-                  name="id"
-                  value={formData.id || ""}
-                  disabled
-                  className="bg-gray-100"
-                />
-              </div>
+            <div className="grid grid-cols-1 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="name">Position Name</Label>
                 <Input
@@ -436,7 +426,7 @@ export const PositionForm: React.FC<PositionFormProps> = ({ onSubmit }) => {
           {/* Position Details */}
           <div className="space-y-4">
             <h3 className="text-lg font-medium">Position Details</h3>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="positionDetails.status">Status</Label>
                 <Select
@@ -502,61 +492,94 @@ export const PositionForm: React.FC<PositionFormProps> = ({ onSubmit }) => {
                   </p>
                 )}
               </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="positionDetails.fractal">Time Frame</Label>
-              <Combobox
-                options={options.timeframe}
-                value={formData.positionDetails?.fractal || ""}
-                onValueChange={value =>
-                  setFormData(prev => ({
-                    ...prev,
-                    positionDetails: {
-                      ...prev.positionDetails!,
-                      fractal: value,
-                    },
-                  }))
-                }
-                onAddOption={value => handleAddOption("timeframe", value)}
-                error={!!errors["positionDetails.fractal"]}
-              />
-              {errors["positionDetails.fractal"] && (
-                <p className="text-sm text-red-500">
-                  {errors["positionDetails.fractal"]}
-                </p>
-              )}
+              <div className="space-y-2">
+                <Label htmlFor="positionDetails.fractal">Time Frame</Label>
+                <Combobox
+                  options={options.timeframe}
+                  value={formData.positionDetails?.fractal || ""}
+                  onValueChange={value =>
+                    setFormData(prev => ({
+                      ...prev,
+                      positionDetails: {
+                        ...prev.positionDetails!,
+                        fractal: value,
+                      },
+                    }))
+                  }
+                  onAddOption={value => handleAddOption("timeframe", value)}
+                  error={!!errors["positionDetails.fractal"]}
+                />
+                {errors["positionDetails.fractal"] && (
+                  <p className="text-sm text-red-500">
+                    {errors["positionDetails.fractal"]}
+                  </p>
+                )}
+              </div>
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="positionDetails.dateOpened">Date Opened</Label>
-              <Input
-                id="positionDetails.dateOpened"
-                name="positionDetails.dateOpened"
-                type="datetime-local"
-                value={
-                  formData.positionDetails?.dateOpened
-                    ? new Date(formData.positionDetails.dateOpened)
-                        .toISOString()
-                        .slice(0, 16)
-                    : ""
-                }
-                onChange={e => {
-                  const date = e.target.value
-                    ? new Date(e.target.value)
-                    : undefined;
-                  setFormData(prev => ({
-                    ...prev,
-                    positionDetails: {
-                      ...prev.positionDetails!,
-                      dateOpened: date,
-                    },
-                  }));
-                }}
-                className={
-                  errors["positionDetails.dateOpened"] ? "border-red-500" : ""
-                }
-              />
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2">
+                  <Input
+                    id="positionDetails.dateOpened"
+                    name="positionDetails.dateOpened"
+                    type="datetime-local"
+                    value={
+                      formData.positionDetails?.dateOpened &&
+                      formData.positionDetails.dateOpened !== "genesis"
+                        ? new Date(formData.positionDetails.dateOpened)
+                            .toISOString()
+                            .slice(0, 16)
+                        : ""
+                    }
+                    onChange={e => {
+                      const date = e.target.value
+                        ? new Date(e.target.value)
+                        : undefined;
+                      setFormData(prev => ({
+                        ...prev,
+                        positionDetails: {
+                          ...prev.positionDetails!,
+                          dateOpened: date,
+                        },
+                      }));
+                    }}
+                    disabled={
+                      formData.positionDetails?.dateOpened === "genesis"
+                    }
+                    className={`flex-1 ${
+                      errors["positionDetails.dateOpened"]
+                        ? "border-red-500"
+                        : ""
+                    } ${
+                      formData.positionDetails?.dateOpened === "genesis"
+                        ? "opacity-50 cursor-not-allowed"
+                        : ""
+                    }`}
+                  />
+                </div>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="isGenesis"
+                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                    checked={formData.positionDetails?.dateOpened === "genesis"}
+                    onChange={e => {
+                      setFormData(prev => ({
+                        ...prev,
+                        positionDetails: {
+                          ...prev.positionDetails!,
+                          dateOpened: e.target.checked ? "genesis" : undefined,
+                        },
+                      }));
+                    }}
+                  />
+                  <Label htmlFor="isGenesis" className="text-sm font-normal">
+                    I don't know when this position was opened
+                  </Label>
+                </div>
+              </div>
               {errors["positionDetails.dateOpened"] && (
                 <p className="text-sm text-red-500">
                   {errors["positionDetails.dateOpened"]}
@@ -769,7 +792,7 @@ export const PositionForm: React.FC<PositionFormProps> = ({ onSubmit }) => {
                         {order.averagePrice &&
                           order.filled &&
                           !focusedInputs.has(`order-${order.id}`) && (
-                            <p className="text-sm text-muted-foreground">
+                            <p className="text-sm text-muted-foreground mt-2 text-left">
                               {order.unit === "base"
                                 ? `≈ ${(
                                     order.filled * order.averagePrice
