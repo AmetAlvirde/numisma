@@ -29,6 +29,8 @@ import {
   CardTitle,
 } from "./ui/card";
 import { Combobox } from "./ui/combobox";
+import { Checkbox } from "@/components/ui/checkbox";
+import { cn } from "@/lib/utils";
 
 interface PositionFormProps {
   onSubmit: (position: Position) => void;
@@ -548,40 +550,59 @@ export const PositionForm: React.FC<PositionFormProps> = ({ onSubmit }) => {
                     disabled={
                       formData.positionDetails?.dateOpened === "genesis"
                     }
-                    className={`flex-1 ${
+                    aria-describedby="dateOpened-description"
+                    className={cn(
                       errors["positionDetails.dateOpened"]
                         ? "border-red-500"
-                        : ""
-                    } ${
+                        : "",
                       formData.positionDetails?.dateOpened === "genesis"
-                        ? "opacity-50 cursor-not-allowed"
+                        ? "opacity-50 cursor-not-allowed bg-muted"
                         : ""
-                    }`}
+                    )}
                   />
                 </div>
                 <div className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     id="isGenesis"
-                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
                     checked={formData.positionDetails?.dateOpened === "genesis"}
-                    onChange={e => {
+                    onCheckedChange={(checked: boolean) => {
                       setFormData(prev => ({
                         ...prev,
                         positionDetails: {
                           ...prev.positionDetails!,
-                          dateOpened: e.target.checked ? "genesis" : undefined,
+                          dateOpened: checked ? "genesis" : undefined,
                         },
                       }));
                     }}
+                    aria-describedby="isGenesis-description"
                   />
-                  <Label htmlFor="isGenesis" className="text-sm font-normal">
-                    I don't know when this position was opened
-                  </Label>
+                  <div className="grid gap-1.5 leading-none">
+                    <Label
+                      htmlFor="isGenesis"
+                      className="text-sm font-normal leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                    >
+                      I don't know when this position was opened
+                    </Label>
+                    <p
+                      id="isGenesis-description"
+                      className="text-sm text-muted-foreground"
+                    >
+                      Select this if you can't remember or don't know the exact
+                      date
+                    </p>
+                  </div>
                 </div>
+                <p
+                  id="dateOpened-description"
+                  className="text-sm text-muted-foreground"
+                >
+                  {formData.positionDetails?.dateOpened === "genesis"
+                    ? "Date is set to genesis (unknown)"
+                    : "Select the date when this position was opened"}
+                </p>
               </div>
               {errors["positionDetails.dateOpened"] && (
-                <p className="text-sm text-red-500">
+                <p className="text-sm text-red-500" role="alert">
                   {errors["positionDetails.dateOpened"]}
                 </p>
               )}
