@@ -24,7 +24,7 @@ import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { ArrowUpDown, Search } from "lucide-react";
-import { calculatePositionValue, calculateUnrealizedPnL } from "@/utils";
+import { calculatePositionValue, calculateUnrealizedPnL } from "@/utilities";
 
 /**
  * Props for the PositionsList component

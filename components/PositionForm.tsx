@@ -151,9 +151,31 @@ export const PositionForm: React.FC<PositionFormProps> = ({ onSubmit }) => {
     }
   };
 
-  const handleConfirm = () => {
-    onSubmit(formData as Position);
-    setShowConfirmation(false);
+  const handleConfirm = async () => {
+    try {
+      const response = await fetch("/api/positions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(formData),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to save position");
+      }
+
+      const result = await response.json();
+      if (result.success) {
+        onSubmit(formData as Position);
+        setShowConfirmation(false);
+      } else {
+        throw new Error(result.error || "Failed to save position");
+      }
+    } catch (error) {
+      console.error("Error saving position:", error);
+      // You might want to show an error toast or message here
+    }
   };
 
   const handleInputChange = (
