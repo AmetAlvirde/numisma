@@ -7,25 +7,9 @@ export default function NewPositionPage() {
   const router = useRouter();
 
   const handleSubmit = async (position: any) => {
-    try {
-      const response = await fetch("/api/positions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(position),
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to create position");
-      }
-
-      // Redirect to dashboard after successful creation
-      router.push("/dashboard");
-    } catch (error) {
-      console.error("Error creating position:", error);
-      // TODO: Add error handling UI
-    }
+    // Position has already been created by PositionForm
+    // Just redirect to dashboard
+    router.push("/dashboard");
   };
 
   return (

@@ -1,7 +1,7 @@
 /**
- * PositionsList.tsx - Displays a tabular list of positions with key metrics
+ * PositionsList.tsx - Displays a grid of position cards with key metrics
  *
- * This component renders a sortable, filterable table of positions with
+ * This component renders a responsive grid of position cards with
  * current values, P&L calculations, and risk indicators. It handles
  * click interactions to navigate to detailed position views.
  *
@@ -13,17 +13,22 @@
 import React, { useState, useMemo } from "react";
 import { Position } from "../types";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "./ui/table";
+  Card,
+  CardHeader,
+  CardTitle,
+  CardContent,
+  CardFooter,
+} from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
-import { ArrowUpDown, Search } from "lucide-react";
+import {
+  ArrowUpDown,
+  Search,
+  TrendingUp,
+  TrendingDown,
+  AlertTriangle,
+} from "lucide-react";
 import { calculatePositionValue, calculateUnrealizedPnL } from "@/utilities";
 
 /**
@@ -31,7 +36,7 @@ import { calculatePositionValue, calculateUnrealizedPnL } from "@/utilities";
  *
  * @property positions - Array of positions to display
  * @property currentPrices - Current market prices for calculation
- * @property onPositionClick - Callback when position row is clicked
+ * @property onPositionClick - Callback when position card is clicked
  * @property className - Optional CSS class for styling
  */
 interface PositionsListProps {
@@ -42,13 +47,15 @@ interface PositionsListProps {
 }
 
 /**
- * Component that displays a sortable, filterable list of trading positions
+ * Component that displays a responsive grid of trading position cards
  *
  * Features:
+ * - Responsive grid layout that adapts to screen size
  * - Sorting by name, asset, value, and P&L
  * - Filtering by name, asset, or strategy
- * - Visual risk indicators
+ * - Visual risk indicators and P&L status
  * - Click-through to position details
+ * - Interactive hover states and animations
  *
  * @component
  */
@@ -70,10 +77,8 @@ export const PositionsList: React.FC<PositionsListProps> = ({
    */
   const handleSort = (field: string) => {
     if (sortField === field) {
-      // Toggle direction if already sorting by this field
       setSortDirection(sortDirection === "asc" ? "desc" : "asc");
     } else {
-      // Set new field and default to ascending
       setSortField(field);
       setSortDirection("asc");
     }
@@ -81,7 +86,6 @@ export const PositionsList: React.FC<PositionsListProps> = ({
 
   /**
    * Filtered and sorted positions with memoization for performance
-   * This prevents recalculation on every render
    */
   const filteredAndSortedPositions = useMemo(() => {
     // First apply filtering
@@ -129,35 +133,12 @@ export const PositionsList: React.FC<PositionsListProps> = ({
           comparison = 0;
       }
 
-      // Apply sort direction
       return sortDirection === "asc" ? comparison : -comparison;
     });
   }, [positions, filter, sortField, sortDirection, currentPrices]);
 
   /**
-   * Renders the header with sort button for a specific column
-   *
-   * @param label - Display label for the column
-   * @param field - Data field for sorting
-   */
-  const renderSortableHeader = (label: string, field: string) => (
-    <TableHead>
-      <Button
-        variant="ghost"
-        onClick={() => handleSort(field)}
-        className="flex items-center p-0 h-auto font-medium"
-      >
-        {label}
-        <ArrowUpDown className="ml-1 h-4 w-4" />
-      </Button>
-    </TableHead>
-  );
-
-  /**
    * Gets appropriate color class based on risk level
-   *
-   * @param riskLevel - Risk level (1-10)
-   * @returns Badge variant for visual indication
    */
   const getRiskBadgeVariant = (riskLevel: number) => {
     if (riskLevel <= 3) return "secondary";
@@ -167,95 +148,174 @@ export const PositionsList: React.FC<PositionsListProps> = ({
 
   return (
     <div className={`space-y-4 ${className}`}>
-      {/* Search filter input */}
-      <div className="relative">
-        <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Filter positions..."
-          value={filter}
-          onChange={e => setFilter(e.target.value)}
-          className="pl-8"
-        />
+      {/* Search and sort controls */}
+      <div className="flex flex-col sm:flex-row gap-4">
+        <div className="relative flex-1">
+          <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Filter positions..."
+            value={filter}
+            onChange={e => setFilter(e.target.value)}
+            className="pl-8"
+          />
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleSort("name")}
+            className="flex items-center gap-1"
+          >
+            Name
+            <ArrowUpDown className="h-4 w-4" />
+            {sortField === "name" && (
+              <span className="text-xs">
+                {sortDirection === "asc" ? "↑" : "↓"}
+              </span>
+            )}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleSort("value")}
+            className="flex items-center gap-1"
+          >
+            Value
+            <ArrowUpDown className="h-4 w-4" />
+            {sortField === "value" && (
+              <span className="text-xs">
+                {sortDirection === "asc" ? "↑" : "↓"}
+              </span>
+            )}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleSort("pnl")}
+            className="flex items-center gap-1"
+          >
+            P&L
+            <ArrowUpDown className="h-4 w-4" />
+            {sortField === "pnl" && (
+              <span className="text-xs">
+                {sortDirection === "asc" ? "↑" : "↓"}
+              </span>
+            )}
+          </Button>
+        </div>
       </div>
 
-      {/* Positions table */}
-      <Table>
-        <TableHeader>
-          <TableRow>
-            {renderSortableHeader("Name", "name")}
-            {renderSortableHeader("Asset", "asset")}
-            {renderSortableHeader("Strategy", "strategy")}
-            {renderSortableHeader("Risk", "risk")}
-            {renderSortableHeader("Value", "value")}
-            {renderSortableHeader("P&L", "pnl")}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {filteredAndSortedPositions.length === 0 ? (
-            <TableRow>
-              <TableCell
-                colSpan={6}
-                className="text-center text-muted-foreground py-8"
+      {/* Positions grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        {filteredAndSortedPositions.length === 0 ? (
+          <div className="col-span-full text-center text-muted-foreground py-8">
+            No positions found. {filter && "Try adjusting your filter."}
+          </div>
+        ) : (
+          filteredAndSortedPositions.map(position => {
+            // Calculate financial metrics
+            const currentPrice = currentPrices[position.asset.ticker] || 0;
+            const value = calculatePositionValue(position, currentPrices);
+            const pnl = calculateUnrealizedPnL(position, currentPrice);
+
+            // Calculate percentage return
+            const totalInvested = position.positionDetails.orders
+              .filter(o => o.status === "filled")
+              .reduce((sum, order) => sum + (order.totalCost || 0), 0);
+            const pnlPercentage =
+              totalInvested > 0 ? (pnl / totalInvested) * 100 : 0;
+
+            return (
+              <Card
+                key={position.id}
+                className="group cursor-pointer transition-all hover:shadow-md hover:scale-[1.02]"
+                onClick={() => onPositionClick(position)}
               >
-                No positions found. {filter && "Try adjusting your filter."}
-              </TableCell>
-            </TableRow>
-          ) : (
-            filteredAndSortedPositions.map(position => {
-              // Calculate financial metrics
-              const currentPrice = currentPrices[position.asset.ticker] || 0;
-              const value = calculatePositionValue(position, currentPrices);
-              const pnl = calculateUnrealizedPnL(position, currentPrice);
-
-              // Calculate percentage return
-              const totalInvested = position.positionDetails.orders
-                .filter(o => o.status === "filled")
-                .reduce((sum, order) => sum + (order.totalCost || 0), 0);
-              const pnlPercentage =
-                totalInvested > 0 ? (pnl / totalInvested) * 100 : 0;
-
-              return (
-                <TableRow
-                  key={position.id}
-                  className="cursor-pointer hover:bg-muted/50"
-                  onClick={() => onPositionClick(position)}
-                >
-                  <TableCell className="font-medium">{position.name}</TableCell>
-                  <TableCell>{position.asset.ticker}</TableCell>
-                  <TableCell>{position.strategy}</TableCell>
-                  <TableCell>
-                    <Badge variant={getRiskBadgeVariant(position.riskLevel)}>
-                      {position.riskLevel}/10
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    $
-                    {value.toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </TableCell>
-                  <TableCell
-                    className={`text-right ${
-                      pnl >= 0 ? "text-green-600" : "text-red-600"
-                    }`}
-                  >
-                    {pnl >= 0 ? "+" : ""}$
-                    {Math.abs(pnl).toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}{" "}
-                    <span className="text-xs">
-                      ({pnlPercentage >= 0 ? "+" : ""}
-                      {pnlPercentage.toFixed(2)}%)
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-lg font-semibold">
+                    {position.name}
+                  </CardTitle>
+                  <Badge variant={getRiskBadgeVariant(position.riskLevel)}>
+                    {position.riskLevel}/10
+                  </Badge>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Asset</span>
+                    <span className="font-medium">{position.asset.ticker}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">
+                      Strategy
                     </span>
-                  </TableCell>
-                </TableRow>
-              );
-            })
-          )}
-        </TableBody>
-      </Table>
+                    <span className="font-medium">{position.strategy}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Value</span>
+                    <span className="font-medium">
+                      $
+                      {value.toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">P&L</span>
+                    <div className="flex items-center gap-1">
+                      {pnl >= 0 ? (
+                        <TrendingUp className="h-4 w-4 text-green-500" />
+                      ) : (
+                        <TrendingDown className="h-4 w-4 text-red-500" />
+                      )}
+                      <span
+                        className={`font-medium ${
+                          pnl >= 0 ? "text-green-500" : "text-red-500"
+                        }`}
+                      >
+                        {pnl >= 0 ? "+" : ""}$
+                        {Math.abs(pnl).toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">
+                      Return
+                    </span>
+                    <span
+                      className={`font-medium ${
+                        pnlPercentage >= 0 ? "text-green-500" : "text-red-500"
+                      }`}
+                    >
+                      {pnlPercentage >= 0 ? "+" : ""}
+                      {pnlPercentage.toFixed(2)}%
+                    </span>
+                  </div>
+                </CardContent>
+                <CardFooter className="flex items-center justify-between pt-2">
+                  <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                    <AlertTriangle className="h-4 w-4" />
+                    <span>
+                      {position.positionDetails.stopLoss?.length || 0} stop
+                      losses
+                    </span>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="opacity-0 group-hover:opacity-100"
+                  >
+                    View Details →
+                  </Button>
+                </CardFooter>
+              </Card>
+            );
+          })
+        )}
+      </div>
 
       {/* Summary information */}
       <div className="text-sm text-muted-foreground">

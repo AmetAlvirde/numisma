@@ -153,6 +153,13 @@ export const PositionForm: React.FC<PositionFormProps> = ({ onSubmit }) => {
 
   const handleConfirm = async () => {
     try {
+      // Validate form data before sending
+      if (!validateForm()) {
+        throw new Error("Please fix the validation errors before submitting");
+      }
+
+      console.log("Form data:", formData);
+
       const response = await fetch("/api/positions", {
         method: "POST",
         headers: {
@@ -161,20 +168,30 @@ export const PositionForm: React.FC<PositionFormProps> = ({ onSubmit }) => {
         body: JSON.stringify(formData),
       });
 
-      if (!response.ok) {
-        throw new Error("Failed to save position");
-      }
-
       const result = await response.json();
-      if (result.success) {
-        onSubmit(formData as Position);
-        setShowConfirmation(false);
-      } else {
+
+      if (!response.ok) {
         throw new Error(result.error || "Failed to save position");
       }
+
+      if (!result.success) {
+        throw new Error(result.error || "Failed to save position");
+      }
+
+      // Just notify parent that we're done, without sending the position again
+      onSubmit(result.data);
+      setShowConfirmation(false);
     } catch (error) {
       console.error("Error saving position:", error);
-      // You might want to show an error toast or message here
+      // Show error message to user
+      alert(error instanceof Error ? error.message : "Failed to save position");
+      // If it's a duplicate position error, generate a new ID and try again
+      if (error instanceof Error && error.message.includes("already exists")) {
+        setFormData(prev => ({
+          ...prev,
+          id: uuidv4(), // Generate a new UUID
+        }));
+      }
     }
   };
 
