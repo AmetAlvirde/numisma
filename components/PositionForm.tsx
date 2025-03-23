@@ -36,6 +36,7 @@ import { PositionConfirmation } from "./PositionConfirmation";
 
 interface PositionFormProps {
   onSubmit: (position: Position) => void;
+  initialData?: Position;
 }
 
 // Initial options for comboboxes
@@ -48,26 +49,31 @@ const EXCHANGE_OPTIONS = ["BingX", "Bitget", "Binance", "Bitso"];
 const WALLET_OPTIONS = ["Spot", "Futures"];
 const TIMEFRAME_OPTIONS = ["1W", "1D", "4H", "1H", "15", "5"];
 
-export const PositionForm: React.FC<PositionFormProps> = ({ onSubmit }) => {
-  const [formData, setFormData] = useState<Partial<Position>>({
-    id: uuidv4(),
-    positionDetails: {
-      status: "active",
-      side: "buy",
-      fractal: "",
-      orders: [],
-      stopLoss: [],
-      takeProfit: [],
-    },
-    asset: {
-      name: "",
-      ticker: "",
-      pair: "",
-      location: "exchange",
-      exchange: "",
-      wallet: "",
-    },
-  });
+export const PositionForm: React.FC<PositionFormProps> = ({
+  onSubmit,
+  initialData,
+}) => {
+  const [formData, setFormData] = useState<Partial<Position>>(
+    initialData || {
+      id: uuidv4(),
+      positionDetails: {
+        status: "active",
+        side: "buy",
+        fractal: "",
+        orders: [],
+        stopLoss: [],
+        takeProfit: [],
+      },
+      asset: {
+        name: "",
+        ticker: "",
+        pair: "",
+        location: "exchange",
+        exchange: "",
+        wallet: "",
+      },
+    }
+  );
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [focusedInputs, setFocusedInputs] = useState<Set<string>>(new Set());
@@ -158,10 +164,14 @@ export const PositionForm: React.FC<PositionFormProps> = ({ onSubmit }) => {
         throw new Error("Please fix the validation errors before submitting");
       }
 
-      console.log("Form data:", formData);
+      const url = initialData
+        ? `/api/positions/${initialData.id}`
+        : "/api/positions";
 
-      const response = await fetch("/api/positions", {
-        method: "POST",
+      const method = initialData ? "PUT" : "POST";
+
+      const response = await fetch(url, {
+        method,
         headers: {
           "Content-Type": "application/json",
         },
@@ -219,9 +229,13 @@ export const PositionForm: React.FC<PositionFormProps> = ({ onSubmit }) => {
     <>
       <Card className="w-full max-w-2xl mx-auto">
         <CardHeader>
-          <CardTitle>Add New Position</CardTitle>
+          <CardTitle>
+            {initialData ? "Edit Position" : "Add New Position"}
+          </CardTitle>
           <CardDescription>
-            Fill in the details for your new trading position
+            {initialData
+              ? "Update the details of your trading position"
+              : "Fill in the details for your new trading position"}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -1401,7 +1415,7 @@ export const PositionForm: React.FC<PositionFormProps> = ({ onSubmit }) => {
             </div>
 
             <Button type="submit" className="w-full">
-              Add Position
+              {initialData ? "Update Position" : "Add Position"}
             </Button>
           </form>
         </CardContent>

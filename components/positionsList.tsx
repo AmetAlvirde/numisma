@@ -10,7 +10,10 @@
  * utility functions. Keep this separation when suggesting modifications.
  */
 
+"use client";
+
 import React, { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { Position } from "../types";
 import {
   Card,
@@ -36,13 +39,11 @@ import { calculatePositionValue, calculateUnrealizedPnL } from "@/utilities";
  *
  * @property positions - Array of positions to display
  * @property currentPrices - Current market prices for calculation
- * @property onPositionClick - Callback when position card is clicked
  * @property className - Optional CSS class for styling
  */
 interface PositionsListProps {
   positions: Position[];
   currentPrices: Record<string, number>;
-  onPositionClick: (position: Position) => void;
   className?: string;
 }
 
@@ -62,9 +63,9 @@ interface PositionsListProps {
 export const PositionsList: React.FC<PositionsListProps> = ({
   positions,
   currentPrices,
-  onPositionClick,
   className = "",
 }) => {
+  const router = useRouter();
   // State for sorting and filtering
   const [sortField, setSortField] = useState<string>("name");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
@@ -82,6 +83,10 @@ export const PositionsList: React.FC<PositionsListProps> = ({
       setSortField(field);
       setSortDirection("asc");
     }
+  };
+
+  const handlePositionClick = (position: Position) => {
+    router.push(`/dashboard/positions/${position.id}`);
   };
 
   /**
@@ -229,7 +234,7 @@ export const PositionsList: React.FC<PositionsListProps> = ({
               <Card
                 key={position.id}
                 className="group cursor-pointer transition-all hover:shadow-md hover:scale-[1.02]"
-                onClick={() => onPositionClick(position)}
+                onClick={() => handlePositionClick(position)}
               >
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                   <CardTitle className="text-lg font-semibold">
