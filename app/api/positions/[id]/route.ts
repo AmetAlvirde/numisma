@@ -12,7 +12,9 @@ export async function GET(
     const positionsData = await fs.readFile(positionsPath, "utf-8");
     const positions: Position[] = JSON.parse(positionsData);
 
-    const position = positions.find(p => p.id === params.id);
+    // Await the params object before using it
+    const { id } = await params;
+    const position = positions.find(p => p.id === id);
 
     if (!position) {
       return NextResponse.json(
