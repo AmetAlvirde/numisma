@@ -325,3 +325,526 @@ export interface TakeProfitOrder extends Order {
    */
   size: number;
 }
+
+/**
+ * Enhanced Portfolio and Valuation Types for Numisma
+ *
+ * This file defines the enhanced types needed to support comprehensive
+ * time-based reporting and performance tracking in the Numisma platform.
+ */
+
+import { DateOrGenesis, Position } from "./index";
+
+/**
+ * Portfolio - A collection of positions with metadata
+ *
+ * Portfolios provide flexible grouping of positions based on different
+ * criteria such as time horizon, risk profile, or strategic purpose.
+ */
+export interface Portfolio {
+  /** Unique identifier for the portfolio */
+  id: string;
+
+  /** Human-readable name for the portfolio */
+  name: string;
+
+  /** Optional description of the portfolio's purpose or strategy */
+  description?: string;
+
+  /** When the portfolio was created */
+  dateCreated: DateOrGenesis;
+
+  /** Status of the portfolio */
+  status: "active" | "archived";
+
+  /** IDs of positions included in this portfolio */
+  positionIds: string[];
+
+  /** User who owns this portfolio */
+  userId: string;
+
+  /** Optional tags for flexible categorization */
+  tags?: string[];
+
+  /** Additional notes or context */
+  notes?: string;
+
+  /** Metadata for UI display purposes */
+  displayMetadata?: {
+    /** Custom color for portfolio visualization */
+    color?: string;
+
+    /** Display order when showing multiple portfolios */
+    sortOrder?: number;
+
+    /** Whether this portfolio is pinned in the UI */
+    isPinned?: boolean;
+  };
+}
+
+/**
+ * TimeFrameUnit - The unit of time for a valuation period
+ */
+export type TimeFrameUnit =
+  | "day"
+  | "week"
+  | "month"
+  | "quarter"
+  | "year"
+  | "genesis"
+  | "custom";
+
+/**
+ * TimeFrameGranularity - The granularity level of source data for a valuation
+ */
+export type TimeFrameGranularity =
+  | "intraday"
+  | "daily"
+  | "weekly"
+  | "monthly"
+  | "quarterly"
+  | "yearly"
+  | "genesis";
+
+/**
+ * AggregationMethod - How values are aggregated when rolling up from smaller to larger timeframes
+ */
+export type AggregationMethod =
+  | "close"
+  | "open"
+  | "high"
+  | "low"
+  | "average"
+  | "weighted"
+  | "custom";
+
+/**
+ * TemporalMetadata - Comprehensive time period classification for a valuation
+ */
+export interface TemporalMetadata {
+  /** Year of the valuation (e.g., 2024) */
+  year: number;
+
+  /** Quarter of the year (1-4) */
+  quarter?: number;
+
+  /** Month of the year (1-12) */
+  month?: number;
+
+  /** Week of the year (1-53) */
+  week?: number;
+
+  /** Day of the month (1-31) */
+  day?: number;
+
+  /** Day of the year (1-366) */
+  dayOfYear?: number;
+
+  /** ISO week number */
+  isoWeek?: number;
+
+  /** ISO week year (may differ from calendar year at year boundaries) */
+  isoWeekYear?: number;
+
+  /** Formatted period identifier (e.g., "2024-W12", "2024-Q1", "2024-03-15") */
+  periodKey: string;
+
+  /** Human-readable period name (e.g., "March 2024", "Q1 2024", "Week 12, 2024") */
+  periodName: string;
+
+  /** Type of time frame this valuation represents */
+  timeFrameUnit: TimeFrameUnit;
+
+  /** Start date of this time period */
+  periodStart: Date;
+
+  /** End date of this time period */
+  periodEnd: Date;
+
+  /** Whether this marks the end of a specific timeframe (e.g., quarter-end) */
+  isTimeframeBoundary: boolean;
+}
+
+/**
+ * AggregationMetadata - Information about how a valuation was derived
+ */
+export interface AggregationMetadata {
+  /** Whether this valuation is derived from other valuations */
+  isAggregated: boolean;
+
+  /** Method used for aggregation */
+  aggregationMethod: AggregationMethod;
+
+  /** Source granularity used for this valuation */
+  sourceGranularity: TimeFrameGranularity;
+
+  /** Target granularity of this valuation */
+  targetGranularity: TimeFrameGranularity;
+
+  /** IDs of source valuations used to derive this aggregated valuation */
+  sourceValuationIds?: string[];
+
+  /** Number of source valuations */
+  sourceCount?: number;
+
+  /** Coverage percentage (e.g., if some daily data is missing from a monthly aggregate) */
+  coveragePercentage?: number;
+
+  /** Whether any missing data was estimated/interpolated */
+  hasEstimatedData?: boolean;
+}
+
+/**
+ * TimeSeriesMetadata - Grouping and sequence information for related valuations
+ */
+export interface TimeSeriesMetadata {
+  /** ID for the time series this valuation belongs to */
+  timeSeriesId: string;
+
+  /** Human-readable name for the time series */
+  timeSeriesName: string;
+
+  /** Position in the sequence (e.g., week 3 of 52) */
+  sequenceNumber: number;
+
+  /** Total items in this series */
+  totalInSeries: number;
+
+  /** Whether this is the first item in the series */
+  isFirst: boolean;
+
+  /** Whether this is the last item in the series */
+  isLast: boolean;
+
+  /** ID of the previous valuation in this series */
+  previousInSeriesId?: string;
+
+  /** ID of the next valuation in this series */
+  nextInSeriesId?: string;
+
+  /** Parent time series ID (e.g., the quarterly series that contains this monthly series) */
+  parentTimeSeriesId?: string;
+
+  /** Child time series ID (e.g., the weekly series contained within this monthly valuation) */
+  childTimeSeriesId?: string;
+}
+
+/**
+ * PerformanceComparison - Standard structure for period-to-period comparisons
+ */
+export interface PerformanceComparison {
+  /** Absolute value change */
+  valueChange: number;
+
+  /** Percentage change */
+  percentageChange: number;
+
+  /** Annualized percentage change (for comparing periods of different lengths) */
+  annualizedChange?: number;
+
+  /** Reference valuation ID used for comparison */
+  referenceValuationId?: string;
+
+  /** Time elapsed between comparisons */
+  timeElapsed?: string;
+}
+
+/**
+ * ReferenceComparisons - Standard comparison points for valuations
+ */
+export interface ReferenceComparisons {
+  /** Comparison to previous period of the same type */
+  previousPeriod?: PerformanceComparison;
+
+  /** Comparison to the period at the start of the current year */
+  yearStart?: PerformanceComparison;
+
+  /** Comparison to the period at the start of the current quarter */
+  quarterStart?: PerformanceComparison;
+
+  /** Comparison to the period at the start of the current month */
+  monthStart?: PerformanceComparison;
+
+  /** Comparison to genesis (initial) valuation */
+  genesis?: PerformanceComparison;
+
+  /** Comparison to same period in previous year */
+  yearOverYear?: PerformanceComparison;
+
+  /** Comparison to same period in previous quarter */
+  quarterOverQuarter?: PerformanceComparison;
+
+  /** Comparison to same period in previous month */
+  monthOverMonth?: PerformanceComparison;
+
+  /** Custom comparison points with descriptive keys */
+  custom?: Record<string, PerformanceComparison>;
+}
+
+/**
+ * PositionValuation - Value and performance data for a position at a specific time
+ *
+ * Captures the essential financial metrics for a position at the time of valuation.
+ */
+export interface PositionValuation {
+  /** Unique identifier for this position valuation */
+  id: string;
+
+  /** Reference to the original position */
+  positionId: string;
+
+  /** Value of the position at valuation time */
+  value: number;
+
+  /** Market price of the asset at valuation time */
+  marketPrice: number;
+
+  /** Asset holding amount (in base currency) */
+  quantity: number;
+
+  /** Initial cost basis of the position */
+  costBasis: number;
+
+  /** Absolute profit/loss at this time */
+  profitLoss: number;
+
+  /** Percentage return at this time */
+  percentageReturn: number;
+
+  /** Reference comparisons, same structure as in PortfolioValuation */
+  referenceComparisons?: ReferenceComparisons;
+
+  /** Aggregation metadata if this is derived from other position valuations */
+  aggregationMetadata?: AggregationMetadata;
+}
+
+/**
+ * PortfolioValuation - A time-based record of a portfolio's state and performance
+ *
+ * Captures the value, composition, and performance metrics of a portfolio
+ * at a specific point in time, enabling historical analysis and comparison.
+ */
+export interface PortfolioValuation {
+  /** Unique identifier for the valuation record */
+  id: string;
+
+  /** Reference to the portfolio this valuation represents */
+  portfolioId: string;
+
+  /** When the valuation was taken/calculated */
+  timestamp: Date;
+
+  /** Comprehensive temporal classification */
+  temporalMetadata: TemporalMetadata;
+
+  /** Aggregation information */
+  aggregationMetadata: AggregationMetadata;
+
+  /** Time series grouping information */
+  timeSeriesMetadata?: TimeSeriesMetadata;
+
+  /** Total portfolio value at this time */
+  totalValue: number;
+
+  /** Currency of the total value (e.g., USD, USDT) */
+  valueCurrency: string;
+
+  /** Initial investment amount (cost basis of all positions) */
+  initialInvestment: number;
+
+  /** Absolute profit/loss at this time */
+  profitLoss: number;
+
+  /** Percentage return at this time */
+  percentageReturn: number;
+
+  /** Position valuations in the portfolio at this time */
+  positionValuations: PositionValuation[];
+
+  /** Standard reference point comparisons */
+  referenceComparisons?: ReferenceComparisons;
+
+  /** Whether this valuation was created retroactively */
+  isRetroactive: boolean;
+
+  /** Additional market context */
+  marketContext?: {
+    /** Bitcoin price at this time */
+    btcPrice?: number;
+
+    /** Ethereum price at this time */
+    ethPrice?: number;
+
+    /** Total crypto market cap at this time */
+    totalMarketCap?: number;
+
+    /** Fear & Greed Index value */
+    fearGreedIndex?: number;
+  };
+
+  /** Additional notes or context */
+  notes?: string;
+}
+
+/**
+ * ReportType - Classification of financial report by time period
+ */
+export type ReportType =
+  | "daily"
+  | "weekly"
+  | "monthly"
+  | "quarterly"
+  | "yearly"
+  | "custom";
+
+/**
+ * ReportSourceGranularity - Data granularity used as source for a report
+ */
+export type ReportSourceGranularity =
+  | "daily"
+  | "weekly"
+  | "monthly"
+  | "quarterly";
+
+/**
+ * PerformanceReport - Standard structure for time-based performance reports
+ *
+ * This structure ties together multiple portfolio valuations into a cohesive
+ * report with summary metrics and comparative analysis.
+ */
+export interface PerformanceReport {
+  /** Unique identifier for the report */
+  id: string;
+
+  /** Reference to the portfolio this report is for */
+  portfolioId: string;
+
+  /** Type of report */
+  reportType: ReportType;
+
+  /** Granularity of source data */
+  sourceGranularity: ReportSourceGranularity;
+
+  /** Period covered by the report */
+  period: {
+    /** Start date of the report period */
+    startDate: Date;
+
+    /** End date of the report period */
+    endDate: Date;
+
+    /** Human-readable period name (e.g., "Q1 2024", "March 2024") */
+    periodName: string;
+  };
+
+  /** Timestamp when the report was generated */
+  generatedAt: Date;
+
+  /** Summary metrics for the entire report period */
+  summary: {
+    /** Starting value */
+    startValue: number;
+
+    /** Ending value */
+    endValue: number;
+
+    /** Absolute change over the period */
+    absoluteChange: number;
+
+    /** Percentage change over the period */
+    percentageChange: number;
+
+    /** High value during the period */
+    highValue: number;
+
+    /** Low value during the period */
+    lowValue: number;
+
+    /** Average value during the period */
+    averageValue: number;
+
+    /** Volatility measure (e.g., standard deviation of returns) */
+    volatility?: number;
+
+    /** Sharpe ratio if applicable */
+    sharpeRatio?: number;
+  };
+
+  /** Individual valuations that make up this report */
+  valuations: PortfolioValuation[];
+
+  /** Array of time series IDs included in this report */
+  timeSeriesIds: string[];
+
+  /** Optional comparison to benchmark */
+  benchmarkComparison?: {
+    /** Name of the benchmark (e.g., "Bitcoin", "S&P 500") */
+    benchmarkName: string;
+
+    /** Benchmark starting value */
+    startValue: number;
+
+    /** Benchmark ending value */
+    endValue: number;
+
+    /** Benchmark percentage change */
+    percentageChange: number;
+
+    /** Relative performance (portfolio % change - benchmark % change) */
+    relativePerformance: number;
+  };
+
+  /** Whether this report was generated as a scheduled/automated report */
+  isScheduled: boolean;
+
+  /** User who requested this report (if manually generated) */
+  generatedBy?: string;
+
+  /** Export format details if the report was exported */
+  exportDetails?: {
+    /** Format of the export (PDF, CSV, etc.) */
+    format: string;
+
+    /** When the export was created */
+    exportedAt: Date;
+
+    /** URL or path to the exported file */
+    location: string;
+  };
+}
+
+/**
+ * Example usage pattern for the 10 required report types:
+ *
+ * 1. Weekly reports based on daily close valuations:
+ * {
+ *   reportType: "weekly",
+ *   sourceGranularity: "daily",
+ *   valuations: [
+ *     {
+ *       temporalMetadata: { timeFrameUnit: "week", ... },
+ *       aggregationMetadata: {
+ *         sourceGranularity: "daily",
+ *         targetGranularity: "weekly",
+ *         ...
+ *       }
+ *     }
+ *   ]
+ * }
+ *
+ * 2. Monthly reports based on daily close valuations:
+ * {
+ *   reportType: "monthly",
+ *   sourceGranularity: "daily",
+ *   ...
+ * }
+ *
+ * 3. Monthly reports based on weekly close valuations:
+ * {
+ *   reportType: "monthly",
+ *   sourceGranularity: "weekly",
+ *   ...
+ * }
+ *
+ * And so on for the remaining report types.
+ */
