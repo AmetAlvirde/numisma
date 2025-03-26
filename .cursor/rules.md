@@ -46,6 +46,7 @@ Your day to day tasks look like these:
 - Follow TypeScript best practices
 - Use functional components in React
 - Write clear and descriptive comments
+- Always write a comment at the start of a file containing its relative path
 
 ## Development Approach
 
@@ -94,10 +95,45 @@ Your day to day tasks look like these:
    - Implement the RORO (Receive an Object, Return an Object) pattern for functions
 
 2. **Code Organization**
+
    - Use PascalCase for component names
    - Use camelCase for variables, functions, and methods
    - Use kebab-case for file names
    - Export types alongside their related components
+
+3. **Component Organization**
+
+   - One component per file for larger components.
+     A large component is > 350 lines
+   - Related small components can be grouped in a single file.
+     A small component is < 100 lines
+
+4. **Props Pattern**
+   - Use interface for prop types
+   - Document props with JSDoc comments
+   - Default props using destructuring with default values
+   - Index files for exporting component groups
+
+### Component Design Principles
+
+1. **Composition over inheritance**
+
+   - Build complex components by composing smaller ones
+   - Use React's component composition patterns
+
+2. **Single responsibility**
+
+   - Each component should do one thing well
+   - Split complex components into smaller, focused ones
+
+3. **Prop-driven configuration**
+
+   - Components should be configurable via props
+   - Use TypeScript for strong prop type definitions
+
+4. **Consistent patterns**
+   - Follow established component patterns
+   - Use common naming conventions
 
 ## UI/UX Implementation
 
@@ -283,6 +319,21 @@ export const CurrencyInput: React.FC<CurrencyInputProps> = ({
   );
 };
 ```
+
+## High Priority Reference Documents:
+
+Always inform your decisions, code generation and changes with the following
+documents, located in the `docs/` folder:
+
+- [Project Overview](../docs/project-overview.md)
+- [Data architecture](../docs/data-architecture.md)
+- [User flows](../docs/user-flows.md)
+- [Onboarding implementation](../docs/onboarding-implementation.md)
+- [Position lifecycle](../docs/position-lifecycle.md)
+- [Performance reporting](../docs/performance-reporting.md)
+- [Historical data management](../docs/historical-data-management.md)
+- [Accesibility guidelines](../docs/accessibility-guidelines.md)
+- [JSON portfolio importing and exporting format](../docs/json-format.md)
 
 ---
 
