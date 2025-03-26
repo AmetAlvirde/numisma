@@ -1,15 +1,12 @@
 /**
- * indexeddb-adapter.ts - IndexedDB database adapter service
+ * indexeddb-adapter.ts - IndexedDB adapter for data persistence
  */
 
-import {
-  DB_NAME,
-  DB_VERSION,
-  STORE_CONFIGS,
-  type DatabaseSchema,
-  type StoreName,
-  type IndexName,
-} from "./indexeddb-schema";
+import type { DatabaseSchema } from "./indexeddb-schema";
+import { STORE_CONFIGS } from "./indexeddb-schema";
+
+const DB_NAME = "numisma_db";
+const DB_VERSION = 1;
 
 export class DatabaseError extends Error {
   constructor(
@@ -23,15 +20,29 @@ export class DatabaseError extends Error {
 
 export class IndexedDBAdapter {
   private db: IDBDatabase | null = null;
-  private initPromise: Promise<void> | null = null;
+  private isInitialized = false;
 
   constructor() {
-    this.initPromise = this.initialize();
+    // Only initialize if we're in a browser environment
+    if (typeof window !== "undefined") {
+      this.initialize().catch(error => {
+        console.error("Failed to initialize IndexedDB:", error);
+      });
+    }
   }
 
   private async initialize(): Promise<void> {
+    if (this.isInitialized) return;
+
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
+      if (typeof window === "undefined") {
+        reject(
+          new DatabaseError("IndexedDB is not available in this environment")
+        );
+        return;
+      }
+
+      const request = window.indexedDB.open(DB_NAME, DB_VERSION);
 
       request.onerror = () => {
         reject(new DatabaseError("Failed to open database", request.error));
@@ -39,6 +50,7 @@ export class IndexedDBAdapter {
 
       request.onsuccess = () => {
         this.db = request.result;
+        this.isInitialized = true;
         resolve();
       };
 
@@ -52,6 +64,7 @@ export class IndexedDBAdapter {
               keyPath: config.keyPath,
             });
 
+            // Create indexes
             config.indexes.forEach(index => {
               store.createIndex(index.name, index.keyPath, index.options);
             });
@@ -62,13 +75,12 @@ export class IndexedDBAdapter {
   }
 
   private async ensureInitialized(): Promise<void> {
-    if (!this.initPromise) {
-      this.initPromise = this.initialize();
+    if (!this.isInitialized) {
+      await this.initialize();
     }
-    await this.initPromise;
   }
 
-  async add<T extends StoreName>(
+  async add<T extends keyof DatabaseSchema>(
     storeName: T,
     item: DatabaseSchema[T]
   ): Promise<void> {
@@ -87,7 +99,7 @@ export class IndexedDBAdapter {
     });
   }
 
-  async get<T extends StoreName>(
+  async get<T extends keyof DatabaseSchema>(
     storeName: T,
     key: string
   ): Promise<DatabaseSchema[T] | undefined> {
@@ -106,7 +118,7 @@ export class IndexedDBAdapter {
     });
   }
 
-  async getAll<T extends StoreName>(
+  async getAll<T extends keyof DatabaseSchema>(
     storeName: T
   ): Promise<DatabaseSchema[T][]> {
     await this.ensureInitialized();
@@ -124,7 +136,7 @@ export class IndexedDBAdapter {
     });
   }
 
-  async update<T extends StoreName>(
+  async update<T extends keyof DatabaseSchema>(
     storeName: T,
     item: DatabaseSchema[T]
   ): Promise<void> {
@@ -143,7 +155,10 @@ export class IndexedDBAdapter {
     });
   }
 
-  async delete<T extends StoreName>(storeName: T, key: string): Promise<void> {
+  async delete<T extends keyof DatabaseSchema>(
+    storeName: T,
+    key: string
+  ): Promise<void> {
     await this.ensureInitialized();
     if (!this.db) throw new DatabaseError("Database not initialized");
 
@@ -159,11 +174,10 @@ export class IndexedDBAdapter {
     });
   }
 
-  async query<T extends StoreName, I extends IndexName<T>>(
+  async query<T extends keyof DatabaseSchema>(
     storeName: T,
-    indexName: I,
-    key: IDBValidKey | IDBKeyRange,
-    direction: IDBCursorDirection = "next"
+    indexName: string,
+    value: any
   ): Promise<DatabaseSchema[T][]> {
     await this.ensureInitialized();
     if (!this.db) throw new DatabaseError("Database not initialized");
@@ -172,27 +186,16 @@ export class IndexedDBAdapter {
       const transaction = this.db!.transaction(storeName, "readonly");
       const store = transaction.objectStore(storeName);
       const index = store.index(indexName);
-      const request = index.openCursor(key, direction);
+      const request = index.getAll(value);
 
-      const results: DatabaseSchema[T][] = [];
-
-      request.onsuccess = event => {
-        const cursor = (event.target as IDBRequest).result;
-        if (cursor) {
-          results.push(cursor.value);
-          cursor.continue();
-        } else {
-          resolve(results);
-        }
-      };
-
+      request.onsuccess = () => resolve(request.result);
       request.onerror = () => {
         reject(new DatabaseError("Failed to query items", request.error));
       };
     });
   }
 
-  async clear<T extends StoreName>(storeName: T): Promise<void> {
+  async clear<T extends keyof DatabaseSchema>(storeName: T): Promise<void> {
     await this.ensureInitialized();
     if (!this.db) throw new DatabaseError("Database not initialized");
 
@@ -212,7 +215,7 @@ export class IndexedDBAdapter {
     if (this.db) {
       this.db.close();
       this.db = null;
-      this.initPromise = null;
+      this.isInitialized = false;
     }
   }
 }
