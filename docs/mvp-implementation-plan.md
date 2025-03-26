@@ -1,8 +1,7 @@
 # Numisma MVP Implementation Plan
 
 This is the outline of a detailed implementation plan broken down into epics,
-user stories, and tasks, along with JSON templates and explanatory diagrams for
-the Numisma MVP.
+user stories, and tasks,for the Numisma MVP.
 
 ## Implementation Plan
 
@@ -50,6 +49,13 @@ User Story 2.3: As a user, I want my changes to persist between sessions.
 Task 2.3.1: Implement local storage for position modifications
 Task 2.3.2: Create JSON export functionality
 Task 2.3.3: Add data migration utilities for schema updates
+
+User Story 2.4: As a developer, I need a storage solution for the MVP phase.
+Task 2.4.1: Create IndexedDB database schema aligned with data model
+Task 2.4.2: Implement database adapter service with CRUD operations
+Task 2.4.3: Build connection between state management and IndexedDB
+Task 2.4.4: Add automatic data persistence on state changes
+Task 2.4.5: Implement backup/restore functions through JSON
 
 Epic 3: Dashboard UI Implementation
 User Story 3.1: As a user, I want to see an overview of my portfolio on login.
@@ -129,5 +135,3 @@ User Story 6.2: As a user, I want to provide feedback on the application.
 
 Task 6.2.1: Implement feedback collection mechanism
 Task 6.2.2: Create issue reporting system
-Task 6.2.3: Build feature request tracking
-Task 6.2.4: Add usage analytics
