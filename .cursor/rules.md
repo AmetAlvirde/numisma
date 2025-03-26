@@ -52,6 +52,8 @@ Your day to day tasks look like these:
   understand and continue your work. You can assume
   this commments will be used by yourself in the
   future.
+- DO NOT change `package.json` content without
+  my explicit authorization
 
 ## Development Approach
 

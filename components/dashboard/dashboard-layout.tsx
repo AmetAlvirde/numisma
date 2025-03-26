@@ -15,7 +15,12 @@
 "use client";
 
 import { ReactNode } from "react";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import {
+  Sheet,
+  SheetContent,
+  SheetTrigger,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Menu } from "lucide-react";
 import { DashboardSidebar } from "./dashboard-sidebar";
@@ -52,6 +57,7 @@ export function DashboardLayout({
               </Button>
             </SheetTrigger>
             <SheetContent side="left" className="w-[240px] sm:w-[280px]">
+              <SheetTitle className="sr-only">Navigation Menu</SheetTitle>
               <DashboardSidebar />
             </SheetContent>
           </Sheet>
