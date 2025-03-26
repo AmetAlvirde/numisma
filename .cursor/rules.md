@@ -47,6 +47,11 @@ Your day to day tasks look like these:
 - Use functional components in React
 - Write clear and descriptive comments
 - Always write a comment at the start of a file containing its relative path
+- Use the @ai-guidance directive in comments when
+  generating code to help any AI to better
+  understand and continue your work. You can assume
+  this commments will be used by yourself in the
+  future.
 
 ## Development Approach
 
