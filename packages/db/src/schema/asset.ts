@@ -2,45 +2,55 @@
  * Asset schema validation
  */
 
-import { z } from 'zod';
-import { idSchema, timestampSchema } from './common';
+import { z } from "zod";
+import { idSchema, timestampSchema } from "./common";
 
 /**
  * Supported asset types
  */
 export const assetTypesSchema = z.enum([
-  'crypto',
-  'stock',
-  'forex',
-  'commodity',
-  'fund',
-  'index',
-  'bond',
-  'option',
-  'future',
-  'stablecoin'
+  "crypto",
+  "stock",
+  "forex",
+  "commodity",
+  "fund",
+  "index",
+  "bond",
+  "option",
+  "future",
+  "stablecoin",
 ]);
 
 /**
  * Asset schema definition
  */
-export const assetSchema = z.object({
-  // Core fields
-  id: idSchema,
-  name: z.string().min(1).max(100),
-  ticker: z.string().min(1).max(20),
-  assetType: assetTypesSchema,
-  description: z.string().optional(),
-  
-  // Timestamps (from database)
-  ...timestampSchema.shape
-}).strict();
+export const assetSchema = z
+  .object({
+    // Core fields
+    id: idSchema,
+    name: z.string().min(1).max(100),
+    ticker: z.string().min(1).max(20),
+    assetType: assetTypesSchema,
+    description: z.string().optional(),
+    network: z.string().optional(),
+    contractAddress: z.string().optional(),
+    iconUrl: z.string().optional(),
+    category: z.string().optional(),
+    marketData: z.any().optional(), // Structured market data
+
+    // Timestamps (from database)
+    ...timestampSchema.shape,
+  })
+  .strict();
 
 /**
  * Schema for creating a new asset
  */
-export const createAssetSchema = assetSchema
-  .omit({ id: true, createdAt: true, updatedAt: true });
+export const createAssetSchema = assetSchema.omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
 
 /**
  * Schema for updating an asset

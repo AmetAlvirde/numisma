@@ -2,45 +2,58 @@
  * Order schema validation
  */
 
-import { z } from 'zod';
-import { 
-  idSchema, 
+import { z } from "zod";
+import {
+  idSchema,
   timestampSchema,
   dateOrGenesisSchema,
   orderStatusSchema,
   orderTypeSchema,
   orderPurposeSchema,
-  sizeUnitSchema
-} from './common';
+  sizeUnitSchema,
+} from "./common";
 
 /**
  * Capital tier impact types
  */
-export const capitalTierImpactSchema = z.enum(['none', 'increase', 'decrease', 'new']);
+export const capitalTierImpactSchema = z.enum([
+  "none",
+  "increase",
+  "decrease",
+  "new",
+]);
 
 /**
  * Order schema definition
  */
-export const orderSchema = z.object({
-  // Core fields
-  id: idSchema,
-  dateOpen: dateOrGenesisSchema.optional(),
-  dateFilled: dateOrGenesisSchema.optional(),
-  averagePrice: z.number().optional(),
-  totalCost: z.number().optional(),
-  status: orderStatusSchema,
-  type: orderTypeSchema,
-  purpose: orderPurposeSchema.optional(),
-  fee: z.number().optional(),
-  feeUnit: z.string().optional(),
-  filled: z.number().optional(),
-  unit: sizeUnitSchema.optional(),
-  capitalTierImpact: capitalTierImpactSchema.optional().default('none'),
-  notes: z.string().optional(),
-  
-  // Timestamps (from database)
-  ...timestampSchema.shape
-}).strict();
+export const orderSchema = z
+  .object({
+    // Core fields
+    id: idSchema,
+    dateOpen: dateOrGenesisSchema.optional(),
+    dateFilled: dateOrGenesisSchema.optional(),
+    averagePrice: z.number().optional(),
+    totalCost: z.number().optional(),
+    status: orderStatusSchema,
+    type: orderTypeSchema,
+    purpose: orderPurposeSchema.optional(),
+    fee: z.number().optional(),
+    feeUnit: z.string().optional(),
+    filled: z.number().optional(),
+    unit: sizeUnitSchema.optional(),
+    capitalTierImpact: capitalTierImpactSchema.optional().default("none"),
+    notes: z.string().optional(),
+    direction: z.enum(["entry", "exit"]),
+    exchangeOrderId: z.string().optional(),
+    isAutomated: z.boolean().optional().default(false),
+    expiration: z.date().optional(),
+    parentOrderId: idSchema.optional(),
+    isHidden: z.boolean().optional().default(false),
+
+    // Timestamps (from database)
+    ...timestampSchema.shape,
+  })
+  .strict();
 
 /**
  * Schema for creating a new order
@@ -48,7 +61,7 @@ export const orderSchema = z.object({
 export const createOrderSchema = orderSchema
   .omit({ id: true, createdAt: true, updatedAt: true })
   .extend({
-    positionDetailsId: idSchema
+    positionDetailsId: idSchema,
   });
 
 /**

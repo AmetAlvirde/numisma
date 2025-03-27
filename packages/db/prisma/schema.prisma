@@ -21,10 +21,17 @@ model Asset {
   ticker      String // Market symbol: "BTC", "TSLA"
   assetType   String // "crypto", "stock", "forex", "commodity", etc.
   description String?
+  // Add missing fields from Numisma types
+  network           String?
+  contractAddress   String?
+  iconUrl           String?
+  category          String?
+  marketData        Json?     // Current market data as JSON
 
   // Relations
   baseMarkets  Market[] @relation("BaseAsset")
   quoteMarkets Market[] @relation("QuoteAsset")
+  
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -66,7 +73,7 @@ model Market {
 model WalletLocation {
   id           String @id @default(cuid())
   name         String // User-defined name for this location
-  locationType String // "exchange" or "coldStorage"
+  locationType AssetLocationType 
 
   // Exchange-specific details
   exchangeName String? // If location is "exchange"
@@ -207,6 +214,12 @@ model Thesis {
   fulfillment  String?  @db.Text // Target outcome representing thesis success
   notes        String?  @db.Text
 
+  // Add missing fields from Numisma types
+  technicalAnalysis   String?   @db.Text
+  fundamentalAnalysis String?   @db.Text
+  timeHorizon         String?
+  riskRewardRatio     String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -223,6 +236,11 @@ model JournalEntry {
   timestamp   DateTime
   userId      String // Who wrote the entry
 
+  // Add missing fields from Numisma types
+  tags                String[]
+  sentiment           String?   // "bullish", "bearish", "neutral"
+  isKeyLearning       Boolean   @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -232,13 +250,29 @@ model JournalEntry {
 // Position details - operational aspects of a position
 model PositionDetails {
   id                String    @id @default(cuid())
-  side              String // "buy" or "sell"
+  side              TradeSide 
+  status            PositionStatus
   fractal           String // Time frame ("1D", "4H", "1W", etc.)
   initialInvestment Float
   currentInvestment Float
   recoveredAmount   Float     @default(0)
   dateOpened        DateTime? // Null represents "genesis"
   closedPercentage  Float     @default(0)
+
+  // Add missing fields from Numisma types
+  timeFrame          String    // Replacing "fractal" to match types
+  averageEntryPrice  Float?
+  averageExitPrice   Float?
+  totalSize          Float?
+  totalCost          Float?
+  realizedProfitLoss Float?
+  isLeveraged        Boolean   @default(false)
+  leverage           Float?
+  unrealizedProfitLoss Float?
+  currentReturn      Float?
+  targetPrice        Float?
+  stopPrice          Float?
+  riskRewardRatio    Float?
 
   // Relations
   position         Position?
@@ -282,8 +316,8 @@ model Order {
   dateFilled        DateTime? // When the order was executed
   averagePrice      Float?
   totalCost         Float?
-  status            String // "submitted", "filled", "cancelled"
-  type              String // "trigger", "market", "limit"
+  status            OrderStatus 
+  type              OrderType 
   purpose           String? // "entry", "exit", etc.
   fee               Float?
   feeUnit           String?
@@ -291,6 +325,12 @@ model Order {
   unit              String? // "base", "quote", "percentage"
   capitalTierImpact String? // Effect on capital tier
   notes             String?
+  direction       String           // "entry" or "exit"
+  exchangeOrderId String?
+  isAutomated     Boolean          @default(false)
+  expiration      DateTime?
+  parentOrderId   String?
+  isHidden        Boolean          @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -316,6 +356,11 @@ model StopLossOrder {
   estimatedCost     Float?
   unit              String // Required for stop loss
   size              Float // Required for stop loss
+  isTrailing        Boolean        @default(false)
+  trailingDistance  Float?
+  trailingUnit      String?        // "percentage" or "absolute"
+  maxSlippage       Float?
+  strategy          String?        // "breakeven", "partial", "full", "tiered"
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -341,6 +386,10 @@ model TakeProfitOrder {
   estimatedCost     Float?
   unit              String // Required for take profit
   size              Float // Required for take profit
+  targetPercentage    Float?
+  maxSlippage         Float?
+  tier                Int?
+  moveStopToBreakeven Boolean       @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -394,6 +443,33 @@ model HistoricalValuation {
   ethPrice       Float?
   totalMarketCap Float?
   fearGreedIndex Int?
+
+  // Add key analytics fields
+  realizedProfitLoss    Float?
+  unrealizedProfitLoss  Float?
+  
+  // Add fields for risk metrics
+  volatility            Float?
+  maxDrawdown           Float?
+  sharpeRatio           Float?
+  sortinoRatio          Float?
+  calmarRatio           Float?
+  
+  // Add fields for return metrics
+  dailyReturn           Float?
+  weeklyReturn          Float?
+  monthlyReturn         Float?
+  quarterlyReturn       Float?
+  yearlyReturn          Float?
+  inceptionReturn       Float?
+
+   // Position metrics
+  positionCount         Int?
+  
+  // Keep using JSON for complex nested structures
+  returnMetrics         Json?
+  riskMetrics           Json?
+  assetAllocation       Json?
 
   notes String?
 
@@ -472,3 +548,160 @@ model SystemSetting {
 
   @@map("system_settings")
 }
+
+// Enums added to ensure consistency with Numisma types:
+
+enum PositionStatus {
+  active
+  closed
+  partial
+}
+
+enum OrderStatus {
+  submitted
+  filled
+  cancelled
+  partially_filled
+  expired
+}
+
+enum OrderType {
+  trigger
+  market
+  limit
+  trailing_stop
+  oco
+}
+
+enum AssetLocationType {
+  exchange
+  dex
+  cold_storage
+  defi
+  staking
+  lending
+}
+
+enum TradeSide {
+  long
+  short
+}
+
+// Add these placeholder models
+
+// Notification system
+model Notification {
+  id              String    @id @default(cuid())
+  userId          String
+  type            String    // NotificationType enum value
+  title           String
+  message         String
+  priority        String    @default("medium") // NotificationPriority enum value
+  isRead          Boolean   @default(false)
+  isActioned      Boolean   @default(false)
+  actionUrl       String?
+  actionText      String?
+  icon            String?
+  data            Json?     // Additional structured data
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@index([userId, isRead])
+}
+
+// Price alerts
+model PriceAlert {
+  id              String    @id @default(cuid())
+  userId          String
+  asset           String    // Asset ticker
+  targetPrice     Float
+  direction       String    // "above" or "below"
+  isPercentageChange Boolean @default(false)
+  percentageChange Float?
+  repeating       Boolean   @default(false)
+  isActive        Boolean   @default(true)
+  lastTriggeredAt DateTime?
+  customMessage   String?
+  createJournalEntry Boolean @default(false)
+  positionId      String?
+  channels        String[]  // Array of notification channels
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@index([userId, asset, isActive])
+}
+
+// Exchange integration
+model ExchangeAccount {
+  id              String    @id @default(cuid())
+  userId          String
+  exchange        String
+  label           String
+  apiKey          String
+  apiSecret       String
+  apiPassphrase   String?
+  isConnected     Boolean   @default(false)
+  lastSynced      DateTime?
+  status          String
+  errorMessage    String?
+  permissions     Json?     // Read/trade/withdraw permissions
+  autoSync        Boolean   @default(true)
+  syncFrequency   Int?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@index([userId, exchange])
+}
+
+// Wallet tracking
+model Wallet {
+  id                String    @id @default(cuid())
+  userId            String
+  address           String
+  label             String
+  network           String
+  type              String
+  hardwareModel     String?
+  isWatchOnly       Boolean   @default(false)
+  includeInPortfolio Boolean  @default(true)
+  lastKnownBalance  Json?
+  notes             String?
+  tags              String[]
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  @@index([userId, network])
+  @@index([address, network])
+}
+
+// Trading metrics
+model TradingMetrics {
+  id                  String    @id @default(cuid())
+  userId              String
+  portfolioId         String?
+  period              String    // "all_time", "yearly", "monthly", etc.
+  periodStart         DateTime?
+  periodEnd           DateTime?
+  totalTrades         Int
+  winningTrades       Int
+  losingTrades        Int
+  winRate             Float
+  avgWinAmount        Float
+  avgLossAmount       Float
+  avgProfitLoss       Float
+  maxConsecutiveWins  Int
+  maxConsecutiveLosses Int
+  maxDrawdown         Float
+  profitFactor        Float
+  expectancy          Float
+  avgHoldingTime      String?
+  stdDeviation        Float?
+  byTradeType         Json?
+  byAsset             Json?
+  byTimeFrame         Json?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  
+  @@index([userId, period])
+}
+
