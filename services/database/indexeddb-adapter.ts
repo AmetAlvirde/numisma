@@ -3,10 +3,7 @@
  */
 
 import type { DatabaseSchema } from "./indexeddb-schema";
-import { STORE_CONFIGS } from "./indexeddb-schema";
-
-const DB_NAME = "numisma_db";
-const DB_VERSION = 1;
+import { STORE_CONFIGS, DB_NAME, DB_VERSION } from "./indexeddb-schema";
 
 export class DatabaseError extends Error {
   constructor(
@@ -144,14 +141,41 @@ export class IndexedDBAdapter {
     if (!this.db) throw new DatabaseError("Database not initialized");
 
     return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction(storeName, "readwrite");
-      const store = transaction.objectStore(storeName);
-      const request = store.put(item);
+      try {
+        console.log(`Starting update for ${storeName}:`, item);
+        const transaction = this.db!.transaction(storeName, "readwrite");
+        const store = transaction.objectStore(storeName);
 
-      request.onsuccess = () => resolve();
-      request.onerror = () => {
-        reject(new DatabaseError("Failed to update item", request.error));
-      };
+        // For historical valuations, we want to use add instead of put
+        const request =
+          storeName === "historicalValuations"
+            ? store.add(item)
+            : store.put(item);
+
+        request.onsuccess = () => {
+          console.log(`Successfully updated ${storeName}:`, item);
+          resolve();
+        };
+        request.onerror = () => {
+          const error = new DatabaseError(
+            `Failed to update ${storeName}: ${
+              request.error?.message || "Unknown error"
+            }`,
+            request.error
+          );
+          console.error(error);
+          reject(error);
+        };
+      } catch (error) {
+        const dbError = new DatabaseError(
+          `Error in update for ${storeName}: ${
+            error instanceof Error ? error.message : "Unknown error"
+          }`,
+          error instanceof Error ? error : null
+        );
+        console.error(dbError);
+        reject(dbError);
+      }
     });
   }
 

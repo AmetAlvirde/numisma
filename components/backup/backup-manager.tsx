@@ -109,17 +109,24 @@ export function BackupManager({ userId }: BackupManagerProps) {
   };
 
   const handleRestoreBackup = async () => {
+    console.log("Restore button clicked");
     const file =
       document.querySelector<HTMLInputElement>("#backup-file")?.files?.[0];
-    if (!file) return;
+    if (!file) {
+      console.log("No file selected");
+      return;
+    }
 
     try {
       setIsLoading(true);
+      console.log("Starting file read");
       const reader = new FileReader();
       reader.onload = async e => {
         const content = e.target?.result as string;
         try {
+          console.log("File read successfully, calling restoreBackup");
           await backupService.restoreBackup(content);
+          console.log("Backup restored successfully");
           toast({
             title: "Backup restored",
             description: "Your data has been successfully restored.",

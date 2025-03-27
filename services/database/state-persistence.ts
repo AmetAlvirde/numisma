@@ -5,6 +5,43 @@
 import { db } from "./indexeddb-adapter";
 import type { Portfolio, Position, Asset, Order } from "@/types/numisma-types";
 
+interface PortfolioPosition {
+  portfolioId: string;
+  positionId: string;
+  addedAt: string;
+  addedBy: string;
+  isHidden: boolean;
+  displayOrder: number;
+}
+
+interface HistoricalValuation {
+  id: string;
+  portfolioId: string;
+  timestamp: string;
+  totalValue: number;
+  valueCurrency: string;
+  initialInvestment: number;
+  profitLoss: number;
+  percentageReturn: number;
+  positionValuations: Array<{
+    id: string;
+    positionId: string;
+    value: number;
+    marketPrice: number;
+    quantity: number;
+    costBasis: number;
+    profitLoss: number;
+    percentageReturn: number;
+  }>;
+  isRetroactive: boolean;
+  marketContext?: {
+    btcPrice: number;
+    ethPrice: number;
+    totalMarketCap: number;
+    fearGreedIndex: number;
+  };
+}
+
 export class StatePersistenceService {
   /**
    * Load all portfolio data for a user
@@ -14,16 +51,34 @@ export class StatePersistenceService {
     positions: Position[];
     assets: Asset[];
     orders: Order[];
+    portfolioPositions: PortfolioPosition[];
+    historicalValuations: HistoricalValuation[];
   }> {
     try {
-      const [portfolios, positions, assets, orders] = await Promise.all([
+      const [
+        portfolios,
+        positions,
+        assets,
+        orders,
+        portfolioPositions,
+        historicalValuations,
+      ] = await Promise.all([
         db.query("portfolios", "userId", userId),
         db.query("positions", "userId", userId),
         db.getAll("assets"),
         db.query("orders", "userId", userId),
+        db.query("portfolioPositions", "portfolioId", userId),
+        db.query("historicalValuations", "portfolioId", userId),
       ]);
 
-      return { portfolios, positions, assets, orders };
+      return {
+        portfolios,
+        positions,
+        assets,
+        orders,
+        portfolioPositions,
+        historicalValuations,
+      };
     } catch (error) {
       console.error("Failed to load user data:", error);
       throw error;
@@ -35,7 +90,22 @@ export class StatePersistenceService {
    */
   async savePortfolio(portfolio: Portfolio): Promise<void> {
     try {
-      await db.update("portfolios", portfolio);
+      // Ensure all required properties are present
+      const portfolioToSave = {
+        ...portfolio,
+        positionIds: portfolio.positionIds || [],
+        displayMetadata: portfolio.displayMetadata || {},
+        tags: portfolio.tags || [],
+        status: portfolio.status || "active",
+        baseCurrency: portfolio.baseCurrency || "USD",
+        currentValue: portfolio.currentValue || 0,
+        initialInvestment: portfolio.initialInvestment || 0,
+        profitLoss: portfolio.profitLoss || 0,
+        returnPercentage: portfolio.returnPercentage || 0,
+        isPublic: portfolio.isPublic || false,
+      };
+
+      await db.update("portfolios", portfolioToSave);
     } catch (error) {
       console.error("Failed to save portfolio:", error);
       throw error;
@@ -102,6 +172,12 @@ export class StatePersistenceService {
         positions.map(position => db.delete("positions", position.id))
       );
 
+      // Delete portfolio positions
+      await db.delete("portfolioPositions", portfolioId);
+
+      // Delete historical valuations
+      await db.delete("historicalValuations", portfolioId);
+
       // Finally delete the portfolio
       await db.delete("portfolios", portfolioId);
     } catch (error) {
@@ -157,21 +233,122 @@ export class StatePersistenceService {
    */
   async importUserData(jsonData: string): Promise<void> {
     try {
+      console.log("Starting importUserData");
       const data = JSON.parse(jsonData) as {
         portfolios: Portfolio[];
         positions: Position[];
         assets: Asset[];
         orders: Order[];
+        portfolioPositions?: PortfolioPosition[];
+        historicalValuations?: HistoricalValuation[];
       };
+      console.log("Data parsed, starting to save...");
+      console.log("Portfolios:", data.portfolios.length);
+      console.log("Positions:", data.positions.length);
+      console.log("Assets:", data.assets.length);
+      console.log("Orders:", data.orders.length);
+      console.log("PortfolioPositions:", data.portfolioPositions?.length);
+      console.log("HistoricalValuations:", data.historicalValuations?.length);
 
-      await Promise.all([
-        ...data.portfolios.map(portfolio => db.update("portfolios", portfolio)),
-        ...data.positions.map(position => db.update("positions", position)),
-        ...data.assets.map(asset => db.update("assets", asset)),
-        ...data.orders.map(order => db.update("orders", order)),
-      ]);
+      // Save all data in parallel with error handling
+      const savePromises = [
+        ...data.portfolios.map(async (portfolio: Portfolio) => {
+          try {
+            console.log("Saving portfolio:", portfolio.id);
+            await this.savePortfolio(portfolio);
+            console.log("Portfolio saved successfully:", portfolio.id);
+          } catch (error) {
+            console.error("Failed to save portfolio:", portfolio.id, error);
+            throw error; // Re-throw to be caught by Promise.allSettled
+          }
+        }),
+        ...data.positions.map(async (position: Position) => {
+          try {
+            console.log("Saving position:", position.id);
+            await db.update("positions", position);
+            console.log("Position saved successfully:", position.id);
+          } catch (error) {
+            console.error("Failed to save position:", position.id, error);
+            throw error;
+          }
+        }),
+        ...data.assets.map(async (asset: Asset) => {
+          try {
+            console.log("Saving asset:", asset.ticker);
+            await db.update("assets", asset);
+            console.log("Asset saved successfully:", asset.ticker);
+          } catch (error) {
+            console.error("Failed to save asset:", asset.ticker, error);
+            throw error;
+          }
+        }),
+        ...data.orders.map(async (order: Order) => {
+          try {
+            console.log("Saving order:", order.id);
+            await db.update("orders", order);
+            console.log("Order saved successfully:", order.id);
+          } catch (error) {
+            console.error("Failed to save order:", order.id, error);
+            throw error;
+          }
+        }),
+        ...(data.portfolioPositions?.map(async (pp: PortfolioPosition) => {
+          try {
+            console.log(
+              "Saving portfolio position:",
+              pp.portfolioId,
+              pp.positionId
+            );
+            await db.update("portfolioPositions", pp);
+            console.log(
+              "Portfolio position saved successfully:",
+              pp.portfolioId,
+              pp.positionId
+            );
+          } catch (error) {
+            console.error(
+              "Failed to save portfolio position:",
+              pp.portfolioId,
+              pp.positionId,
+              error
+            );
+            throw error;
+          }
+        }) || []),
+        ...(data.historicalValuations?.map(async (hv: HistoricalValuation) => {
+          try {
+            console.log("Saving historical valuation:", hv.id);
+            await db.update("historicalValuations", hv);
+            console.log("Historical valuation saved successfully:", hv.id);
+          } catch (error) {
+            console.error("Failed to save historical valuation:", hv.id, error);
+            throw error;
+          }
+        }) || []),
+      ];
+
+      // Use Promise.allSettled to handle all promises and get their results
+      const results = await Promise.allSettled(savePromises);
+
+      // Check for any rejected promises
+      const rejected = results.filter(
+        (result): result is PromiseRejectedResult =>
+          result.status === "rejected"
+      );
+
+      if (rejected.length > 0) {
+        console.error("Some saves failed:", rejected);
+        throw new Error(
+          `Failed to save some items: ${rejected.map(r => r.reason).join(", ")}`
+        );
+      }
+
+      console.log("All data saved successfully");
     } catch (error) {
       console.error("Failed to import user data:", error);
+      if (error instanceof Error) {
+        console.error("Error stack:", error.stack);
+      }
       throw error;
     }
   }
