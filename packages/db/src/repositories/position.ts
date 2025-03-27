@@ -174,7 +174,7 @@ export class PositionRepository {
       const positionDetails = await this.prisma.positionDetails.create({
         data: {
           side: position.positionDetails.side,
-          fractal: position.positionDetails.fractal,
+          timeFrame: position.positionDetails.timeFrame,
           initialInvestment: position.positionDetails.initialInvestment,
           currentInvestment: position.positionDetails.currentInvestment,
           recoveredAmount: position.positionDetails.recoveredAmount || 0,

@@ -146,7 +146,7 @@ model Position {
   lifecycleHistory   LifecycleHistory[]
   capitalTierHistory CapitalTierHistory[]
   positionDetails    PositionDetails      @relation(fields: [positionDetailsId], references: [id])
-  positionDetailsId  String
+  positionDetailsId  String @unique
   metrics            PositionMetrics?
   thesis             Thesis?
   journalEntries     JournalEntry[]
