@@ -10,13 +10,14 @@
 import { DashboardLayout } from "@/components/dashboard/dashboard-layout";
 import { DashboardContent } from "@/components/dashboard/dashboard-content";
 import { PortfolioSummaryCard } from "@/components/dashboard/portfolio-summary-card";
+import { AssetAllocationCard } from "@/components/dashboard/asset-allocation-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function DashboardPage() {
   // TODO: Get actual user data from auth context
   const userData = {
-    name: "John Doe",
-    email: "john@example.com",
+    name: "Amet Alvirde",
+    email: "Amet.Alvirde@gmail.com",
     avatarUrl: "https://github.com/shadcn.png",
   };
 
@@ -35,14 +36,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Asset Allocation */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Asset Allocation</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p>Asset allocation visualization will go here.</p>
-            </CardContent>
-          </Card>
+          <AssetAllocationCard portfolioId={portfolioId} />
 
           {/* Recent Activity */}
           <Card>
