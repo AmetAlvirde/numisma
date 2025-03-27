@@ -1,0 +1,474 @@
+// This file defines the database schema for the Numisma application
+// It represents the central data model for portfolio and position tracking
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// CORE FINANCIAL ENTITIES
+// ==========================================
+
+// Asset model - represents any financial instrument independent of trading pairs
+model Asset {
+  id          String  @id @default(cuid())
+  name        String // Full name: "Bitcoin", "Tesla, Inc."
+  ticker      String // Market symbol: "BTC", "TSLA"
+  assetType   String // "crypto", "stock", "forex", "commodity", etc.
+  description String?
+
+  // Relations
+  baseMarkets  Market[] @relation("BaseAsset")
+  quoteMarkets Market[] @relation("QuoteAsset")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ticker, assetType])
+  @@map("assets")
+}
+
+// Market model - represents a trading venue for a pair of assets
+model Market {
+  id String @id @default(cuid())
+
+  // The assets forming this market pair
+  baseAsset    Asset  @relation("BaseAsset", fields: [baseAssetId], references: [id])
+  baseAssetId  String
+  quoteAsset   Asset  @relation("QuoteAsset", fields: [quoteAssetId], references: [id])
+  quoteAssetId String
+
+  // Market details
+  marketSymbol String // E.g., "BTCUSDT", "TSLA", "EURUSD"
+  pairNotation String // Standard notation like "BTC/USDT"
+
+  // Additional market metadata
+  exchange   String? // "Binance", "NYSE", etc.
+  isTradable Boolean @default(true)
+
+  // Relations
+  positions Position[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([baseAssetId, quoteAssetId, exchange])
+  @@index([marketSymbol, exchange])
+  @@map("markets")
+}
+
+// WalletLocation model - represents where assets are stored
+model WalletLocation {
+  id           String @id @default(cuid())
+  name         String // User-defined name for this location
+  locationType String // "exchange" or "coldStorage"
+
+  // Exchange-specific details
+  exchangeName String? // If location is "exchange"
+  accountType  String? // If location is "exchange", e.g., "spot", "margin"
+
+  // Cold storage details
+  storageType String? // If location is "coldStorage", e.g., "hardware"
+  storageName String? // If location is "coldStorage", e.g., "T1"
+
+  // Relations
+  userId    String // Owner of this wallet
+  positions Position[] // Positions stored in this wallet
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("wallet_locations")
+}
+
+// Portfolio model - represents a collection of positions
+model Portfolio {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  dateCreated DateTime // Will need to handle "genesis" concept in application code
+  status      String // "active" or "archived"
+  userId      String
+  tags        String[] // Array of tags for categorization
+  notes       String?
+
+  // Display metadata
+  color     String?
+  sortOrder Int?
+  isPinned  Boolean? @default(false)
+
+  // Relations
+  portfolioPositions PortfolioPosition[]
+  valuations         HistoricalValuation[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("portfolios")
+}
+
+// ==========================================
+// POSITION MANAGEMENT
+// ==========================================
+
+// Position model - core entity for trading positions
+model Position {
+  id   String @id @default(cuid())
+  name String
+
+  // Market and wallet information
+  market           Market         @relation(fields: [marketId], references: [id])
+  marketId         String
+  walletLocation   WalletLocation @relation(fields: [walletLocationId], references: [id])
+  walletLocationId String
+  walletType       String // "hot" or "cold" - denormalized for query convenience
+
+  // Position management fields
+  lifecycle   String // "planned", "active", "closed"
+  capitalTier String // "C1", "C2", etc. - tracks origin of capital
+  riskLevel   Int // 1-10 scale
+  strategy    String // Trading strategy classification
+
+  // Relations
+  portfolioPositions PortfolioPosition[]
+  lifecycleHistory   LifecycleHistory[]
+  capitalTierHistory CapitalTierHistory[]
+  positionDetails    PositionDetails      @relation(fields: [positionDetailsId], references: [id])
+  positionDetailsId  String
+  metrics            PositionMetrics?
+  thesis             Thesis?
+  journalEntries     JournalEntry[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([lifecycle, marketId])
+  @@map("positions")
+}
+
+// Junction table between Portfolio and Position with metadata
+model PortfolioPosition {
+  id           String    @id @default(cuid())
+  portfolio    Portfolio @relation(fields: [portfolioId], references: [id])
+  portfolioId  String
+  position     Position  @relation(fields: [positionId], references: [id])
+  positionId   String
+  addedAt      DateTime
+  addedBy      String // User ID who added this position
+  isHidden     Boolean   @default(false)
+  displayOrder Int
+
+  @@unique([portfolioId, positionId])
+  @@map("portfolio_positions")
+}
+
+// Lifecycle history for positions
+model LifecycleHistory {
+  id              String   @id @default(cuid())
+  position        Position @relation(fields: [positionId], references: [id])
+  positionId      String
+  from            String // Previous lifecycle state
+  to              String // New lifecycle state
+  timestamp       DateTime
+  userId          String // Who made the change
+  notes           String?
+  relatedOrderIds String[] // Array of order IDs related to this change
+
+  @@map("lifecycle_history")
+}
+
+// Capital tier history
+model CapitalTierHistory {
+  id             String   @id @default(cuid())
+  position       Position @relation(fields: [positionId], references: [id])
+  positionId     String
+  from           String // Previous capital tier
+  to             String // New capital tier
+  timestamp      DateTime
+  amountSecured  Float
+  relatedOrderId String? // Order ID related to this change
+  notes          String?
+
+  @@map("capital_tier_history")
+}
+
+// Thesis documenting the reasoning behind a position
+model Thesis {
+  id           String   @id @default(cuid())
+  position     Position @relation(fields: [positionId], references: [id])
+  positionId   String   @unique
+  reasoning    String   @db.Text
+  invalidation String?  @db.Text // Conditions that would invalidate the thesis
+  fulfillment  String?  @db.Text // Target outcome representing thesis success
+  notes        String?  @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("theses")
+}
+
+// Journal entries for subjective notes about positions
+model JournalEntry {
+  id          String   @id @default(cuid())
+  position    Position @relation(fields: [positionId], references: [id])
+  positionId  String
+  thought     String   @db.Text
+  attachments String[] // Array of file paths/URLs
+  timestamp   DateTime
+  userId      String // Who wrote the entry
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("journal_entries")
+}
+
+// Position details - operational aspects of a position
+model PositionDetails {
+  id                String    @id @default(cuid())
+  side              String // "buy" or "sell"
+  fractal           String // Time frame ("1D", "4H", "1W", etc.)
+  initialInvestment Float
+  currentInvestment Float
+  recoveredAmount   Float     @default(0)
+  dateOpened        DateTime? // Null represents "genesis"
+  closedPercentage  Float     @default(0)
+
+  // Relations
+  position         Position?
+  orders           Order[]
+  stopLossOrders   StopLossOrder[]
+  takeProfitOrders TakeProfitOrder[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("position_details")
+}
+
+// Position metrics - calculated performance values
+model PositionMetrics {
+  id            String   @id @default(cuid())
+  position      Position @relation(fields: [positionId], references: [id])
+  positionId    String   @unique
+  realizedPnL   Float
+  unrealizedPnL Float
+  roi           Float
+  maxDrawdown   Float
+  duration      String // E.g., "10d" for 10 days
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("position_metrics")
+}
+
+// ==========================================
+// ORDER MANAGEMENT
+// ==========================================
+
+// Order model - entry or exit for a position
+model Order {
+  id                String          @id @default(cuid())
+  positionDetails   PositionDetails @relation(fields: [positionDetailsId], references: [id])
+  positionDetailsId String
+  dateOpen          DateTime? // When the order was created
+  dateFilled        DateTime? // When the order was executed
+  averagePrice      Float?
+  totalCost         Float?
+  status            String // "submitted", "filled", "cancelled"
+  type              String // "trigger", "market", "limit"
+  purpose           String? // "entry", "exit", etc.
+  fee               Float?
+  feeUnit           String?
+  filled            Float?
+  unit              String? // "base", "quote", "percentage"
+  capitalTierImpact String? // Effect on capital tier
+  notes             String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("orders")
+}
+
+// Stop loss order - for risk management
+model StopLossOrder {
+  id                String          @id @default(cuid())
+  positionDetails   PositionDetails @relation(fields: [positionDetailsId], references: [id])
+  positionDetailsId String
+  dateOpen          DateTime?
+  dateFilled        DateTime?
+  averagePrice      Float?
+  totalCost         Float?
+  status            String
+  type              String
+  fee               Float?
+  feeUnit           String?
+  filled            Float?
+  trigger           Float?
+  estimatedCost     Float?
+  unit              String // Required for stop loss
+  size              Float // Required for stop loss
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("stop_loss_orders")
+}
+
+// Take profit order - for capturing gains
+model TakeProfitOrder {
+  id                String          @id @default(cuid())
+  positionDetails   PositionDetails @relation(fields: [positionDetailsId], references: [id])
+  positionDetailsId String
+  dateOpen          DateTime?
+  dateFilled        DateTime?
+  averagePrice      Float?
+  totalCost         Float?
+  status            String
+  type              String
+  fee               Float?
+  feeUnit           String?
+  filled            Float?
+  trigger           Float?
+  estimatedCost     Float?
+  unit              String // Required for take profit
+  size              Float // Required for take profit
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("take_profit_orders")
+}
+
+// ==========================================
+// VALUATION & REPORTING
+// ==========================================
+
+// Historical valuation for portfolios
+model HistoricalValuation {
+  id          String    @id @default(cuid())
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id])
+  portfolioId String
+  timestamp   DateTime
+
+  // Temporal metadata
+  year                Int
+  month               Int?
+  day                 Int?
+  periodKey           String
+  periodName          String
+  timeFrameUnit       String
+  periodStart         DateTime
+  periodEnd           DateTime
+  isTimeframeBoundary Boolean
+
+  // Aggregation metadata
+  isAggregated      Boolean @default(false)
+  aggregationMethod String
+  sourceGranularity String
+  targetGranularity String
+
+  // Valuation data
+  totalValue        Float
+  valueCurrency     String
+  initialInvestment Float
+  profitLoss        Float
+  percentageReturn  Float
+
+  // Position valuations as JSON
+  positionValuations Json
+
+  // Additional metadata
+  isRetroactive Boolean @default(false)
+
+  // Market context
+  btcPrice       Float?
+  ethPrice       Float?
+  totalMarketCap Float?
+  fearGreedIndex Int?
+
+  notes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([portfolioId, timestamp])
+  @@index([periodKey, timeFrameUnit])
+  @@map("historical_valuations")
+}
+
+// Performance report model
+model PerformanceReport {
+  id                String @id @default(cuid())
+  portfolioId       String
+  reportType        String // "daily", "weekly", "monthly", "quarterly", "yearly", "custom"
+  sourceGranularity String // "daily", "weekly", "monthly", "quarterly"
+
+  // Period covered
+  startDate  DateTime
+  endDate    DateTime
+  periodName String
+
+  // Report metadata
+  generatedAt   DateTime
+  summary       Json // Contains startValue, endValue, percentageChange, etc.
+  valuationIds  String[] // IDs of valuations included in this report
+  timeSeriesIds String[] // IDs of time series included
+
+  // Benchmark comparison
+  benchmarkComparison Json? // Optional comparison to market benchmark
+
+  // Report generation metadata
+  isScheduled Boolean @default(false)
+  generatedBy String? // User who generated the report
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([portfolioId, reportType])
+  @@map("performance_reports")
+}
+
+// ==========================================
+// USER MANAGEMENT & SETTINGS
+// ==========================================
+
+// User model - for application users
+model User {
+  id           String  @id @default(cuid())
+  email        String  @unique
+  name         String?
+  passwordHash String // Securely stored password hash
+  isActive     Boolean @default(true)
+  role         String  @default("user") // "user", "admin", etc.
+
+  // User preferences
+  preferences Json? // User preferences as JSON
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+// System settings
+model SystemSetting {
+  id          String  @id @default(cuid())
+  key         String  @unique
+  value       String
+  description String?
+  isSecret    Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("system_settings")
+}
