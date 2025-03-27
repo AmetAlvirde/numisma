@@ -7,7 +7,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { Portfolio } from "@/types/numisma-types";
-import { getPortfolioData } from "@/lib/db";
+import { getPortfolioData } from "@/utilities/db";
 
 interface PortfolioSummary {
   /** The portfolio ID */

@@ -8,7 +8,7 @@
 "use client";
 
 import { usePortfolioSummary } from "@/hooks/use-portfolio-summary";
-import { formatCurrency, formatPercentage } from "@/lib/format";
+import { formatCurrency, formatPercentage } from "@/utilities/format";
 import { ArrowUp, ArrowDown, RefreshCw } from "lucide-react";
 import {
   Card,
