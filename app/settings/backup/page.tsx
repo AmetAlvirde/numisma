@@ -3,11 +3,14 @@
  */
 "use client";
 
-import { BackupManager } from "@/components/backup/backup-manager";
+import { saveAlphaTesterData } from "@/lib/alpha-tester-data";
 
 export default function BackupPage() {
   // TODO: Get actual user ID from auth context
   const userId = "test-user";
+  console.log("Saving alpha tester data");
+  saveAlphaTesterData();
+  console.log("finished saving alpha tester data");
 
   return (
     <div className="container py-8">
@@ -17,7 +20,6 @@ export default function BackupPage() {
           Manage your data backups and restorations.
         </p>
       </div>
-      <BackupManager userId={userId} />
     </div>
   );
 }

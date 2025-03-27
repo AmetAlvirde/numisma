@@ -6,8 +6,8 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
-import { db } from "@/services/database/indexeddb-adapter";
 import type { Portfolio } from "@/types/numisma-types";
+import { getPortfolioData } from "@/lib/db";
 
 interface PortfolioSummary {
   /** The portfolio ID */
@@ -76,27 +76,31 @@ export function usePortfolioSummary(
       setError(null);
 
       // Fetch portfolio data from IndexedDB
-      const portfolio = await db.get("portfolios", portfolioId);
-      if (!portfolio) {
+      const data = await getPortfolioData(portfolioId);
+      if (!data.portfolio) {
         throw new Error(`Portfolio with ID ${portfolioId} not found`);
       }
 
+      // Get the latest valuation
+      const latestValuation =
+        data.historicalValuations[data.historicalValuations.length - 1];
+
       // Transform portfolio data into summary format
       const summary: PortfolioSummary = {
-        id: portfolio.id,
-        name: portfolio.name,
-        description: portfolio.description,
-        totalValue: portfolio.currentValue ?? 0,
-        initialInvestment: portfolio.initialInvestment ?? 0,
-        profitLoss: portfolio.profitLoss ?? 0,
-        returnPercentage: portfolio.returnPercentage ?? 0,
-        baseCurrency: portfolio.baseCurrency,
-        positionCount: portfolio.positionIds.length,
-        isPublic: portfolio.isPublic ?? false,
-        tags: portfolio.tags ?? [],
-        riskProfile: portfolio.riskProfile,
-        targetAllocations: portfolio.targetAllocations,
-        displayMetadata: portfolio.displayMetadata,
+        id: data.portfolio.id,
+        name: data.portfolio.name,
+        description: data.portfolio.description,
+        totalValue: latestValuation?.totalValue ?? 0,
+        initialInvestment: latestValuation?.initialInvestment ?? 0,
+        profitLoss: latestValuation?.profitLoss ?? 0,
+        returnPercentage: latestValuation?.percentageReturn ?? 0,
+        baseCurrency: data.portfolio.baseCurrency ?? "USD",
+        positionCount: data.positions.length,
+        isPublic: data.portfolio.isPublic ?? false,
+        tags: data.portfolio.tags ?? [],
+        riskProfile: data.portfolio.riskProfile,
+        targetAllocations: data.portfolio.targetAllocations,
+        displayMetadata: data.portfolio.displayMetadata,
       };
 
       setSummary(summary);
