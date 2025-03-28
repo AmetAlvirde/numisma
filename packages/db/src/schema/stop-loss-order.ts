@@ -6,38 +6,61 @@ import { z } from "zod";
 import {
   idSchema,
   timestampSchema,
+  foreignKeySchema,
   dateOrGenesisSchema,
-  orderStatusSchema,
-  orderTypeSchema,
-  sizeUnitSchema,
 } from "./common";
+import {
+  OrderStatus,
+  OrderType,
+  SizeUnit,
+  ValidationResult,
+  ValidationError,
+} from "@numisma/types";
 
 /**
- * Stop Loss Order schema definition
+ * Stop loss strategy enum
  */
-export const stopLossOrderSchema = z
+export enum StopLossStrategy {
+  BREAKEVEN = "breakeven",
+  PARTIAL = "partial",
+  FULL = "full",
+  TIERED = "tiered",
+}
+
+/**
+ * Trailing unit enum
+ */
+export enum TrailingUnit {
+  PERCENTAGE = "percentage",
+  ABSOLUTE = "absolute",
+}
+
+/**
+ * Base stop loss order schema without refinements
+ */
+const baseStopLossOrderSchema = z
   .object({
     // Core fields
     id: idSchema,
     dateOpen: dateOrGenesisSchema.optional(),
     dateFilled: dateOrGenesisSchema.optional(),
-    averagePrice: z.number().optional(),
-    totalCost: z.number().optional(),
-    status: orderStatusSchema,
-    type: orderTypeSchema,
-    fee: z.number().optional(),
-    feeUnit: z.string().optional(),
-    filled: z.number().optional(),
-    trigger: z.number().optional(),
-    estimatedCost: z.number().optional(),
+    averagePrice: z.number().positive().optional(),
+    totalCost: z.number().nonnegative().optional(),
+    status: z.nativeEnum(OrderStatus),
+    type: z.nativeEnum(OrderType),
+    fee: z.number().nonnegative().optional(),
+    feeUnit: z.string().length(3).optional(), // ISO 4217 currency code
+    filled: z.number().nonnegative().optional(),
+    trigger: z.number().positive().optional(),
+    estimatedCost: z.number().nonnegative().optional(),
     isTrailing: z.boolean().optional().default(false),
-    trailingDistance: z.number().optional(),
-    trailingUnit: z.enum(["percentage", "absolute"]).optional(),
-    maxSlippage: z.number().optional(),
-    strategy: z.enum(["breakeven", "partial", "full", "tiered"]).optional(),
+    trailingDistance: z.number().positive().optional(),
+    trailingUnit: z.nativeEnum(TrailingUnit).optional(),
+    maxSlippage: z.number().positive().optional(),
+    strategy: z.nativeEnum(StopLossStrategy).optional(),
 
     // Stop loss specific fields (required)
-    unit: sizeUnitSchema,
+    unit: z.enum(["PERCENTAGE", "FIXED"] as const),
     size: z.number().positive(),
 
     // Timestamps (from database)
@@ -46,28 +69,181 @@ export const stopLossOrderSchema = z
   .strict();
 
 /**
+ * Stop loss order schema with refinements
+ */
+export const stopLossOrderSchema = baseStopLossOrderSchema
+  .refine(
+    data => {
+      // If order is filled, require filled amount and average price
+      if (data.status === OrderStatus.FILLED) {
+        return !!data.filled && !!data.averagePrice;
+      }
+      return true;
+    },
+    {
+      message: "Filled orders must have filled amount and average price",
+      path: ["status"],
+    }
+  )
+  .refine(
+    data => {
+      // If order is filled, validate that filled amount matches size
+      if (data.status === OrderStatus.FILLED && data.filled) {
+        const filled = data.filled as number;
+        const size = data.size as number;
+        return Math.abs(filled - size) < 0.00000001;
+      }
+      return true;
+    },
+    {
+      message: "Filled amount must match order size",
+      path: ["filled"],
+    }
+  )
+  .refine(
+    data => {
+      // If trailing is enabled, require trailing distance and unit
+      if (data.isTrailing) {
+        return !!data.trailingDistance && !!data.trailingUnit;
+      }
+      return true;
+    },
+    {
+      message:
+        "Trailing distance and unit are required when trailing is enabled",
+      path: ["isTrailing"],
+    }
+  );
+
+/**
  * Schema for creating a new stop loss order
  */
-export const createStopLossOrderSchema = stopLossOrderSchema
-  .omit({ id: true, createdAt: true, updatedAt: true })
+export const createStopLossOrderSchema = baseStopLossOrderSchema
+  .omit({
+    id: true,
+    createdAt: true,
+    updatedAt: true,
+  })
   .extend({
-    positionDetailsId: idSchema,
-  });
+    positionDetailsId: foreignKeySchema,
+  })
+  .refine(
+    data => {
+      // If order is filled, require filled amount and average price
+      if (data.status === OrderStatus.FILLED) {
+        return !!data.filled && !!data.averagePrice;
+      }
+      return true;
+    },
+    {
+      message: "Filled orders must have filled amount and average price",
+      path: ["status"],
+    }
+  )
+  .refine(
+    data => {
+      // If order is filled, validate that filled amount matches size
+      if (data.status === OrderStatus.FILLED && data.filled) {
+        const filled = data.filled as number;
+        const size = data.size as number;
+        return Math.abs(filled - size) < 0.00000001;
+      }
+      return true;
+    },
+    {
+      message: "Filled amount must match order size",
+      path: ["filled"],
+    }
+  )
+  .refine(
+    data => {
+      // If trailing is enabled, require trailing distance and unit
+      if (data.isTrailing) {
+        return !!data.trailingDistance && !!data.trailingUnit;
+      }
+      return true;
+    },
+    {
+      message:
+        "Trailing distance and unit are required when trailing is enabled",
+      path: ["isTrailing"],
+    }
+  );
 
 /**
  * Schema for updating a stop loss order
  */
-export const updateStopLossOrderSchema = createStopLossOrderSchema
-  .omit({ positionDetailsId: true })
-  .partial();
+export const updateStopLossOrderSchema = z
+  .object({
+    dateOpen: dateOrGenesisSchema.optional(),
+    dateFilled: dateOrGenesisSchema.optional(),
+    averagePrice: z.number().positive().optional(),
+    totalCost: z.number().nonnegative().optional(),
+    status: z.nativeEnum(OrderStatus).optional(),
+    type: z.nativeEnum(OrderType).optional(),
+    fee: z.number().nonnegative().optional(),
+    feeUnit: z.string().length(3).optional(),
+    filled: z.number().nonnegative().optional(),
+    trigger: z.number().positive().optional(),
+    estimatedCost: z.number().nonnegative().optional(),
+    isTrailing: z.boolean().optional(),
+    trailingDistance: z.number().positive().optional(),
+    trailingUnit: z.nativeEnum(TrailingUnit).optional(),
+    maxSlippage: z.number().positive().optional(),
+    strategy: z.nativeEnum(StopLossStrategy).optional(),
+    unit: z.enum(["PERCENTAGE", "FIXED"] as const).optional(),
+    size: z.number().positive().optional(),
+  })
+  .refine(
+    data => {
+      // If order is filled, require filled amount and average price
+      if (data.status === OrderStatus.FILLED) {
+        return !!data.filled && !!data.averagePrice;
+      }
+      return true;
+    },
+    {
+      message: "Filled orders must have filled amount and average price",
+      path: ["status"],
+    }
+  )
+  .refine(
+    data => {
+      // If order is filled, validate that filled amount matches size
+      if (data.status === OrderStatus.FILLED && data.filled && data.size) {
+        const filled = data.filled as number;
+        const size = data.size as number;
+        return Math.abs(filled - size) < 0.00000001;
+      }
+      return true;
+    },
+    {
+      message: "Filled amount must match order size",
+      path: ["filled"],
+    }
+  )
+  .refine(
+    data => {
+      // If trailing is enabled, require trailing distance and unit
+      if (data.isTrailing) {
+        return !!data.trailingDistance && !!data.trailingUnit;
+      }
+      return true;
+    },
+    {
+      message:
+        "Trailing distance and unit are required when trailing is enabled",
+      path: ["isTrailing"],
+    }
+  );
 
 /**
  * Stop loss order search parameters schema
  */
 export const stopLossOrderSearchSchema = z.object({
-  positionDetailsId: idSchema.optional(),
-  status: orderStatusSchema.optional(),
-  type: orderTypeSchema.optional(),
+  positionDetailsId: foreignKeySchema.optional(),
+  status: z.nativeEnum(OrderStatus).optional(),
+  type: z.nativeEnum(OrderType).optional(),
 });
 
 export type StopLossOrder = z.infer<typeof stopLossOrderSchema>;

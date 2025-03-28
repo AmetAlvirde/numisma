@@ -6,21 +6,21 @@ import { z } from "zod";
 import {
   idSchema,
   timestampSchema,
-  lifecycleSchema,
+  positionLifecycleSchema,
   capitalTierSchema,
   riskLevelSchema,
   walletTypeSchema,
   dateOrGenesisSchema,
-  userIdSchema,
+  foreignKeySchema,
+  oneToOneSchema,
+  oneToManySchema,
+  tradeSideSchema,
 } from "./common";
+import { marketSchema } from "./market";
+import { walletLocationSchema } from "./wallet-location";
 import { orderSchema } from "./order";
 import { stopLossOrderSchema } from "./stop-loss-order";
 import { takeProfitOrderSchema } from "./take-profit-order";
-
-/**
- * Position side type
- */
-export const positionSideSchema = z.enum(["buy", "sell"]);
 
 /**
  * Thesis schema
@@ -45,7 +45,7 @@ export const journalEntrySchema = z.object({
   thought: z.string(),
   attachments: z.array(z.string()).default([]),
   timestamp: z.date().default(() => new Date()),
-  userId: userIdSchema,
+  userId: foreignKeySchema,
   tags: z.array(z.string()).default([]),
   sentiment: z.enum(["bullish", "bearish", "neutral"]).optional(),
   isKeyLearning: z.boolean().default(false),
@@ -56,12 +56,12 @@ export const journalEntrySchema = z.object({
  */
 export const lifecycleHistorySchema = z.object({
   id: idSchema.optional(),
-  from: z.string(),
-  to: lifecycleSchema,
+  from: positionLifecycleSchema,
+  to: positionLifecycleSchema,
   timestamp: z.date().default(() => new Date()),
-  userId: userIdSchema,
+  userId: foreignKeySchema,
   notes: z.string().optional(),
-  relatedOrderIds: z.array(idSchema).default([]),
+  relatedOrderIds: z.array(foreignKeySchema).default([]),
 });
 
 /**
@@ -73,7 +73,7 @@ export const capitalTierHistorySchema = z.object({
   to: capitalTierSchema,
   timestamp: z.date().default(() => new Date()),
   amountSecured: z.number().nonnegative(),
-  relatedOrderId: idSchema.optional(),
+  relatedOrderId: foreignKeySchema.optional(),
   notes: z.string().optional(),
 });
 
@@ -82,7 +82,7 @@ export const capitalTierHistorySchema = z.object({
  */
 export const positionDetailsSchema = z.object({
   id: idSchema.optional(),
-  side: positionSideSchema,
+  side: tradeSideSchema,
   timeFrame: z.string(),
   initialInvestment: z.number().nonnegative(),
   currentInvestment: z.number().nonnegative(),
@@ -91,9 +91,9 @@ export const positionDetailsSchema = z.object({
   closedPercentage: z.number().min(0).max(100).default(0),
 
   // Order collections
-  orders: z.array(orderSchema).optional(),
-  stopLoss: z.array(stopLossOrderSchema).optional(),
-  takeProfit: z.array(takeProfitOrderSchema).optional(),
+  orders: oneToManySchema(orderSchema).optional(),
+  stopLoss: oneToManySchema(stopLossOrderSchema).optional(),
+  takeProfit: oneToManySchema(takeProfitOrderSchema).optional(),
 
   averageEntryPrice: z.number().optional(),
   averageExitPrice: z.number().optional(),
@@ -131,31 +131,31 @@ export const positionSchema = z
     name: z.string().min(1).max(100),
 
     // Market and wallet references
-    marketId: idSchema,
-    walletLocationId: idSchema,
+    marketId: foreignKeySchema,
+    walletLocationId: foreignKeySchema,
     walletType: walletTypeSchema,
 
     // Position management fields
-    lifecycle: lifecycleSchema,
+    lifecycle: positionLifecycleSchema,
     capitalTier: capitalTierSchema,
     riskLevel: riskLevelSchema,
     strategy: z.string(),
 
     // Additional fields for updates
-    userId: userIdSchema.optional(),
+    userId: foreignKeySchema.optional(),
     lifecycleNotes: z.string().optional(),
     capitalTierAmount: z.number().optional(),
     capitalTierNotes: z.string().optional(),
 
     // Relationships
-    market: z.any().optional(), // Fully typed in repository
-    walletLocation: z.any().optional(), // Fully typed in repository
+    market: oneToOneSchema(marketSchema),
+    walletLocation: oneToOneSchema(walletLocationSchema),
     positionDetails: positionDetailsSchema,
-    metrics: positionMetricsSchema.optional(),
-    thesis: thesisSchema.optional(),
-    journalEntries: z.array(journalEntrySchema).optional(),
-    lifecycleHistory: z.array(lifecycleHistorySchema).optional(),
-    capitalTierHistory: z.array(capitalTierHistorySchema).optional(),
+    metrics: oneToOneSchema(positionMetricsSchema),
+    thesis: oneToOneSchema(thesisSchema),
+    journalEntries: oneToManySchema(journalEntrySchema),
+    lifecycleHistory: oneToManySchema(lifecycleHistorySchema),
+    capitalTierHistory: oneToManySchema(capitalTierHistorySchema),
 
     // Timestamps (from database)
     ...timestampSchema.shape,
@@ -178,7 +178,7 @@ export const createPositionSchema = positionSchema
   })
   .extend({
     // Make userId required for creation
-    userId: userIdSchema.optional().default("system"),
+    userId: foreignKeySchema.optional().default("system"),
   });
 
 /**
@@ -187,16 +187,16 @@ export const createPositionSchema = positionSchema
 export const updatePositionSchema = z.object({
   // Core fields that can be updated
   name: z.string().min(1).max(100).optional(),
-  marketId: idSchema.optional(),
-  walletLocationId: idSchema.optional(),
+  marketId: foreignKeySchema.optional(),
+  walletLocationId: foreignKeySchema.optional(),
   walletType: walletTypeSchema.optional(),
-  lifecycle: lifecycleSchema.optional(),
+  lifecycle: positionLifecycleSchema.optional(),
   capitalTier: capitalTierSchema.optional(),
   riskLevel: riskLevelSchema.optional(),
   strategy: z.string().optional(),
 
   // Additional fields for history entries
-  userId: userIdSchema.optional(),
+  userId: foreignKeySchema.optional(),
   lifecycleNotes: z.string().optional(),
   capitalTierAmount: z.number().optional(),
   capitalTierNotes: z.string().optional(),
@@ -210,10 +210,10 @@ export const updatePositionSchema = z.object({
  * Position search parameters schema
  */
 export const positionSearchSchema = z.object({
-  portfolioId: idSchema.optional(),
-  marketId: idSchema.optional(),
+  portfolioId: foreignKeySchema.optional(),
+  marketId: foreignKeySchema.optional(),
   walletType: walletTypeSchema.optional(),
-  lifecycle: lifecycleSchema.optional(),
+  lifecycle: positionLifecycleSchema.optional(),
   capitalTier: capitalTierSchema.optional(),
   strategy: z.string().optional(),
 });
@@ -222,10 +222,10 @@ export const positionSearchSchema = z.object({
  * Journal entry creation schema
  */
 export const createJournalEntrySchema = z.object({
-  positionId: idSchema,
+  positionId: foreignKeySchema,
   thought: z.string().min(1),
   attachments: z.array(z.string()).default([]),
-  userId: userIdSchema,
+  userId: foreignKeySchema,
 });
 
 export type Position = z.infer<typeof positionSchema>;

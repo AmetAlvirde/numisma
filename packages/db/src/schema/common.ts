@@ -216,3 +216,66 @@ export type ManyToMany<T> = {
   add(item: T): void;
   remove(item: T): void;
 };
+
+// Type guards
+export const isDateOrGenesis = (value: unknown): value is DateOrGenesis => {
+  return dateOrGenesisSchema.safeParse(value).success;
+};
+
+export const isId = (value: unknown): value is Id => {
+  return idSchema.safeParse(value).success;
+};
+
+export const isTimestamp = (value: unknown): value is Timestamp => {
+  return timestampSchema.safeParse(value).success;
+};
+
+export const isPagination = (value: unknown): value is Pagination => {
+  return paginationSchema.safeParse(value).success;
+};
+
+export const isFilter = (value: unknown): value is Filter => {
+  return filterSchema.safeParse(value).success;
+};
+
+export const isQueryParams = (value: unknown): value is QueryParams => {
+  return queryParamsSchema.safeParse(value).success;
+};
+
+export const isOperationResult = <T = any>(
+  value: unknown
+): value is OperationResult<T> => {
+  return operationResultSchema.safeParse(value).success;
+};
+
+export const isBatchOperationResult = <T = any>(
+  value: unknown
+): value is BatchOperationResult<T> => {
+  return batchOperationResultSchema.safeParse(value).success;
+};
+
+export const isRelationOptions = (value: unknown): value is RelationOptions => {
+  return relationOptionsSchema.safeParse(value).success;
+};
+
+export const isForeignKey = <T>(value: unknown): value is ForeignKey<T> => {
+  return foreignKeySchema.safeParse(value).success;
+};
+
+export const isOneToOne = <T>(value: unknown): value is OneToOne<T> => {
+  return z.union([z.any(), z.null()]).safeParse(value).success;
+};
+
+export const isOneToMany = <T>(value: unknown): value is OneToMany<T> => {
+  return z.array(z.any()).safeParse(value).success;
+};
+
+export const isManyToMany = <T>(value: unknown): value is ManyToMany<T> => {
+  return z
+    .object({
+      items: z.array(z.any()),
+      add: z.function().args(z.any()).returns(z.void()),
+      remove: z.function().args(z.any()).returns(z.void()),
+    })
+    .safeParse(value).success;
+};

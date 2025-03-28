@@ -3,41 +3,56 @@
  */
 
 import { z } from "zod";
-import { idSchema, timestampSchema, userIdSchema } from "./common";
+import { idSchema, timestampSchema, foreignKeySchema } from "./common";
+import { ValidationResult, ValidationError } from "@numisma/types";
 
 /**
- * Notification types enum
+ * Notification type enum
  */
-export const notificationTypeSchema = z.enum([
-  "price_alert",
-  "position_update",
-  "portfolio_alert",
-  "report_generated",
-  "system_notification",
-]);
+export enum NotificationType {
+  PRICE_ALERT = "price_alert",
+  POSITION_UPDATE = "position_update",
+  PORTFOLIO_ALERT = "portfolio_alert",
+  REPORT_GENERATED = "report_generated",
+  SYSTEM_NOTIFICATION = "system_notification",
+}
 
 /**
- * Notification priority levels
+ * Notification priority enum
  */
-export const notificationPrioritySchema = z.enum([
-  "low",
-  "medium",
-  "high",
-  "critical",
-]);
+export enum NotificationPriority {
+  LOW = "low",
+  MEDIUM = "medium",
+  HIGH = "high",
+  CRITICAL = "critical",
+}
 
 /**
- * Notification entity schema
+ * Related entity type enum
  */
-export const notificationSchema = z
+export enum RelatedEntityType {
+  POSITION = "position",
+  PORTFOLIO = "portfolio",
+  PRICE_ALERT = "price_alert",
+  REPORT = "report",
+  WALLET = "wallet",
+  EXCHANGE_ACCOUNT = "exchange_account",
+}
+
+/**
+ * Base notification schema without refinements
+ */
+const baseNotificationSchema = z
   .object({
     // Core fields
     id: idSchema,
-    userId: userIdSchema,
-    type: notificationTypeSchema,
+    userId: foreignKeySchema,
+    type: z.nativeEnum(NotificationType),
     title: z.string().min(1).max(200),
     message: z.string().min(1).max(2000),
-    priority: notificationPrioritySchema.default("medium"),
+    priority: z
+      .nativeEnum(NotificationPriority)
+      .default(NotificationPriority.MEDIUM),
     isRead: z.boolean().default(false),
     isActioned: z.boolean().default(false),
     actionUrl: z.string().url().optional(),
@@ -51,8 +66,8 @@ export const notificationSchema = z
     relatedEntityIds: z
       .array(
         z.object({
-          type: z.string(),
-          id: idSchema,
+          type: z.nativeEnum(RelatedEntityType),
+          id: foreignKeySchema,
         })
       )
       .optional(),
@@ -63,9 +78,26 @@ export const notificationSchema = z
   .strict();
 
 /**
+ * Notification schema with refinements
+ */
+export const notificationSchema = baseNotificationSchema.refine(
+  data => {
+    // If actionUrl is provided, actionText must also be provided
+    if (data.actionUrl) {
+      return !!data.actionText;
+    }
+    return true;
+  },
+  {
+    message: "Action text is required when action URL is provided",
+    path: ["actionText"],
+  }
+);
+
+/**
  * Schema for creating a new notification
  */
-export const createNotificationSchema = notificationSchema
+export const createNotificationSchema = baseNotificationSchema
   .omit({
     id: true,
     isRead: true,
@@ -73,12 +105,19 @@ export const createNotificationSchema = notificationSchema
     createdAt: true,
     updatedAt: true,
   })
-  .extend({
-    userId: userIdSchema,
-    type: notificationTypeSchema,
-    title: z.string().min(1).max(200),
-    message: z.string().min(1).max(2000),
-  });
+  .refine(
+    data => {
+      // If actionUrl is provided, actionText must also be provided
+      if (data.actionUrl) {
+        return !!data.actionText;
+      }
+      return true;
+    },
+    {
+      message: "Action text is required when action URL is provided",
+      path: ["actionText"],
+    }
+  );
 
 /**
  * Schema for updating a notification
@@ -88,16 +127,29 @@ export const updateNotificationSchema = z
     isRead: z.boolean().optional(),
     isActioned: z.boolean().optional(),
   })
-  .strict();
+  .refine(
+    data => {
+      // If marking as actioned, it must also be marked as read
+      if (data.isActioned) {
+        return data.isRead !== false;
+      }
+      return true;
+    },
+    {
+      message:
+        "A notification must be read before it can be marked as actioned",
+      path: ["isActioned"],
+    }
+  );
 
 /**
  * Notification search parameters
  */
 export const notificationSearchSchema = z.object({
-  userId: userIdSchema,
-  type: notificationTypeSchema.optional(),
+  userId: foreignKeySchema,
+  type: z.nativeEnum(NotificationType).optional(),
   isRead: z.boolean().optional(),
-  priority: notificationPrioritySchema.optional(),
+  priority: z.nativeEnum(NotificationPriority).optional(),
   from: z.date().optional(),
   to: z.date().optional(),
 });

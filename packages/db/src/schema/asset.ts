@@ -3,55 +3,43 @@
  */
 
 import { z } from "zod";
+import { idSchema, timestampSchema, foreignKeySchema } from "./common";
 import {
-  idSchema,
-  timestampSchema,
-  assetTypeSchema,
-  assetLocationTypeSchema,
-} from "./common";
+  AssetType,
+  AssetLocationType,
+  ValidationResult,
+  ValidationError,
+} from "@numisma/types";
 
 /**
- * Supported asset types
+ * Asset market data schema
  */
-export const assetTypesSchema = z.enum([
-  "crypto",
-  "stock",
-  "forex",
-  "commodity",
-  "fund",
-  "index",
-  "bond",
-  "option",
-  "future",
-  "stablecoin",
-]);
+const assetMarketDataSchema = z.object({
+  currentPrice: z.number().positive().optional(),
+  priceChangePercentage24h: z.number().optional(),
+  marketCap: z.number().nonnegative().optional(),
+  volume24h: z.number().nonnegative().optional(),
+  lastUpdated: z.date().optional(),
+});
 
 /**
- * Asset schema definition
+ * Base asset schema without refinements
  */
-export const assetSchema = z
+const baseAssetSchema = z
   .object({
     // Core fields
     id: idSchema,
     name: z.string().min(1).max(100),
     ticker: z.string().min(1).max(20),
-    assetType: assetTypeSchema,
-    description: z.string().optional(),
-    network: z.string().optional(),
-    contractAddress: z.string().optional(),
-    iconUrl: z.string().optional(),
-    category: z.string().optional(),
-    locationType: assetLocationTypeSchema.optional(),
-    wallet: z.string().optional(),
-    marketData: z
-      .object({
-        currentPrice: z.number().optional(),
-        priceChangePercentage24h: z.number().optional(),
-        marketCap: z.number().optional(),
-        volume24h: z.number().optional(),
-        lastUpdated: z.date().optional(),
-      })
-      .optional(),
+    assetType: z.nativeEnum(AssetType),
+    description: z.string().max(1000).optional(),
+    network: z.string().max(50).optional(),
+    contractAddress: z.string().max(42).optional(), // Ethereum address length
+    iconUrl: z.string().url().optional(),
+    category: z.string().max(50).optional(),
+    locationType: z.nativeEnum(AssetLocationType).optional(),
+    wallet: z.string().max(100).optional(),
+    marketData: assetMarketDataSchema.optional(),
 
     // Timestamps (from database)
     ...timestampSchema.shape,
@@ -59,27 +47,136 @@ export const assetSchema = z
   .strict();
 
 /**
+ * Asset schema with refinements
+ */
+export const assetSchema = baseAssetSchema
+  .refine(
+    data => {
+      // If asset type is CRYPTO or TOKEN, require network and contract address
+      if (
+        data.assetType === AssetType.CRYPTO ||
+        data.assetType === AssetType.TOKEN
+      ) {
+        return !!data.network && !!data.contractAddress;
+      }
+      return true;
+    },
+    {
+      message:
+        "Network and contract address are required for crypto and token assets",
+      path: ["assetType"],
+    }
+  )
+  .refine(
+    data => {
+      // If location type is provided, wallet must be provided
+      if (data.locationType) {
+        return !!data.wallet;
+      }
+      return true;
+    },
+    {
+      message: "Wallet is required when location type is specified",
+      path: ["wallet"],
+    }
+  );
+
+/**
  * Schema for creating a new asset
  */
-export const createAssetSchema = assetSchema.omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-});
+export const createAssetSchema = baseAssetSchema
+  .omit({
+    id: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .refine(
+    data => {
+      // If asset type is CRYPTO or TOKEN, require network and contract address
+      if (
+        data.assetType === AssetType.CRYPTO ||
+        data.assetType === AssetType.TOKEN
+      ) {
+        return !!data.network && !!data.contractAddress;
+      }
+      return true;
+    },
+    {
+      message:
+        "Network and contract address are required for crypto and token assets",
+      path: ["assetType"],
+    }
+  )
+  .refine(
+    data => {
+      // If location type is provided, wallet must be provided
+      if (data.locationType) {
+        return !!data.wallet;
+      }
+      return true;
+    },
+    {
+      message: "Wallet is required when location type is specified",
+      path: ["wallet"],
+    }
+  );
 
 /**
  * Schema for updating an asset
  */
-export const updateAssetSchema = createAssetSchema.partial();
+export const updateAssetSchema = z
+  .object({
+    name: z.string().min(1).max(100).optional(),
+    ticker: z.string().min(1).max(20).optional(),
+    assetType: z.nativeEnum(AssetType).optional(),
+    description: z.string().max(1000).optional(),
+    network: z.string().max(50).optional(),
+    contractAddress: z.string().max(42).optional(),
+    iconUrl: z.string().url().optional(),
+    category: z.string().max(50).optional(),
+    locationType: z.nativeEnum(AssetLocationType).optional(),
+    wallet: z.string().max(100).optional(),
+    marketData: assetMarketDataSchema.optional(),
+  })
+  .refine(
+    data => {
+      // If asset type is CRYPTO or TOKEN, require network and contract address
+      if (
+        data.assetType === AssetType.CRYPTO ||
+        data.assetType === AssetType.TOKEN
+      ) {
+        return !!data.network && !!data.contractAddress;
+      }
+      return true;
+    },
+    {
+      message:
+        "Network and contract address are required for crypto and token assets",
+      path: ["assetType"],
+    }
+  )
+  .refine(
+    data => {
+      // If location type is provided, wallet must be provided
+      if (data.locationType) {
+        return !!data.wallet;
+      }
+      return true;
+    },
+    {
+      message: "Wallet is required when location type is specified",
+      path: ["wallet"],
+    }
+  );
 
 /**
  * Asset search parameters schema
  */
 export const assetSearchSchema = z.object({
   ticker: z.string().optional(),
-  assetType: assetTypeSchema.optional(),
+  assetType: z.nativeEnum(AssetType).optional(),
   query: z.string().optional(),
-  locationType: assetLocationTypeSchema.optional(),
+  locationType: z.nativeEnum(AssetLocationType).optional(),
 });
 
 export type Asset = z.infer<typeof assetSchema>;

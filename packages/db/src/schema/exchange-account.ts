@@ -3,7 +3,28 @@
  */
 
 import { z } from "zod";
-import { idSchema, timestampSchema, userIdSchema } from "./common";
+import { idSchema, timestampSchema, foreignKeySchema } from "./common";
+import {
+  AssetLocationType,
+  ValidationResult,
+  ValidationError,
+} from "@numisma/types";
+
+/**
+ * Exchange name enum
+ */
+export enum ExchangeName {
+  BINANCE = "binance",
+  COINBASE = "coinbase",
+  KRAKEN = "kraken",
+  KUCOIN = "kucoin",
+  GEMINI = "gemini",
+  BITFINEX = "bitfinex",
+  HUOBI = "huobi",
+  OKX = "okx",
+  BYBIT = "bybit",
+  FTX = "ftx",
+}
 
 /**
  * Exchange account status enum
@@ -25,14 +46,14 @@ export const apiPermissionsSchema = z.object({
 });
 
 /**
- * Exchange Account entity schema
+ * Base exchange account schema without refinements
  */
-export const exchangeAccountSchema = z
+const baseExchangeAccountSchema = z
   .object({
     // Core fields
     id: idSchema,
-    userId: userIdSchema,
-    exchange: z.string().min(1), // Exchange name
+    userId: foreignKeySchema,
+    exchange: z.nativeEnum(ExchangeName),
     label: z.string().min(1).max(100),
 
     // API credentials (encrypted in the database)
@@ -59,9 +80,28 @@ export const exchangeAccountSchema = z
   .strict();
 
 /**
+ * Exchange account schema with refinements
+ */
+export const exchangeAccountSchema = baseExchangeAccountSchema.refine(
+  data => {
+    // Validate that exchange-specific requirements are met
+    switch (data.exchange) {
+      case ExchangeName.COINBASE:
+        return !!data.apiPassphrase;
+      default:
+        return true;
+    }
+  },
+  {
+    message: "Exchange-specific requirements not met",
+    path: ["exchange"],
+  }
+);
+
+/**
  * Schema for creating a new exchange account
  */
-export const createExchangeAccountSchema = exchangeAccountSchema
+export const createExchangeAccountSchema = baseExchangeAccountSchema
   .omit({
     id: true,
     isConnected: true,
@@ -71,18 +111,28 @@ export const createExchangeAccountSchema = exchangeAccountSchema
     createdAt: true,
     updatedAt: true,
   })
-  .extend({
-    exchange: z.string().min(1),
-    label: z.string().min(1).max(100),
-    apiKey: z.string().min(1),
-    apiSecret: z.string().min(1),
-  });
+  .refine(
+    data => {
+      // Validate that exchange-specific requirements are met
+      switch (data.exchange) {
+        case ExchangeName.COINBASE:
+          return !!data.apiPassphrase;
+        default:
+          return true;
+      }
+    },
+    {
+      message: "Exchange-specific requirements not met",
+      path: ["exchange"],
+    }
+  );
 
 /**
  * Schema for updating an exchange account
  */
 export const updateExchangeAccountSchema = z
   .object({
+    exchange: z.nativeEnum(ExchangeName).optional(),
     label: z.string().min(1).max(100).optional(),
     apiKey: z.string().min(1).optional(),
     apiSecret: z.string().min(1).optional(),
@@ -91,14 +141,26 @@ export const updateExchangeAccountSchema = z
     syncFrequency: z.number().int().positive().optional(),
     permissions: apiPermissionsSchema.optional(),
   })
-  .strict();
+  .refine(
+    data => {
+      // If updating Coinbase account, ensure apiPassphrase is provided
+      if (data.exchange === ExchangeName.COINBASE) {
+        return !!data.apiPassphrase;
+      }
+      return true;
+    },
+    {
+      message: "Exchange-specific requirements not met",
+      path: ["exchange"],
+    }
+  );
 
 /**
  * Exchange account search parameters
  */
 export const exchangeAccountSearchSchema = z.object({
-  userId: userIdSchema,
-  exchange: z.string().optional(),
+  userId: foreignKeySchema,
+  exchange: z.nativeEnum(ExchangeName).optional(),
   status: exchangeAccountStatusSchema.optional(),
   isConnected: z.boolean().optional(),
 });

@@ -1,14 +1,27 @@
 /**
- * Exchange Account schema validation
+ * Wallet schema validation
  */
 
 import { z } from "zod";
-import { idSchema, timestampSchema, userIdSchema } from "./common";
+import { idSchema, timestampSchema, foreignKeySchema } from "./common";
+import {
+  AssetLocationType,
+  ValidationResult,
+  ValidationError,
+} from "@numisma/types";
 
 /**
- * Exchange account status enum
+ * Wallet type classification
  */
-export const exchangeAccountStatusSchema = z.enum([
+export enum WalletType {
+  HOT = "hot",
+  COLD = "cold",
+}
+
+/**
+ * Wallet status enum
+ */
+export const walletStatusSchema = z.enum([
   "active",
   "error",
   "disconnected",
@@ -25,26 +38,27 @@ export const apiPermissionsSchema = z.object({
 });
 
 /**
- * Exchange Account entity schema
+ * Base wallet schema without refinements
  */
-export const exchangeAccountSchema = z
+const baseWalletSchema = z
   .object({
     // Core fields
     id: idSchema,
-    userId: userIdSchema,
-    exchange: z.string().min(1), // Exchange name
-    label: z.string().min(1).max(100),
+    userId: foreignKeySchema,
+    name: z.string().min(1).max(100),
+    type: z.nativeEnum(WalletType),
+    locationType: z.nativeEnum(AssetLocationType),
 
-    // API credentials (encrypted in the database)
-    apiKey: z.string().min(1),
-    apiSecret: z.string().min(1),
-    apiPassphrase: z.string().optional(), // For exchanges that require it (e.g., Coinbase Pro)
-
-    // Connection state
+    // Connection details
     isConnected: z.boolean().default(false),
     lastSynced: z.date().optional(),
-    status: exchangeAccountStatusSchema,
+    status: walletStatusSchema,
     errorMessage: z.string().optional(),
+
+    // API credentials (encrypted in the database)
+    apiKey: z.string().min(1).optional(),
+    apiSecret: z.string().min(1).optional(),
+    apiPassphrase: z.string().optional(),
 
     // Permissions
     permissions: apiPermissionsSchema.optional(),
@@ -59,9 +73,26 @@ export const exchangeAccountSchema = z
   .strict();
 
 /**
- * Schema for creating a new exchange account
+ * Wallet schema with refinements
  */
-export const createExchangeAccountSchema = exchangeAccountSchema
+export const walletSchema = baseWalletSchema.refine(
+  data => {
+    // If location type is EXCHANGE, require API credentials
+    if (data.locationType === AssetLocationType.EXCHANGE) {
+      return !!data.apiKey && !!data.apiSecret;
+    }
+    return true;
+  },
+  {
+    message: "Exchange wallets require API credentials",
+    path: ["locationType"],
+  }
+);
+
+/**
+ * Schema for creating a new wallet
+ */
+export const createWalletSchema = baseWalletSchema
   .omit({
     id: true,
     isConnected: true,
@@ -71,19 +102,28 @@ export const createExchangeAccountSchema = exchangeAccountSchema
     createdAt: true,
     updatedAt: true,
   })
-  .extend({
-    exchange: z.string().min(1),
-    label: z.string().min(1).max(100),
-    apiKey: z.string().min(1),
-    apiSecret: z.string().min(1),
-  });
+  .refine(
+    data => {
+      // If location type is EXCHANGE, require API credentials
+      if (data.locationType === AssetLocationType.EXCHANGE) {
+        return !!data.apiKey && !!data.apiSecret;
+      }
+      return true;
+    },
+    {
+      message: "Exchange wallets require API credentials",
+      path: ["locationType"],
+    }
+  );
 
 /**
- * Schema for updating an exchange account
+ * Schema for updating a wallet
  */
-export const updateExchangeAccountSchema = z
+export const updateWalletSchema = z
   .object({
-    label: z.string().min(1).max(100).optional(),
+    name: z.string().min(1).max(100).optional(),
+    type: z.nativeEnum(WalletType).optional(),
+    locationType: z.nativeEnum(AssetLocationType).optional(),
     apiKey: z.string().min(1).optional(),
     apiSecret: z.string().min(1).optional(),
     apiPassphrase: z.string().optional(),
@@ -91,23 +131,32 @@ export const updateExchangeAccountSchema = z
     syncFrequency: z.number().int().positive().optional(),
     permissions: apiPermissionsSchema.optional(),
   })
-  .strict();
+  .refine(
+    data => {
+      // If location type is EXCHANGE, require API credentials
+      if (data.locationType === AssetLocationType.EXCHANGE) {
+        return !!data.apiKey && !!data.apiSecret;
+      }
+      return true;
+    },
+    {
+      message: "Exchange wallets require API credentials",
+      path: ["locationType"],
+    }
+  );
 
 /**
- * Exchange account search parameters
+ * Wallet search parameters
  */
-export const exchangeAccountSearchSchema = z.object({
-  userId: userIdSchema,
-  exchange: z.string().optional(),
-  status: exchangeAccountStatusSchema.optional(),
+export const walletSearchSchema = z.object({
+  userId: foreignKeySchema,
+  type: z.nativeEnum(WalletType).optional(),
+  locationType: z.nativeEnum(AssetLocationType).optional(),
+  status: walletStatusSchema.optional(),
   isConnected: z.boolean().optional(),
 });
 
-export type ExchangeAccount = z.infer<typeof exchangeAccountSchema>;
-export type CreateExchangeAccountInput = z.infer<
-  typeof createExchangeAccountSchema
->;
-export type UpdateExchangeAccountInput = z.infer<
-  typeof updateExchangeAccountSchema
->;
-export type ExchangeAccountSearch = z.infer<typeof exchangeAccountSearchSchema>;
+export type Wallet = z.infer<typeof walletSchema>;
+export type CreateWalletInput = z.infer<typeof createWalletSchema>;
+export type UpdateWalletInput = z.infer<typeof updateWalletSchema>;
+export type WalletSearch = z.infer<typeof walletSearchSchema>;

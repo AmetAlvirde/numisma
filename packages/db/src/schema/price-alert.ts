@@ -3,41 +3,51 @@
  */
 
 import { z } from "zod";
-import { idSchema, timestampSchema, userIdSchema } from "./common";
+import { idSchema, timestampSchema, foreignKeySchema } from "./common";
+import { AssetType, ValidationResult, ValidationError } from "@numisma/types";
 
 /**
  * Alert direction enum
  */
-export const alertDirectionSchema = z.enum(["above", "below"]);
+export enum AlertDirection {
+  ABOVE = "above",
+  BELOW = "below",
+}
 
 /**
- * Notification channels
+ * Notification channel enum
  */
-export const notificationChannelSchema = z.enum(["email", "push", "sms"]);
+export enum NotificationChannel {
+  EMAIL = "email",
+  PUSH = "push",
+  SMS = "sms",
+}
 
 /**
- * Price Alert entity schema
+ * Base price alert schema without refinements
  */
-export const priceAlertSchema = z
+const basePriceAlertSchema = z
   .object({
     // Core fields
     id: idSchema,
-    userId: userIdSchema,
+    userId: foreignKeySchema,
     asset: z.string().min(1), // Asset ticker
-    targetPrice: z.number(),
-    direction: alertDirectionSchema,
+    targetPrice: z.number().positive(),
+    direction: z.nativeEnum(AlertDirection),
     isPercentageChange: z.boolean().default(false),
-    percentageChange: z.number().optional(),
+    percentageChange: z.number().positive().optional(),
     repeating: z.boolean().default(false),
     isActive: z.boolean().default(true),
 
     // Notification channels and content
-    channels: z.array(notificationChannelSchema).default(["push"]),
+    channels: z
+      .array(z.nativeEnum(NotificationChannel))
+      .default([NotificationChannel.PUSH]),
     customMessage: z.string().max(200).optional(),
 
     // Integrations with other entities
     createJournalEntry: z.boolean().default(false),
-    positionId: idSchema.optional(),
+    positionId: foreignKeySchema.optional(),
 
     // Tracking fields
     lastTriggeredAt: z.date().optional(),
@@ -48,46 +58,86 @@ export const priceAlertSchema = z
   .strict();
 
 /**
+ * Price alert schema with refinements
+ */
+export const priceAlertSchema = basePriceAlertSchema.refine(
+  data => {
+    // If percentage change is enabled, require percentage value
+    if (data.isPercentageChange) {
+      return !!data.percentageChange;
+    }
+    return true;
+  },
+  {
+    message:
+      "Percentage change value is required when percentage change is enabled",
+    path: ["percentageChange"],
+  }
+);
+
+/**
  * Schema for creating a new price alert
  */
-export const createPriceAlertSchema = priceAlertSchema
+export const createPriceAlertSchema = basePriceAlertSchema
   .omit({
     id: true,
     lastTriggeredAt: true,
     createdAt: true,
     updatedAt: true,
   })
-  .extend({
-    asset: z.string().min(1),
-    targetPrice: z.number(),
-    direction: alertDirectionSchema,
-  });
+  .refine(
+    data => {
+      // If percentage change is enabled, require percentage value
+      if (data.isPercentageChange) {
+        return !!data.percentageChange;
+      }
+      return true;
+    },
+    {
+      message:
+        "Percentage change value is required when percentage change is enabled",
+      path: ["percentageChange"],
+    }
+  );
 
 /**
  * Schema for updating a price alert
  */
 export const updatePriceAlertSchema = z
   .object({
-    targetPrice: z.number().optional(),
-    direction: alertDirectionSchema.optional(),
+    targetPrice: z.number().positive().optional(),
+    direction: z.nativeEnum(AlertDirection).optional(),
     isPercentageChange: z.boolean().optional(),
-    percentageChange: z.number().optional(),
+    percentageChange: z.number().positive().optional(),
     repeating: z.boolean().optional(),
     isActive: z.boolean().optional(),
-    channels: z.array(notificationChannelSchema).optional(),
+    channels: z.array(z.nativeEnum(NotificationChannel)).optional(),
     customMessage: z.string().max(200).optional(),
     createJournalEntry: z.boolean().optional(),
   })
-  .strict();
+  .refine(
+    data => {
+      // If percentage change is enabled, require percentage value
+      if (data.isPercentageChange) {
+        return !!data.percentageChange;
+      }
+      return true;
+    },
+    {
+      message:
+        "Percentage change value is required when percentage change is enabled",
+      path: ["percentageChange"],
+    }
+  );
 
 /**
  * Price alert search parameters
  */
 export const priceAlertSearchSchema = z.object({
-  userId: userIdSchema,
+  userId: foreignKeySchema,
   asset: z.string().optional(),
   isActive: z.boolean().optional(),
-  positionId: idSchema.optional(),
+  positionId: foreignKeySchema.optional(),
 });
 
 export type PriceAlert = z.infer<typeof priceAlertSchema>;

@@ -3,7 +3,29 @@
  */
 
 import { z } from "zod";
-import { idSchema, timestampSchema, userIdSchema } from "./common";
+import { idSchema, timestampSchema, foreignKeySchema } from "./common";
+import {
+  OrderType,
+  AssetType,
+  ValidationResult,
+  ValidationError,
+} from "@numisma/types";
+
+/**
+ * Time frame for metrics calculation
+ */
+export enum TimeFrame {
+  MINUTE_1 = "1m",
+  MINUTE_5 = "5m",
+  MINUTE_15 = "15m",
+  MINUTE_30 = "30m",
+  HOUR_1 = "1H",
+  HOUR_4 = "4H",
+  DAY_1 = "1D",
+  DAY_3 = "3D",
+  WEEK_1 = "1W",
+  MONTH_1 = "1M",
+}
 
 /**
  * Period type for metrics calculation
@@ -54,12 +76,12 @@ export const timeFrameAnalyticsSchema = z.record(
 /**
  * Trading Metrics entity schema
  */
-export const tradingMetricsSchema = z
+const baseTradingMetricsSchema = z
   .object({
     // Core fields
     id: idSchema,
-    userId: userIdSchema,
-    portfolioId: idSchema.optional(),
+    userId: foreignKeySchema,
+    portfolioId: foreignKeySchema.optional(),
 
     // Period configuration
     period: metricsPeriodSchema,
@@ -87,9 +109,13 @@ export const tradingMetricsSchema = z
     stdDeviation: z.number().nonnegative().optional(),
 
     // Breakdown analytics
-    byTradeType: tradeTypeAnalyticsSchema.optional(),
-    byAsset: assetAnalyticsSchema.optional(),
-    byTimeFrame: timeFrameAnalyticsSchema.optional(),
+    byTradeType: z
+      .record(z.nativeEnum(OrderType), tradeTypeAnalyticsSchema)
+      .optional(),
+    byAsset: z.record(z.nativeEnum(AssetType), assetAnalyticsSchema).optional(),
+    byTimeFrame: z
+      .record(z.nativeEnum(TimeFrame), timeFrameAnalyticsSchema)
+      .optional(),
 
     // Timestamps
     ...timestampSchema.shape,
@@ -97,10 +123,36 @@ export const tradingMetricsSchema = z
   .strict();
 
 /**
+ * Trading Metrics entity schema with refinements
+ */
+export const tradingMetricsSchema = baseTradingMetricsSchema
+  .refine(
+    data => {
+      // Validate that winningTrades + losingTrades equals totalTrades
+      return data.winningTrades + data.losingTrades === data.totalTrades;
+    },
+    {
+      message: "Total trades must equal the sum of winning and losing trades",
+      path: ["totalTrades"],
+    }
+  )
+  .refine(
+    data => {
+      // Validate that winRate matches the calculated value
+      const calculatedWinRate = (data.winningTrades / data.totalTrades) * 100;
+      return Math.abs(data.winRate - calculatedWinRate) < 0.01;
+    },
+    {
+      message: "Win rate must match the calculated value from winning trades",
+      path: ["winRate"],
+    }
+  );
+
+/**
  * Schema for creating trading metrics
  * (typically calculated by the system, not user-created)
  */
-export const createTradingMetricsSchema = tradingMetricsSchema.omit({
+export const createTradingMetricsSchema = baseTradingMetricsSchema.omit({
   id: true,
   createdAt: true,
   updatedAt: true,
@@ -110,8 +162,8 @@ export const createTradingMetricsSchema = tradingMetricsSchema.omit({
  * Trading metrics search parameters
  */
 export const tradingMetricsSearchSchema = z.object({
-  userId: userIdSchema,
-  portfolioId: idSchema.optional(),
+  userId: foreignKeySchema,
+  portfolioId: foreignKeySchema.optional(),
   period: metricsPeriodSchema.optional(),
   startDate: z.date().optional(),
   endDate: z.date().optional(),
