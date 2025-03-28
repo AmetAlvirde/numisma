@@ -9,6 +9,20 @@
  * TypeScript definitions that ensure type safety throughout the application.
  */
 
+import {
+  AssetType,
+  AssetLocationType,
+  PositionLifecycle,
+  CapitalTier,
+  OrderStatus,
+  OrderType,
+  OrderPurpose,
+  ForeignKey,
+  PreTrackingStatus,
+  ValidationResult,
+  ValidationOptions,
+} from "./base";
+
 // ===================================================================
 // CORE DOMAIN PRIMITIVES
 // ===================================================================
@@ -37,36 +51,6 @@ export type WalletType = "hot" | "cold";
 export type PositionStatus = "active" | "closed" | "partial";
 
 /**
- * Status of an individual order
- * - submitted: Order created but not yet executed
- * - filled: Order has been executed on the exchange/market
- * - cancelled: Order was cancelled before execution
- * - partially_filled: Order has been partially executed
- * - expired: Order expired without being fully filled
- */
-export type OrderStatus =
-  | "submitted"
-  | "filled"
-  | "cancelled"
-  | "partially_filled"
-  | "expired";
-
-/**
- * Type of order execution mechanism
- * - trigger: Executes when price reaches a specific level
- * - market: Executes immediately at current market price
- * - limit: Executes only at specified price or better
- * - trailing_stop: Follows the market price at a specified distance
- * - oco: One-cancels-other order type (pairs a limit with a stop)
- */
-export type OrderType =
-  | "trigger"
-  | "market"
-  | "limit"
-  | "trailing_stop"
-  | "oco";
-
-/**
  * Unit for order size specification
  * - percentage: Size as percentage of total position (0.01-1.0)
  * - base: Size in base currency units (e.g., BTC in BTC/USDT)
@@ -81,23 +65,6 @@ export type SizeUnit = "percentage" | "base" | "quote" | "fiat";
  * - short: Betting the price will go down
  */
 export type TradeSide = "long" | "short";
-
-/**
- * Type of asset location
- * - exchange: Held on a centralized exchange
- * - dex: Held on a decentralized exchange
- * - cold_storage: Held in offline storage
- * - defi: Held in DeFi protocols
- * - staking: Used in staking services
- * - lending: Used in lending protocols
- */
-export type AssetLocationType =
-  | "exchange"
-  | "dex"
-  | "cold_storage"
-  | "defi"
-  | "staking"
-  | "lending";
 
 /**
  * Types of financial metrics for reporting
@@ -168,7 +135,7 @@ export interface Position {
   riskLevel: number;
 
   /** Portfolio this position belongs to (allows grouping) */
-  portfolio: string;
+  portfolioId: ForeignKey<Portfolio>;
 
   /**
    * Indicates if position is on an exchange (hot) or cold storage
@@ -182,10 +149,13 @@ export interface Position {
    * C2+: Realized profits from previous trades
    * This enables compound growth tracking
    */
-  seedCapitalTier: string;
+  capitalTier: CapitalTier;
 
   /** Trading strategy classification (e.g., "Buy the dip", "altseason") */
   strategy: string;
+
+  /** Current lifecycle state of the position */
+  lifecycle: PositionLifecycle;
 
   /** Detailed trading thesis with reasoning and exit conditions */
   thesis?: Thesis;
@@ -208,7 +178,7 @@ export interface Position {
   /** User who created/owns this position */
   userId: string;
 
-  /** When the position was created in the system (different from dateOpened) */
+  /** When the position was created in the system */
   dateCreated: Date;
 
   /** When the position was last updated */
@@ -222,6 +192,9 @@ export interface Position {
 
   /** Whether position alerts are enabled */
   alertsEnabled?: boolean;
+
+  /** Pre-tracking status for positions that existed before system tracking */
+  preTrackingStatus: PreTrackingStatus;
 }
 
 /**
@@ -306,7 +279,7 @@ export interface Asset {
   ticker: string;
 
   /** Asset type (e.g., "crypto", "stock", "forex", "commodity") */
-  assetType: string;
+  assetType: AssetType;
 
   /** Description of the asset */
   description?: string;
@@ -357,16 +330,14 @@ export interface Asset {
 
 /**
  * Represents a trading market between two assets
- *
- * This includes the base asset, quote asset, and the pair notation
- *
  */
 export interface Market {
   id: string;
   baseAsset: Asset;
   quoteAsset: Asset;
   pairNotation: string; // e.g., "BTC/USDT"
-  // ...
+  exchange?: string;
+  isTradable?: boolean;
 }
 
 /**
@@ -382,24 +353,14 @@ export interface PositionDetails {
   /** Direction of the position (long or short) */
   side: TradeSide;
 
-  /**
-   * Time frame for the trade (e.g., "1D", "4H", "1W")
-   * Follows standard charting notation:
-   * M = month, W = week, D = day, H = hour
-   */
+  /** Time frame for the trade */
   timeFrame: TimeFrame;
 
-  /**
-   * Fee paid to move assets (e.g., between wallets)
-   * Can be "genesis" if from before tracking started
-   */
-  transactionFee?: number | string | "genesis";
-
   /** When the position was opened */
-  dateOpened?: DateOrGenesis;
+  dateOpened?: Date | null;
 
   /** When the position was closed (if applicable) */
-  dateClosed?: DateOrGenesis;
+  dateClosed?: Date | null;
 
   /** List of execution orders for this position */
   orders: Order[];
@@ -449,27 +410,21 @@ export interface PositionDetails {
 
 /**
  * Represents a single order (entry or exit) for a position
- *
- * Orders track the specific executions that compose a position,
- * including both planned and executed transactions.
  */
 export interface Order {
   /** Unique identifier for the order */
   id: string;
 
   /** Reference to the position this order belongs to */
-  positionId: string;
+  positionId: ForeignKey<Position>;
 
-  /**
-   * When the order was opened/executed
-   * Can be "genesis" if from before tracking started
-   */
-  dateOpen?: DateOrGenesis;
+  /** When the order was opened/executed */
+  dateOpen?: Date | null;
 
   /** Executed price, if filled */
   averagePrice?: number;
 
-  /** Total cost in quote currency (e.g., USD or USDT) */
+  /** Total cost in quote currency */
   totalCost?: number;
 
   /** Current status of the order */
@@ -478,41 +433,29 @@ export interface Order {
   /** Execution mechanism for the order */
   type: OrderType;
 
-  /**
-   * Transaction fee paid to the exchange
-   * Can be "genesis" if from before tracking started
-   */
-  fee?: number | "genesis";
+  /** Purpose of the order */
+  purpose: OrderPurpose;
 
-  /** Currency unit for the fee (typically base or quote currency) */
+  /** Transaction fee paid to the exchange */
+  fee?: number;
+
+  /** Currency unit for the fee */
   feeUnit?: string;
 
   /** Amount of base currency acquired/sold */
   filled?: number;
 
-  /** Unit for the filled amount (base or quote) */
+  /** Unit for the filled amount */
   unit?: SizeUnit;
 
-  /**
-   * Price level that triggers the order
-   * Used for limit orders and trigger orders
-   */
+  /** Price level that triggers the order */
   trigger?: number;
 
   /** Estimated cost for orders not yet executed */
   estimatedCost?: number;
 
-  /** Whether this is an entry or exit order */
-  direction: "entry" | "exit";
-
-  /** For limit orders, expiration date/time */
-  expiration?: Date;
-
   /** Order identifier on the exchange */
   exchangeOrderId?: string;
-
-  /** Reference to the exchange API used */
-  exchangeApiRef?: string;
 
   /** Whether the order was placed manually or via automation */
   isAutomated?: boolean;
