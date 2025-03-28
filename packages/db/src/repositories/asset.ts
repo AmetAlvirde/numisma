@@ -2,10 +2,10 @@
  * Asset repository implementation
  */
 
-import { PrismaClient, Asset as PrismaAsset } from '@prisma/client';
-import { Asset } from '@numisma/types';
-import { assetSchema } from '../schema/asset';
-import { handleDatabaseError } from '../utils';
+import { PrismaClient, Asset as PrismaAsset } from "@prisma/client";
+import { Asset } from "@numisma/types";
+import { assetSchema } from "../schema/asset";
+import { handleDatabaseError } from "../utils";
 
 export class AssetRepository {
   constructor(private prisma: PrismaClient) {}
@@ -18,7 +18,7 @@ export class AssetRepository {
       const asset = await this.prisma.asset.findUnique({
         where: { id },
       });
-      
+
       return asset ? this.mapToDomainModel(asset) : null;
     } catch (error) {
       throw handleDatabaseError(error);
@@ -33,7 +33,7 @@ export class AssetRepository {
       const assets = await this.prisma.asset.findMany({
         where: { ticker },
       });
-      
+
       return assets.map(this.mapToDomainModel);
     } catch (error) {
       throw handleDatabaseError(error);
@@ -43,10 +43,10 @@ export class AssetRepository {
   /**
    * Create a new asset
    */
-  async create(asset: Omit<Asset, 'id'>): Promise<Asset> {
+  async create(asset: Omit<Asset, "id">): Promise<Asset> {
     // Validate with Zod schema
     assetSchema.omit({ id: true }).parse(asset);
-    
+
     try {
       const createdAsset = await this.prisma.asset.create({
         data: {
@@ -56,7 +56,7 @@ export class AssetRepository {
           description: asset.description,
         },
       });
-      
+
       return this.mapToDomainModel(createdAsset);
     } catch (error) {
       throw handleDatabaseError(error);
@@ -66,16 +66,16 @@ export class AssetRepository {
   /**
    * Update an existing asset
    */
-  async update(id: string, data: Partial<Omit<Asset, 'id'>>): Promise<Asset> {
+  async update(id: string, data: Partial<Omit<Asset, "id">>): Promise<Asset> {
     // Validate with Zod schema
     assetSchema.partial().omit({ id: true }).parse(data);
-    
+
     try {
       const updatedAsset = await this.prisma.asset.update({
         where: { id },
         data,
       });
-      
+
       return this.mapToDomainModel(updatedAsset);
     } catch (error) {
       throw handleDatabaseError(error);
@@ -102,10 +102,10 @@ export class AssetRepository {
     assetType?: string;
     skip?: number;
     take?: number;
-    orderBy?: { [key: string]: 'asc' | 'desc' };
+    orderBy?: { [key: string]: "asc" | "desc" };
   }): Promise<Asset[]> {
     const { assetType, skip, take, orderBy } = params;
-    
+
     try {
       const assets = await this.prisma.asset.findMany({
         where: assetType ? { assetType } : undefined,
@@ -113,7 +113,7 @@ export class AssetRepository {
         take,
         orderBy,
       });
-      
+
       return assets.map(this.mapToDomainModel);
     } catch (error) {
       throw handleDatabaseError(error);
@@ -130,6 +130,8 @@ export class AssetRepository {
       ticker: asset.ticker,
       assetType: asset.assetType,
       description: asset.description || undefined,
+      locationType: asset.locationType,
+      wallet: asset.wallet,
     };
   }
 }

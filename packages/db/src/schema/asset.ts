@@ -36,6 +36,8 @@ export const assetSchema = z
     contractAddress: z.string().optional(),
     iconUrl: z.string().optional(),
     category: z.string().optional(),
+    locationType: z.string().optional(),
+    wallet: z.string().optional(),
     marketData: z.any().optional(), // Structured market data
 
     // Timestamps (from database)

@@ -296,11 +296,20 @@ export interface JournalEntry {
  * Captures both the asset itself and its location information.
  */
 export interface Asset {
+  /** Unique identifier for the asset */
+  id: string;
+
   /** Full name of the cryptocurrency */
   name: string;
 
   /** Trading symbol/ticker (e.g., "BTC", "ETH") */
   ticker: string;
+
+  /** Asset type (e.g., "crypto", "stock", "forex", "commodity") */
+  assetType: string;
+
+  /** Description of the asset */
+  description?: string;
 
   /** Where the asset is held */
   locationType: AssetLocationType;
