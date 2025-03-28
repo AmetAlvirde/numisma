@@ -3,7 +3,12 @@
  */
 
 import { z } from "zod";
-import { idSchema, timestampSchema } from "./common";
+import {
+  idSchema,
+  timestampSchema,
+  assetTypeSchema,
+  assetLocationTypeSchema,
+} from "./common";
 
 /**
  * Supported asset types
@@ -30,15 +35,23 @@ export const assetSchema = z
     id: idSchema,
     name: z.string().min(1).max(100),
     ticker: z.string().min(1).max(20),
-    assetType: assetTypesSchema,
+    assetType: assetTypeSchema,
     description: z.string().optional(),
     network: z.string().optional(),
     contractAddress: z.string().optional(),
     iconUrl: z.string().optional(),
     category: z.string().optional(),
-    locationType: z.string().optional(),
+    locationType: assetLocationTypeSchema.optional(),
     wallet: z.string().optional(),
-    marketData: z.any().optional(), // Structured market data
+    marketData: z
+      .object({
+        currentPrice: z.number().optional(),
+        priceChangePercentage24h: z.number().optional(),
+        marketCap: z.number().optional(),
+        volume24h: z.number().optional(),
+        lastUpdated: z.date().optional(),
+      })
+      .optional(),
 
     // Timestamps (from database)
     ...timestampSchema.shape,
@@ -64,8 +77,9 @@ export const updateAssetSchema = createAssetSchema.partial();
  */
 export const assetSearchSchema = z.object({
   ticker: z.string().optional(),
-  assetType: assetTypesSchema.optional(),
+  assetType: assetTypeSchema.optional(),
   query: z.string().optional(),
+  locationType: assetLocationTypeSchema.optional(),
 });
 
 export type Asset = z.infer<typeof assetSchema>;
