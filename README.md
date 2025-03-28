@@ -1,84 +1,66 @@
-# Turborepo starter
+# Numisma
 
-This Turborepo starter is maintained by the Turborepo core team.
+Numisma is a comprehensive financial platform designed for independent
+investors and traders who want to visualize their portfolio performance and
+manage trading positions effectively. The application enables data-driven
+decision making through advanced analytics, position tracking, and portfolio
+management.
 
-## Using this example
+## Project Overview
 
-Run the following command:
+Numisma helps traders and investors by providing:
 
-```sh
-npx create-turbo@latest
-```
+- Portfolio performance tracking and visualization over time
+- Position management with detailed entry/exit strategies
+- Risk management tools including stop-loss and take-profit tracking
+- Multiple timeframe analysis of trading performance
+- Journal capabilities for capturing trading thesis and learnings
 
-## What's inside?
+This project is built as a monorepo using Turborepo, allowing for modular
+development while maintaining a consistent codebase across multiple applications
+and packages.
 
-This Turborepo includes the following packages/apps:
+## Project Status
 
-### Apps and Packages
+This monorepo currently contains the foundational packages with plans to expand
+into a complete ecosystem of applications:
 
-- `docs`: a [Next.js](https://nextjs.org/) app
-- `web`: another [Next.js](https://nextjs.org/) app
-- `@repo/ui`: a stub React component library shared by both `web` and `docs` applications
-- `@repo/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
-- `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
+- Foundation: Core types and database layers are implemented
+- In Development: UI component library and applications
 
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
+## Packages Overview
 
-### Utilities
+### @numisma/types
 
-This Turborepo has some additional tools already setup for you:
+Core domain types that define the data model for the entire application. This
+package contains TypeScript interfaces and type definitions for all domain
+entities such as Portfolio, Position, and Asset.
 
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
+### @numisma/db
 
-### Build
+Database layer that provides repository implementations and database access
+utilities. This package uses Prisma ORM to interact with the PostgreSQL database
+and implements the repository pattern for clean data access.
 
-To build all apps and packages, run the following command:
+### @numisma/ui
 
-```
-cd my-turborepo
-pnpm build
-```
+UI component library ("Component Forest") that will provide reusable React
+components for building consistent user interfaces. This package builds on
+shadcn UI components and Tailwind CSS for styling.
 
-### Develop
+## Applications
 
-To develop all apps and packages, run the following command:
+### Web Application (apps/web)
 
-```
-cd my-turborepo
-pnpm dev
-```
+The main application that will deliver portfolio management, position
+tracking, and performance analytics for traders and investors.
 
-### Remote Caching
+### Admin Application (apps/admin)
 
-> [!TIP]
-> Vercel Remote Cache is free for all plans. Get started today at [vercel.com](https://vercel.com/signup?/signup?utm_source=remote-cache-sdk&utm_campaign=free_remote_cache).
+Back office application for data management and administrative tasks. This
+application will provide CRUD operations for all entities and content management.
 
-Turborepo can use a technique known as [Remote Caching](https://turbo.build/repo/docs/core-concepts/remote-caching) to share cache artifacts across machines, enabling you to share build caches with your team and CI/CD pipelines.
+### Documentation (apps/docs)
 
-By default, Turborepo will cache locally. To enable Remote Caching you will need an account with Vercel. If you don't have an account you can [create one](https://vercel.com/signup?utm_source=turborepo-examples), then enter the following commands:
-
-```
-cd my-turborepo
-npx turbo login
-```
-
-This will authenticate the Turborepo CLI with your [Vercel account](https://vercel.com/docs/concepts/personal-accounts/overview).
-
-Next, you can link your Turborepo to your Remote Cache by running the following command from the root of your Turborepo:
-
-```
-npx turbo link
-```
-
-## Useful Links
-
-Learn more about the power of Turborepo:
-
-- [Tasks](https://turbo.build/repo/docs/core-concepts/monorepos/running-tasks)
-- [Caching](https://turbo.build/repo/docs/core-concepts/caching)
-- [Remote Caching](https://turbo.build/repo/docs/core-concepts/remote-caching)
-- [Filtering](https://turbo.build/repo/docs/core-concepts/monorepos/filtering)
-- [Configuration Options](https://turbo.build/repo/docs/reference/configuration)
-- [CLI Usage](https://turbo.build/repo/docs/reference/command-line-reference)
+Knowledge base and documentation site. This site will serve as a central hub
+or developer resources, user guides, and API references.

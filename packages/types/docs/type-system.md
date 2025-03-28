@@ -473,3 +473,519 @@ When testing code that uses the new type system:
    - IDE integration
    - Development tools
    - Debugging support
+
+## Advanced Usage Examples
+
+### 1. Working with Complex Relationships
+
+```typescript
+// Example of a position with complex relationships
+const position: Position = {
+  id: "pos_123",
+  name: "BTC Long March 2025",
+  portfolioId: "portfolio_123" as ForeignKey<Portfolio>,
+  asset: {
+    id: "asset_123",
+    name: "Bitcoin",
+    ticker: "BTC",
+    assetType: AssetType.crypto,
+    locationType: AssetLocationType.exchange,
+    wallet: "hot_wallet_123",
+  },
+  positionDetails: {
+    side: TradeSide.long,
+    status: PositionStatus.active,
+    timeFrame: "1D",
+    initialInvestment: 10000,
+    currentInvestment: 10000,
+    dateOpened: new Date(),
+    dateOpenedStatus: DateStatus.actual,
+  },
+  // ... other fields
+};
+
+// @ai-guidance: When working with complex relationships, always ensure that:
+// 1. All required fields are present
+// 2. Relationship IDs are properly typed with ForeignKey<T>
+// 3. Nested objects follow the same type constraints
+// 4. Date fields include proper DateStatus
+```
+
+### 2. Batch Operations
+
+```typescript
+// Example of batch creating assets
+async function createAssets(
+  assets: Omit<Asset, "id">[]
+): Promise<BatchOperationResult<Asset>> {
+  const results: OperationResult<Asset>[] = [];
+
+  for (const asset of assets) {
+    try {
+      // Validate asset data
+      if (!isAsset(asset)) {
+        results.push({
+          success: false,
+          error: "Invalid asset data",
+        });
+        continue;
+      }
+
+      // Create asset in database
+      const created = await prisma.asset.create({
+        data: asset,
+      });
+
+      results.push({
+        success: true,
+        data: created,
+      });
+    } catch (error) {
+      results.push({
+        success: false,
+        error: error.message,
+      });
+    }
+  }
+
+  return {
+    success: results.every(r => r.success),
+    results,
+    errors: results.filter(r => !r.success).map(r => r.error as string),
+  };
+}
+
+// @ai-guidance: Batch operations should:
+// 1. Handle each item independently
+// 2. Continue processing on individual failures
+// 3. Provide detailed error information
+// 4. Maintain type safety throughout
+```
+
+### 3. Advanced Filtering
+
+```typescript
+// Example of complex filtering
+const filters: FilterParams[] = [
+  {
+    field: "assetType",
+    operator: "eq",
+    value: AssetType.crypto,
+  },
+  {
+    field: "currentValue",
+    operator: "gt",
+    value: 10000,
+  },
+  {
+    field: "tags",
+    operator: "contains",
+    value: "long_term",
+  },
+];
+
+const query: QueryParams = {
+  filters,
+  pagination: {
+    page: 1,
+    limit: 10,
+  },
+  sort: [
+    {
+      field: "dateCreated",
+      direction: "desc",
+    },
+  ],
+};
+
+// @ai-guidance: When implementing filters:
+// 1. Use type-safe operators
+// 2. Validate filter values against field types
+// 3. Consider performance implications
+// 4. Handle edge cases (null, undefined)
+```
+
+### 4. Validation Best Practices
+
+```typescript
+// Example of comprehensive validation
+function validatePosition(data: unknown): OperationResult<Position> {
+  // Type guard check
+  if (!isPosition(data)) {
+    return {
+      success: false,
+      error: "Invalid position data structure",
+      metadata: {
+        validationErrors: ["Position structure is invalid"],
+      },
+    };
+  }
+
+  // Business rule validation
+  if (data.riskLevel < 1 || data.riskLevel > 10) {
+    return {
+      success: false,
+      error: "Risk level must be between 1 and 10",
+      metadata: {
+        validationErrors: ["Invalid risk level"],
+      },
+    };
+  }
+
+  // Date validation
+  if (data.dateOpened && !data.dateOpenedStatus) {
+    return {
+      success: false,
+      error: "Date status is required when date is provided",
+      metadata: {
+        validationErrors: ["Missing date status"],
+      },
+    };
+  }
+
+  return {
+    success: true,
+    data,
+  };
+}
+
+// @ai-guidance: Validation should:
+// 1. Use type guards first
+// 2. Apply business rules
+// 3. Validate relationships
+// 4. Check date consistency
+// 5. Provide detailed error messages
+```
+
+## Repository Pattern Documentation
+
+### 1. Base Repository Structure
+
+```typescript
+// Example of a base repository pattern
+abstract class BaseRepository<T> {
+  constructor(protected prisma: PrismaClient) {}
+
+  // Common CRUD operations
+  async findById(id: string): Promise<OperationResult<T>> {
+    try {
+      const item = await this.prisma[this.modelName].findUnique({
+        where: { id },
+      });
+
+      if (!item) {
+        return {
+          success: false,
+          error: `${this.modelName} with ID ${id} not found`,
+        };
+      }
+
+      return {
+        success: true,
+        data: this.mapToDomainModel(item),
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: handleDatabaseError(error).message,
+      };
+    }
+  }
+
+  // @ai-guidance: Base repositories should:
+  // 1. Provide common CRUD operations
+  // 2. Handle errors consistently
+  // 3. Map database models to domain models
+  // 4. Support pagination and filtering
+}
+
+// Example of extending the base repository
+class AssetRepository extends BaseRepository<Asset> {
+  constructor(prisma: PrismaClient) {
+    super(prisma);
+  }
+
+  protected get modelName(): string {
+    return "asset";
+  }
+
+  protected mapToDomainModel(data: any): Asset {
+    return {
+      id: data.id,
+      name: data.name,
+      ticker: data.ticker,
+      assetType: data.assetType as AssetType,
+      locationType: data.locationType as AssetLocationType,
+      wallet: data.wallet || "",
+    };
+  }
+}
+```
+
+### 2. Query Building
+
+```typescript
+// Example of query building
+class QueryBuilder {
+  static buildWhereClause(filters?: FilterParams[]): Record<string, any> {
+    if (!filters) return {};
+
+    return filters.reduce(
+      (acc, filter) => {
+        if (!isFilterParams(filter)) return acc;
+
+        const { field, operator, value } = filter;
+
+        // @ai-guidance: Query building should:
+        // 1. Validate operator types
+        // 2. Handle special cases (null, undefined)
+        // 3. Support complex queries
+        // 4. Consider performance implications
+
+        switch (operator) {
+          case "eq":
+            acc[field] = value;
+            break;
+          case "gt":
+            acc[field] = { gt: value };
+            break;
+          // ... other operators
+        }
+        return acc;
+      },
+      {} as Record<string, any>
+    );
+  }
+
+  static buildPaginationParams(pagination?: PaginationParams) {
+    if (!pagination || !isPaginationParams(pagination)) {
+      return { skip: 0, take: 10 };
+    }
+
+    return {
+      skip: (pagination.page - 1) * pagination.limit,
+      take: pagination.limit,
+    };
+  }
+}
+```
+
+### 3. Error Handling
+
+```typescript
+// Example of comprehensive error handling
+function handleDatabaseError(error: unknown): OperationResult<never> {
+  // @ai-guidance: Error handling should:
+  // 1. Categorize different types of errors
+  // 2. Provide meaningful error messages
+  // 3. Include relevant metadata
+  // 4. Handle edge cases
+
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    switch (error.code) {
+      case "P2002":
+        return {
+          success: false,
+          error: "Unique constraint violation",
+          metadata: {
+            code: error.code,
+            field: error.meta?.target as string[],
+          },
+        };
+      case "P2025":
+        return {
+          success: false,
+          error: "Record not found",
+          metadata: {
+            code: error.code,
+          },
+        };
+      // ... other error codes
+    }
+  }
+
+  return {
+    success: false,
+    error: "An unexpected error occurred",
+    metadata: {
+      originalError: error,
+    },
+  };
+}
+```
+
+## Validation Examples
+
+### 1. Schema Validation
+
+```typescript
+// Example of comprehensive schema validation
+const assetSchema = z.object({
+  name: z.string().min(1, "Name is required"),
+  ticker: z.string().min(1, "Ticker is required"),
+  assetType: z.nativeEnum(AssetType),
+  locationType: z.nativeEnum(AssetLocationType),
+  description: z.string().optional(),
+  network: z.string().optional(),
+  contractAddress: z.string().optional(),
+  iconUrl: z.string().url().optional(),
+  category: z.string().optional(),
+  marketData: z.record(z.unknown()).optional(),
+});
+
+// @ai-guidance: Schema validation should:
+// 1. Use proper Zod types
+// 2. Include meaningful error messages
+// 3. Handle optional fields
+// 4. Validate complex types
+```
+
+### 2. Relationship Validation
+
+```typescript
+// Example of relationship validation
+function validateRelationships(data: unknown): OperationResult<Position> {
+  if (!isPosition(data)) {
+    return {
+      success: false,
+      error: "Invalid position data",
+    };
+  }
+
+  // Validate portfolio relationship
+  if (!data.portfolioId) {
+    return {
+      success: false,
+      error: "Portfolio ID is required",
+      metadata: {
+        validationErrors: ["Missing portfolio relationship"],
+      },
+    };
+  }
+
+  // Validate asset relationship
+  if (!data.asset) {
+    return {
+      success: false,
+      error: "Asset is required",
+      metadata: {
+        validationErrors: ["Missing asset relationship"],
+      },
+    };
+  }
+
+  return {
+    success: true,
+    data,
+  };
+}
+
+// @ai-guidance: Relationship validation should:
+// 1. Check required relationships
+// 2. Validate relationship types
+// 3. Handle optional relationships
+// 4. Provide clear error messages
+```
+
+### 3. Date Validation
+
+```typescript
+// Example of date validation
+function validateDates(data: unknown): OperationResult<Position> {
+  if (!isPosition(data)) {
+    return {
+      success: false,
+      error: "Invalid position data",
+    };
+  }
+
+  // Validate date consistency
+  if (data.dateOpened && !data.dateOpenedStatus) {
+    return {
+      success: false,
+      error: "Date status is required when date is provided",
+      metadata: {
+        validationErrors: ["Missing date status"],
+      },
+    };
+  }
+
+  // Validate date order
+  if (data.dateOpened && data.dateClosed && data.dateOpened > data.dateClosed) {
+    return {
+      success: false,
+      error: "Close date cannot be before open date",
+      metadata: {
+        validationErrors: ["Invalid date order"],
+      },
+    };
+  }
+
+  return {
+    success: true,
+    data,
+  };
+}
+
+// @ai-guidance: Date validation should:
+// 1. Check date status consistency
+// 2. Validate date order
+// 3. Handle timezone implications
+// 4. Consider edge cases
+```
+
+## Best Practices Summary
+
+1. **Type Safety**
+
+   - Use type guards consistently
+   - Avoid type assertions
+   - Leverage TypeScript's type system
+
+2. **Error Handling**
+
+   - Use OperationResult consistently
+   - Provide meaningful error messages
+   - Include relevant metadata
+
+3. **Validation**
+
+   - Validate early and often
+   - Use Zod schemas
+   - Handle edge cases
+
+4. **Repository Pattern**
+
+   - Follow consistent patterns
+   - Handle errors properly
+   - Support pagination and filtering
+
+5. **Documentation**
+   - Document complex logic
+   - Include examples
+   - Provide AI guidance
+
+## Next Steps
+
+1. **Testing**
+
+   - Add unit tests for type guards
+   - Test validation logic
+   - Test error handling
+
+2. **Performance**
+
+   - Monitor type guard performance
+   - Optimize validation
+   - Cache results when appropriate
+
+3. **Documentation**
+
+   - Keep documentation up to date
+   - Add more examples
+   - Document new features
+
+4. **Tooling**
+   - Add IDE support
+   - Create development tools
+   - Improve debugging support
