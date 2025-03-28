@@ -35,13 +35,13 @@
   "devDependencies": {
     "@types/node": "^20.5.7",
     "eslint": "^8.48.0",
-    "prisma": "^5.2.0",
+    "prisma": "^6.5.0",
     "tsup": "^7.2.0",
     "typescript": "^5.2.2"
   },
   "dependencies": {
     "@numisma/types": "workspace:*",
-    "@prisma/client": "^5.2.0",
+    "@prisma/client": "^6.5.0",
     "zod": "^3.22.2"
   }
 }
