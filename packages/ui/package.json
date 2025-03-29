@@ -12,7 +12,6 @@
     }
   },
   "scripts": {
-    "format": "prettier --write ./src",
     "build": "tsup",
     "dev": "tsup --watch",
     "lint": "eslint src/**/*.{ts,tsx}",
