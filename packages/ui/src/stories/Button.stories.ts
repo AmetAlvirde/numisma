@@ -1,29 +1,18 @@
-import { Meta, StoryObj } from '@storybook/react';
-import { Button } from '@/components/ui/button';
+import { Meta, StoryObj } from "@storybook/react";
+import { Button } from "@/components/ui/button";
 
 const meta = {
-  title: 'Atoms/button',
+  title: "Button",
   component: Button,
-  tags: ['autodocs'],
+  tags: ["autodocs"],
   argTypes: {
     variant: {
-      control: { type: 'select' },
-      options: [
-        'default',
-        'secondary',
-        'destructive',
-        'ghost',
-        'link',
-        'outline',
-      ],
-    },
-    size: {
-      control: { type: 'select' },
-      options: ['default', 'icon', 'sm', 'lg'],
+      control: { type: "select" },
+      options: ["default", "secondary"],
     },
   },
   parameters: {
-    layout: 'centered',
+    layout: "centered",
   },
 } satisfies Meta<typeof Button>;
 
@@ -36,70 +25,15 @@ type Story = StoryObj<typeof meta>;
 // <Button variant="default">Default</Button>
 export const Default: Story = {
   args: {
-    variant: 'default',
-    children: 'Default',
+    variant: "default",
+    children: "Default",
   },
 };
 
 // <Button variant="secondary">Secondary</Button>
 export const Secondary: Story = {
   args: {
-    variant: 'secondary',
-    children: 'Secondary',
-  },
-};
-
-export const Destructive: Story = {
-  args: {
-    variant: 'destructive',
-    children: 'Destructive',
-  },
-};
-
-export const Ghost: Story = {
-  args: {
-    variant: 'ghost',
-    children: 'Ghost',
-  },
-};
-
-export const Link: Story = {
-  args: {
-    variant: 'link',
-    children: 'Link',
-  },
-};
-export const Outline: Story = {
-  args: {
-    variant: 'outline',
-    children: 'Outline',
-  },
-};
-
-// Various Sizes
-
-export const SizeDefault: Story = {
-  args: {
-    size: 'default',
-    children: 'Default',
-  },
-};
-export const SizeIcon: Story = {
-  args: {
-    size: 'icon',
-    children: 'icon',
-  },
-};
-export const SizeLarge: Story = {
-  args: {
-    size: 'lg',
-    children: 'Large',
-  },
-};
-
-export const SizeSmall: Story = {
-  args: {
-    size: 'sm',
-    children: 'Small',
+    variant: "secondary",
+    children: "Secondary",
   },
 };
