@@ -66,7 +66,7 @@
   }
 }
 
-@layer base {
+/* @layer base {
   * {
     @apply border-border;
     @font-face {
@@ -77,4 +77,4 @@
   body {
     @apply bg-background text-foreground;
   }
-}
+} */
