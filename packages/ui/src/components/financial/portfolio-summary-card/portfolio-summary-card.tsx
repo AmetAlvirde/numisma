@@ -1,6 +1,7 @@
 // src/components/financial/portfolio-summary-card/portfolio-summary-card.tsx
 import React from "react";
 import { cn, formatCurrency, formatPercentage } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 
 interface PortfolioSummaryCardProps
   extends React.HTMLAttributes<HTMLDivElement> {
@@ -60,9 +61,7 @@ export const PortfolioSummaryCard = React.forwardRef<
           </span>
         </div>
 
-        <div className="mt-4 text-sm text-muted-foreground">
-          {assetCount} assets
-        </div>
+        <Badge variant="default">{assetCount} assets</Badge>
       </div>
     );
   }
