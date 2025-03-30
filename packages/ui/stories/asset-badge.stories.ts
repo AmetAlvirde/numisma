@@ -1,5 +1,5 @@
 import { Meta, StoryObj } from "@storybook/react";
-import { AssetBadge } from "./asset-badge";
+import { AssetBadge } from "../src/components/ui/asset-badge";
 
 const meta = {
   title: "Asset Badge",

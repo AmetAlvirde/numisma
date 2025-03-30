@@ -12,8 +12,8 @@
     }
   },
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
+    "build": "tsup --config tsup.config.ts",
+    "dev": "tsup --config tsup.config.ts --watch",
     "lint": "eslint src/**/*.{ts,tsx}",
     "clean": "rm -rf dist",
     "sb": "storybook dev -p 6006",
@@ -66,6 +66,7 @@
     "storybook": "^8.0.10",
     "storybook-dark-mode": "^4.0.1",
     "tailwindcss": "^3.4.3",
+    "tsup": "^8.0.2",
     "typescript": "^5.2.2",
     "vite": "^5.2.0"
   }

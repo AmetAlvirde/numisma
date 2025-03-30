@@ -1,5 +1,5 @@
 import { Meta, StoryObj } from "@storybook/react";
-import { PortfolioSummaryCard } from ".";
+import { PortfolioSummaryCard } from "../src/components/financial/portfolio-summary-card";
 
 const meta = {
   title: "Portfolio Summary Card",
