@@ -3,7 +3,7 @@ import React from "react";
 import { cn, formatCurrency, formatPercentage } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 
-interface PortfolioSummaryCardProps
+export interface PortfolioSummaryCardProps
   extends React.HTMLAttributes<HTMLDivElement> {
   name: string;
   totalValue: number;
@@ -67,6 +67,3 @@ export const PortfolioSummaryCard = React.forwardRef<
   }
 );
 PortfolioSummaryCard.displayName = "PortfolioSummaryCard";
-
-// src/components/financial/portfolio-summary-card/index.ts
-export * from "./portfolio-summary-card";
