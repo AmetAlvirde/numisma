@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+@plugin "tailwindcss-animate";
+
+@custom-variant dark (&:is(.dark *));
+
+@import "./neutral.css";
+@import "./gray.css";
+@import "./slate.css";
+@import "./stone.css";
+@import "./zinc.css";
+
+:root {
+	font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+	color-scheme: light dark;
+
+	font-synthesis: none;
+	text-rendering: optimizeLegibility;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+
+	--radius: 0.625rem;
+}
+
+@theme inline {
+	--radius-sm: calc(var(--radius) - 4px);
+	--radius-md: calc(var(--radius) - 2px);
+	--radius-lg: var(--radius);
+	--radius-xl: calc(var(--radius) + 4px);
+	--color-background: var(--color-background);
+	--color-foreground: var(--color-foreground);
+	--color-ring: var(--ring);
+	--color-border: var(--border);
+	--color-primary: var(--primary);
+	--color-primary-foreground: var(--primary-foreground);
+
+	--color-card: var(--color-card);
+	--color-divider: var(--color-divider);
+	--color-interactive: var(--color-interactive);
+
+	--color-text-primary: var(--color-text-primary);
+	--color-text-secondary: var(--color-text-secondary);
+	--color-text-tertiary: var(--color-text-tertiary);
+	--color-text-placeholder: var(--color-text-placeholder);
+
+	--color-gold-primary: var(--color-gold-primary);
+	--color-gold-light: var(--color-gold-light);
+	--color-gold-dark: var(--color-gold-dark);
+
+	--color-blue-primary: var(--color-blue-primary);
+	--color-blue-light: var(--color-blue-light);
+	--color-blue-dark: var(--color-blue-dark);
+
+	--color-success: var(--color-success);
+	--color-success-light: var(--color-success-light);
+	--color-success-dark: var(--color-success-dark);
+
+	--color-danger: var(--color-danger);
+	--color-danger-light: var(--color-danger-light);
+	--color-danger-dark: var(--color-danger-dark);
+
+	--color-warning: var(--color-warning);
+	--color-warning-light: var(--color-warning-light);
+	--color-warning-dark: var(--color-warning-dark);
+
+	--color-info: var(--color-info);
+	--color-info-light: var(--color-info-light);
+	--color-info-dark: var(--color-info-dark);
+
+	@keyframes accordion-down {
+		from {
+			height: 0;
+		}
+		to {
+			height: var(--radix-accordion-content-height);
+		}
+	}
+
+	@keyframes accordion-up {
+		from {
+			height: var(--radix-accordion-content-height);
+		}
+		to {
+			height: 0;
+		}
+	}
+}
+
+@layer base {
+	* {
+		@apply border-border outline-ring/50;
+	}
+	body {
+		@apply bg-background text-foreground;
+	}
+}
+
+/* Remove the previous opacity utilities */

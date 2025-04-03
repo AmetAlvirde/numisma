@@ -1,45 +1,53 @@
 import { Meta, StoryObj } from "@storybook/react";
-import { PortfolioSummaryCard } from ".";
+import { PortfolioSummary } from ".";
+import { mixedPerformance } from "./mock-data";
 
 const meta = {
-  title: "Portfolio Summary Card",
-  component: PortfolioSummaryCard,
+  title: "Portfolio Summary",
+  component: PortfolioSummary,
   tags: ["autodocs"],
   argTypes: {
-    name: {
+    portfolioName: {
       control: { type: "text" },
     },
     totalValue: {
       control: { type: "number" },
     },
-    profitLoss: {
+    change24h: {
       control: { type: "number" },
     },
-    percentageReturn: {
+    positionCounts: {
+      control: { type: "object" },
+    },
+    ordersFilled: {
       control: { type: "number" },
     },
-    assetCount: {
-      control: { type: "number" },
+    recentActivity: {
+      control: { type: "object" },
     },
-    currency: {
-      control: { type: "text" },
+    watchlist: {
+      control: { type: "object" },
+    },
+    exchanges: {
+      control: { type: "object" },
+    },
+    spotPositions: {
+      control: { type: "object" },
+    },
+    futuresPositions: {
+      control: { type: "object" },
     },
   },
   parameters: {
     layout: "centered",
   },
-} satisfies Meta<typeof PortfolioSummaryCard>;
+} satisfies Meta<typeof PortfolioSummary>;
 
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
   args: {
-    name: "My Portfolio",
-    totalValue: 10000,
-    profitLoss: 100,
-    percentageReturn: 0.01,
-    assetCount: 10,
-    currency: "USD",
+    ...mixedPerformance,
   },
 };
 
