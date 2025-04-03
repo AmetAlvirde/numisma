@@ -4,10 +4,10 @@ import defaultTheme from "tailwindcss/defaultTheme";
 
 export const darkMode = ["class"];
 export const content = [
-  './pages/**/*.{ts,tsx}',
-  './components/**/*.{ts,tsx}',
-  './app/**/*.{ts,tsx}',
-  './src/**/*.{ts,tsx}',
+  "./pages/**/*.{ts,tsx}",
+  "./components/**/*.{ts,tsx}",
+  "./app/**/*.{ts,tsx}",
+  "./src/**/*.{ts,tsx}",
 ];
 export const prefix = "";
 export const theme = {
@@ -20,38 +20,52 @@ export const theme = {
   },
   extend: {
     colors: {
-      border: "hsl(var(--border))",
-      input: "hsl(var(--input))",
-      ring: "hsl(var(--ring))",
-      background: "hsl(var(--background))",
-      foreground: "hsl(var(--foreground))",
-      primary: {
-        DEFAULT: "hsl(var(--primary))",
-        foreground: "hsl(var(--primary-foreground))",
+      // Base colors
+      background: "var(--color-background)",
+      card: "var(--color-card)",
+      divider: "var(--color-divider)",
+      interactive: "var(--color-interactive)",
+
+      // Text colors
+      text: {
+        primary: "var(--color-text-primary)",
+        secondary: "var(--color-text-secondary)",
+        tertiary: "var(--color-text-tertiary)",
+        placeholder: "var(--color-text-placeholder)",
       },
-      secondary: {
-        DEFAULT: "hsl(var(--secondary))",
-        foreground: "hsl(var(--secondary-foreground))",
+
+      // Accent colors
+      gold: {
+        primary: "var(--color-gold-primary)",
+        light: "var(--color-gold-light)",
+        dark: "var(--color-gold-dark)",
       },
-      destructive: {
-        DEFAULT: "hsl(var(--destructive))",
-        foreground: "hsl(var(--destructive-foreground))",
+      blue: {
+        primary: "var(--color-blue-primary)",
+        light: "var(--color-blue-light)",
+        dark: "var(--color-blue-dark)",
       },
-      muted: {
-        DEFAULT: "hsl(var(--muted))",
-        foreground: "hsl(var(--muted-foreground))",
+
+      // Semantic colors
+      success: {
+        DEFAULT: "var(--color-success)",
+        light: "var(--color-success-light)",
+        dark: "var(--color-success-dark)",
       },
-      accent: {
-        DEFAULT: "hsl(var(--accent))",
-        foreground: "hsl(var(--accent-foreground))",
+      danger: {
+        DEFAULT: "var(--color-danger)",
+        light: "var(--color-danger-light)",
+        dark: "var(--color-danger-dark)",
       },
-      popover: {
-        DEFAULT: "hsl(var(--popover))",
-        foreground: "hsl(var(--popover-foreground))",
+      warning: {
+        DEFAULT: "var(--color-warning)",
+        light: "var(--color-warning-light)",
+        dark: "var(--color-warning-dark)",
       },
-      card: {
-        DEFAULT: "hsl(var(--card))",
-        foreground: "hsl(var(--card-foreground))",
+      info: {
+        DEFAULT: "var(--color-info)",
+        light: "var(--color-info-light)",
+        dark: "var(--color-info-dark)",
       },
     },
     borderRadius: {
@@ -74,8 +88,8 @@ export const theme = {
       "accordion-up": "accordion-up 0.2s ease-out",
     },
     fontFamily: {
-      'sans': ['"Quicksand"', ...defaultTheme.fontFamily.sans],
-    }
-  }
+      sans: ['"Quicksand"', ...defaultTheme.fontFamily.sans],
+    },
+  },
 };
 export const plugins = [require("tailwindcss-animate")];
