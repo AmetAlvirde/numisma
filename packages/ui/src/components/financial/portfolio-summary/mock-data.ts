@@ -1,5 +1,5 @@
 // src/mocks/portfolioSummaryData.ts
-import { PortfolioSummaryProps } from "./index";
+import { PortfolioSummaryProps } from "@/components/financial/portfolio-summary";
 
 export const mockPortfolioSummaryData: PortfolioSummaryProps = {
   // Core data

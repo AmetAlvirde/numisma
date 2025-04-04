@@ -1,6 +1,6 @@
 import { Meta, StoryObj } from "@storybook/react";
-import { PortfolioSummary } from "@/components/financial/portfolio-summary-card";
-import { mixedPerformance } from "@/components/financial/portfolio-summary-card/mock-data";
+import { PortfolioSummary } from "@/components/financial/portfolio-summary";
+import { mockPortfolioSummaryData } from "@/components/financial/portfolio-summary/mock-data";
 
 const meta = {
   title: "Portfolio Summary",
@@ -44,7 +44,7 @@ type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
   args: {
-    ...mixedPerformance,
+    ...mockPortfolioSummaryData,
   },
 };
 
