@@ -1,6 +1,6 @@
 import { Meta, StoryObj } from "@storybook/react";
-import { PortfolioSummary } from ".";
-import { mixedPerformance } from "./mock-data";
+import { PortfolioSummary } from "@/components/financial/portfolio-summary-card";
+import { mixedPerformance } from "@/components/financial/portfolio-summary-card/mock-data";
 
 const meta = {
   title: "Portfolio Summary",
@@ -37,9 +37,6 @@ const meta = {
     futuresPositions: {
       control: { type: "object" },
     },
-  },
-  parameters: {
-    layout: "centered",
   },
 } satisfies Meta<typeof PortfolioSummary>;
 
