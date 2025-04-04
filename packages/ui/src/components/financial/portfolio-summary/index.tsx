@@ -1,6 +1,6 @@
 // src/components/financial/portfolio-summary-card/portfolio-summary-card.tsx
 import React from "react";
-// import { cn, formatCurrency, formatPercentage } from "@/lib/utils"
+import { cn } from "@/lib/utils";
 import {
   Card,
   CardContent,
@@ -117,7 +117,7 @@ export const PortfolioSummary = React.forwardRef<
     ref
   ) => {
     return (
-      <div className="w-full max-w-3xl mx-auto space-y-4 p-2 sm:p-4 font-mono bg-background text-text-primary">
+      <div className="w-full max-w-2xl mx-auto space-y-4 p-2 sm:p-4 font-mono bg-background text-text-primary">
         {/* Portfolio Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-4 mb-2">
           <div>
@@ -192,79 +192,67 @@ export const PortfolioSummary = React.forwardRef<
           </div>
         </Card>
 
-        {/* Overnight Activity */}
+        {/* Recent Activity, previously Overnight Activity (which is the main use case for this component) */}
         <Card className="shadow-lg border border-divider bg-card">
           <CardHeader className="pb-2 sm:pb-3 border-b border-divider">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base sm:text-lg flex items-center gap-2 text-gold-primary">
                 <Clock className="h-4 w-4 sm:h-5 sm:w-5 text-gold-primary/70" />
-                Overnight Activity
+                Recent Activity
               </CardTitle>
             </div>
           </CardHeader>
           <CardContent className="space-y-3 sm:space-y-4 p-3 sm:p-4">
-            <div className="rounded-lg p-2 sm:p-3 flex items-start justify-between border border-success/20 border-l-4 border-l-success bg-success/10">
-              <div className="flex gap-2 sm:gap-3">
-                <CheckCircle2 className="h-4 w-4 sm:h-5 sm:w-5 mt-0.5 text-success" />
-                <div>
-                  <div className="font-medium text-text-primary text-sm sm:text-base">
-                    ETH order filled
-                  </div>
-                  <div className="text-xs sm:text-sm text-text-secondary">
-                    0.42 ETH @ <span className="font-mono">$2,840</span> on
-                    Binance
+            {recentActivity.map(activity => (
+              <div
+                key={activity.id}
+                className={cn(
+                  "rounded-lg p-2 sm:p-3 flex items-start justify-between border border-l-4",
+                  activity.type === "order_filled" &&
+                    "border-success/20 bg-success/10 border-l-success",
+                  activity.type === "alert" &&
+                    "border-warning/20 bg-warning/10 border-l-warning"
+                )}
+              >
+                <div className="flex gap-2 sm:gap-3">
+                  {activity.type === "order_filled" && (
+                    <CheckCircle2 className="h-4 w-4 sm:h-5 sm:w-5 mt-0.5 text-success" />
+                  )}
+                  {activity.type === "alert" && (
+                    <AlertCircle className="h-4 w-4 sm:h-5 sm:w-5 mt-0.5 text-warning" />
+                  )}
+                  <div>
+                    <div className="font-medium text-text-primary text-sm sm:text-base">
+                      {activity.title}
+                    </div>
+                    <div className="text-xs sm:text-sm text-text-secondary">
+                      {activity.description}
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div className="text-right">
-                <div className="font-medium font-mono text-gold-primary text-sm sm:text-base">
-                  $1,192.80
-                </div>
-                <div className="text-xs text-text-secondary">03:24 AM</div>
-              </div>
-            </div>
+                <div className="text-right">
+                  {activity.type === "order_filled" && (
+                    <div className="font-medium font-mono text-gold-primary text-sm sm:text-base">
+                      {activity.value}
+                    </div>
+                  )}
 
-            <div className="rounded-lg p-2 sm:p-3 flex items-start justify-between border border-warning/20 order-l-4 border-l-warning bg-warning/10">
-              <div className="flex gap-2 sm:gap-3">
-                <AlertCircle className="h-4 w-4 sm:h-5 sm:w-5 mt-0.5 text-warning" />
-                <div>
-                  <div className="font-medium text-text-primary text-sm sm:text-base">
-                    BTC above alert
-                  </div>
-                  <div className="text-xs sm:text-sm text-text-secondary">
-                    Crossed <span className="font-mono">$62,500</span> threshold
-                  </div>
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="flex items-center justify-end font-medium font-mono text-success text-sm sm:text-base">
-                  <ArrowUp className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-0.5" />
-                  <Plus className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-0.5" />
-                  3.8%
-                </div>
-                <div className="text-xs text-text-secondary">05:12 AM</div>
-              </div>
-            </div>
+                  {activity.type === "alert" && (
+                    <>
+                      <div className="flex items-center justify-end font-medium font-mono text-success text-sm sm:text-base">
+                        <ArrowUp className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-0.5" />
+                        <Plus className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-0.5" />
+                        {activity.changePercentage}%
+                      </div>
+                    </>
+                  )}
 
-            <div className="rounded-lg p-2 sm:p-3 flex items-start justify-between border border-success/20 border-l-4 border-l-success bg-success/10">
-              <div className="flex gap-2 sm:gap-3">
-                <CheckCircle2 className="h-4 w-4 sm:h-5 sm:w-5 mt-0.5 text-success" />
-                <div>
-                  <div className="font-medium text-text-primary text-sm sm:text-base">
-                    SOL order filled
-                  </div>
-                  <div className="text-xs sm:text-sm text-text-secondary">
-                    3.5 SOL @ <span className="font-mono">$142</span> on BingX
+                  <div className="text-xs text-text-secondary">
+                    {activity.timestamp}
                   </div>
                 </div>
               </div>
-              <div className="text-right">
-                <div className="font-medium font-mono text-gold-primary text-sm sm:text-base">
-                  $497.00
-                </div>
-                <div className="text-xs text-text-secondary">11:42 PM</div>
-              </div>
-            </div>
+            ))}
 
             <Button
               variant="ghost"
@@ -287,106 +275,50 @@ export const PortfolioSummary = React.forwardRef<
             </div>
           </CardHeader>
           <CardContent className="space-y-3 sm:space-y-4 p-3 sm:p-4">
-            <div className="rounded-lg p-3 sm:p-4 flex items-start justify-between border border-divider border-l-4 border-l-warning bg-card/70">
-              <div>
-                <div className="flex items-center gap-1 sm:gap-2">
-                  <div className="font-mono text-xs px-1 sm:px-1.5 py-0.5 rounded bg-warning/20 text-warning">
-                    BTC
+            {watchlist.map(watchlistItem => (
+              <div className="rounded-lg p-3 sm:p-4 flex items-start justify-between border border-divider border-l-4 border-l-interactive bg-card/70">
+                <div>
+                  <div className="flex items-center gap-1 sm:gap-2">
+                    <div className="font-mono text-xs px-1 sm:px-1.5 py-0.5 rounded bg-interactive/50 text-secondary">
+                      {watchlistItem.ticker}
+                    </div>
+                    <div className="font-medium text-text-primary text-sm sm:text-base">
+                      {watchlistItem.name}
+                    </div>
+                    <Badge
+                      variant="outline"
+                      className="ml-1 text-xs bg-interactive/20 border-blue-primary/50 uppercase text-blue-light"
+                    >
+                      {watchlistItem.type}
+                    </Badge>
                   </div>
-                  <div className="font-medium text-text-primary text-sm sm:text-base">
-                    Bitcoin
+                  <div className="text-xs sm:text-sm mt-1 text-text-secondary">
+                    {watchlistItem.status}
                   </div>
-                  <Badge
-                    variant="outline"
-                    className="ml-1 text-xs bg-interactive/20 border-gold-primary/50 text-blue-light"
-                  >
-                    FUTURES
-                  </Badge>
-                </div>
-                <div className="text-xs sm:text-sm mt-1 text-text-secondary">
-                  Approaching take-profit zone
-                </div>
-                <div className="flex items-center gap-1 text-xs mt-1 text-warning">
-                  <span className="inline-flex items-center">
-                    <span className="font-medium font-mono">5x</span> leverage
-                  </span>
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="flex items-center justify-end font-medium font-mono text-success text-sm sm:text-base">
-                  <ArrowUp className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-0.5" />
-                  <Plus className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-0.5" />
-                  3.8%
-                </div>
-                <div className="font-medium mt-1 font-mono text-gold-primary text-sm sm:text-base">
-                  $62,584
-                </div>
-              </div>
-            </div>
 
-            <div className="rounded-lg p-3 sm:p-4 flex items-start justify-between border border-divider border-l-4 border-l-blue-primary bg-card/70">
-              <div>
-                <div className="flex items-center gap-1 sm:gap-2">
-                  <div className="font-mono text-xs px-1 sm:px-1.5 py-0.5 rounded bg-blue-primary/20 text-blue-primary">
-                    ETH
-                  </div>
-                  <div className="font-medium text-text-primary text-sm sm:text-base">
-                    Ethereum
-                  </div>
-                  <Badge
-                    variant="outline"
-                    className="ml-1 text-xs bg-interactive/20 border-blue-primary/50 text-blue-light"
-                  >
-                    SPOT
-                  </Badge>
+                  {watchlistItem.leverage && (
+                    <div className="flex items-center gap-1 text-xs mt-1 text-warning">
+                      <span className="inline-flex items-center">
+                        <span className="font-medium font-mono">
+                          {watchlistItem.leverage}x
+                        </span>{" "}
+                        leverage
+                      </span>
+                    </div>
+                  )}
                 </div>
-                <div className="text-xs sm:text-sm mt-1 text-text-secondary">
-                  New position (filled overnight)
+                <div className="text-right">
+                  <div className="flex items-center justify-end font-medium font-mono text-success text-sm sm:text-base">
+                    <ArrowUp className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-0.5" />
+                    <Plus className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-0.5" />
+                    {watchlistItem.changePercentage}%
+                  </div>
+                  <div className="font-medium mt-1 font-mono text-gold-primary text-sm sm:text-base">
+                    {watchlistItem.currentPrice}
+                  </div>
                 </div>
               </div>
-              <div className="text-right">
-                <div className="flex items-center justify-end font-medium font-mono text-success text-sm sm:text-base">
-                  <ArrowUp className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-0.5" />
-                  <Plus className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-0.5" />
-                  2.4%
-                </div>
-                <div className="font-medium mt-1 font-mono text-gold-primary text-sm sm:text-base">
-                  $2,850
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-lg p-3 sm:p-4 flex items-start justify-between border border-divider border-l-4 border-l-purple-500 bg-card/70">
-              <div>
-                <div className="flex items-center gap-1 sm:gap-2">
-                  <div className="font-mono text-xs px-1 sm:px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300">
-                    SOL
-                  </div>
-                  <div className="font-medium text-text-primary text-sm sm:text-base">
-                    Solana
-                  </div>
-                  <Badge
-                    variant="outline"
-                    className="ml-1 text-xs bg-interactive/20 border-blue-primary/50 text-blue-light"
-                  >
-                    SPOT
-                  </Badge>
-                </div>
-                <div className="text-xs sm:text-sm mt-1 text-text-secondary">
-                  Near stop-loss level
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="flex items-center justify-end font-medium font-mono text-danger text-sm sm:text-base">
-                  <ArrowDown className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-0.5" />
-                  <Minus className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-0.5" />
-                  1.2%
-                </div>
-                <div className="font-medium mt-1 font-mono text-gold-primary text-sm sm:text-base">
-                  $138.45
-                </div>
-              </div>
-            </div>
+            ))}
           </CardContent>
         </Card>
 
