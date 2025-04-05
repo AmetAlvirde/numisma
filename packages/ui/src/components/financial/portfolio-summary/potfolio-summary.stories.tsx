@@ -1,6 +1,10 @@
+// src/components/financial/portfolio-summary/potfolio-summary.stories.tsx
 import { Meta, StoryObj } from "@storybook/react";
 import { PortfolioSummary } from "@/components/financial/portfolio-summary";
-import { mockPortfolioSummaryData } from "@/components/financial/portfolio-summary/mock-data";
+import {
+  mixedPerformance,
+  negativePerformance,
+} from "@/components/financial/portfolio-summary/mock-data";
 
 const meta = {
   title: "Portfolio Summary",
@@ -42,9 +46,15 @@ const meta = {
 
 type Story = StoryObj<typeof meta>;
 
-export const Default: Story = {
+export const WithMixedPerformance: Story = {
   args: {
-    ...mockPortfolioSummaryData,
+    ...mixedPerformance,
+  },
+};
+
+export const WithNegativeChange: Story = {
+  args: {
+    ...negativePerformance,
   },
 };
 
