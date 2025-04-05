@@ -22,12 +22,8 @@ export const DocsContainer: FC<PropsWithChildren<DocsContainerProps>> = ({
   const [theme, setTheme] = useState(getStoredTheme());
   const [mode, setMode] = useState(getStoredMode());
 
-  console.log(context);
-  console.log(context.channel.eventNames());
-
   useEffect(() => {
     context.channel.addListener("updateGlobals", event => {
-      console.log("updateGlobals", event);
       if (event.globals.theme) {
         setTheme(event.globals.theme);
       }

@@ -1,3 +1,4 @@
+// src/components/financial/portfolio-summary/potfolio-summary.stories.tsx
 import { Meta, StoryObj } from "@storybook/react";
 import { PortfolioSummary } from "@/components/financial/portfolio-summary";
 import {
@@ -45,7 +46,7 @@ const meta = {
 
 type Story = StoryObj<typeof meta>;
 
-export const Default: Story = {
+export const WithMixedPerformance: Story = {
   args: {
     ...mixedPerformance,
   },
