@@ -133,7 +133,6 @@ export const PortfolioSummary = React.forwardRef<
                   >
                     24h Change
                   </Badge>
-                  {/* <span className="flex items-center text-success text-xs sm:text-sm"> */}
                   <span
                     className={cn(
                       "flex items-center text-success text-xs sm:text-sm",
@@ -180,7 +179,9 @@ export const PortfolioSummary = React.forwardRef<
                   variant="outline"
                   className="bg-interactive/20 border-gold-primary/50 text-blue-light text-xs"
                 >
-                  <span className="font-medium font-mono">4</span>
+                  <span className="font-medium font-mono">
+                    {positionCounts.futures}
+                  </span>
                   <span className="ml-1 opacity-80">Futures</span>
                 </Badge>
                 <Badge
@@ -445,9 +446,20 @@ export const PortfolioSummary = React.forwardRef<
                       {spotPositions.totalValue}
                     </div>
                     <div className="text-xs sm:text-sm mt-1 flex items-center justify-center text-success">
-                      <ArrowUp className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-0.5" />
-                      <Plus className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-0.5" />
-                      <span>{spotPositions.change24h}% (24h)</span>
+                      {spotPositions.change24h > 0 ? (
+                        <>
+                          <ArrowUp className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-0.5" />
+                          <Plus className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-0.5" />
+                          <span>{spotPositions.change24h}% (24h)</span>
+                        </>
+                      ) : (
+                        <>
+                          <ArrowDown className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-0.5 text-danger" />
+                          <span className="text-danger">
+                            {spotPositions.change24h}% (24h)
+                          </span>
+                        </>
+                      )}
                     </div>
                   </div>
 
@@ -462,9 +474,20 @@ export const PortfolioSummary = React.forwardRef<
                       {futuresPositions.totalValue}
                     </div>
                     <div className="text-xs sm:text-sm mt-1 flex items-center justify-center text-success">
-                      <ArrowUp className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-0.5" />
-                      <Plus className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-0.5" />
-                      <span>{futuresPositions.change24h}% (24h)</span>
+                      {futuresPositions.change24h > 0 ? (
+                        <>
+                          <ArrowUp className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-0.5" />
+                          <Plus className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-0.5" />
+                          <span>{futuresPositions.change24h}% (24h)</span>
+                        </>
+                      ) : (
+                        <>
+                          <ArrowDown className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-0.5 text-danger" />
+                          <span className="text-danger">
+                            {futuresPositions.change24h}% (24h)
+                          </span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -481,9 +504,20 @@ export const PortfolioSummary = React.forwardRef<
                     {spotPositions.totalValue}
                   </div>
                   <div className="text-xs sm:text-sm mt-1 flex items-center justify-center text-success">
-                    <ArrowUp className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-0.5" />
-                    <Plus className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-0.5" />
-                    <span>{spotPositions.change24h}% (24h)</span>
+                    {spotPositions.change24h > 0 ? (
+                      <>
+                        <ArrowUp className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-0.5" />
+                        <Plus className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-0.5" />
+                        <span>{spotPositions.change24h}% (24h)</span>
+                      </>
+                    ) : (
+                      <>
+                        <ArrowDown className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-0.5 text-danger" />
+                        <span className="text-danger">
+                          {spotPositions.change24h}% (24h)
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
               </TabsContent>
@@ -499,9 +533,20 @@ export const PortfolioSummary = React.forwardRef<
                     {futuresPositions.totalValue}
                   </div>
                   <div className="text-xs sm:text-sm mt-1 flex items-center justify-center text-success">
-                    <ArrowUp className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-0.5" />
-                    <Plus className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-0.5" />
-                    <span>{futuresPositions.change24h}% (24h)</span>
+                    {futuresPositions.change24h > 0 ? (
+                      <>
+                        <ArrowUp className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-0.5" />
+                        <Plus className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-0.5" />
+                        <span>{futuresPositions.change24h}% (24h)</span>
+                      </>
+                    ) : (
+                      <>
+                        <ArrowDown className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-0.5 text-danger" />
+                        <span className="text-danger">
+                          {futuresPositions.change24h}% (24h)
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
               </TabsContent>

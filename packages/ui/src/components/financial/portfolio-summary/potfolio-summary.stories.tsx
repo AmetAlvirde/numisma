@@ -1,7 +1,7 @@
 import { Meta, StoryObj } from "@storybook/react";
 import { PortfolioSummary } from "@/components/financial/portfolio-summary";
 import {
-  mockPortfolioSummaryData,
+  mixedPerformance,
   negativePerformance,
 } from "@/components/financial/portfolio-summary/mock-data";
 
@@ -47,7 +47,7 @@ type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
   args: {
-    ...mockPortfolioSummaryData,
+    ...mixedPerformance,
   },
 };
 
