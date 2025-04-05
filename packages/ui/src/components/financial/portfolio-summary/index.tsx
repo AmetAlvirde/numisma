@@ -24,7 +24,7 @@ import {
   BarChart3,
   DollarSign,
   Plus,
-  Minus,
+  // Minus, -> icon for negative changePercentage
 } from "lucide-react";
 
 export interface PortfolioSummaryProps
@@ -96,50 +96,33 @@ export const PortfolioSummary = React.forwardRef<
   HTMLDivElement,
   PortfolioSummaryProps
 >(
-  (
-    {
-      portfolioName,
-      totalValue,
-      change24h,
-      positionCounts,
-      ordersFilled,
-      recentActivity,
-      watchlist,
-      exchanges,
-      spotPositions,
-      futuresPositions,
-      onRefresh,
-      onViewAllActivity,
-      onFullAnalysis,
-      className,
-      ...props
-    },
-    ref
-  ) => {
+  ({
+    portfolioName,
+    totalValue,
+    change24h,
+    positionCounts,
+    ordersFilled,
+    recentActivity,
+    watchlist,
+    exchanges,
+    spotPositions,
+    futuresPositions,
+    onRefresh = () => {},
+    onViewAllActivity = () => {},
+    onFullAnalysis = () => {},
+  }) => {
     return (
       <div className="w-full max-w-2xl mx-auto space-y-4 p-2 sm:p-4 font-mono bg-background text-text-primary">
-        {/* Portfolio Header */}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-4 mb-2">
-          <div>
-            <p className="text-xs sm:text-sm text-text-secondary">
-              Good Morning
-            </p>
-            <h1 className="text-xl sm:text-2xl font-bold text-gold-primary">
-              {portfolioName}
-            </h1>
-          </div>
-          <div className="flex flex-col items-end">
-            <p className="text-xl sm:text-2xl font-bold text-gold-primary">
-              08:01 PM
-            </p>
-            <p className="text-xs sm:text-sm text-text-secondary">
-              Mon, Mar 31
-            </p>
-          </div>
-        </div>
-
         {/* Portfolio Summary Card */}
         <Card className="overflow-hidden shadow-xl border border-divider bg-card">
+          <CardHeader className="pb-2 sm:pb-3 border-b border-divider">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base sm:text-lg flex items-center gap-2 text-gold-primary">
+                <Clock className="h-4 w-4 sm:h-5 sm:w-5 text-gold-primary/70" />
+                {portfolioName}
+              </CardTitle>
+            </div>
+          </CardHeader>
           <div className="p-3 sm:p-6">
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-0">
               <div className="space-y-2">
@@ -150,14 +133,35 @@ export const PortfolioSummary = React.forwardRef<
                   >
                     24h Change
                   </Badge>
-                  <span className="flex items-center text-success text-xs sm:text-sm">
-                    <Plus className="h-3 w-3 mr-0.5" />
+                  {/* <span className="flex items-center text-success text-xs sm:text-sm"> */}
+                  <span
+                    className={cn(
+                      "flex items-center text-success text-xs sm:text-sm",
+                      change24h < 0 && "text-danger"
+                    )}
+                  >
+                    {change24h > 0 ? <Plus className="h-3 w-3 mr-0.5" /> : null}
+
                     <span>{change24h}%</span>
                   </span>
                 </div>
                 <div className="flex items-center gap-1 text-success">
-                  <ArrowUp className="h-4 w-4 sm:h-5 sm:w-5" />
-                  <span className="text-2xl sm:text-3xl font-bold font-mono">
+                  {change24h < 0 ? (
+                    <ArrowDown
+                      className={cn(
+                        "h-4 w-4 sm:h-5 sm:w-5",
+                        change24h < 0 && "text-danger"
+                      )}
+                    />
+                  ) : (
+                    <ArrowUp className="h-4 w-4 sm:h-5 sm:w-5" />
+                  )}
+                  <span
+                    className={cn(
+                      "text-2xl sm:text-3xl font-bold font-mono",
+                      change24h < 0 && "text-danger"
+                    )}
+                  >
                     {totalValue}
                   </span>
                 </div>
@@ -257,6 +261,7 @@ export const PortfolioSummary = React.forwardRef<
             <Button
               variant="ghost"
               className="w-full justify-center text-gold-primary hover:bg-gold-primary/10 transition-colors text-sm sm:text-base"
+              onClick={onViewAllActivity}
             >
               View all activity
               <ChevronRight className="ml-1 h-3 w-3 sm:h-4 sm:w-4" />
@@ -308,10 +313,28 @@ export const PortfolioSummary = React.forwardRef<
                   )}
                 </div>
                 <div className="text-right">
-                  <div className="flex items-center justify-end font-medium font-mono text-success text-sm sm:text-base">
-                    <ArrowUp className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-0.5" />
-                    <Plus className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-0.5" />
-                    {watchlistItem.changePercentage}%
+                  <div
+                    className={cn(
+                      "flex items-center justify-end font-medium font-mono text-sm sm:text-base",
+                      watchlistItem.changePercentage > 0 && "text-success",
+                      watchlistItem.changePercentage < 0 && "text-danger"
+                    )}
+                  >
+                    {watchlistItem.changePercentage > 0 ? (
+                      <>
+                        <ArrowUp className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-0.5" />
+                        <Plus className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-0.5" />
+                        {watchlistItem.changePercentage}%
+                      </>
+                    ) : (
+                      <>
+                        <ArrowDown className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-0.5" />
+                        {/* TODO: props send changePercentage as negative, maybe
+												it should send absolute value and we handle the sign here? */}
+                        {/* <Minus className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-0.5" /> */}
+                        {watchlistItem.changePercentage}%
+                      </>
+                    )}
                   </div>
                   <div className="font-medium mt-1 font-mono text-gold-primary text-sm sm:text-base">
                     {watchlistItem.currentPrice}
@@ -334,97 +357,45 @@ export const PortfolioSummary = React.forwardRef<
           </CardHeader>
           <CardContent className="p-3 sm:p-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-              <div className="rounded-lg p-3 sm:p-4 bg-card/70 border border-divider">
-                <div className="font-medium mb-2 text-text-primary text-sm sm:text-base">
-                  Binance
-                </div>
-                <div className="flex gap-2 mb-2">
-                  <Badge
-                    variant="secondary"
-                    className="bg-interactive/70 text-blue-light text-xs"
-                  >
-                    <span className="font-mono">3</span> Spot
-                  </Badge>
-                  <Badge
-                    variant="secondary"
-                    className="bg-interactive text-blue-light text-xs"
-                  >
-                    <span className="font-mono">1</span> Futures
-                  </Badge>
-                </div>
-                <div className="text-base sm:text-lg font-bold font-mono text-success">
-                  $3,845.20
-                </div>
-              </div>
+              {exchanges.map(exchange => (
+                <div className="rounded-lg p-3 sm:p-4  bg-card/70 border border-divider">
+                  <div className="font-medium mb-2 text-text-primary text-sm sm:text-base">
+                    {exchange.name}
+                  </div>
+                  <div className="flex gap-2 mb-2">
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "text-xs",
+                        exchange.spotCount > 0 &&
+                          "text-blue-light/80 border-blue-light/80",
+                        exchange.spotCount === 0 &&
+                          "border-text-tertiary text-text-tertiary"
+                      )}
+                    >
+                      <span className="font-mono">{exchange.spotCount}</span>{" "}
+                      Spot
+                    </Badge>
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "text-xs",
+                        exchange.futuresCount > 0 &&
+                          "text-blue-light/80 border-blue-light/80",
+                        exchange.futuresCount === 0 &&
+                          "border-text-tertiary text-text-tertiary"
+                      )}
+                    >
+                      <span className="font-mono">{exchange.futuresCount}</span>
+                      Futures
+                    </Badge>
+                  </div>
 
-              <div className="rounded-lg p-3 sm:p-4 bg-card/70 border border-divider">
-                <div className="font-medium mb-2 text-text-primary text-sm sm:text-base">
-                  BingX
+                  <div className="text-base sm:text-lg font-bold font-mono text-gold-primary">
+                    {exchange.totalValue}
+                  </div>
                 </div>
-                <div className="flex gap-2 mb-2">
-                  <Badge
-                    variant="secondary"
-                    className="bg-interactive/70 text-blue-light text-xs"
-                  >
-                    <span className="font-mono">3</span> Spot
-                  </Badge>
-                  <Badge
-                    variant="secondary"
-                    className="bg-interactive/70 text-blue-light text-xs"
-                  >
-                    <span className="font-mono">2</span> Futures
-                  </Badge>
-                </div>
-                <div className="text-base sm:text-lg font-bold font-mono text-success">
-                  $2,842.12
-                </div>
-              </div>
-
-              <div className="rounded-lg p-3 sm:p-4 bg-card/70 border border-divider">
-                <div className="font-medium mb-2 text-text-primary text-sm sm:text-base">
-                  Bitget
-                </div>
-                <div className="flex gap-2 mb-2">
-                  <Badge
-                    variant="secondary"
-                    className="bg-interactive/70 text-blue-light text-xs"
-                  >
-                    <span className="font-mono">6</span> Spot
-                  </Badge>
-                  <Badge
-                    variant="secondary"
-                    className="bg-interactive text-blue-light text-xs"
-                  >
-                    <span className="font-mono">1</span> Futures
-                  </Badge>
-                </div>
-                <div className="text-base sm:text-lg font-bold font-mono text-success">
-                  $3,918.22
-                </div>
-              </div>
-
-              <div className="rounded-lg p-3 sm:p-4 bg-card/70 border border-divider">
-                <div className="font-medium mb-2 text-text-primary text-sm sm:text-base">
-                  Bitso
-                </div>
-                <div className="flex gap-2 mb-2">
-                  <Badge
-                    variant="secondary"
-                    className="bg-interactive text-blue-light text-xs"
-                  >
-                    <span className="font-mono">2</span> Spot
-                  </Badge>
-                  <Badge
-                    variant="secondary"
-                    className="bg-interactive bg-opacity-80 text-text-tertiary border-text-tertiary border-opacity-30 text-xs"
-                  >
-                    <span className="font-mono">0</span> Futures
-                  </Badge>
-                </div>
-                <div className="text-base sm:text-lg font-bold font-mono text-success">
-                  $879.55
-                </div>
-              </div>
+              ))}
             </div>
           </CardContent>
         </Card>
@@ -468,15 +439,15 @@ export const PortfolioSummary = React.forwardRef<
                       Spot Positions
                     </div>
                     <div className="text-2xl sm:text-3xl font-bold font-mono text-text-primary">
-                      12
+                      {spotPositions.count}
                     </div>
                     <div className="text-base sm:text-lg font-semibold mt-1 font-mono text-gold-primary">
-                      $8,422.50
+                      {spotPositions.totalValue}
                     </div>
                     <div className="text-xs sm:text-sm mt-1 flex items-center justify-center text-success">
                       <ArrowUp className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-0.5" />
                       <Plus className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-0.5" />
-                      <span>2.1% (24h)</span>
+                      <span>{spotPositions.change24h}% (24h)</span>
                     </div>
                   </div>
 
@@ -485,15 +456,15 @@ export const PortfolioSummary = React.forwardRef<
                       Futures Positions
                     </div>
                     <div className="text-2xl sm:text-3xl font-bold font-mono text-text-primary">
-                      4
+                      {futuresPositions.count}
                     </div>
                     <div className="text-base sm:text-lg font-semibold mt-1 font-mono text-gold-primary">
-                      $4,030.39
+                      {futuresPositions.totalValue}
                     </div>
                     <div className="text-xs sm:text-sm mt-1 flex items-center justify-center text-success">
                       <ArrowUp className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-0.5" />
                       <Plus className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-0.5" />
-                      <span>3.4% (24h)</span>
+                      <span>{futuresPositions.change24h}% (24h)</span>
                     </div>
                   </div>
                 </div>
@@ -504,15 +475,15 @@ export const PortfolioSummary = React.forwardRef<
                     Spot Positions
                   </div>
                   <div className="text-2xl sm:text-3xl font-bold font-mono text-text-primary">
-                    12
+                    {spotPositions.count}
                   </div>
                   <div className="text-base sm:text-lg font-semibold mt-1 font-mono text-gold-primary">
-                    $8,422.50
+                    {spotPositions.totalValue}
                   </div>
                   <div className="text-xs sm:text-sm mt-1 flex items-center justify-center text-success">
                     <ArrowUp className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-0.5" />
                     <Plus className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-0.5" />
-                    <span>2.1% (24h)</span>
+                    <span>{spotPositions.change24h}% (24h)</span>
                   </div>
                 </div>
               </TabsContent>
@@ -522,15 +493,15 @@ export const PortfolioSummary = React.forwardRef<
                     Futures Positions
                   </div>
                   <div className="text-2xl sm:text-3xl font-bold font-mono text-text-primary">
-                    4
+                    {futuresPositions.count}
                   </div>
                   <div className="text-base sm:text-lg font-semibold mt-1 font-mono text-gold-primary">
-                    $4,030.39
+                    {futuresPositions.totalValue}
                   </div>
                   <div className="text-xs sm:text-sm mt-1 flex items-center justify-center text-success">
                     <ArrowUp className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-0.5" />
                     <Plus className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-0.5" />
-                    <span>3.4% (24h)</span>
+                    <span>{futuresPositions.change24h}% (24h)</span>
                   </div>
                 </div>
               </TabsContent>
@@ -549,13 +520,17 @@ export const PortfolioSummary = React.forwardRef<
           </CardHeader>
           <CardContent className="p-3 sm:p-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-              <Button className="w-full flex items-center justify-center gap-2 transition-colors bg-gold-dark hover:bg-gold-primary text-white focus:ring-2 focus:ring-gold-primary focus:ring-offset-2 focus:outline-none text-sm sm:text-base">
+              <Button
+                className="w-full flex items-center justify-center gap-2 transition-colors bg-gold-dark hover:bg-gold-primary text-white focus:ring-2 focus:ring-gold-primary focus:ring-offset-2 focus:outline-none text-sm sm:text-base"
+                onClick={onRefresh}
+              >
                 <RefreshCw className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 Refresh Data
               </Button>
               <Button
                 variant="outline"
                 className="w-full flex items-center justify-center gap-2 transition-colors bg-card border-divider text-gold-primary hover:bg-interactive focus:ring-2 focus:ring-gold-primary focus:ring-offset-2 focus:outline-none text-sm sm:text-base"
+                onClick={onFullAnalysis}
               >
                 <BarChart3 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 Full Analysis
@@ -570,7 +545,7 @@ export const PortfolioSummary = React.forwardRef<
             <Button
               variant="ghost"
               size="sm"
-              // onClick={handleRefresh}
+              onClick={onRefresh}
               className="p-1 h-auto transition-colors text-gold-primary hover:bg-gold-primary hover:bg-opacity-10 focus:ring-2 focus:ring-gold-primary focus:outline-none"
             >
               <RefreshCw className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
@@ -582,4 +557,4 @@ export const PortfolioSummary = React.forwardRef<
     );
   }
 );
-PortfolioSummary.displayName = "PortfolioSummaryCard";
+PortfolioSummary.displayName = "PortfolioSummary";

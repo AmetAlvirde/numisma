@@ -1,6 +1,9 @@
 import { Meta, StoryObj } from "@storybook/react";
 import { PortfolioSummary } from "@/components/financial/portfolio-summary";
-import { mockPortfolioSummaryData } from "@/components/financial/portfolio-summary/mock-data";
+import {
+  mockPortfolioSummaryData,
+  negativePerformance,
+} from "@/components/financial/portfolio-summary/mock-data";
 
 const meta = {
   title: "Portfolio Summary",
@@ -45,6 +48,12 @@ type Story = StoryObj<typeof meta>;
 export const Default: Story = {
   args: {
     ...mockPortfolioSummaryData,
+  },
+};
+
+export const WithNegativeChange: Story = {
+  args: {
+    ...negativePerformance,
   },
 };
 
