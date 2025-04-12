@@ -9,6 +9,7 @@
  * TypeScript definitions that ensure type safety throughout the application.
  */
 
+// Import types from base.ts for use within this file
 import {
   AssetType,
   AssetLocationType,
@@ -44,6 +45,9 @@ import {
   isBatchOperationResult,
 } from "./base";
 
+// Re-export all types from base.ts
+export * from "./base";
+
 // ===================================================================
 // CORE DOMAIN PRIMITIVES
 // ===================================================================
@@ -61,7 +65,10 @@ export type DateOrGenesis = Date | string | "genesis";
  * - hot: Connected to the internet, typically on exchanges or hot wallets
  * - cold: Offline storage (hardware wallets, paper wallets, etc.)
  */
-export type WalletType = "hot" | "cold";
+export enum WalletType {
+  HOT = "hot",
+  COLD = "cold",
+}
 
 /**
  * Current state of a position
@@ -69,7 +76,11 @@ export type WalletType = "hot" | "cold";
  * - closed: Position has been fully exited
  * - partial: Position has been partially closed (some profits taken)
  */
-export type PositionStatus = "active" | "closed" | "partial";
+export enum PositionStatus {
+  ACTIVE = "active",
+  CLOSED = "closed",
+  PARTIAL = "partial",
+}
 
 /**
  * Unit for order size specification
@@ -78,43 +89,53 @@ export type PositionStatus = "active" | "closed" | "partial";
  * - quote: Size in quote currency units (e.g., USDT in BTC/USDT)
  * - fiat: Size in specified fiat currency (e.g., USD)
  */
-export type SizeUnit = "percentage" | "base" | "quote" | "fiat";
+export enum SizeUnit {
+  PERCENTAGE = "percentage",
+  BASE = "base",
+  QUOTE = "quote",
+  FIAT = "fiat",
+}
 
 /**
  * Direction of a trade
  * - long: Betting the price will go up
  * - short: Betting the price will go down
  */
-export type TradeSide = "long" | "short";
+export enum TradeSide {
+  LONG = "long",
+  SHORT = "short",
+}
 
 /**
  * Types of financial metrics for reporting
  */
-export type MetricType =
-  | "total_value"
-  | "profit_loss"
-  | "percentage_return"
-  | "roi"
-  | "realized_pl"
-  | "unrealized_pl"
-  | "drawdown"
-  | "volatility";
+export enum MetricType {
+  TOTAL_VALUE = "total_value",
+  PROFIT_LOSS = "profit_loss",
+  PERCENTAGE_RETURN = "percentage_return",
+  ROI = "roi",
+  REALIZED_PL = "realized_pl",
+  UNREALIZED_PL = "unrealized_pl",
+  DRAWDOWN = "drawdown",
+  VOLATILITY = "volatility",
+}
 
 /**
  * Time frame for a trade following standard charting notation:
  * M = month, W = week, D = day, H = hour, m = minute
  */
-export type TimeFrame =
-  | "1m"
-  | "5m"
-  | "15m"
-  | "30m"
-  | "1H"
-  | "4H"
-  | "1D"
-  | "3D"
-  | "1W"
-  | "1M";
+export enum TimeFrame {
+  ONE_MINUTE = "1m",
+  FIVE_MINUTES = "5m",
+  FIFTEEN_MINUTES = "15m",
+  THIRTY_MINUTES = "30m",
+  ONE_HOUR = "1H",
+  FOUR_HOURS = "4H",
+  ONE_DAY = "1D",
+  THREE_DAYS = "3D",
+  ONE_WEEK = "1W",
+  ONE_MONTH = "1M",
+}
 
 // ===================================================================
 // POSITION MANAGEMENT
