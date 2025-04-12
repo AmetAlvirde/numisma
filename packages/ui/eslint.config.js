@@ -27,18 +27,18 @@ export default tseslint.config(
       ],
       /* Import rules */
       "import/first": "warn",
-      "no-restricted-imports": [
-        "warn",
-        {
-          patterns: [
-            {
-              group: [".*", "./*", "../*"],
-              message:
-                "Use absolute imports starting with '@/' instead of relative imports",
-            },
-          ],
-        },
-      ],
+      // "no-restricted-imports": [
+      //   "warn",
+      //   {
+      //     patterns: [
+      //       {
+      //         group: [".*", "./*", "../*"],
+      //         message:
+      //           "Use absolute imports starting with '@/' instead of relative imports",
+      //       },
+      //     ],
+      //   },
+      // ],
       "import/no-duplicates": "error",
       // "import/order": [
       // 	"error",

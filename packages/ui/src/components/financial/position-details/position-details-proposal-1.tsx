@@ -1,4 +1,3 @@
-import React from "react";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -34,13 +33,13 @@ import {
 } from "lucide-react";
 
 import { PositionDetailsComponentProps } from "@/components/financial/position-details/mock-data";
-// import {
-//   CapitalTier,
-//   PositionLifecycle,
-//   PositionStatus,
-//   OrderStatus,
-//   OrderPurpose,
-// } from "@/types";
+import {
+  CapitalTier,
+  PositionLifecycle,
+  PositionStatus,
+  OrderStatus,
+  OrderPurpose,
+} from "@/types";
 
 // Helper functions for formatting
 const formatCurrency = (value: number): string => {
@@ -982,11 +981,11 @@ export const PositionDetailsProposal1: React.FC<
   PositionDetailsComponentProps
 > = ({
   position,
-  relatedPortfolioName,
-  onEditPosition,
+  // relatedPortfolioName,
+  // onEditPosition,
   onAddJournalEntry,
   onEditThesis,
-  onClosePosition,
+  // onClosePosition,
   onRefreshData,
   onBackToPortfolio,
   className,
