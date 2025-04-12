@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { PositionDetailsProposal2 } from "./position-details-proposal-2";
 import { mockBtcPosition, mockEthPosition } from "./mock-data";
-
+import { PositionLifecycle, PositionStatus } from "@numisma/types";
 const meta: Meta<typeof PositionDetailsProposal2> = {
   component: PositionDetailsProposal2,
   title: "Financial/Position Details/Proposal 2",
@@ -48,10 +48,10 @@ export const ClosedPosition: Story = {
     ...Default.args,
     position: {
       ...mockEthPosition,
-      lifecycle: "CLOSED",
+      lifecycle: PositionLifecycle.CLOSED,
       positionDetails: {
         ...mockEthPosition.positionDetails,
-        status: "CLOSED",
+        status: PositionStatus.CLOSED,
         dateClosed: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000), // 3 days ago
       },
     },

@@ -12,13 +12,13 @@ import {
   PositionDetails,
   PositionLifecycle,
   PositionStatus,
-  PreTrackingStatus,
   SizeUnit,
   StopLossOrder,
   TakeProfitOrder,
   Thesis,
   TimeFrame,
   TradeSide,
+  WalletType,
 } from "@/types";
 
 export interface PositionDetailsComponentProps {
@@ -176,7 +176,7 @@ const btcTakeProfit: TakeProfitOrder[] = [
 const btcPositionDetails: PositionDetails = {
   status: PositionStatus.ACTIVE,
   side: TradeSide.LONG,
-  timeFrame: TimeFrame["1D"],
+  timeFrame: TimeFrame.ONE_DAY,
   dateOpened: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000),
   dateClosed: null,
   orders: btcEntryOrders,
@@ -249,7 +249,7 @@ export const mockBtcPosition: Position = {
   name: "BTC Halving Momentum",
   riskLevel: 6,
   portfolioId: "portfolio_1" as any,
-  walletType: "hot",
+  walletType: WalletType.HOT,
   capitalTier: CapitalTier.C1,
   strategy: "Post-halving accumulation",
   lifecycle: PositionLifecycle.ACTIVE,
@@ -270,7 +270,7 @@ export const mockBtcPosition: Position = {
 const ethPositionDetails: PositionDetails = {
   status: PositionStatus.ACTIVE,
   side: TradeSide.LONG,
-  timeFrame: TimeFrame["4H"],
+  timeFrame: TimeFrame.FOUR_HOURS,
   dateOpened: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
   dateClosed: null,
   orders: [
@@ -348,7 +348,7 @@ export const mockEthPosition: Position = {
   name: "ETH Post-Dencun Breakout",
   riskLevel: 5,
   portfolioId: "portfolio_1" as any,
-  walletType: "hot",
+  walletType: WalletType.HOT,
   capitalTier: CapitalTier.C2,
   strategy: "Technical breakout",
   lifecycle: PositionLifecycle.ACTIVE,
@@ -369,7 +369,7 @@ export const mockEthPosition: Position = {
 const solPositionDetails: PositionDetails = {
   status: PositionStatus.ACTIVE,
   side: TradeSide.LONG,
-  timeFrame: TimeFrame["1H"],
+  timeFrame: TimeFrame.ONE_HOUR,
   dateOpened: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
   dateClosed: null,
   orders: [
@@ -463,7 +463,7 @@ export const mockSolPosition: Position = {
   name: "SOL Leveraged Bounce",
   riskLevel: 8,
   portfolioId: "portfolio_1" as any,
-  walletType: "hot",
+  walletType: WalletType.HOT,
   capitalTier: CapitalTier.C2,
   strategy: "Oversold bounce",
   lifecycle: PositionLifecycle.ACTIVE,
