@@ -2,7 +2,7 @@
  * Market repository implementation
  */
 
-import { PrismaClient, Market as PrismaMarket } from "@prisma/client";
+import { PrismaClient, Market as PrismaMarket, Prisma } from "@prisma/client";
 import {
   Market,
   Asset,
@@ -20,6 +20,7 @@ import {
 } from "@numisma/types";
 import { marketSchema } from "../schema/market";
 import { handleDatabaseError } from "../utils";
+import { mapMarketToDomain } from "../utils/entity-mappers";
 
 export class MarketRepository {
   constructor(private prisma: PrismaClient) {}
@@ -46,7 +47,7 @@ export class MarketRepository {
 
       return {
         success: true,
-        data: this.mapToDomainModel(market),
+        data: mapMarketToDomain(market),
       };
     } catch (error) {
       return {
@@ -84,7 +85,7 @@ export class MarketRepository {
 
       return {
         success: true,
-        data: this.mapToDomainModel(market),
+        data: mapMarketToDomain(market),
       };
     } catch (error) {
       return {
@@ -135,7 +136,7 @@ export class MarketRepository {
 
       return {
         success: true,
-        data: this.mapToDomainModel(createdMarket),
+        data: mapMarketToDomain(createdMarket),
       };
     } catch (error) {
       return {
@@ -188,7 +189,7 @@ export class MarketRepository {
 
       return {
         success: true,
-        data: this.mapToDomainModel(updatedMarket),
+        data: mapMarketToDomain(updatedMarket),
       };
     } catch (error) {
       return {
@@ -239,7 +240,7 @@ export class MarketRepository {
       return {
         success: true,
         data: {
-          items: markets.map(this.mapToDomainModel),
+          items: markets.map(market => mapMarketToDomain(market)),
           total,
           page: pagination?.page || 1,
           limit: pagination?.limit || 10,
@@ -252,58 +253,6 @@ export class MarketRepository {
         error: handleDatabaseError(error).message,
       };
     }
-  }
-
-  /**
-   * Map a Prisma market to the domain model
-   */
-  private mapToDomainModel(
-    market: PrismaMarket & {
-      baseAsset: {
-        id: string;
-        name: string;
-        ticker: string;
-        assetType: string;
-        description: string | null;
-      };
-      quoteAsset: {
-        id: string;
-        name: string;
-        ticker: string;
-        assetType: string;
-        description: string | null;
-      };
-    }
-  ): Market {
-    return {
-      id: market.id,
-      baseAsset: this.mapToAssetModel(market.baseAsset),
-      quoteAsset: this.mapToAssetModel(market.quoteAsset),
-      pairNotation: market.pairNotation,
-      exchange: market.exchange || undefined,
-      isTradable: market.isTradable,
-    };
-  }
-
-  /**
-   * Map a Prisma asset to the domain model
-   */
-  private mapToAssetModel(asset: {
-    id: string;
-    name: string;
-    ticker: string;
-    assetType: string;
-    description: string | null;
-  }): Asset {
-    return {
-      id: asset.id,
-      name: asset.name,
-      ticker: asset.ticker,
-      assetType: asset.assetType as AssetType,
-      description: asset.description || undefined,
-      locationType: AssetLocationType.EXCHANGE, // Default to EXCHANGE as per schema
-      wallet: "", // Empty string as default since it's required in the Asset type
-    };
   }
 
   /**
