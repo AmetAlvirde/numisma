@@ -18,8 +18,8 @@
     }
   },
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
+    "build": "npm run clean && esbuild src/index.ts src/prisma.ts --format=cjs --outdir=dist --platform=node --target=node16 --sourcemap",
+    "dev": "npm run build -- --watch",
     "lint": "eslint src/**/*.ts",
     "clean": "rm -rf dist",
     "db:generate": "prisma generate",
@@ -34,6 +34,7 @@
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^20.5.7",
+    "esbuild": "^0.20.0",
     "eslint": "^8.48.0",
     "prisma": "^6.5.0",
     "tsup": "^7.2.0",
