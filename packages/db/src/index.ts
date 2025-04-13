@@ -6,14 +6,20 @@
  * database concerns from business logic.
  */
 
-// Export prisma client
-export * from "./prisma";
+// Export prisma client instance
+export { prisma } from "./prisma";
 
-// Export repositories for data access
+// Export repositories
 export * from "./repositories";
 
-// Export schemas for validation
+// Export schema validation functions
 export * from "./schema";
 
-// Export utility functions and types
+// Export utility functions
 export * from "./utils";
+
+// Note on type usage:
+// 1. Domain types should be imported from @numisma/types
+// 2. Database model types should be imported from @prisma/client
+// 3. Schema validation types are exported from ./schema
+// 4. Type-safe conversion utilities are exported from ./utils
