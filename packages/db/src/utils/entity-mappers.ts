@@ -10,6 +10,8 @@ import {
   Market,
   Asset,
   Portfolio,
+  AssetLocationType,
+  AssetType,
   WalletLocation,
   Order,
   StopLossOrder,
@@ -45,6 +47,9 @@ import {
   stringToCapitalTier,
   stringToTimeFrame,
   dateToDateOrGenesis,
+  dateOrGenesisToDate,
+  stringToAssetType,
+  mapPortfolioToPrisma,
 } from "./type-mappers";
 
 /**
@@ -60,7 +65,7 @@ export function mapAssetToDomain(
     id: asset.id,
     name: asset.name,
     ticker: asset.ticker,
-    assetType: asset.assetType as any, // TODO: Create proper enum mapping
+    assetType: stringToAssetType(asset.assetType),
     description: asset.description || undefined,
     network: asset.network || undefined,
     contractAddress: asset.contractAddress || undefined,
@@ -70,7 +75,19 @@ export function mapAssetToDomain(
       options?.includeMarketData && asset.marketData
         ? (asset.marketData as any)
         : undefined,
+    locationType: AssetLocationType.EXCHANGE, // Default to EXCHANGE as per schema
+    wallet: "", // Empty string as default since it's required in the Asset type
   };
+}
+
+/**
+ * Helper function to safely convert asset type strings to AssetType enum
+ */
+function stringToAssetType(assetType: string): AssetType {
+  if (Object.values(AssetType).includes(assetType as AssetType)) {
+    return assetType as AssetType;
+  }
+  return AssetType.CRYPTOCURRENCY; // Default if not recognized
 }
 
 /**
@@ -385,5 +402,25 @@ export function mapPortfolioToDomain(
       sortOrder: portfolio.sortOrder || undefined,
       isPinned: portfolio.isPinned || undefined,
     },
+  };
+}
+
+/**
+ * Maps a domain Portfolio to a Prisma Portfolio model for creation/updates
+ */
+export function mapPortfolioToPrisma(
+  portfolio: Omit<Portfolio, "id">
+): Prisma.PortfolioCreateInput {
+  return {
+    name: portfolio.name,
+    description: portfolio.description,
+    dateCreated: dateOrGenesisToDate(portfolio.dateCreated) ?? new Date(),
+    status: portfolio.status,
+    userId: portfolio.userId,
+    tags: portfolio.tags || [],
+    notes: portfolio.notes,
+    color: portfolio.color,
+    sortOrder: portfolio.sortOrder || 0,
+    isPinned: portfolio.isPinned || false,
   };
 }

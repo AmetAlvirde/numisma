@@ -19,6 +19,7 @@ import {
 } from "@numisma/types";
 import { assetSchema } from "../schema/asset";
 import { handleDatabaseError } from "../utils";
+import { mapAssetToDomain, mapAssetToPrisma } from "../utils/entity-mappers";
 
 export class AssetRepository {
   constructor(private prisma: PrismaClient) {}
@@ -41,7 +42,7 @@ export class AssetRepository {
 
       return {
         success: true,
-        data: this.mapToDomainModel(asset),
+        data: mapAssetToDomain(asset),
       };
     } catch (error) {
       return {
@@ -62,7 +63,7 @@ export class AssetRepository {
 
       return {
         success: true,
-        data: assets.map(this.mapToDomainModel),
+        data: assets.map(asset => mapAssetToDomain(asset)),
       };
     } catch (error) {
       return {
@@ -87,23 +88,15 @@ export class AssetRepository {
         };
       }
 
+      // Convert to Prisma model using mapper
+      const prismaData = mapAssetToPrisma(asset);
       const createdAsset = await this.prisma.asset.create({
-        data: {
-          name: asset.name,
-          ticker: asset.ticker,
-          assetType: asset.assetType,
-          description: asset.description,
-          network: asset.network,
-          contractAddress: asset.contractAddress,
-          iconUrl: asset.iconUrl,
-          category: asset.category,
-          marketData: asset.marketData,
-        },
+        data: prismaData,
       });
 
       return {
         success: true,
-        data: this.mapToDomainModel(createdAsset),
+        data: mapAssetToDomain(createdAsset),
       };
     } catch (error) {
       return {
@@ -138,7 +131,7 @@ export class AssetRepository {
 
       return {
         success: true,
-        data: this.mapToDomainModel(updatedAsset),
+        data: mapAssetToDomain(updatedAsset),
       };
     } catch (error) {
       return {
@@ -203,7 +196,7 @@ export class AssetRepository {
       return {
         success: true,
         data: {
-          items: assets.map(this.mapToDomainModel),
+          items: assets.map(asset => mapAssetToDomain(asset)),
           total,
           page: pagination?.page || 1,
           limit: pagination?.limit || 10,
@@ -216,26 +209,6 @@ export class AssetRepository {
         error: handleDatabaseError(error).message,
       };
     }
-  }
-
-  /**
-   * Map a Prisma asset to the domain model
-   */
-  private mapToDomainModel(asset: PrismaAsset): Asset {
-    return {
-      id: asset.id,
-      name: asset.name,
-      ticker: asset.ticker,
-      assetType: asset.assetType as AssetType,
-      description: asset.description || undefined,
-      network: asset.network || undefined,
-      contractAddress: asset.contractAddress || undefined,
-      iconUrl: asset.iconUrl || undefined,
-      category: asset.category || undefined,
-      marketData: (asset.marketData as any) || undefined,
-      locationType: AssetLocationType.EXCHANGE, // Default to EXCHANGE as per schema
-      wallet: "", // Empty string as default since it's required in the Asset type
-    };
   }
 
   /**
