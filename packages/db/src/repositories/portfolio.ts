@@ -2,10 +2,11 @@
  * Portfolio repository implementation
  */
 
-import { PrismaClient, Portfolio as PrismaPortfolio } from '@prisma/client';
-import { Portfolio, DateOrGenesis } from '@numisma/types';
-import { portfolioSchema } from '../schema/portfolio';
-import { dateOrGenesisToDate, databaseDateToDateOrGenesis, handleDatabaseError } from '../utils';
+import { PrismaClient, Portfolio as PrismaPortfolio } from "@prisma/client";
+import { Portfolio, DateOrGenesis, OperationResult } from "@numisma/types";
+import { portfolioSchema } from "../schema/portfolio";
+import { handleDatabaseError, dateOrGenesisToDate } from "../utils";
+import { mapPortfolioToDomain } from "../utils/entity-mappers";
 
 export class PortfolioRepository {
   constructor(private prisma: PrismaClient) {}
@@ -13,37 +14,55 @@ export class PortfolioRepository {
   /**
    * Find a portfolio by its ID with optional related data
    */
-  async findById(id: string, options?: { 
-    includePositions?: boolean 
-  }): Promise<Portfolio | null> {
+  async findById(
+    id: string,
+    options?: {
+      includePositions?: boolean;
+    }
+  ): Promise<OperationResult<Portfolio>> {
     try {
       const portfolio = await this.prisma.portfolio.findUnique({
         where: { id },
         include: {
-          portfolioPositions: options?.includePositions ? {
-            include: {
-              position: true
-            }
-          } : false,
+          portfolioPositions: options?.includePositions
+            ? {
+                include: {
+                  position: true,
+                },
+              }
+            : false,
           valuations: {
             orderBy: {
-              timestamp: 'desc'
+              timestamp: "desc",
             },
-            take: 1
-          }
-        }
+            take: 1,
+          },
+        },
       });
-      
-      return portfolio ? this.mapToDomainModel(portfolio) : null;
+
+      if (!portfolio) {
+        return {
+          success: false,
+          error: `Portfolio with ID ${id} not found`,
+        };
+      }
+
+      return {
+        success: true,
+        data: mapPortfolioToDomain(portfolio),
+      };
     } catch (error) {
-      throw handleDatabaseError(error);
+      return {
+        success: false,
+        error: handleDatabaseError(error).message,
+      };
     }
   }
 
   /**
    * Find portfolios by user ID
    */
-  async findByUserId(userId: string): Promise<Portfolio[]> {
+  async findByUserId(userId: string): Promise<OperationResult<Portfolio[]>> {
     try {
       const portfolios = await this.prisma.portfolio.findMany({
         where: { userId },
@@ -51,105 +70,166 @@ export class PortfolioRepository {
           portfolioPositions: true,
           valuations: {
             orderBy: {
-              timestamp: 'desc'
+              timestamp: "desc",
             },
-            take: 1
-          }
-        }
+            take: 1,
+          },
+        },
       });
-      
-      return portfolios.map(portfolio => this.mapToDomainModel(portfolio));
+
+      return {
+        success: true,
+        data: portfolios.map(portfolio => mapPortfolioToDomain(portfolio)),
+      };
     } catch (error) {
-      throw handleDatabaseError(error);
+      return {
+        success: false,
+        error: handleDatabaseError(error).message,
+      };
     }
   }
 
   /**
    * Create a new portfolio
    */
-  async create(portfolio: Omit<Portfolio, 'id'>): Promise<Portfolio> {
-    // Validate with Zod schema
-    portfolioSchema.omit({ id: true }).parse(portfolio);
-    
+  async create(
+    portfolio: Omit<Portfolio, "id">
+  ): Promise<OperationResult<Portfolio>> {
     try {
+      // Validate with Zod schema
+      const validationResult = portfolioSchema.safeParse(portfolio);
+      if (!validationResult.success) {
+        return {
+          success: false,
+          error: "Invalid portfolio data",
+          metadata: { validationErrors: validationResult.error.errors },
+        };
+      }
+
+      // Convert to Prisma model
+      const data = {
+        name: portfolio.name,
+        description: portfolio.description,
+        dateCreated: dateOrGenesisToDate(portfolio.dateCreated) ?? new Date(),
+        status: portfolio.status,
+        userId: portfolio.userId,
+        tags: portfolio.tags || [],
+        notes: portfolio.notes,
+        color: portfolio.color,
+        sortOrder: portfolio.sortOrder || 0,
+        isPinned: portfolio.isPinned || false,
+      };
+
       const createdPortfolio = await this.prisma.portfolio.create({
-        data: {
-          name: portfolio.name,
-          description: portfolio.description,
-          dateCreated: dateOrGenesisToDate(portfolio.dateCreated) ?? new Date(),
-          status: portfolio.status,
-          userId: portfolio.userId,
-          tags: portfolio.tags || [],
-          notes: portfolio.notes,
-          color: portfolio.color,
-          sortOrder: portfolio.sortOrder,
-          isPinned: portfolio.isPinned
-        },
+        data,
         include: {
-          portfolioPositions: true
-        }
+          portfolioPositions: true,
+        },
       });
-      
-      return this.mapToDomainModel(createdPortfolio);
+
+      return {
+        success: true,
+        data: mapPortfolioToDomain(createdPortfolio),
+      };
     } catch (error) {
-      throw handleDatabaseError(error);
+      return {
+        success: false,
+        error: handleDatabaseError(error).message,
+      };
     }
   }
 
   /**
    * Update an existing portfolio
    */
-  async update(id: string, data: Partial<Omit<Portfolio, 'id'>>): Promise<Portfolio> {
-    // Validate with Zod schema
-    portfolioSchema.partial().omit({ id: true }).parse(data);
-    
+  async update(
+    id: string,
+    data: Partial<Omit<Portfolio, "id">>
+  ): Promise<OperationResult<Portfolio>> {
     try {
-      // Handle dateCreated if it exists
-      let updatedData = { ...data };
-      if (data.dateCreated) {
-        updatedData.dateCreated = dateOrGenesisToDate(data.dateCreated);
+      // Validate with Zod schema
+      const validationResult = portfolioSchema.partial().safeParse(data);
+      if (!validationResult.success) {
+        return {
+          success: false,
+          error: "Invalid portfolio data",
+          metadata: { validationErrors: validationResult.error.errors },
+        };
       }
-      
-      const updatedPortfolio = await this.prisma.portfolio.update({
-        where: { id },
-        data: updatedData,
-        include: {
-          portfolioPositions: true
+
+      // Create a partial update with only the fields that are provided
+      const updateData: any = {};
+
+      // Copy all provided fields except for dates that need special handling
+      Object.entries(data).forEach(([key, value]) => {
+        if (key !== "dateCreated") {
+          updateData[key] = value;
         }
       });
-      
-      return this.mapToDomainModel(updatedPortfolio);
+
+      // Handle dateCreated if it exists
+      if (data.dateCreated) {
+        updateData.dateCreated = dateOrGenesisToDate(data.dateCreated);
+      }
+
+      const updatedPortfolio = await this.prisma.portfolio.update({
+        where: { id },
+        data: updateData,
+        include: {
+          portfolioPositions: true,
+        },
+      });
+
+      return {
+        success: true,
+        data: mapPortfolioToDomain(updatedPortfolio),
+      };
     } catch (error) {
-      throw handleDatabaseError(error);
+      return {
+        success: false,
+        error: handleDatabaseError(error).message,
+      };
     }
   }
 
   /**
    * Delete a portfolio
    */
-  async delete(id: string): Promise<void> {
+  async delete(id: string): Promise<OperationResult<void>> {
     try {
       await this.prisma.portfolio.delete({
-        where: { id }
+        where: { id },
       });
+
+      return {
+        success: true,
+      };
     } catch (error) {
-      throw handleDatabaseError(error);
+      return {
+        success: false,
+        error: handleDatabaseError(error).message,
+      };
     }
   }
 
   /**
    * Add a position to a portfolio
    */
-  async addPosition(portfolioId: string, positionId: string, userId: string, displayOrder?: number): Promise<void> {
+  async addPosition(
+    portfolioId: string,
+    positionId: string,
+    userId: string,
+    displayOrder?: number
+  ): Promise<OperationResult<void>> {
     try {
       // Check if there's already an entry for this portfolio and position
       const existingEntry = await this.prisma.portfolioPosition.findUnique({
         where: {
           portfolioId_positionId: {
             portfolioId,
-            positionId
-          }
-        }
+            positionId,
+          },
+        },
       });
 
       if (existingEntry) {
@@ -157,16 +237,16 @@ export class PortfolioRepository {
         if (existingEntry.isHidden) {
           await this.prisma.portfolioPosition.update({
             where: {
-              id: existingEntry.id
+              id: existingEntry.id,
             },
             data: {
               isHidden: false,
               addedAt: new Date(),
-              addedBy: userId
-            }
+              addedBy: userId,
+            },
           });
         }
-        return;
+        return { success: true };
       }
 
       // If no display order is provided, calculate the next available one
@@ -174,14 +254,14 @@ export class PortfolioRepository {
       if (finalDisplayOrder === undefined) {
         const highestOrder = await this.prisma.portfolioPosition.findFirst({
           where: {
-            portfolioId
+            portfolioId,
           },
           orderBy: {
-            displayOrder: 'desc'
+            displayOrder: "desc",
           },
           select: {
-            displayOrder: true
-          }
+            displayOrder: true,
+          },
         });
 
         finalDisplayOrder = highestOrder ? highestOrder.displayOrder + 1 : 1;
@@ -195,88 +275,71 @@ export class PortfolioRepository {
           addedAt: new Date(),
           addedBy: userId,
           isHidden: false,
-          displayOrder: finalDisplayOrder
-        }
+          displayOrder: finalDisplayOrder,
+        },
       });
+
+      return { success: true };
     } catch (error) {
-      throw handleDatabaseError(error);
+      return {
+        success: false,
+        error: handleDatabaseError(error).message,
+      };
     }
   }
 
   /**
    * Remove a position from a portfolio
    */
-  async removePosition(portfolioId: string, positionId: string): Promise<void> {
+  async removePosition(
+    portfolioId: string,
+    positionId: string
+  ): Promise<OperationResult<void>> {
     try {
       await this.prisma.portfolioPosition.updateMany({
         where: {
           portfolioId,
-          positionId
+          positionId,
         },
         data: {
-          isHidden: true
-        }
+          isHidden: true,
+        },
       });
+
+      return { success: true };
     } catch (error) {
-      throw handleDatabaseError(error);
+      return {
+        success: false,
+        error: handleDatabaseError(error).message,
+      };
     }
   }
 
   /**
-   * Update a position's display order within a portfolio
+   * Update the display order of a position in a portfolio
    */
-  async updatePositionOrder(portfolioId: string, positionId: string, displayOrder: number): Promise<void> {
+  async updatePositionOrder(
+    portfolioId: string,
+    positionId: string,
+    displayOrder: number
+  ): Promise<OperationResult<void>> {
     try {
       await this.prisma.portfolioPosition.updateMany({
         where: {
           portfolioId,
-          positionId
+          positionId,
         },
         data: {
-          displayOrder
-        }
+          displayOrder,
+        },
       });
+
+      return { success: true };
     } catch (error) {
-      throw handleDatabaseError(error);
+      return {
+        success: false,
+        error: handleDatabaseError(error).message,
+      };
     }
-  }
-
-  /**
-   * Map a Prisma portfolio to the domain model
-   */
-  private mapToDomainModel(portfolio: PrismaPortfolio & {
-    portfolioPositions?: any[];
-    valuations?: any[];
-  }): Portfolio {
-    // Extract position IDs from portfolioPositions
-    const positionIds = portfolio.portfolioPositions 
-      ? portfolio.portfolioPositions
-          .filter(pp => !pp.isHidden)
-          .map(pp => pp.positionId)
-      : [];
-
-    return {
-      id: portfolio.id,
-      name: portfolio.name,
-      description: portfolio.description || undefined,
-      dateCreated: databaseDateToDateOrGenesis(portfolio.dateCreated),
-      status: portfolio.status as 'active' | 'archived',
-      userId: portfolio.userId,
-      positionIds: positionIds,
-      tags: portfolio.tags as string[],
-      notes: portfolio.notes || undefined,
-      color: portfolio.color || undefined,
-      sortOrder: portfolio.sortOrder || undefined,
-      isPinned: portfolio.isPinned || false,
-      // Include the latest valuation data if available
-      latestValuation: portfolio.valuations && portfolio.valuations.length > 0
-        ? {
-            timestamp: portfolio.valuations[0].timestamp,
-            totalValue: portfolio.valuations[0].totalValue,
-            profitLoss: portfolio.valuations[0].profitLoss,
-            percentageReturn: portfolio.valuations[0].percentageReturn
-          }
-        : undefined
-    };
   }
 }

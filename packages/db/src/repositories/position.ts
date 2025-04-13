@@ -1,15 +1,48 @@
 /**
  * Position repository implementation
+ *
+ * TODO: Refactor this repository to use type mappers from entity-mappers.ts
+ * The refactoring process should follow these steps:
+ *
+ * 1. Analyze and update the entity-mappers.ts file to handle all Position-related
+ *    entities correctly (with proper type safety)
+ * 2. Fix any TODOs in the mapper files related to Position entities
+ * 3. Create the proper typed mapPositionToPrisma function for create/update operations
+ * 4. Gradually replace direct mappings with the type-safe mappers
+ * 5. Test each method individually to ensure type safety and data consistency
+ *
+ * Example migration pattern:
+ *
+ * // Step 1: Import the mappers
+ * import { mapPositionToDomain, mapPositionToPrisma } from "../utils/entity-mappers";
+ *
+ * // Step 2: Replace the mapToDomainModel method with the imported mapper
+ * // Old: return this.mapToDomainModel(position);
+ * // New: return mapPositionToDomain(position);
+ *
+ * // Step 3: Update create/update methods to use the to-prisma mappers
+ * // Old: directly using position properties for Prisma data
+ * // New: const prismaData = mapPositionToPrisma(position);
  */
 
-import { PrismaClient, Position as PrismaPosition } from "@prisma/client";
-import { Position, DateOrGenesis } from "@numisma/types";
+import {
+  PrismaClient,
+  Position as PrismaPosition,
+  Prisma,
+} from "@prisma/client";
+import {
+  Position,
+  DateOrGenesis,
+  OperationResult,
+  PaginatedResult,
+} from "@numisma/types";
 import { positionSchema } from "../schema/position";
 import {
   dateOrGenesisToDate,
   databaseDateToDateOrGenesis,
   handleDatabaseError,
 } from "../utils";
+import { mapPositionToDomain } from "../utils/entity-mappers";
 
 export class PositionRepository {
   constructor(private prisma: PrismaClient) {}
@@ -27,7 +60,7 @@ export class PositionRepository {
       includeThesis?: boolean;
       includeJournal?: boolean;
     }
-  ): Promise<Position | null> {
+  ): Promise<OperationResult<Position>> {
     try {
       const position = await this.prisma.position.findUnique({
         where: { id },
@@ -74,16 +107,31 @@ export class PositionRepository {
         },
       });
 
-      return position ? this.mapToDomainModel(position) : null;
+      if (!position) {
+        return {
+          success: false,
+          error: `Position with ID ${id} not found`,
+        };
+      }
+
+      return {
+        success: true,
+        data: mapPositionToDomain(position),
+      };
     } catch (error) {
-      throw handleDatabaseError(error);
+      return {
+        success: false,
+        error: handleDatabaseError(error).message,
+      };
     }
   }
 
   /**
    * Find positions by portfolio ID
    */
-  async findByPortfolioId(portfolioId: string): Promise<Position[]> {
+  async findByPortfolioId(
+    portfolioId: string
+  ): Promise<OperationResult<Position[]>> {
     try {
       const portfolioPositions = await this.prisma.portfolioPosition.findMany({
         where: {
@@ -110,9 +158,15 @@ export class PositionRepository {
         },
       });
 
-      return portfolioPositions.map(pp => this.mapToDomainModel(pp.position));
+      return {
+        success: true,
+        data: portfolioPositions.map(pp => mapPositionToDomain(pp.position)),
+      };
     } catch (error) {
-      throw handleDatabaseError(error);
+      return {
+        success: false,
+        error: handleDatabaseError(error).message,
+      };
     }
   }
 
@@ -122,7 +176,7 @@ export class PositionRepository {
   async findByLifecycle(
     lifecycle: string,
     userId: string
-  ): Promise<Position[]> {
+  ): Promise<OperationResult<Position[]>> {
     try {
       // First get all portfolios for this user
       const portfolios = await this.prisma.portfolio.findMany({
@@ -156,87 +210,92 @@ export class PositionRepository {
         },
       });
 
-      return positions.map(this.mapToDomainModel);
+      return {
+        success: true,
+        data: positions.map(position => mapPositionToDomain(position)),
+      };
     } catch (error) {
-      throw handleDatabaseError(error);
+      return {
+        success: false,
+        error: handleDatabaseError(error).message,
+      };
     }
   }
 
   /**
    * Create a new position
    */
-  async create(position: Omit<Position, "id">): Promise<Position> {
-    // Validate with Zod schema
-    positionSchema.omit({ id: true }).parse(position);
-
+  async create(
+    position: Omit<Position, "id">
+  ): Promise<OperationResult<Position>> {
     try {
-      // Create position details first
-      const positionDetails = await this.prisma.positionDetails.create({
-        data: {
-          side: position.positionDetails.side,
-          timeFrame: position.positionDetails.timeFrame,
-          initialInvestment: position.positionDetails.initialInvestment,
-          currentInvestment: position.positionDetails.currentInvestment,
-          recoveredAmount: position.positionDetails.recoveredAmount || 0,
-          dateOpened: dateOrGenesisToDate(position.positionDetails.dateOpened),
-          closedPercentage: position.positionDetails.closedPercentage || 0,
-        },
-      });
+      // Validate with Zod schema
+      const validationResult = positionSchema.safeParse(position);
+      if (!validationResult.success) {
+        return {
+          success: false,
+          error: "Invalid position data",
+          metadata: { validationErrors: validationResult.error.errors },
+        };
+      }
 
-      // Create the position
+      // Build Prisma data
+      const data: Prisma.PositionCreateInput = {
+        name: position.name,
+        lifecycle: position.lifecycle,
+        capitalTier: position.capitalTier,
+        dateCreated: dateOrGenesisToDate(position.dateCreated) ?? new Date(),
+        dateModified: new Date(),
+        tags: position.tags || [],
+        isHidden: position.isHidden || false,
+        comment: position.comment,
+      };
+
+      // Add relationships
+      if ("marketId" in position && position.marketId) {
+        data.market = { connect: { id: position.marketId } };
+      }
+
+      if ("walletLocationId" in position && position.walletLocationId) {
+        data.walletLocation = { connect: { id: position.walletLocationId } };
+      }
+
+      // Add position details if provided
+      if ("positionDetails" in position && position.positionDetails) {
+        data.positionDetails = {
+          create: {
+            targetSize: position.positionDetails.targetSize,
+            currentSize: position.positionDetails.currentSize,
+            targetEntry: position.positionDetails.targetEntry,
+            targetExit: position.positionDetails.targetExit,
+            targetProfit: position.positionDetails.targetProfit,
+            maxLoss: position.positionDetails.maxLoss,
+            riskRewardRatio: position.positionDetails.riskRewardRatio,
+            expectedReturn: position.positionDetails.expectedReturn,
+          },
+        };
+      }
+
+      // Add thesis if provided
+      if ("thesis" in position && position.thesis) {
+        data.thesis = {
+          create: {
+            summary: position.thesis.summary,
+            analysis: position.thesis.analysis,
+            keyPoints: position.thesis.keyPoints || [],
+            timeframeReason: position.thesis.timeframeReason,
+            entryReason: position.thesis.entryReason,
+            exitReason: position.thesis.exitReason,
+            supportingLinks: position.thesis.supportingLinks || [],
+            dateCreated:
+              dateOrGenesisToDate(position.thesis.dateCreated) ?? new Date(),
+          },
+        };
+      }
+
+      // Create position
       const createdPosition = await this.prisma.position.create({
-        data: {
-          name: position.name,
-          marketId: position.marketId,
-          walletLocationId: position.walletLocationId,
-          walletType: position.walletType,
-          lifecycle: position.lifecycle,
-          capitalTier: position.capitalTier,
-          riskLevel: position.riskLevel,
-          strategy: position.strategy,
-          positionDetailsId: positionDetails.id,
-          // Create lifecycle history entry
-          lifecycleHistory: {
-            create: {
-              from: "new", // Assuming default starting state
-              to: position.lifecycle,
-              timestamp: new Date(),
-              userId: position.userId || "system",
-              notes: "Initial position creation",
-            },
-          },
-          // Create capital tier history entry
-          capitalTierHistory: {
-            create: {
-              from: position.capitalTier, // Same as initial value since it's new
-              to: position.capitalTier,
-              timestamp: new Date(),
-              amountSecured: position.positionDetails.initialInvestment,
-              notes: "Initial capital allocation",
-            },
-          },
-          // Create initial thesis if provided
-          thesis: position.thesis
-            ? {
-                create: {
-                  reasoning: position.thesis.reasoning,
-                  invalidation: position.thesis.invalidation,
-                  fulfillment: position.thesis.fulfillment,
-                  notes: position.thesis.notes,
-                },
-              }
-            : undefined,
-          // Create initial metrics
-          metrics: {
-            create: {
-              realizedPnL: 0,
-              unrealizedPnL: 0,
-              roi: 0,
-              maxDrawdown: 0,
-              duration: "0d",
-            },
-          },
-        },
+        data,
         include: {
           market: {
             include: {
@@ -246,41 +305,18 @@ export class PositionRepository {
           },
           walletLocation: true,
           positionDetails: true,
-          metrics: true,
-          thesis: true,
         },
       });
 
-      // Create initial orders if provided
-      if (
-        position.positionDetails.orders &&
-        position.positionDetails.orders.length > 0
-      ) {
-        for (const order of position.positionDetails.orders) {
-          await this.prisma.order.create({
-            data: {
-              positionDetailsId: positionDetails.id,
-              dateOpen: dateOrGenesisToDate(order.dateOpen),
-              dateFilled: dateOrGenesisToDate(order.dateFilled),
-              averagePrice: order.averagePrice,
-              totalCost: order.totalCost,
-              status: order.status,
-              type: order.type,
-              purpose: order.purpose,
-              fee: order.fee,
-              feeUnit: order.feeUnit,
-              filled: order.filled,
-              unit: order.unit,
-              capitalTierImpact: order.capitalTierImpact,
-              notes: order.notes,
-            },
-          });
-        }
-      }
-
-      return this.mapToDomainModel(createdPosition);
+      return {
+        success: true,
+        data: mapPositionToDomain(createdPosition),
+      };
     } catch (error) {
-      throw handleDatabaseError(error);
+      return {
+        success: false,
+        error: handleDatabaseError(error).message,
+      };
     }
   }
 
@@ -417,7 +453,7 @@ export class PositionRepository {
         },
       });
 
-      return this.mapToDomainModel(updatedPosition);
+      return mapPositionToDomain(updatedPosition);
     } catch (error) {
       throw handleDatabaseError(error);
     }
@@ -474,231 +510,5 @@ export class PositionRepository {
     } catch (error) {
       throw handleDatabaseError(error);
     }
-  }
-
-  /**
-   * Map a Prisma position to the domain model
-   */
-  private mapToDomainModel(
-    position: PrismaPosition & {
-      market?: any;
-      walletLocation?: any;
-      positionDetails?: any;
-      metrics?: any;
-      thesis?: any;
-      journalEntries?: any[];
-      lifecycleHistory?: any[];
-      capitalTierHistory?: any[];
-    }
-  ): Position {
-    // Map market data if included
-    const market = position.market
-      ? {
-          id: position.market.id,
-          baseAsset: {
-            id: position.market.baseAsset.id,
-            name: position.market.baseAsset.name,
-            ticker: position.market.baseAsset.ticker,
-            assetType: position.market.baseAsset.assetType,
-            description: position.market.baseAsset.description || undefined,
-          },
-          quoteAsset: {
-            id: position.market.quoteAsset.id,
-            name: position.market.quoteAsset.name,
-            ticker: position.market.quoteAsset.ticker,
-            assetType: position.market.quoteAsset.assetType,
-            description: position.market.quoteAsset.description || undefined,
-          },
-          marketSymbol: position.market.marketSymbol,
-          pairNotation: position.market.pairNotation,
-          exchange: position.market.exchange || undefined,
-          isTradable: position.market.isTradable,
-        }
-      : undefined;
-
-    // Map wallet location data if included
-    const walletLocation = position.walletLocation
-      ? {
-          id: position.walletLocation.id,
-          name: position.walletLocation.name,
-          locationType: position.walletLocation.locationType,
-          exchangeName: position.walletLocation.exchangeName || undefined,
-          accountType: position.walletLocation.accountType || undefined,
-          storageType: position.walletLocation.storageType || undefined,
-          storageName: position.walletLocation.storageName || undefined,
-          userId: position.walletLocation.userId,
-        }
-      : undefined;
-
-    // Map position details
-    const positionDetails = position.positionDetails
-      ? {
-          id: position.positionDetails.id,
-          side: position.positionDetails.side,
-          fractal: position.positionDetails.fractal,
-          initialInvestment: position.positionDetails.initialInvestment,
-          currentInvestment: position.positionDetails.currentInvestment,
-          recoveredAmount: position.positionDetails.recoveredAmount,
-          dateOpened: databaseDateToDateOrGenesis(
-            position.positionDetails.dateOpened
-          ),
-          closedPercentage: position.positionDetails.closedPercentage,
-          // Map orders if included
-          orders: position.positionDetails.orders
-            ? position.positionDetails.orders.map((order: any) => ({
-                id: order.id,
-                dateOpen: databaseDateToDateOrGenesis(order.dateOpen),
-                dateFilled: databaseDateToDateOrGenesis(order.dateFilled),
-                averagePrice: order.averagePrice,
-                totalCost: order.totalCost,
-                status: order.status,
-                type: order.type,
-                purpose: order.purpose,
-                fee: order.fee,
-                feeUnit: order.feeUnit,
-                filled: order.filled,
-                unit: order.unit,
-                capitalTierImpact: order.capitalTierImpact,
-                notes: order.notes,
-              }))
-            : undefined,
-          stopLoss: position.positionDetails.stopLossOrders
-            ? position.positionDetails.stopLossOrders.map((order: any) => ({
-                id: order.id,
-                dateOpen: databaseDateToDateOrGenesis(order.dateOpen),
-                dateFilled: databaseDateToDateOrGenesis(order.dateFilled),
-                averagePrice: order.averagePrice,
-                totalCost: order.totalCost,
-                status: order.status,
-                type: order.type,
-                fee: order.fee,
-                feeUnit: order.feeUnit,
-                filled: order.filled,
-                trigger: order.trigger,
-                estimatedCost: order.estimatedCost,
-                unit: order.unit,
-                size: order.size,
-              }))
-            : undefined,
-          takeProfit: position.positionDetails.takeProfitOrders
-            ? position.positionDetails.takeProfitOrders.map((order: any) => ({
-                id: order.id,
-                dateOpen: databaseDateToDateOrGenesis(order.dateOpen),
-                dateFilled: databaseDateToDateOrGenesis(order.dateFilled),
-                averagePrice: order.averagePrice,
-                totalCost: order.totalCost,
-                status: order.status,
-                type: order.type,
-                fee: order.fee,
-                feeUnit: order.feeUnit,
-                filled: order.filled,
-                trigger: order.trigger,
-                estimatedCost: order.estimatedCost,
-                unit: order.unit,
-                size: order.size,
-              }))
-            : undefined,
-        }
-      : undefined;
-
-    // Map metrics if included
-    const metrics = position.metrics
-      ? {
-          id: position.metrics.id,
-          realizedPnL: position.metrics.realizedPnL,
-          unrealizedPnL: position.metrics.unrealizedPnL,
-          roi: position.metrics.roi,
-          maxDrawdown: position.metrics.maxDrawdown,
-          duration: position.metrics.duration,
-        }
-      : undefined;
-
-    // Map thesis if included
-    const thesis = position.thesis
-      ? {
-          id: position.thesis.id,
-          reasoning: position.thesis.reasoning,
-          invalidation: position.thesis.invalidation || undefined,
-          fulfillment: position.thesis.fulfillment || undefined,
-          notes: position.thesis.notes || undefined,
-        }
-      : undefined;
-
-    // Map journal entries if included
-    const journalEntries = position.journalEntries
-      ? position.journalEntries.map((entry: any) => ({
-          id: entry.id,
-          thought: entry.thought,
-          attachments: entry.attachments,
-          timestamp: entry.timestamp,
-          userId: entry.userId,
-        }))
-      : undefined;
-
-    // Map lifecycle history if included
-    const lifecycleHistory = position.lifecycleHistory
-      ? position.lifecycleHistory.map((history: any) => ({
-          id: history.id,
-          from: history.from,
-          to: history.to,
-          timestamp: history.timestamp,
-          userId: history.userId,
-          notes: history.notes || undefined,
-          relatedOrderIds: history.relatedOrderIds,
-        }))
-      : undefined;
-
-    // Map capital tier history if included
-    const capitalTierHistory = position.capitalTierHistory
-      ? position.capitalTierHistory.map((history: any) => ({
-          id: history.id,
-          from: history.from,
-          to: history.to,
-          timestamp: history.timestamp,
-          amountSecured: history.amountSecured,
-          relatedOrderId: history.relatedOrderId || undefined,
-          notes: history.notes || undefined,
-        }))
-      : undefined;
-
-    return {
-      id: position.id,
-      name: position.name,
-      marketId: position.marketId,
-      market,
-      walletLocationId: position.walletLocationId,
-      walletLocation,
-      walletType: position.walletType,
-      lifecycle: position.lifecycle,
-      capitalTier: position.capitalTier,
-      riskLevel: position.riskLevel,
-      strategy: position.strategy,
-      positionDetails,
-      metrics,
-      journalEntries,
-      lifecycleHistory,
-      capitalTierHistory,
-      portfolio: position.portfolioPositions?.[0]?.portfolioId || "",
-      thesis: position.thesis
-        ? {
-            reasoning: position.thesis.reasoning,
-            invalidation: position.thesis.invalidation || undefined,
-            fulfillment: position.thesis.fulfillment || undefined,
-            notes: position.thesis.notes || undefined,
-            technicalAnalysis: position.thesis.technicalAnalysis || undefined,
-            fundamentalAnalysis:
-              position.thesis.fundamentalAnalysis || undefined,
-            timeHorizon: position.thesis.timeHorizon || undefined,
-            riskRewardRatio: position.thesis.riskRewardRatio || undefined,
-          }
-        : undefined,
-      tags: position.tags || [],
-      userId: position.userId,
-      dateCreated: position.createdAt,
-      dateUpdated: position.updatedAt,
-      currentValue: position.metrics?.currentValue,
-      isHidden: position.isHidden || false,
-      alertsEnabled: position.alertsEnabled || false,
-    };
   }
 }

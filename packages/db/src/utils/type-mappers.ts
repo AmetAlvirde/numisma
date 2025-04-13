@@ -17,6 +17,10 @@ import {
   TradeSide,
   PositionStatus,
   TimeFrame,
+  AssetType,
+  Position,
+  Portfolio,
+  Market,
 } from "@numisma/types";
 
 import {
@@ -34,6 +38,7 @@ import {
   OrderType as PrismaOrderType,
   TradeSide as PrismaTradeSide,
   AssetLocationType as PrismaAssetLocationType,
+  Prisma,
 } from "@prisma/client";
 
 /**
@@ -343,4 +348,171 @@ export function dateOrGenesisToDate(date: DateOrGenesis): Date | null {
   }
 
   return date;
+}
+
+/**
+ * TODO: Implement this function properly
+ * Convert a string to AssetType with type safety
+ */
+export function stringToAssetType(value: string): AssetType {
+  return value as AssetType; // Temporary implementation, needs proper validation
+}
+
+/**
+ * Convert domain Position to Prisma Position for create operations
+ */
+export function mapPositionToPrisma(
+  position: Omit<Position, "id">
+): Prisma.PositionCreateInput {
+  // Extract the properties we need from the position object
+  const {
+    name,
+    lifecycle,
+    capitalTier,
+    dateCreated,
+    marketId,
+    walletLocationId,
+    positionDetails,
+    thesis,
+    comment,
+    tags,
+    isHidden,
+    isModel,
+  } = position;
+
+  // Position may not have all optional fields, so we build the data object carefully
+  const data: Prisma.PositionCreateInput = {
+    name,
+    lifecycle,
+    capitalTier,
+    dateCreated: dateOrGenesisToDate(dateCreated) ?? new Date(),
+    dateModified: new Date(),
+    tags: tags || [],
+    isHidden: isHidden || false,
+    isModel: isModel || false,
+    comment,
+  };
+
+  // Add optional fields conditionally
+  if ("tradeSide" in position && position.tradeSide) {
+    data.tradeSide = mapToPrismaTradeSide(position.tradeSide);
+  }
+
+  if ("status" in position && position.status) {
+    data.status = mapToPrismaPositionStatus(position.status);
+  }
+
+  if ("direction" in position && position.direction) {
+    data.direction = position.direction;
+  }
+
+  if ("dateOpened" in position && position.dateOpened) {
+    data.dateOpened = dateOrGenesisToDate(position.dateOpened);
+  }
+
+  if ("dateClosed" in position && position.dateClosed) {
+    data.dateClosed = dateOrGenesisToDate(position.dateClosed);
+  }
+
+  if ("timeFrame" in position && position.timeFrame) {
+    data.timeFrame = position.timeFrame;
+  }
+
+  if ("averageEntry" in position && position.averageEntry !== undefined) {
+    data.averageEntry = position.averageEntry;
+  }
+
+  if ("averageExit" in position && position.averageExit !== undefined) {
+    data.averageExit = position.averageExit;
+  }
+
+  if ("invested" in position && position.invested !== undefined) {
+    data.invested = position.invested;
+  }
+
+  if ("roi" in position && position.roi !== undefined) {
+    data.roi = position.roi;
+  }
+
+  // Add relationships
+  if (marketId) {
+    data.market = { connect: { id: marketId } };
+  }
+
+  if (walletLocationId) {
+    data.walletLocation = { connect: { id: walletLocationId } };
+  }
+
+  if (positionDetails) {
+    data.positionDetails = {
+      create: {
+        targetSize: positionDetails.targetSize,
+        currentSize: positionDetails.currentSize,
+        targetEntry: positionDetails.targetEntry,
+        targetExit: positionDetails.targetExit,
+        targetProfit: positionDetails.targetProfit,
+        maxLoss: positionDetails.maxLoss,
+        riskRewardRatio: positionDetails.riskRewardRatio,
+        expectedReturn: positionDetails.expectedReturn,
+      },
+    };
+  }
+
+  if (thesis) {
+    data.thesis = {
+      create: {
+        summary: thesis.summary,
+        analysis: thesis.analysis,
+        keyPoints: thesis.keyPoints || [],
+        timeframeReason: thesis.timeframeReason,
+        entryReason: thesis.entryReason,
+        exitReason: thesis.exitReason,
+        supportingLinks: thesis.supportingLinks || [],
+        dateCreated: dateOrGenesisToDate(thesis.dateCreated) ?? new Date(),
+      },
+    };
+  }
+
+  return data;
+}
+
+/**
+ * Convert domain Portfolio to Prisma Portfolio for create operations
+ */
+export function mapPortfolioToPrisma(
+  portfolio: Omit<Portfolio, "id">
+): Prisma.PortfolioCreateInput {
+  return {
+    name: portfolio.name,
+    description: portfolio.description,
+    dateCreated: dateOrGenesisToDate(portfolio.dateCreated) ?? new Date(),
+    status: portfolio.status,
+    userId: portfolio.userId,
+    tags: portfolio.tags || [],
+    notes: portfolio.notes,
+    color: portfolio.color,
+    sortOrder: portfolio.sortOrder || 0,
+    isPinned: portfolio.isPinned || false,
+  };
+}
+
+/**
+ * TODO: Implement this function properly
+ * Convert domain Market to Prisma Market for create operations
+ */
+export function mapMarketToPrisma(
+  market: Omit<Market, "id" | "baseAsset" | "quoteAsset"> & {
+    baseAssetId: string;
+    quoteAssetId: string;
+  }
+): Prisma.MarketCreateInput {
+  // This is a stub that needs proper implementation
+  return {
+    baseAsset: { connect: { id: market.baseAssetId } },
+    quoteAsset: { connect: { id: market.quoteAssetId } },
+    marketSymbol: market.pairNotation.replace("/", ""),
+    pairNotation: market.pairNotation,
+    exchange: market.exchange,
+    isTradable: market.isTradable ?? true,
+  };
 }
