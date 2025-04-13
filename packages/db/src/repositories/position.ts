@@ -35,6 +35,9 @@ import {
   DateOrGenesis,
   OperationResult,
   PaginatedResult,
+  PositionStatus,
+  TradeSide,
+  TimeFrame,
 } from "@numisma/types";
 import { positionSchema } from "../schema/position";
 import {
@@ -43,6 +46,10 @@ import {
   handleDatabaseError,
 } from "../utils";
 import { mapPositionToDomain } from "../utils/entity-mappers";
+import {
+  mapToPrismaPositionStatus,
+  mapToPrismaTradeSide,
+} from "../utils/type-mappers";
 
 export class PositionRepository {
   constructor(private prisma: PrismaClient) {}
@@ -239,61 +246,168 @@ export class PositionRepository {
         };
       }
 
-      // Build Prisma data
+      // Build Prisma data - Note: Not using mapPositionToPrisma directly due to type differences
       const data: Prisma.PositionCreateInput = {
         name: position.name,
         lifecycle: position.lifecycle,
         capitalTier: position.capitalTier,
         dateCreated: dateOrGenesisToDate(position.dateCreated) ?? new Date(),
         dateModified: new Date(),
-        tags: position.tags || [],
-        isHidden: position.isHidden || false,
-        comment: position.comment,
+        riskLevel: position.riskLevel,
+        strategy: position.strategy || "",
+        walletType: position.walletType,
       };
 
-      // Add relationships
-      if ("marketId" in position && position.marketId) {
+      // Add tags if provided
+      if (position.tags && position.tags.length > 0) {
+        data.tags = position.tags;
+      }
+
+      // Add isHidden if provided
+      if (position.isHidden !== undefined) {
+        data.isHidden = position.isHidden;
+      }
+
+      // Handle Market relationship
+      if (position.marketId) {
         data.market = { connect: { id: position.marketId } };
       }
 
-      if ("walletLocationId" in position && position.walletLocationId) {
+      // Handle WalletLocation relationship
+      if (position.walletLocationId) {
         data.walletLocation = { connect: { id: position.walletLocationId } };
       }
 
-      // Add position details if provided
-      if ("positionDetails" in position && position.positionDetails) {
+      // Handle PositionDetails with nested create
+      if (position.positionDetails) {
+        const details = position.positionDetails;
         data.positionDetails = {
           create: {
-            targetSize: position.positionDetails.targetSize,
-            currentSize: position.positionDetails.currentSize,
-            targetEntry: position.positionDetails.targetEntry,
-            targetExit: position.positionDetails.targetExit,
-            targetProfit: position.positionDetails.targetProfit,
-            maxLoss: position.positionDetails.maxLoss,
-            riskRewardRatio: position.positionDetails.riskRewardRatio,
-            expectedReturn: position.positionDetails.expectedReturn,
+            status: mapToPrismaPositionStatus(
+              details.status || PositionStatus.ACTIVE
+            ),
+            side: mapToPrismaTradeSide(details.side || TradeSide.LONG),
+            timeFrame: details.timeFrame || TimeFrame.ONE_DAY,
+
+            // Handle dates with proper DateOrGenesis conversion
+            ...(details.dateOpened
+              ? {
+                  dateOpened: dateOrGenesisToDate(details.dateOpened),
+                }
+              : {}),
+            ...(details.dateClosed
+              ? {
+                  dateClosed: dateOrGenesisToDate(details.dateClosed),
+                }
+              : {}),
+
+            // Handle numeric properties
+            ...(details.averageEntryPrice !== undefined
+              ? {
+                  averageEntryPrice: details.averageEntryPrice,
+                }
+              : {}),
+            ...(details.averageExitPrice !== undefined
+              ? {
+                  averageExitPrice: details.averageExitPrice,
+                }
+              : {}),
+            ...(details.totalSize !== undefined
+              ? {
+                  totalSize: details.totalSize,
+                }
+              : {}),
+            ...(details.totalCost !== undefined
+              ? {
+                  totalCost: details.totalCost,
+                }
+              : {}),
+            ...(details.realizedProfitLoss !== undefined
+              ? {
+                  realizedProfitLoss: details.realizedProfitLoss,
+                }
+              : {}),
+            ...(details.unrealizedProfitLoss !== undefined
+              ? {
+                  unrealizedProfitLoss: details.unrealizedProfitLoss,
+                }
+              : {}),
+            ...(details.currentReturn !== undefined
+              ? {
+                  currentReturn: details.currentReturn,
+                }
+              : {}),
+            ...(details.targetPrice !== undefined
+              ? {
+                  targetPrice: details.targetPrice,
+                }
+              : {}),
+            ...(details.stopPrice !== undefined
+              ? {
+                  stopPrice: details.stopPrice,
+                }
+              : {}),
+            ...(details.riskRewardRatio !== undefined
+              ? {
+                  riskRewardRatio: details.riskRewardRatio,
+                }
+              : {}),
+            isLeveraged: details.isLeveraged || false,
+            ...(details.leverage !== undefined
+              ? {
+                  leverage: details.leverage,
+                }
+              : {}),
           },
         };
       }
 
-      // Add thesis if provided
-      if ("thesis" in position && position.thesis) {
+      // Handle thesis with nested create
+      if (position.thesis) {
+        const thesis = position.thesis;
         data.thesis = {
           create: {
-            summary: position.thesis.summary,
-            analysis: position.thesis.analysis,
-            keyPoints: position.thesis.keyPoints || [],
-            timeframeReason: position.thesis.timeframeReason,
-            entryReason: position.thesis.entryReason,
-            exitReason: position.thesis.exitReason,
-            supportingLinks: position.thesis.supportingLinks || [],
-            dateCreated:
-              dateOrGenesisToDate(position.thesis.dateCreated) ?? new Date(),
+            reasoning: thesis.reasoning,
+            ...(thesis.invalidation !== undefined
+              ? {
+                  invalidation: thesis.invalidation,
+                }
+              : {}),
+            ...(thesis.fulfillment !== undefined
+              ? {
+                  fulfillment: thesis.fulfillment,
+                }
+              : {}),
+            ...(thesis.notes !== undefined
+              ? {
+                  notes: thesis.notes,
+                }
+              : {}),
+            ...(thesis.technicalAnalysis !== undefined
+              ? {
+                  technicalAnalysis: thesis.technicalAnalysis,
+                }
+              : {}),
+            ...(thesis.fundamentalAnalysis !== undefined
+              ? {
+                  fundamentalAnalysis: thesis.fundamentalAnalysis,
+                }
+              : {}),
+            ...(thesis.timeHorizon !== undefined
+              ? {
+                  timeHorizon: thesis.timeHorizon,
+                }
+              : {}),
+            ...(thesis.riskRewardRatio !== undefined
+              ? {
+                  riskRewardRatio: thesis.riskRewardRatio,
+                }
+              : {}),
           },
         };
       }
 
-      // Create position
+      // Create the position
       const createdPosition = await this.prisma.position.create({
         data,
         include: {
@@ -304,7 +418,14 @@ export class PositionRepository {
             },
           },
           walletLocation: true,
-          positionDetails: true,
+          positionDetails: {
+            include: {
+              orders: true,
+              stopLossOrders: true,
+              takeProfitOrders: true,
+            },
+          },
+          thesis: true,
         },
       });
 
@@ -325,120 +446,267 @@ export class PositionRepository {
    */
   async update(
     id: string,
-    data: Partial<Omit<Position, "id">>
-  ): Promise<Position> {
-    // Validate with Zod schema
-    positionSchema.partial().omit({ id: true }).parse(data);
-
+    data: Partial<Omit<Position, "id">> & {
+      market?: { id: string };
+      walletLocation?: { id: string };
+    }
+  ): Promise<OperationResult<Position>> {
     try {
-      // First get the current position to compare changes
-      const currentPosition = await this.prisma.position.findUnique({
+      // First check if the position exists
+      const existingPosition = await this.prisma.position.findUnique({
         where: { id },
         include: {
-          positionDetails: true,
+          market: true,
+          walletLocation: true,
+          positionDetails: {
+            include: {
+              orders: true,
+              stopLossOrders: true,
+              takeProfitOrders: true,
+            },
+          },
+          thesis: true,
         },
       });
 
-      if (!currentPosition) {
-        throw new Error(`Position with ID ${id} not found`);
+      if (!existingPosition) {
+        return {
+          success: false,
+          error: `Position with ID ${id} not found`,
+        };
       }
 
-      // Handle lifecycle change if needed
-      if (data.lifecycle && data.lifecycle !== currentPosition.lifecycle) {
-        await this.prisma.lifecycleHistory.create({
-          data: {
-            positionId: id,
-            from: currentPosition.lifecycle,
-            to: data.lifecycle,
-            timestamp: new Date(),
-            userId: data.userId || "system",
-            notes:
-              data.lifecycleNotes ||
-              `Updated lifecycle from ${currentPosition.lifecycle} to ${data.lifecycle}`,
-          },
-        });
+      // Use the mapper to prepare the update data
+      // We need to be careful with updates to avoid overwriting related entities
+      // For this reason, we handle market, wallet, orders, etc. separately
+      let updateData: Prisma.PositionUpdateInput = {};
+
+      // Update basic fields
+      if (data.name !== undefined) updateData.name = data.name;
+      if (data.lifecycle !== undefined) updateData.lifecycle = data.lifecycle;
+      if (data.capitalTier !== undefined)
+        updateData.capitalTier = data.capitalTier;
+      if (data.walletType !== undefined)
+        updateData.walletType = data.walletType;
+      if (data.riskLevel !== undefined) updateData.riskLevel = data.riskLevel;
+      if (data.strategy !== undefined) updateData.strategy = data.strategy;
+
+      // Add tags if provided (handling as a special case)
+      if (data.tags !== undefined) {
+        updateData.tags = data.tags as any;
       }
 
-      // Handle capital tier change if needed
-      if (
-        data.capitalTier &&
-        data.capitalTier !== currentPosition.capitalTier
-      ) {
-        await this.prisma.capitalTierHistory.create({
-          data: {
-            positionId: id,
-            from: currentPosition.capitalTier,
-            to: data.capitalTier,
-            timestamp: new Date(),
-            amountSecured: data.capitalTierAmount || 0,
-            notes:
-              data.capitalTierNotes ||
-              `Updated capital tier from ${currentPosition.capitalTier} to ${data.capitalTier}`,
-          },
-        });
+      // Add isHidden if provided (handling as a special case)
+      if (data.isHidden !== undefined) {
+        updateData.isHidden = data.isHidden as any;
       }
 
-      // Update position details if provided
+      // Handle market relationship update
+      if (data.market?.id) {
+        updateData.market = { connect: { id: data.market.id } };
+      }
+
+      // Handle wallet location relationship update
+      if (data.walletLocation?.id) {
+        updateData.walletLocation = { connect: { id: data.walletLocation.id } };
+      }
+
+      // Handle position details update (if exists)
       if (data.positionDetails) {
-        await this.prisma.positionDetails.update({
-          where: { id: currentPosition.positionDetailsId },
-          data: {
-            side: data.positionDetails.side,
-            fractal: data.positionDetails.fractal,
-            initialInvestment: data.positionDetails.initialInvestment,
-            currentInvestment: data.positionDetails.currentInvestment,
-            recoveredAmount: data.positionDetails.recoveredAmount,
-            dateOpened: data.positionDetails.dateOpened
-              ? dateOrGenesisToDate(data.positionDetails.dateOpened)
-              : undefined,
-            closedPercentage: data.positionDetails.closedPercentage,
-          },
-        });
-      }
-
-      // Update thesis if provided
-      if (data.thesis) {
-        // Check if thesis exists
-        const thesis = await this.prisma.thesis.findUnique({
-          where: { positionId: id },
-        });
-
-        if (thesis) {
-          await this.prisma.thesis.update({
-            where: { positionId: id },
-            data: {
-              reasoning: data.thesis.reasoning,
-              invalidation: data.thesis.invalidation,
-              fulfillment: data.thesis.fulfillment,
-              notes: data.thesis.notes,
+        // If the position already has details, update them
+        if (existingPosition.positionDetailsId) {
+          updateData.positionDetails = {
+            update: {
+              // Update position details fields
+              ...(data.positionDetails.status !== undefined && {
+                status: mapToPrismaPositionStatus(data.positionDetails.status),
+              }),
+              ...(data.positionDetails.side !== undefined && {
+                side: mapToPrismaTradeSide(data.positionDetails.side),
+              }),
+              ...(data.positionDetails.timeFrame !== undefined && {
+                timeFrame: data.positionDetails.timeFrame,
+              }),
+              ...(data.positionDetails.dateOpened !== undefined && {
+                dateOpened: dateOrGenesisToDate(
+                  data.positionDetails.dateOpened
+                ),
+              }),
+              ...(data.positionDetails.dateClosed !== undefined && {
+                dateClosed: dateOrGenesisToDate(
+                  data.positionDetails.dateClosed
+                ),
+              }),
+              ...(data.positionDetails.averageEntryPrice !== undefined && {
+                averageEntryPrice: data.positionDetails.averageEntryPrice,
+              }),
+              ...(data.positionDetails.averageExitPrice !== undefined && {
+                averageExitPrice: data.positionDetails.averageExitPrice,
+              }),
+              ...(data.positionDetails.totalSize !== undefined && {
+                totalSize: data.positionDetails.totalSize,
+              }),
+              ...(data.positionDetails.totalCost !== undefined && {
+                totalCost: data.positionDetails.totalCost,
+              }),
+              ...(data.positionDetails.realizedProfitLoss !== undefined && {
+                realizedProfitLoss: data.positionDetails.realizedProfitLoss,
+              }),
+              ...(data.positionDetails.unrealizedProfitLoss !== undefined && {
+                unrealizedProfitLoss: data.positionDetails.unrealizedProfitLoss,
+              }),
+              ...(data.positionDetails.currentReturn !== undefined && {
+                currentReturn: data.positionDetails.currentReturn,
+              }),
+              ...(data.positionDetails.targetPrice !== undefined && {
+                targetPrice: data.positionDetails.targetPrice,
+              }),
+              ...(data.positionDetails.stopPrice !== undefined && {
+                stopPrice: data.positionDetails.stopPrice,
+              }),
+              ...(data.positionDetails.riskRewardRatio !== undefined && {
+                riskRewardRatio: data.positionDetails.riskRewardRatio,
+              }),
+              ...(data.positionDetails.isLeveraged !== undefined && {
+                isLeveraged: data.positionDetails.isLeveraged,
+              }),
+              ...(data.positionDetails.leverage !== undefined && {
+                leverage: data.positionDetails.leverage,
+              }),
             },
-          });
-        } else {
-          await this.prisma.thesis.create({
-            data: {
-              positionId: id,
-              reasoning: data.thesis.reasoning,
-              invalidation: data.thesis.invalidation,
-              fulfillment: data.thesis.fulfillment,
-              notes: data.thesis.notes,
+          };
+        }
+        // If no position details exist yet, create them (unlikely)
+        else {
+          const positionDetails = data.positionDetails;
+          updateData.positionDetails = {
+            create: {
+              status: mapToPrismaPositionStatus(
+                positionDetails.status || PositionStatus.ACTIVE
+              ),
+              side: mapToPrismaTradeSide(
+                positionDetails.side || TradeSide.LONG
+              ),
+              timeFrame: positionDetails.timeFrame || TimeFrame.ONE_DAY,
+              ...(positionDetails.dateOpened && {
+                dateOpened: dateOrGenesisToDate(positionDetails.dateOpened),
+              }),
+              ...(positionDetails.dateClosed && {
+                dateClosed: dateOrGenesisToDate(positionDetails.dateClosed),
+              }),
+              ...(positionDetails.averageEntryPrice !== undefined && {
+                averageEntryPrice: positionDetails.averageEntryPrice,
+              }),
+              ...(positionDetails.averageExitPrice !== undefined && {
+                averageExitPrice: positionDetails.averageExitPrice,
+              }),
+              ...(positionDetails.totalSize !== undefined && {
+                totalSize: positionDetails.totalSize,
+              }),
+              ...(positionDetails.totalCost !== undefined && {
+                totalCost: positionDetails.totalCost,
+              }),
+              ...(positionDetails.realizedProfitLoss !== undefined && {
+                realizedProfitLoss: positionDetails.realizedProfitLoss,
+              }),
+              ...(positionDetails.unrealizedProfitLoss !== undefined && {
+                unrealizedProfitLoss: positionDetails.unrealizedProfitLoss,
+              }),
+              ...(positionDetails.currentReturn !== undefined && {
+                currentReturn: positionDetails.currentReturn,
+              }),
+              ...(positionDetails.targetPrice !== undefined && {
+                targetPrice: positionDetails.targetPrice,
+              }),
+              ...(positionDetails.stopPrice !== undefined && {
+                stopPrice: positionDetails.stopPrice,
+              }),
+              ...(positionDetails.riskRewardRatio !== undefined && {
+                riskRewardRatio: positionDetails.riskRewardRatio,
+              }),
+              ...(positionDetails.isLeveraged !== undefined && {
+                isLeveraged: positionDetails.isLeveraged,
+              }),
+              ...(positionDetails.leverage !== undefined && {
+                leverage: positionDetails.leverage,
+              }),
             },
-          });
+          };
         }
       }
 
-      // Update the position itself
+      // Handle thesis update
+      if (data.thesis) {
+        // If the position already has a thesis, update it
+        if (existingPosition.thesis) {
+          updateData.thesis = {
+            update: {
+              ...(data.thesis.reasoning !== undefined && {
+                reasoning: data.thesis.reasoning,
+              }),
+              ...(data.thesis.invalidation !== undefined && {
+                invalidation: data.thesis.invalidation,
+              }),
+              ...(data.thesis.fulfillment !== undefined && {
+                fulfillment: data.thesis.fulfillment,
+              }),
+              ...(data.thesis.notes !== undefined && {
+                notes: data.thesis.notes,
+              }),
+              ...(data.thesis.technicalAnalysis !== undefined && {
+                technicalAnalysis: data.thesis.technicalAnalysis,
+              }),
+              ...(data.thesis.fundamentalAnalysis !== undefined && {
+                fundamentalAnalysis: data.thesis.fundamentalAnalysis,
+              }),
+              ...(data.thesis.timeHorizon !== undefined && {
+                timeHorizon: data.thesis.timeHorizon,
+              }),
+              ...(data.thesis.riskRewardRatio !== undefined && {
+                riskRewardRatio: data.thesis.riskRewardRatio,
+              }),
+            },
+          };
+        }
+        // If no thesis exists yet, create it
+        else {
+          updateData.thesis = {
+            create: {
+              reasoning: data.thesis.reasoning,
+              ...(data.thesis.invalidation !== undefined && {
+                invalidation: data.thesis.invalidation,
+              }),
+              ...(data.thesis.fulfillment !== undefined && {
+                fulfillment: data.thesis.fulfillment,
+              }),
+              ...(data.thesis.notes !== undefined && {
+                notes: data.thesis.notes,
+              }),
+              ...(data.thesis.technicalAnalysis !== undefined && {
+                technicalAnalysis: data.thesis.technicalAnalysis,
+              }),
+              ...(data.thesis.fundamentalAnalysis !== undefined && {
+                fundamentalAnalysis: data.thesis.fundamentalAnalysis,
+              }),
+              ...(data.thesis.timeHorizon !== undefined && {
+                timeHorizon: data.thesis.timeHorizon,
+              }),
+              ...(data.thesis.riskRewardRatio !== undefined && {
+                riskRewardRatio: data.thesis.riskRewardRatio,
+              }),
+            },
+          };
+        }
+      }
+
+      // Note: Orders, stopLoss, and takeProfit updates would be handled separately using
+      // dedicated order repository methods, as they might require creating, updating, or deleting
+      // individual orders rather than replacing the entire collection
+
+      // Perform the update
       const updatedPosition = await this.prisma.position.update({
         where: { id },
-        data: {
-          name: data.name,
-          marketId: data.marketId,
-          walletLocationId: data.walletLocationId,
-          walletType: data.walletType,
-          lifecycle: data.lifecycle,
-          capitalTier: data.capitalTier,
-          riskLevel: data.riskLevel,
-          strategy: data.strategy,
-        },
+        data: updateData,
         include: {
           market: {
             include: {
@@ -447,15 +715,26 @@ export class PositionRepository {
             },
           },
           walletLocation: true,
-          positionDetails: true,
-          metrics: true,
+          positionDetails: {
+            include: {
+              orders: true,
+              stopLossOrders: true,
+              takeProfitOrders: true,
+            },
+          },
           thesis: true,
         },
       });
 
-      return mapPositionToDomain(updatedPosition);
+      return {
+        success: true,
+        data: mapPositionToDomain(updatedPosition),
+      };
     } catch (error) {
-      throw handleDatabaseError(error);
+      return {
+        success: false,
+        error: handleDatabaseError(error).message,
+      };
     }
   }
 

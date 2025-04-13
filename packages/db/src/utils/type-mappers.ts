@@ -362,113 +362,269 @@ export function stringToAssetType(value: string): AssetType {
  * Convert domain Position to Prisma Position for create operations
  */
 export function mapPositionToPrisma(
-  position: Omit<Position, "id">
+  position: Omit<Position, "id"> & {
+    market?: { id: string };
+    walletLocation?: { id: string };
+  }
 ): Prisma.PositionCreateInput {
-  // Extract the properties we need from the position object
+  // Extract the basic properties we need from the position object
   const {
     name,
     lifecycle,
     capitalTier,
-    dateCreated,
-    marketId,
-    walletLocationId,
-    positionDetails,
-    thesis,
-    comment,
     tags,
     isHidden,
-    isModel,
+    market,
+    walletLocation,
+    positionDetails,
+    thesis,
   } = position;
 
   // Position may not have all optional fields, so we build the data object carefully
   const data: Prisma.PositionCreateInput = {
     name,
-    lifecycle,
-    capitalTier,
-    dateCreated: dateOrGenesisToDate(dateCreated) ?? new Date(),
-    dateModified: new Date(),
-    tags: tags || [],
+    lifecycle: lifecycle,
+    capitalTier: capitalTier,
+    walletType: position.walletType || WalletType.HOT,
+    riskLevel: position.riskLevel || 5,
+    strategy: position.strategy || "",
     isHidden: isHidden || false,
-    isModel: isModel || false,
-    comment,
   };
 
-  // Add optional fields conditionally
-  if ("tradeSide" in position && position.tradeSide) {
-    data.tradeSide = mapToPrismaTradeSide(position.tradeSide);
+  // Add tags if provided
+  if (tags && tags.length > 0) {
+    data.tags = tags;
   }
 
-  if ("status" in position && position.status) {
-    data.status = mapToPrismaPositionStatus(position.status);
+  // Handle Market relationship
+  if (market?.id) {
+    data.market = { connect: { id: market.id } };
   }
 
-  if ("direction" in position && position.direction) {
-    data.direction = position.direction;
+  // Handle WalletLocation relationship
+  if (walletLocation?.id) {
+    data.walletLocation = { connect: { id: walletLocation.id } };
   }
 
-  if ("dateOpened" in position && position.dateOpened) {
-    data.dateOpened = dateOrGenesisToDate(position.dateOpened);
-  }
-
-  if ("dateClosed" in position && position.dateClosed) {
-    data.dateClosed = dateOrGenesisToDate(position.dateClosed);
-  }
-
-  if ("timeFrame" in position && position.timeFrame) {
-    data.timeFrame = position.timeFrame;
-  }
-
-  if ("averageEntry" in position && position.averageEntry !== undefined) {
-    data.averageEntry = position.averageEntry;
-  }
-
-  if ("averageExit" in position && position.averageExit !== undefined) {
-    data.averageExit = position.averageExit;
-  }
-
-  if ("invested" in position && position.invested !== undefined) {
-    data.invested = position.invested;
-  }
-
-  if ("roi" in position && position.roi !== undefined) {
-    data.roi = position.roi;
-  }
-
-  // Add relationships
-  if (marketId) {
-    data.market = { connect: { id: marketId } };
-  }
-
-  if (walletLocationId) {
-    data.walletLocation = { connect: { id: walletLocationId } };
-  }
-
+  // Handle PositionDetails with nested create
   if (positionDetails) {
     data.positionDetails = {
       create: {
-        targetSize: positionDetails.targetSize,
-        currentSize: positionDetails.currentSize,
-        targetEntry: positionDetails.targetEntry,
-        targetExit: positionDetails.targetExit,
-        targetProfit: positionDetails.targetProfit,
-        maxLoss: positionDetails.maxLoss,
-        riskRewardRatio: positionDetails.riskRewardRatio,
-        expectedReturn: positionDetails.expectedReturn,
+        status: mapToPrismaPositionStatus(
+          positionDetails.status || PositionStatus.ACTIVE
+        ),
+        side: mapToPrismaTradeSide(positionDetails.side || TradeSide.LONG),
+        timeFrame: positionDetails.timeFrame || TimeFrame.ONE_DAY,
+
+        // Handle dates with proper DateOrGenesis conversion
+        ...(positionDetails.dateOpened
+          ? { dateOpened: dateOrGenesisToDate(positionDetails.dateOpened) }
+          : {}),
+        ...(positionDetails.dateClosed
+          ? { dateClosed: dateOrGenesisToDate(positionDetails.dateClosed) }
+          : {}),
+
+        // Handle numeric properties
+        ...(positionDetails.averageEntryPrice !== undefined
+          ? { averageEntryPrice: positionDetails.averageEntryPrice }
+          : {}),
+        ...(positionDetails.averageExitPrice !== undefined
+          ? { averageExitPrice: positionDetails.averageExitPrice }
+          : {}),
+        ...(positionDetails.totalSize !== undefined
+          ? { totalSize: positionDetails.totalSize }
+          : {}),
+        ...(positionDetails.totalCost !== undefined
+          ? { totalCost: positionDetails.totalCost }
+          : {}),
+        ...(positionDetails.realizedProfitLoss !== undefined
+          ? { realizedProfitLoss: positionDetails.realizedProfitLoss }
+          : {}),
+        ...(positionDetails.unrealizedProfitLoss !== undefined
+          ? { unrealizedProfitLoss: positionDetails.unrealizedProfitLoss }
+          : {}),
+        ...(positionDetails.currentReturn !== undefined
+          ? { currentReturn: positionDetails.currentReturn }
+          : {}),
+        ...(positionDetails.targetPrice !== undefined
+          ? { targetPrice: positionDetails.targetPrice }
+          : {}),
+        ...(positionDetails.stopPrice !== undefined
+          ? { stopPrice: positionDetails.stopPrice }
+          : {}),
+        ...(positionDetails.riskRewardRatio !== undefined
+          ? { riskRewardRatio: positionDetails.riskRewardRatio }
+          : {}),
+        isLeveraged: positionDetails.isLeveraged || false,
+        ...(positionDetails.leverage !== undefined
+          ? { leverage: positionDetails.leverage }
+          : {}),
+
+        // Handle orders if provided
+        ...(positionDetails.orders && positionDetails.orders.length > 0
+          ? {
+              orders: {
+                create: positionDetails.orders.map(order => ({
+                  dateOpen: dateOrGenesisToDate(order.dateOpen || new Date()),
+                  status: mapToPrismaOrderStatus(order.status),
+                  type: mapToPrismaOrderType(order.type),
+                  purpose: order.purpose,
+                  ...(order.averagePrice !== undefined
+                    ? { averagePrice: order.averagePrice }
+                    : {}),
+                  ...(order.totalCost !== undefined
+                    ? { totalCost: order.totalCost }
+                    : {}),
+                  ...(order.fee !== undefined ? { fee: order.fee } : {}),
+                  ...(order.feeUnit !== undefined
+                    ? { feeUnit: order.feeUnit }
+                    : {}),
+                  ...(order.filled !== undefined
+                    ? { filled: order.filled }
+                    : {}),
+                  ...(order.unit !== undefined
+                    ? { unit: order.unit as string }
+                    : {}),
+                  ...(order.trigger !== undefined
+                    ? { trigger: order.trigger }
+                    : {}),
+                  ...(order.estimatedCost !== undefined
+                    ? { estimatedCost: order.estimatedCost }
+                    : {}),
+                  ...(order.exchangeOrderId !== undefined
+                    ? { exchangeOrderId: order.exchangeOrderId }
+                    : {}),
+                  isAutomated: order.isAutomated || false,
+                  isHidden: order.isHidden || false,
+                  ...(order.parentOrderId !== undefined
+                    ? { parentOrderId: order.parentOrderId }
+                    : {}),
+                  ...(order.notes !== undefined ? { notes: order.notes } : {}),
+                })),
+              },
+            }
+          : {}),
+
+        // Handle stop loss orders if provided
+        ...(positionDetails.stopLoss && positionDetails.stopLoss.length > 0
+          ? {
+              stopLossOrders: {
+                create: positionDetails.stopLoss.map(order => ({
+                  dateOpen: dateOrGenesisToDate(order.dateOpen || new Date()),
+                  status: mapToPrismaOrderStatus(order.status),
+                  type: mapToPrismaOrderType(order.type),
+                  size: order.size,
+                  ...(order.unit !== undefined
+                    ? { unit: order.unit as string }
+                    : {}),
+                  ...(order.trigger !== undefined
+                    ? { trigger: order.trigger }
+                    : {}),
+                  isTrailing: order.isTrailing || false,
+                  ...(order.trailingDistance !== undefined
+                    ? { trailingDistance: order.trailingDistance }
+                    : {}),
+                  ...(order.trailingUnit !== undefined
+                    ? { trailingUnit: order.trailingUnit as string }
+                    : {}),
+                  ...(order.estimatedCost !== undefined
+                    ? { estimatedCost: order.estimatedCost }
+                    : {}),
+                  ...(order.filled !== undefined
+                    ? { filled: order.filled }
+                    : {}),
+                  ...(order.maxSlippage !== undefined
+                    ? { maxSlippage: order.maxSlippage }
+                    : {}),
+                  ...(order.fee !== undefined ? { fee: order.fee } : {}),
+                  ...(order.feeUnit !== undefined
+                    ? { feeUnit: order.feeUnit }
+                    : {}),
+                  ...(order.averagePrice !== undefined
+                    ? { averagePrice: order.averagePrice }
+                    : {}),
+                  ...(order.totalCost !== undefined
+                    ? { totalCost: order.totalCost }
+                    : {}),
+                  ...(order.strategy !== undefined
+                    ? { strategy: order.strategy as string }
+                    : {}),
+                })),
+              },
+            }
+          : {}),
+
+        // Handle take profit orders if provided
+        ...(positionDetails.takeProfit && positionDetails.takeProfit.length > 0
+          ? {
+              takeProfitOrders: {
+                create: positionDetails.takeProfit.map(order => ({
+                  dateOpen: dateOrGenesisToDate(order.dateOpen || new Date()),
+                  status: mapToPrismaOrderStatus(order.status),
+                  type: mapToPrismaOrderType(order.type),
+                  size: order.size,
+                  ...(order.unit !== undefined
+                    ? { unit: order.unit as string }
+                    : {}),
+                  ...(order.trigger !== undefined
+                    ? { trigger: order.trigger }
+                    : {}),
+                  ...(order.targetPercentage !== undefined
+                    ? { targetPercentage: order.targetPercentage }
+                    : {}),
+                  ...(order.estimatedCost !== undefined
+                    ? { estimatedCost: order.estimatedCost }
+                    : {}),
+                  ...(order.filled !== undefined
+                    ? { filled: order.filled }
+                    : {}),
+                  ...(order.maxSlippage !== undefined
+                    ? { maxSlippage: order.maxSlippage }
+                    : {}),
+                  ...(order.fee !== undefined ? { fee: order.fee } : {}),
+                  ...(order.feeUnit !== undefined
+                    ? { feeUnit: order.feeUnit }
+                    : {}),
+                  ...(order.averagePrice !== undefined
+                    ? { averagePrice: order.averagePrice }
+                    : {}),
+                  ...(order.totalCost !== undefined
+                    ? { totalCost: order.totalCost }
+                    : {}),
+                  ...(order.tier !== undefined ? { tier: order.tier } : {}),
+                  moveStopToBreakeven: order.moveStopToBreakeven || false,
+                })),
+              },
+            }
+          : {}),
       },
     };
   }
 
+  // Handle thesis with nested create
   if (thesis) {
     data.thesis = {
       create: {
-        summary: thesis.summary,
-        analysis: thesis.analysis,
-        keyPoints: thesis.keyPoints || [],
-        timeframeReason: thesis.timeframeReason,
-        entryReason: thesis.entryReason,
-        exitReason: thesis.exitReason,
-        supportingLinks: thesis.supportingLinks || [],
-        dateCreated: dateOrGenesisToDate(thesis.dateCreated) ?? new Date(),
+        reasoning: thesis.reasoning,
+        ...(thesis.invalidation !== undefined
+          ? { invalidation: thesis.invalidation }
+          : {}),
+        ...(thesis.fulfillment !== undefined
+          ? { fulfillment: thesis.fulfillment }
+          : {}),
+        ...(thesis.notes !== undefined ? { notes: thesis.notes } : {}),
+        ...(thesis.technicalAnalysis !== undefined
+          ? { technicalAnalysis: thesis.technicalAnalysis }
+          : {}),
+        ...(thesis.fundamentalAnalysis !== undefined
+          ? { fundamentalAnalysis: thesis.fundamentalAnalysis }
+          : {}),
+        ...(thesis.timeHorizon !== undefined
+          ? { timeHorizon: thesis.timeHorizon }
+          : {}),
+        ...(thesis.riskRewardRatio !== undefined
+          ? { riskRewardRatio: thesis.riskRewardRatio }
+          : {}),
       },
     };
   }
