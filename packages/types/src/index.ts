@@ -1825,6 +1825,41 @@ export interface Wallet {
   tags?: string[];
 }
 
+/**
+ * Represents a storage location for assets
+ */
+export interface WalletLocation {
+  /** Unique identifier */
+  id: string;
+
+  /** Human-readable name for this location */
+  name: string;
+
+  /** Type of location where assets are stored */
+  locationType: AssetLocationType;
+
+  /** Exchange name (if location is an exchange) */
+  exchangeName?: string;
+
+  /** Account type within the exchange (if applicable) */
+  accountType?: string;
+
+  /** Storage type for cold storage locations */
+  storageType?: string;
+
+  /** Storage device name for cold storage */
+  storageName?: string;
+
+  /** User who owns this wallet location */
+  userId: string;
+
+  /** Optional creation timestamp */
+  createdAt?: Date;
+
+  /** Optional update timestamp */
+  updatedAt?: Date;
+}
+
 // ===================================================================
 // CURRENCY & EXCHANGE INTEGRATION
 // ===================================================================
