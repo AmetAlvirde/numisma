@@ -5,9 +5,14 @@
 import {
   PrismaClient,
   WalletLocation as PrismaWalletLocation,
+  AssetLocationType as PrismaAssetLocationType,
 } from "@prisma/client";
-import { WalletLocation } from "@numisma/types";
-import { walletLocationSchema } from "../schema/wallet-location";
+import { WalletLocation, AssetLocationType } from "@numisma/types";
+import {
+  walletLocationSchema,
+  createWalletLocationSchema,
+  updateWalletLocationSchema,
+} from "../schema/wallet-location";
 import { handleDatabaseError } from "../utils";
 
 export class WalletLocationRepository {
@@ -47,13 +52,13 @@ export class WalletLocationRepository {
    * Find wallet locations by type
    */
   async findByType(
-    locationType: string,
+    locationType: AssetLocationType,
     userId: string
   ): Promise<WalletLocation[]> {
     try {
       const walletLocations = await this.prisma.walletLocation.findMany({
         where: {
-          locationType,
+          locationType: this.mapLocationTypeToPrisma(locationType),
           userId,
         },
       });
@@ -71,13 +76,15 @@ export class WalletLocationRepository {
     walletLocation: Omit<WalletLocation, "id">
   ): Promise<WalletLocation> {
     // Validate with Zod schema
-    walletLocationSchema.omit({ id: true }).parse(walletLocation);
+    createWalletLocationSchema.parse(walletLocation);
 
     try {
       const createdWalletLocation = await this.prisma.walletLocation.create({
         data: {
           name: walletLocation.name,
-          locationType: walletLocation.locationType,
+          locationType: this.mapLocationTypeToPrisma(
+            walletLocation.locationType
+          ),
           exchangeName: walletLocation.exchangeName,
           accountType: walletLocation.accountType,
           storageType: walletLocation.storageType,
@@ -100,12 +107,20 @@ export class WalletLocationRepository {
     data: Partial<Omit<WalletLocation, "id">>
   ): Promise<WalletLocation> {
     // Validate with Zod schema
-    walletLocationSchema.partial().omit({ id: true }).parse(data);
+    updateWalletLocationSchema.parse(data);
 
     try {
+      // Convert the locationType if it exists
+      const prismaData: any = { ...data };
+      if (data.locationType) {
+        prismaData.locationType = this.mapLocationTypeToPrisma(
+          data.locationType
+        );
+      }
+
       const updatedWalletLocation = await this.prisma.walletLocation.update({
         where: { id },
-        data,
+        data: prismaData,
       });
 
       return this.mapToDomainModel(updatedWalletLocation);
@@ -136,12 +151,46 @@ export class WalletLocationRepository {
     return {
       id: walletLocation.id,
       name: walletLocation.name,
-      locationType: walletLocation.locationType,
+      locationType: this.mapLocationTypeToDomain(walletLocation.locationType),
       exchangeName: walletLocation.exchangeName || undefined,
       accountType: walletLocation.accountType || undefined,
       storageType: walletLocation.storageType || undefined,
       storageName: walletLocation.storageName || undefined,
       userId: walletLocation.userId,
     };
+  }
+
+  /**
+   * Map the domain AssetLocationType enum to Prisma enum
+   */
+  private mapLocationTypeToPrisma(
+    locationType: AssetLocationType
+  ): PrismaAssetLocationType {
+    const mapping: Record<AssetLocationType, PrismaAssetLocationType> = {
+      [AssetLocationType.EXCHANGE]: "exchange",
+      [AssetLocationType.DEX]: "dex",
+      [AssetLocationType.COLD_STORAGE]: "cold_storage",
+      [AssetLocationType.DEFI]: "defi",
+      [AssetLocationType.STAKING]: "staking",
+      [AssetLocationType.LENDING]: "lending",
+    };
+    return mapping[locationType];
+  }
+
+  /**
+   * Map the Prisma AssetLocationType enum to domain enum
+   */
+  private mapLocationTypeToDomain(
+    locationType: PrismaAssetLocationType
+  ): AssetLocationType {
+    const mapping: Record<PrismaAssetLocationType, AssetLocationType> = {
+      exchange: AssetLocationType.EXCHANGE,
+      dex: AssetLocationType.DEX,
+      cold_storage: AssetLocationType.COLD_STORAGE,
+      defi: AssetLocationType.DEFI,
+      staking: AssetLocationType.STAKING,
+      lending: AssetLocationType.LENDING,
+    };
+    return mapping[locationType];
   }
 }
