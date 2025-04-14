@@ -15,5 +15,20 @@ export {
 // Export type conversion functions
 export * from "./type-mappers";
 
-// Export entity mapper functions
-export * from "./entity-mappers";
+// Export entity mapper functions, but rename mapPortfolioToPrisma to avoid conflict
+export {
+  mapAssetToDomain,
+  mapAssetToPrisma,
+  mapMarketToDomain,
+  mapWalletLocationToDomain,
+  mapOrderToDomain,
+  mapStopLossOrderToDomain,
+  mapTakeProfitOrderToDomain,
+  mapPositionDetailsToDomain,
+  mapThesisToDomain,
+  mapJournalEntryToDomain,
+  mapPositionToDomain,
+  mapPortfolioToDomain,
+  // Rename the conflicting function from entity-mappers
+  mapPortfolioToPrisma as mapPortfolioEntityToPrisma,
+} from "./entity-mappers";
