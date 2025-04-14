@@ -4,11 +4,11 @@
 
 import { z } from "zod";
 import { idSchema, timestampSchema, foreignKeySchema } from "./common";
-import {
-  AssetLocationType,
-  ValidationResult,
-  ValidationError,
-} from "@numisma/types";
+// import {
+//   AssetLocationType,
+//   ValidationResult,
+//   ValidationError,
+// } from "@numisma/types";
 
 /**
  * Exchange name enum

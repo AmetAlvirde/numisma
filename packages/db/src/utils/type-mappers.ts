@@ -326,7 +326,14 @@ export function stringToTimeFrame(value: string): TimeFrame {
 }
 
 /**
- * Convert a Date | null to DateOrGenesis safely
+ * Convert a Date to DateOrGenesis
+ *
+ * This is the inverse operation of dateOrGenesisToDate (from ../utils)
+ * - dateOrGenesisToDate: converts from domain type to database type (DateOrGenesis -> Date | null)
+ * - dateToDateOrGenesis: converts from database type to domain type (Date | null -> DateOrGenesis)
+ *
+ * @param date Date from database or null
+ * @returns DateOrGenesis value for domain model
  */
 export function dateToDateOrGenesis(date: Date | null): DateOrGenesis {
   if (date === null) {
@@ -405,6 +412,9 @@ export function mapPositionToPrisma(
 
 /**
  * Convert domain Portfolio to Prisma Portfolio for create operations
+ *
+ * Note: This function is imported by entity-mappers.ts to avoid duplication.
+ * We keep it in type-mappers.ts for consistency with other similar functions.
  */
 export function mapPortfolioToPrisma(
   portfolio: Omit<Portfolio, "id">

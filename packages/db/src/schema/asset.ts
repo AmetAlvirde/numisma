@@ -3,12 +3,16 @@
  */
 
 import { z } from "zod";
-import { idSchema, timestampSchema, foreignKeySchema } from "./common";
+import {
+  idSchema,
+  timestampSchema,
+  //  foreignKeySchema
+} from "./common";
 import {
   AssetType,
   AssetLocationType,
-  ValidationResult,
-  ValidationError,
+  // ValidationResult,
+  // ValidationError,
 } from "@numisma/types";
 
 /**

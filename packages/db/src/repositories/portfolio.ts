@@ -2,8 +2,15 @@
  * Portfolio repository implementation
  */
 
-import { PrismaClient, Portfolio as PrismaPortfolio } from "@prisma/client";
-import { Portfolio, DateOrGenesis, OperationResult } from "@numisma/types";
+import {
+  PrismaClient,
+  // Portfolio as PrismaPortfolio
+} from "@prisma/client";
+import {
+  Portfolio,
+  // DateOrGenesis,
+  OperationResult,
+} from "@numisma/types";
 import { portfolioSchema, updatePortfolioSchema } from "../schema/portfolio";
 import { handleDatabaseError, dateOrGenesisToDate } from "../utils";
 import { mapPortfolioToDomain } from "../utils/entity-mappers";

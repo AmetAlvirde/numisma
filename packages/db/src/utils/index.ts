@@ -12,11 +12,53 @@ export {
   handleDatabaseError,
 } from "../utils";
 
-// Export type conversion functions
-export * from "./type-mappers";
-
-// Export entity mapper functions, but rename mapPortfolioToPrisma to avoid conflict
+// ======== TYPE MAPPING FUNCTIONS ========
+// Functions for mapping primitive types, enums, and simple conversions
 export {
+  // Type guards
+  isWalletType,
+  isPositionLifecycle,
+  isCapitalTier,
+  isOrderStatus,
+  isOrderType,
+  isOrderPurpose,
+  isAssetLocationType,
+  isTradeSide,
+  isPositionStatus,
+  isTimeFrame,
+
+  // Type conversions
+  stringToWalletType,
+  stringToPositionLifecycle,
+  stringToCapitalTier,
+  stringToTimeFrame,
+  stringToAssetType,
+
+  // Only include dateToDateOrGenesis from type-mappers (the other date function comes from ../utils)
+  dateToDateOrGenesis,
+
+  // Enum mappers
+  mapOrderStatus,
+  mapToPrismaOrderStatus,
+  mapOrderType,
+  mapToPrismaOrderType,
+  mapAssetLocationType,
+  mapToPrismaAssetLocationType,
+  mapTradeSide,
+  mapToPrismaTradeSide,
+  mapPositionStatus,
+  mapToPrismaPositionStatus,
+
+  // Entity to Prisma mappers (CREATE/UPDATE operations)
+  mapPositionToPrisma,
+  mapPortfolioToPrisma,
+  mapMarketToPrisma,
+} from "./type-mappers";
+
+// ======== ENTITY MAPPING FUNCTIONS ========
+// Functions for mapping complete entities between database and domain models
+export {
+  // Prisma to Domain entity mappers (READ operations)
   mapAssetToDomain,
   mapAssetToPrisma,
   mapMarketToDomain,
@@ -29,6 +71,4 @@ export {
   mapJournalEntryToDomain,
   mapPositionToDomain,
   mapPortfolioToDomain,
-  // Rename the conflicting function from entity-mappers
-  mapPortfolioToPrisma as mapPortfolioEntityToPrisma,
 } from "./entity-mappers";
