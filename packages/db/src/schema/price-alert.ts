@@ -4,7 +4,7 @@
 
 import { z } from "zod";
 import { idSchema, timestampSchema, foreignKeySchema } from "./common";
-import { AssetType, ValidationResult, ValidationError } from "@numisma/types";
+// import { AssetType, ValidationResult, ValidationError } from "@numisma/types";
 
 /**
  * Alert direction enum

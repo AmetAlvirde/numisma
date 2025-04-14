@@ -32,9 +32,9 @@ import {
 } from "@prisma/client";
 import {
   Position,
-  DateOrGenesis,
+  // DateOrGenesis,
   OperationResult,
-  PaginatedResult,
+  // PaginatedResult,
   PositionStatus,
   TradeSide,
   TimeFrame,
@@ -50,6 +50,28 @@ import {
   mapToPrismaPositionStatus,
   mapToPrismaTradeSide,
 } from "../utils/type-mappers";
+
+/**
+ * Type for Prisma Position entities with all related data.
+ * This allows proper handling of null vs undefined across mappers.
+ */
+type PrismaPositionWithRelations = PrismaPosition & {
+  market?: {
+    baseAsset?: any;
+    quoteAsset?: any;
+  } & any;
+  walletLocation?: any;
+  positionDetails?: {
+    orders?: any[];
+    stopLossOrders?: any[];
+    takeProfitOrders?: any[];
+  } & any;
+  thesis?: any;
+  journalEntries?: any[];
+  lifecycleHistory?: any[];
+  capitalTierHistory?: any[];
+  portfolioPositions?: any[];
+};
 
 export class PositionRepository {
   constructor(private prisma: PrismaClient) {}
@@ -123,7 +145,7 @@ export class PositionRepository {
 
       return {
         success: true,
-        data: mapPositionToDomain(position),
+        data: mapPositionToDomain(position as PrismaPositionWithRelations),
       };
     } catch (error) {
       return {
@@ -167,7 +189,9 @@ export class PositionRepository {
 
       return {
         success: true,
-        data: portfolioPositions.map(pp => mapPositionToDomain(pp.position)),
+        data: portfolioPositions.map(pp =>
+          mapPositionToDomain(pp.position as PrismaPositionWithRelations)
+        ),
       };
     } catch (error) {
       return {
@@ -219,7 +243,9 @@ export class PositionRepository {
 
       return {
         success: true,
-        data: positions.map(position => mapPositionToDomain(position)),
+        data: positions.map(position =>
+          mapPositionToDomain(position as PrismaPositionWithRelations)
+        ),
       };
     } catch (error) {
       return {
@@ -246,36 +272,45 @@ export class PositionRepository {
         };
       }
 
-      // Build Prisma data - Note: Not using mapPositionToPrisma directly due to type differences
-      const data: Prisma.PositionCreateInput = {
+      // Build Prisma data
+      const data = {
         name: position.name,
         lifecycle: position.lifecycle,
         capitalTier: position.capitalTier,
-        dateCreated: dateOrGenesisToDate(position.dateCreated) ?? new Date(),
-        dateModified: new Date(),
+        createdAt: new Date(), // Use createdAt instead of dateCreated
+        updatedAt: new Date(), // Use updatedAt instead of dateModified
         riskLevel: position.riskLevel,
         strategy: position.strategy || "",
         walletType: position.walletType,
-      };
+      } as Prisma.PositionCreateInput;
 
-      // Add tags if provided
-      if (position.tags && position.tags.length > 0) {
-        data.tags = position.tags;
-      }
-
-      // Add isHidden if provided
-      if (position.isHidden !== undefined) {
-        data.isHidden = position.isHidden;
-      }
-
-      // Handle Market relationship
-      if (position.marketId) {
+      // Handle Market relationship - check for marketId property or market object
+      if ("marketId" in position && typeof position.marketId === "string") {
         data.market = { connect: { id: position.marketId } };
+      } else if (
+        "market" in position &&
+        position.market &&
+        typeof position.market === "object" &&
+        "id" in position.market
+      ) {
+        data.market = { connect: { id: position.market.id as string } };
       }
 
-      // Handle WalletLocation relationship
-      if (position.walletLocationId) {
+      // Handle WalletLocation relationship - check for walletLocationId property or walletLocation object
+      if (
+        "walletLocationId" in position &&
+        typeof position.walletLocationId === "string"
+      ) {
         data.walletLocation = { connect: { id: position.walletLocationId } };
+      } else if (
+        "walletLocation" in position &&
+        position.walletLocation &&
+        typeof position.walletLocation === "object" &&
+        "id" in position.walletLocation
+      ) {
+        data.walletLocation = {
+          connect: { id: position.walletLocation.id as string },
+        };
       }
 
       // Handle PositionDetails with nested create
@@ -288,6 +323,11 @@ export class PositionRepository {
             ),
             side: mapToPrismaTradeSide(details.side || TradeSide.LONG),
             timeFrame: details.timeFrame || TimeFrame.ONE_DAY,
+
+            // Required fields in Prisma schema
+            fractal: "",
+            initialInvestment: details.totalCost || 0,
+            currentInvestment: details.totalCost || 0,
 
             // Handle dates with proper DateOrGenesis conversion
             ...(details.dateOpened
@@ -431,7 +471,9 @@ export class PositionRepository {
 
       return {
         success: true,
-        data: mapPositionToDomain(createdPosition),
+        data: mapPositionToDomain(
+          createdPosition as PrismaPositionWithRelations
+        ),
       };
     } catch (error) {
       return {
@@ -491,24 +533,24 @@ export class PositionRepository {
       if (data.riskLevel !== undefined) updateData.riskLevel = data.riskLevel;
       if (data.strategy !== undefined) updateData.strategy = data.strategy;
 
-      // Add tags if provided (handling as a special case)
-      if (data.tags !== undefined) {
-        updateData.tags = data.tags as any;
-      }
-
-      // Add isHidden if provided (handling as a special case)
-      if (data.isHidden !== undefined) {
-        updateData.isHidden = data.isHidden as any;
-      }
-
       // Handle market relationship update
-      if (data.market?.id) {
-        updateData.market = { connect: { id: data.market.id } };
+      if (
+        data.market &&
+        typeof data.market === "object" &&
+        "id" in data.market
+      ) {
+        updateData.market = { connect: { id: data.market.id as string } };
       }
 
       // Handle wallet location relationship update
-      if (data.walletLocation?.id) {
-        updateData.walletLocation = { connect: { id: data.walletLocation.id } };
+      if (
+        data.walletLocation &&
+        typeof data.walletLocation === "object" &&
+        "id" in data.walletLocation
+      ) {
+        updateData.walletLocation = {
+          connect: { id: data.walletLocation.id as string },
+        };
       }
 
       // Handle position details update (if exists)
@@ -528,14 +570,16 @@ export class PositionRepository {
                 timeFrame: data.positionDetails.timeFrame,
               }),
               ...(data.positionDetails.dateOpened !== undefined && {
-                dateOpened: dateOrGenesisToDate(
-                  data.positionDetails.dateOpened
-                ),
+                dateOpened:
+                  data.positionDetails.dateOpened !== null
+                    ? dateOrGenesisToDate(data.positionDetails.dateOpened)
+                    : null,
               }),
               ...(data.positionDetails.dateClosed !== undefined && {
-                dateClosed: dateOrGenesisToDate(
-                  data.positionDetails.dateClosed
-                ),
+                dateClosed:
+                  data.positionDetails.dateClosed !== null
+                    ? dateOrGenesisToDate(data.positionDetails.dateClosed)
+                    : null,
               }),
               ...(data.positionDetails.averageEntryPrice !== undefined && {
                 averageEntryPrice: data.positionDetails.averageEntryPrice,
@@ -588,6 +632,12 @@ export class PositionRepository {
                 positionDetails.side || TradeSide.LONG
               ),
               timeFrame: positionDetails.timeFrame || TimeFrame.ONE_DAY,
+
+              // Required fields in Prisma schema
+              fractal: "",
+              initialInvestment: positionDetails.totalCost || 0,
+              currentInvestment: positionDetails.totalCost || 0,
+
               ...(positionDetails.dateOpened && {
                 dateOpened: dateOrGenesisToDate(positionDetails.dateOpened),
               }),
@@ -728,7 +778,9 @@ export class PositionRepository {
 
       return {
         success: true,
-        data: mapPositionToDomain(updatedPosition),
+        data: mapPositionToDomain(
+          updatedPosition as PrismaPositionWithRelations
+        ),
       };
     } catch (error) {
       return {
