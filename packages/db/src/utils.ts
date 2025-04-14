@@ -5,7 +5,7 @@
 import { DateOrGenesis as NumismaDateOrGenesis } from "@numisma/types";
 
 // Re-define DateOrGenesis for internal use to avoid type conflicts
-type InternalDateOrGenesis = Date | "genesis";
+type PrismaDateRepresentation = Date | "genesis";
 
 /**
  * Convert a DateOrGenesis value to a Date object for database storage
@@ -18,7 +18,7 @@ export function dateOrGenesisToDate(date: NumismaDateOrGenesis): Date | null {
     return null;
   }
 
-  if (typeof date === "string" && date !== "genesis") {
+  if (typeof date === "string") {
     return new Date(date);
   }
 
@@ -32,8 +32,8 @@ export function dateOrGenesisToDate(date: NumismaDateOrGenesis): Date | null {
  * @returns DateOrGenesis value (Date or "genesis")
  */
 export function databaseDateToDateOrGenesis(
-  date: Date | null
-): InternalDateOrGenesis {
+  date: PrismaDateRepresentation | null
+): NumismaDateOrGenesis {
   if (date === null) {
     return "genesis";
   }

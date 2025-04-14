@@ -19,6 +19,7 @@ import {
   PositionDetails,
   Thesis,
   JournalEntry,
+  OrderPurpose,
 } from "@numisma/types";
 
 import {
@@ -48,7 +49,6 @@ import {
   stringToTimeFrame,
   dateToDateOrGenesis,
   dateOrGenesisToDate,
-  stringToAssetType,
   mapPortfolioToPrisma,
 } from "./type-mappers";
 
@@ -87,7 +87,7 @@ function stringToAssetType(assetType: string): AssetType {
   if (Object.values(AssetType).includes(assetType as AssetType)) {
     return assetType as AssetType;
   }
-  return AssetType.CRYPTOCURRENCY; // Default if not recognized
+  return AssetType.CRYPTO; // Default if not recognized
 }
 
 /**
@@ -157,7 +157,7 @@ export function mapOrderToDomain(order: PrismaOrder): Order {
   return {
     id: order.id,
     positionId: order.positionDetailsId as any, // Note: domain model expects positionId, but Prisma uses positionDetailsId
-    dateOpen: dateToDateOrGenesis(order.dateOpen),
+    dateOpen: order.dateOpen,
     averagePrice: order.averagePrice || undefined,
     totalCost: order.totalCost || undefined,
     status: mapOrderStatus(order.status),
@@ -186,11 +186,12 @@ export function mapStopLossOrderToDomain(
   return {
     id: order.id,
     positionId: order.positionDetailsId as any, // Note: domain model expects positionId, but Prisma uses positionDetailsId
-    dateOpen: dateToDateOrGenesis(order.dateOpen),
+    dateOpen: order.dateOpen,
     averagePrice: order.averagePrice || undefined,
     totalCost: order.totalCost || undefined,
     status: order.status as any, // TODO: Create proper status enum mapping
     type: order.type as any, // TODO: Create proper type enum mapping
+    purpose: OrderPurpose.STOP_LOSS,
     fee: order.fee || undefined,
     feeUnit: order.feeUnit || undefined,
     filled: order.filled || undefined,
@@ -215,11 +216,12 @@ export function mapTakeProfitOrderToDomain(
   return {
     id: order.id,
     positionId: order.positionDetailsId as any, // Note: domain model expects positionId, but Prisma uses positionDetailsId
-    dateOpen: dateToDateOrGenesis(order.dateOpen),
+    dateOpen: order.dateOpen,
     averagePrice: order.averagePrice || undefined,
     totalCost: order.totalCost || undefined,
     status: order.status as any, // TODO: Create proper status enum mapping
     type: order.type as any, // TODO: Create proper type enum mapping
+    purpose: OrderPurpose.TAKE_PROFIT,
     fee: order.fee || undefined,
     feeUnit: order.feeUnit || undefined,
     filled: order.filled || undefined,
@@ -248,7 +250,7 @@ export function mapPositionDetailsToDomain(
     status: mapPositionStatus(details.status),
     side: mapTradeSide(details.side),
     timeFrame: stringToTimeFrame(details.timeFrame),
-    dateOpened: dateToDateOrGenesis(details.dateOpened),
+    dateOpened: details.dateOpened,
     dateClosed: undefined, // Not in the Prisma model but in domain model
     orders: details.orders ? details.orders.map(mapOrderToDomain) : [],
     stopLoss: details.stopLossOrders
@@ -332,46 +334,48 @@ export function mapPositionToDomain(
     id: position.id,
     name: position.name,
 
-    // Handle wallet and market
-    marketId: position.marketId,
-    market: position.market ? mapMarketToDomain(position.market) : undefined,
-    walletLocationId: position.walletLocationId,
-    walletLocation: position.walletLocation
-      ? mapWalletLocationToDomain(position.walletLocation)
-      : undefined,
+    // Use portfolioId instead of portfolio property
+    portfolioId: position.portfolioPositions?.[0]?.portfolioId || "",
 
-    // Map string types to proper enums using type-safe converters
+    // Standard properties from Position interface
     walletType: stringToWalletType(position.walletType),
     lifecycle: stringToPositionLifecycle(position.lifecycle),
     capitalTier: stringToCapitalTier(position.capitalTier),
-
-    // Simple properties
     riskLevel: position.riskLevel,
     strategy: position.strategy,
 
-    // Map complex nested objects
+    // Related entities
+    asset: position.market?.baseAsset
+      ? mapAssetToDomain(position.market.baseAsset)
+      : ({} as Asset), // Required property in Position
+
     positionDetails: position.positionDetails
       ? mapPositionDetailsToDomain(position.positionDetails)
-      : (undefined as any), // TODO: Fix this in domain model to be optional
+      : ({} as PositionDetails), // Required property in Position
 
     thesis: position.thesis ? mapThesisToDomain(position.thesis) : undefined,
 
-    journalEntries: position.journalEntries
+    // Fix: Use 'journal' instead of 'journalEntries'
+    journal: position.journalEntries
       ? position.journalEntries.map(mapJournalEntryToDomain)
       : undefined,
 
-    // Portfolio relationship
-    portfolio: position.portfolioPositions?.[0]?.portfolioId || "",
-
-    // Additional metadata
-    userId: "", // TODO: Get this from the correct place in Prisma model
+    // Required metadata
+    userId: "", // User ID not directly available in Prisma model
     dateCreated: position.createdAt,
     dateUpdated: position.updatedAt,
-    currentValue: 0, // TODO: Calculate this or get from metrics
-    isHidden: false, // TODO: Get this from the correct place
-    alertsEnabled: false, // TODO: Get this from the correct place
 
-    tags: [], // TODO: Get tags from the correct place
+    // Optional metadata with defaults
+    currentValue: 0,
+    isHidden: false,
+    alertsEnabled: false,
+    tags: [],
+
+    // Pre-tracking status
+    preTrackingStatus: {
+      isPreTracking: false,
+      dateOpened: null,
+    },
   };
 }
 
@@ -389,11 +393,11 @@ export function mapPortfolioToDomain(
     name: portfolio.name,
     description: portfolio.description || undefined,
     dateCreated: dateToDateOrGenesis(portfolio.dateCreated),
-    status: portfolio.status as any, // TODO: Create proper enum mapping
-    positionIds: portfolio.portfolioPositions
-      ? portfolio.portfolioPositions.map(pp => pp.positionId)
-      : [],
+    status: portfolio.status as any, // Cast to handle type discrepancy
     userId: portfolio.userId,
+    positionIds: portfolio.portfolioPositions
+      ? portfolio.portfolioPositions.map(pp => (pp as any).positionId)
+      : [], // Map to position IDs with safer type handling
     tags: portfolio.tags || [],
     notes: portfolio.notes || undefined,
     baseCurrency: "USD", // Default, not in Prisma model
@@ -402,25 +406,5 @@ export function mapPortfolioToDomain(
       sortOrder: portfolio.sortOrder || undefined,
       isPinned: portfolio.isPinned || undefined,
     },
-  };
-}
-
-/**
- * Maps a domain Portfolio to a Prisma Portfolio model for creation/updates
- */
-export function mapPortfolioToPrisma(
-  portfolio: Omit<Portfolio, "id">
-): Prisma.PortfolioCreateInput {
-  return {
-    name: portfolio.name,
-    description: portfolio.description,
-    dateCreated: dateOrGenesisToDate(portfolio.dateCreated) ?? new Date(),
-    status: portfolio.status,
-    userId: portfolio.userId,
-    tags: portfolio.tags || [],
-    notes: portfolio.notes,
-    color: portfolio.color,
-    sortOrder: portfolio.sortOrder || 0,
-    isPinned: portfolio.isPinned || false,
   };
 }

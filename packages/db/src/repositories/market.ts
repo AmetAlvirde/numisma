@@ -2,18 +2,22 @@
  * Market repository implementation
  */
 
-import { PrismaClient, Market as PrismaMarket, Prisma } from "@prisma/client";
+import {
+  PrismaClient,
+  // Market as PrismaMarket,
+  // Prisma
+} from "@prisma/client";
 import {
   Market,
-  Asset,
-  AssetType,
-  AssetLocationType,
+  // Asset,
+  // AssetType,
+  // AssetLocationType,
   OperationResult,
   PaginationParams,
   PaginatedResult,
   FilterParams,
   QueryParams,
-  isOperationResult,
+  // isOperationResult,
   isPaginationParams,
   isFilterParams,
   isQueryParams,

@@ -2,9 +2,16 @@
  * Portfolio repository implementation
  */
 
-import { PrismaClient, Portfolio as PrismaPortfolio } from "@prisma/client";
-import { Portfolio, DateOrGenesis, OperationResult } from "@numisma/types";
-import { portfolioSchema } from "../schema/portfolio";
+import {
+  PrismaClient,
+  // Portfolio as PrismaPortfolio
+} from "@prisma/client";
+import {
+  Portfolio,
+  // DateOrGenesis,
+  OperationResult,
+} from "@numisma/types";
+import { portfolioSchema, updatePortfolioSchema } from "../schema/portfolio";
 import { handleDatabaseError, dateOrGenesisToDate } from "../utils";
 import { mapPortfolioToDomain } from "../utils/entity-mappers";
 
@@ -115,9 +122,11 @@ export class PortfolioRepository {
         userId: portfolio.userId,
         tags: portfolio.tags || [],
         notes: portfolio.notes,
-        color: portfolio.color,
-        sortOrder: portfolio.sortOrder || 0,
-        isPinned: portfolio.isPinned || false,
+        displayMetadata: {
+          color: portfolio.displayMetadata?.color,
+          sortOrder: portfolio.displayMetadata?.sortOrder || 0,
+          isPinned: portfolio.displayMetadata?.isPinned || false,
+        },
       };
 
       const createdPortfolio = await this.prisma.portfolio.create({
@@ -148,7 +157,7 @@ export class PortfolioRepository {
   ): Promise<OperationResult<Portfolio>> {
     try {
       // Validate with Zod schema
-      const validationResult = portfolioSchema.partial().safeParse(data);
+      const validationResult = updatePortfolioSchema.safeParse(data);
       if (!validationResult.success) {
         return {
           success: false,

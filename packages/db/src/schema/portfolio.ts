@@ -11,7 +11,7 @@ import {
   oneToManySchema,
 } from "./common";
 import { positionSchema } from "./position";
-import { ValidationResult, ValidationError } from "@numisma/types";
+// import { ValidationResult, ValidationError } from "@numisma/types";
 
 /**
  * Portfolio status enum

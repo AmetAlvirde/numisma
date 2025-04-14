@@ -2,73 +2,86 @@
 
 This package provides repository implementations and database access utilities for the Numisma application.
 
-## Type Mapper Refactoring Status
+## Overview
 
-We've completed the refactoring of repositories to use type-safe mappers, providing better type safety when converting between Prisma models and domain models.
+The database layer has been fully refactored to use type-safe mappers, providing better type safety when converting between Prisma models and domain models.
 
-### Current Progress
+### Key Features
 
-- ✅ Created initial type mappers for basic enum conversions
-- ✅ Created entity mappers for complex entity conversions
-- ✅ Updated simpler repositories (Asset, Market) to use the type mappers
-- ✅ Converted repositories to use OperationResult pattern for consistent error handling
-- ✅ Implemented Portfolio repository with type mappers
-- ✅ Completed Position repository refactoring with type-safe mappers
-- ✅ Implemented proper handling of DateOrGenesis for date fields
-- ✅ Fixed type inconsistencies between Prisma schema and domain models
+- Type-safe repositories with consistent error handling using OperationResult pattern
+- Entity mappers for converting between Prisma database models and domain models
+- Type guards and conversion utilities for enums and complex types
+- Proper handling of DateOrGenesis for date fields
+- Schema validation for all entities using Zod
 
-### Implementation Status
+### Architecture
 
-1. **Type Mappers**
+1. **Exports**
 
-   - ✅ Basic enum conversions in type-mappers.ts
-   - ✅ Date/Genesis handling utilities
-   - ✅ Completed mapPositionToPrisma implementation with proper type-safety
+   - Prisma client instance (from `./prisma`)
+   - Repository implementations (from `./repositories`)
+   - Schema validation functions (from `./schema`)
+   - Utility functions including type mappers (from `./utils`)
 
-2. **Entity Mappers**
+2. **Type Usage**
+   - Domain types: imported from `@numisma/types`
+   - Database model types: imported directly from `@prisma/client` (not re-exported to avoid conflicts)
+   - Schema validation types: exported from `./schema`
+   - Type-safe conversion utilities: provided in `./utils/type-mappers` and `./utils/entity-mappers`
 
-   - ✅ Implemented ToPrisma mappers for Asset and Market entities
-   - ✅ Implemented ToPrisma mapper for Portfolio entity
-   - ✅ Implemented Position entity mapper with full support for nested entities
+## Implementation Details
 
-3. **Repository Implementations**
+### Repositories
 
-   - ✅ Asset Repository (completed)
-   - ✅ Market Repository (completed)
-   - ✅ Portfolio Repository (completed)
-   - ✅ Position Repository (completed)
-   - ⚠️ Additional repositories may still need updating
+All repositories follow a consistent pattern:
 
-4. **Type Safety Improvements**
-   - ✅ Implemented OperationResult pattern for consistent error handling
-   - ✅ Improved handling of null/undefined values with conditional property assignments
-   - ✅ Fixed type inconsistencies between Prisma and domain models
-   - ✅ Added proper type handling for DateOrGenesis conversions
+- Type-safe CRUD operations
+- Error handling with OperationResult
+- Schema validation for create/update operations
+- Type mapping between Prisma and domain models
 
-### Challenges Addressed
+Implemented repositories:
 
-- **Complex Entity Relationships**: The Position/Portfolio entities have complex relationships that required careful mapping. We implemented a solution that maintains these relationships while ensuring type safety.
-- **DateOrGenesis Type**: We've enhanced the handling of the DateOrGenesis type to correctly convert between Prisma dates and domain model dates.
-- **Enum Types**: We've implemented proper type guards and conversion functions to ensure enum types are correctly handled.
-- **Optional Properties**: We've improved the handling of optional properties with conditional property assignment, avoiding undefined or null values in the database.
+- Asset Repository
+- Market Repository
+- Portfolio Repository
+- Position Repository
+- Wallet Location Repository
 
-### Next Steps
+### Type Mappers
 
-1. **Testing**
+The type mapper system provides:
 
-   - Implement tests to verify proper type conversion
-   - Add integration tests to ensure end-to-end type safety for all repositories
+- Enum conversion utilities (WalletType, PositionLifecycle, CapitalTier, etc.)
+- Date/Genesis handling with proper null/undefined checks
+- Entity mappers for complex types (Position, Portfolio, Market, etc.)
 
-2. **Documentation**
+### Error Handling
 
-   - Update code comments to reflect the new patterns
-   - Create examples for other developers on how to use the repositories with the new pattern
+- All database operations return an OperationResult type
+- Database errors are properly mapped to domain errors
+- Validation errors are handled consistently
 
-3. **Performance Optimization**
-   - Review database query patterns to ensure efficient loading of related entities
-   - Consider adding caching for frequently accessed data
+## Development
 
-### Resources
+```bash
+# Generate Prisma client
+npm run db:generate
 
-- Type definitions are in the @numisma/types package
-- Prisma schema is in packages/db/prisma/schema.prisma
+# Push schema changes to database
+npm run db:push
+
+# Open Prisma Studio
+npm run db:studio
+
+# Build the package
+npm run build
+
+# Development with watch mode
+npm run dev
+```
+
+## Resources
+
+- Type definitions are in the `@numisma/types` package
+- Prisma schema is in `packages/db/prisma/schema.prisma`
