@@ -4,7 +4,7 @@
 
 import { z } from "zod";
 import { idSchema, timestampSchema, foreignKeySchema } from "./common";
-import { ValidationResult, ValidationError } from "@numisma/types";
+// import { ValidationResult, ValidationError } from "@numisma/types";
 
 /**
  * Notification type enum

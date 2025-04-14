@@ -32,9 +32,9 @@ import {
 } from "@prisma/client";
 import {
   Position,
-  DateOrGenesis,
+  // DateOrGenesis,
   OperationResult,
-  PaginatedResult,
+  // PaginatedResult,
   PositionStatus,
   TradeSide,
   TimeFrame,

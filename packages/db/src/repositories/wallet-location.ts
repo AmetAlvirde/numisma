@@ -9,7 +9,7 @@ import {
 } from "@prisma/client";
 import { WalletLocation, AssetLocationType } from "@numisma/types";
 import {
-  walletLocationSchema,
+  // walletLocationSchema,
   createWalletLocationSchema,
   updateWalletLocationSchema,
 } from "../schema/wallet-location";

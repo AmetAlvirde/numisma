@@ -6,8 +6,8 @@ import { z } from "zod";
 import { idSchema, timestampSchema, foreignKeySchema } from "./common";
 import {
   AssetLocationType,
-  ValidationResult,
-  ValidationError,
+  // ValidationResult,
+  // ValidationError,
 } from "@numisma/types";
 
 /**

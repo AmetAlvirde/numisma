@@ -10,7 +10,7 @@ import {
   oneToOneSchema,
 } from "./common";
 import { assetSchema } from "./asset";
-import { ValidationResult, ValidationError } from "@numisma/types";
+// import { ValidationResult, ValidationError } from "@numisma/types";
 
 /**
  * Exchange name enum

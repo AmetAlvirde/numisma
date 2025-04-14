@@ -4,7 +4,7 @@
 
 import { z } from "zod";
 import { idSchema, timestampSchema, foreignKeySchema } from "./common";
-import { TimeFrame, ValidationResult, ValidationError } from "@numisma/types";
+// import { TimeFrame, ValidationResult, ValidationError } from "@numisma/types";
 
 /**
  * Time frame unit enum

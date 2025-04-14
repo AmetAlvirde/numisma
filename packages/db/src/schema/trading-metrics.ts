@@ -7,8 +7,8 @@ import { idSchema, timestampSchema, foreignKeySchema } from "./common";
 import {
   OrderType,
   AssetType,
-  ValidationResult,
-  ValidationError,
+  // ValidationResult,
+  // ValidationError,
 } from "@numisma/types";
 
 /**

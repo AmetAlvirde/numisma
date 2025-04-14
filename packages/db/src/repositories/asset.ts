@@ -2,17 +2,20 @@
  * Asset repository implementation
  */
 
-import { PrismaClient, Asset as PrismaAsset } from "@prisma/client";
+import {
+  PrismaClient,
+  // Asset as PrismaAsset
+} from "@prisma/client";
 import {
   Asset,
-  AssetType,
-  AssetLocationType,
+  // AssetType,
+  // AssetLocationType,
   OperationResult,
   PaginationParams,
   PaginatedResult,
   FilterParams,
   QueryParams,
-  isOperationResult,
+  // isOperationResult,
   isPaginationParams,
   isFilterParams,
   isQueryParams,

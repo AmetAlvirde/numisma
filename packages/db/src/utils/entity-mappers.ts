@@ -49,6 +49,7 @@ import {
   stringToTimeFrame,
   dateToDateOrGenesis,
   dateOrGenesisToDate,
+  mapPortfolioToPrisma,
 } from "./type-mappers";
 
 /**
@@ -392,11 +393,11 @@ export function mapPortfolioToDomain(
     name: portfolio.name,
     description: portfolio.description || undefined,
     dateCreated: dateToDateOrGenesis(portfolio.dateCreated),
-    status: portfolio.status as any, // TODO: Create proper enum mapping
-    positionIds: portfolio.portfolioPositions
-      ? portfolio.portfolioPositions.map(pp => pp.positionId)
-      : [],
+    status: portfolio.status as any, // Cast to handle type discrepancy
     userId: portfolio.userId,
+    positionIds: portfolio.portfolioPositions
+      ? portfolio.portfolioPositions.map(pp => (pp as any).positionId)
+      : [], // Map to position IDs with safer type handling
     tags: portfolio.tags || [],
     notes: portfolio.notes || undefined,
     baseCurrency: "USD", // Default, not in Prisma model
@@ -405,25 +406,5 @@ export function mapPortfolioToDomain(
       sortOrder: portfolio.sortOrder || undefined,
       isPinned: portfolio.isPinned || undefined,
     },
-  };
-}
-
-/**
- * Maps a domain Portfolio to a Prisma Portfolio model for creation/updates
- */
-export function mapPortfolioToPrisma(
-  portfolio: Omit<Portfolio, "id">
-): Prisma.PortfolioCreateInput {
-  return {
-    name: portfolio.name,
-    description: portfolio.description,
-    dateCreated: dateOrGenesisToDate(portfolio.dateCreated) ?? new Date(),
-    status: portfolio.status,
-    userId: portfolio.userId,
-    tags: portfolio.tags || [],
-    notes: portfolio.notes,
-    color: portfolio.displayMetadata?.color,
-    sortOrder: portfolio.displayMetadata?.sortOrder || 0,
-    isPinned: portfolio.displayMetadata?.isPinned || false,
   };
 }
