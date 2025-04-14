@@ -2,10 +2,13 @@
  * Wallet Location repository implementation
  */
 
-import { PrismaClient, WalletLocation as PrismaWalletLocation } from '@prisma/client';
-import { WalletLocation } from '@numisma/types';
-import { walletLocationSchema } from '../schema/wallet-location';
-import { handleDatabaseError } from '../utils';
+import {
+  PrismaClient,
+  WalletLocation as PrismaWalletLocation,
+} from "@prisma/client";
+import { WalletLocation } from "@numisma/types";
+import { walletLocationSchema } from "../schema/wallet-location";
+import { handleDatabaseError } from "../utils";
 
 export class WalletLocationRepository {
   constructor(private prisma: PrismaClient) {}
@@ -18,7 +21,7 @@ export class WalletLocationRepository {
       const walletLocation = await this.prisma.walletLocation.findUnique({
         where: { id },
       });
-      
+
       return walletLocation ? this.mapToDomainModel(walletLocation) : null;
     } catch (error) {
       throw handleDatabaseError(error);
@@ -33,7 +36,7 @@ export class WalletLocationRepository {
       const walletLocations = await this.prisma.walletLocation.findMany({
         where: { userId },
       });
-      
+
       return walletLocations.map(this.mapToDomainModel);
     } catch (error) {
       throw handleDatabaseError(error);
@@ -43,15 +46,18 @@ export class WalletLocationRepository {
   /**
    * Find wallet locations by type
    */
-  async findByType(locationType: string, userId: string): Promise<WalletLocation[]> {
+  async findByType(
+    locationType: string,
+    userId: string
+  ): Promise<WalletLocation[]> {
     try {
       const walletLocations = await this.prisma.walletLocation.findMany({
-        where: { 
+        where: {
           locationType,
           userId,
         },
       });
-      
+
       return walletLocations.map(this.mapToDomainModel);
     } catch (error) {
       throw handleDatabaseError(error);
@@ -61,10 +67,12 @@ export class WalletLocationRepository {
   /**
    * Create a new wallet location
    */
-  async create(walletLocation: Omit<WalletLocation, 'id'>): Promise<WalletLocation> {
+  async create(
+    walletLocation: Omit<WalletLocation, "id">
+  ): Promise<WalletLocation> {
     // Validate with Zod schema
     walletLocationSchema.omit({ id: true }).parse(walletLocation);
-    
+
     try {
       const createdWalletLocation = await this.prisma.walletLocation.create({
         data: {
@@ -77,7 +85,7 @@ export class WalletLocationRepository {
           userId: walletLocation.userId,
         },
       });
-      
+
       return this.mapToDomainModel(createdWalletLocation);
     } catch (error) {
       throw handleDatabaseError(error);
@@ -87,16 +95,19 @@ export class WalletLocationRepository {
   /**
    * Update an existing wallet location
    */
-  async update(id: string, data: Partial<Omit<WalletLocation, 'id'>>): Promise<WalletLocation> {
+  async update(
+    id: string,
+    data: Partial<Omit<WalletLocation, "id">>
+  ): Promise<WalletLocation> {
     // Validate with Zod schema
     walletLocationSchema.partial().omit({ id: true }).parse(data);
-    
+
     try {
       const updatedWalletLocation = await this.prisma.walletLocation.update({
         where: { id },
         data,
       });
-      
+
       return this.mapToDomainModel(updatedWalletLocation);
     } catch (error) {
       throw handleDatabaseError(error);
@@ -119,7 +130,9 @@ export class WalletLocationRepository {
   /**
    * Map a Prisma wallet location to the domain model
    */
-  private mapToDomainModel(walletLocation: PrismaWalletLocation): WalletLocation {
+  private mapToDomainModel(
+    walletLocation: PrismaWalletLocation
+  ): WalletLocation {
     return {
       id: walletLocation.id,
       name: walletLocation.name,
