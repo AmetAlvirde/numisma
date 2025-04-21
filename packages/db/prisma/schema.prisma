@@ -1,8 +1,14 @@
 // This file defines the database schema for the Numisma application
 // It represents the central data model for portfolio and position tracking
 
+// I don't know if the moduleFormat and engineType apply to the generated client in the -js provider, or were only added fot the prisma-client provider
+
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  output          = "../generated/client"
+  moduleFormat    = "esm"
+  previewFeatures = []
+  engineType      = "binary"
 }
 
 datasource db {
