@@ -6,7 +6,7 @@ import {
   PrismaClient,
   // Market as PrismaMarket,
   // Prisma
-} from "@prisma/client";
+} from "../../generated/client";
 import {
   Market,
   // Asset,

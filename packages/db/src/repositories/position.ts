@@ -29,7 +29,7 @@ import {
   PrismaClient,
   Position as PrismaPosition,
   Prisma,
-} from "@prisma/client";
+} from "../../generated/client";
 import {
   Position,
   // DateOrGenesis,

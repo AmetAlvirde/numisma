@@ -5,7 +5,7 @@
  * to prevent multiple connections to the database during development.
  */
 
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient } from "../generated/client";
 
 // Create a type for the global object with prisma
 declare global {
