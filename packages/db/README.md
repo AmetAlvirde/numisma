@@ -2,6 +2,65 @@
 
 This package provides repository implementations and database access utilities for the Numisma application.
 
+## Setup
+
+### Local Development
+
+1. Create a PostgreSQL database for local development
+2. Add database connection string to `.env`:
+   ```
+   DATABASE_URL="postgresql://postgres:postgres@localhost:5432/numisma"
+   ```
+3. Generate the Prisma client:
+   ```bash
+   pnpm db:generate
+   ```
+4. Initialize the database schema:
+   ```bash
+   pnpm db:push
+   ```
+
+### Production Environment
+
+1. Create a `.env.production` file with your production database connection:
+   ```
+   DATABASE_URL="postgresql://user:password@production-host:5432/numisma"
+   ```
+2. Apply the schema to production:
+   ```bash
+   pnpm db:push:prod
+   ```
+
+## Available Commands
+
+### Local Development
+
+- `pnpm db:generate` - Generate Prisma client
+- `pnpm db:push` - Push schema changes to local database
+- `pnpm db:migrate` - Create and apply migrations
+- `pnpm db:studio` - Open Prisma Studio for local database
+
+### Production
+
+- `pnpm db:push:prod` - Push schema to production database
+- `pnpm db:migrate:prod` - Deploy migrations to production
+- `pnpm db:studio:prod` - Open Prisma Studio for production
+
+## Architecture
+
+This database package uses Prisma 6.6.0 with the new `prisma-client` generator that supports ESM modules.
+
+1. **Client Configuration**
+
+   - The Prisma client is configured in `prisma/schema.prisma`
+   - We use environment variables for database connection
+
+2. **Type Usage**
+   - Domain types: imported from `@numisma/types`
+   - Database model types: generated in `src/generated/prisma`
+   - Schema validation: exported from `./schema`
+   - Type-safe conversion utilities: provided in `./utils`
+
 ## Overview
 
 The database layer has been fully refactored to use type-safe mappers, providing better type safety when converting between Prisma models and domain models.
@@ -13,21 +72,6 @@ The database layer has been fully refactored to use type-safe mappers, providing
 - Type guards and conversion utilities for enums and complex types
 - Proper handling of DateOrGenesis for date fields
 - Schema validation for all entities using Zod
-
-### Architecture
-
-1. **Exports**
-
-   - Prisma client instance (from `./prisma`)
-   - Repository implementations (from `./repositories`)
-   - Schema validation functions (from `./schema`)
-   - Utility functions including type mappers (from `./utils`)
-
-2. **Type Usage**
-   - Domain types: imported from `@numisma/types`
-   - Database model types: imported directly from `@prisma/client` (not re-exported to avoid conflicts)
-   - Schema validation types: exported from `./schema`
-   - Type-safe conversion utilities: provided in `./utils/type-mappers` and `./utils/entity-mappers`
 
 ## Implementation Details
 

@@ -6,7 +6,7 @@ import {
   PrismaClient,
   WalletLocation as PrismaWalletLocation,
   AssetLocationType as PrismaAssetLocationType,
-} from "@prisma/client";
+} from "../../generated/client";
 import { WalletLocation, AssetLocationType } from "@numisma/types";
 import {
   // walletLocationSchema,

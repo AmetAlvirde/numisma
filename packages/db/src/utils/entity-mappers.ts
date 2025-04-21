@@ -35,7 +35,7 @@ import {
   Thesis as PrismaThesis,
   JournalEntry as PrismaJournalEntry,
   Prisma,
-} from "@prisma/client";
+} from "../../generated/client";
 
 import {
   mapOrderStatus,

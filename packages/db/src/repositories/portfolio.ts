@@ -5,7 +5,7 @@
 import {
   PrismaClient,
   // Portfolio as PrismaPortfolio
-} from "@prisma/client";
+} from "../../generated/client";
 import {
   Portfolio,
   // DateOrGenesis,
