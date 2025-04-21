@@ -5,7 +5,7 @@
 import {
   PrismaClient,
   // Asset as PrismaAsset
-} from "@prisma/client";
+} from "../../generated/client";
 import {
   Asset,
   // AssetType,

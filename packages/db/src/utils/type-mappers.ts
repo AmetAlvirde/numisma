@@ -39,7 +39,7 @@ import {
   TradeSide as PrismaTradeSide,
   AssetLocationType as PrismaAssetLocationType,
   Prisma,
-} from "@prisma/client";
+} from "../../generated/client";
 
 /**
  * Type guard to check if a value is a valid WalletType

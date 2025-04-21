@@ -1,20 +1,20 @@
 /**
  * Repository factory for dependency injection
- * 
+ *
  * This file provides a factory for creating repositories with a shared
  * Prisma client instance, making it easier to manage dependencies and
  * enabling more testable code.
  */
 
-import { PrismaClient } from '@prisma/client';
-import { prisma as defaultPrisma } from '../prisma';
+import { PrismaClient } from "../../generated/client";
+import { prisma as defaultPrisma } from "../prisma";
 
 // Import repositories
-import { AssetRepository } from './asset';
-import { MarketRepository } from './market';
-import { PortfolioRepository } from './portfolio';
-import { PositionRepository } from './position';
-import { WalletLocationRepository } from './wallet-location';
+import { AssetRepository } from "./asset";
+import { MarketRepository } from "./market";
+import { PortfolioRepository } from "./portfolio";
+import { PositionRepository } from "./position";
+import { WalletLocationRepository } from "./wallet-location";
 
 /**
  * Repository factory that creates repository instances with a shared Prisma client
@@ -24,7 +24,7 @@ export class RepositoryFactory {
 
   /**
    * Create a new repository factory
-   * 
+   *
    * @param prisma Optional Prisma client instance (useful for testing with mocks)
    */
   constructor(prisma: PrismaClient = defaultPrisma) {
