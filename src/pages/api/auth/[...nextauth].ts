@@ -1,6 +1,7 @@
 import NextAuth, { type NextAuthOptions } from "next-auth";
 import { PrismaAdapter } from "@next-auth/prisma-adapter";
 import CredentialsProvider from "next-auth/providers/credentials";
+import bcrypt from "bcryptjs";
 import { prisma } from "@/db/prisma-client"; // Adjust path if necessary
 
 export const authOptions: NextAuthOptions = {
@@ -21,10 +22,7 @@ export const authOptions: NextAuthOptions = {
         },
         password: { label: "Password", type: "password" },
       },
-      async authorize(credentials, req) {
-        console.log("req", req);
-        // Add logic here to look up the user from the credentials supplied
-        // IMPORTANT: This is a placeholder. Implement proper validation!
+      async authorize(credentials) {
         console.log("Attempting authorization for:", credentials?.email);
 
         if (!credentials?.email || !credentials?.password) {
@@ -37,15 +35,26 @@ export const authOptions: NextAuthOptions = {
           where: { email: credentials.email },
         });
 
-        if (user) {
-          // VERY IMPORTANT: Add password hashing and comparison here!
-          // For now, just returning the user if found (INSECURE for demo)
-          console.log("User found:", user.email);
-          // Any object returned will be saved in `user` property of the JWT
-          return user;
+        if (user && user.password) {
+          // Ensure user and password hash exist
+          // Compare the provided password with the stored hash
+          const isValid = await bcrypt.compare(
+            credentials.password,
+            user.password // Assuming the password field in your User model is 'password'
+          );
+
+          if (isValid) {
+            console.log("Password match for:", user.email);
+            // Passwords match, return the user object
+            return user;
+          } else {
+            console.log("Password mismatch for:", user.email);
+            // Passwords don't match
+            return null;
+          }
         } else {
           // If you return null then an error will be displayed advising the user to check their details.
-          console.log("User not found:", credentials.email);
+          console.log("User not found or password missing:", credentials.email);
           return null;
 
           // You can also Reject this callback with an Error thus the user will be sent to the error page with the error message as a query parameter
