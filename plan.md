@@ -41,7 +41,7 @@ This plan outlines the steps to integrate authentication (NextAuth.js), a typesa
   - Implement the `callbacks.session` function to add `user.id` to the session object.
   - **Verification:** The file exists and type-checks correctly. Ensure necessary environment variables (`NEXTAUTH_SECRET`, `NEXTAUTH_URL`, `DATABASE_URL`) are set in your `.env` file. Ensure the `authorize` function logic is correctly implemented for credential validation.
 
-- [ ] **Add SessionProvider Wrapper:**
+- [x] **Add SessionProvider Wrapper:**
   - Modify `src/pages/_app.tsx`.
   - Import `SessionProvider` from `next-auth/react`.
   - Wrap the main `Component` with `<SessionProvider session={pageProps.session}>`.
