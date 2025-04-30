@@ -21,7 +21,7 @@
 /build
 
 # prisma  client
-src/prisma/generated
+prisma/generated
 
 # misc
 .DS_Store
