@@ -2,8 +2,6 @@ import { type AppType } from "next/app";
 import { type Session } from "next-auth";
 import { SessionProvider } from "next-auth/react";
 
-import "@/pages/globals.css";
-
 const App: AppType<{ session: Session | null }> = ({
   Component,
   pageProps: { session, ...pageProps },
