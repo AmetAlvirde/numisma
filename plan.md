@@ -21,25 +21,25 @@ This plan outlines the steps to integrate authentication (NextAuth.js), a typesa
   - Execute `npx prisma migrate dev --name init-auth` (or a suitable name).
   - **Verification:** The command should complete successfully in the terminal. Inspect your PostgreSQL database (using `psql`, pgAdmin, or another tool) to confirm that the `Account`, `Session`, `User`, and `VerificationToken` tables (or tables matching your model names) have been created or updated correctly.
 
-- [ ] **Create Prisma Client Singleton:**
+- [x] **Create Prisma Client Singleton:**
 
-  - Create the file `src/server/db.ts`.
+  - Create the file `src/db/prisma-client.ts`.
   - Implement the singleton pattern to instantiate `PrismaClient`, preventing multiple instances during development.
-  - **Verification:** The file `src/server/db.ts` exists and the code type-checks correctly (e.g., run `tsc --noEmit` or rely on editor feedback).
+  - **Verification:** The file `src/db/prisma-lient.ts` exists and the code type-checks correctly (e.g., run `tsc --noEmit` or rely on editor feedback).
 
-- [ ] **Generate Prisma Client:**
+- [x] **Generate Prisma Client:**
   - Execute `npx prisma generate`.
-  - **Verification:** The command should complete successfully. The `node_modules/@prisma/client` directory should be updated, reflecting the latest schema.
+  - **Verification:** The command should complete successfully. The `prisma/generated/client` directory should be updated, reflecting the latest schema.
 
 ## Phase 2: NextAuth.js Core Setup
 
-- [ ] **Create NextAuth.js API Route:**
+- [x] **Create NextAuth.js API Route:**
 
   - Create the file `src/pages/api/auth/[...nextauth].ts`.
-  - Import `NextAuth`, `PrismaAdapter`, your `prisma` client instance, and at least one provider (e.g., `GithubProvider`).
-  - Configure `authOptions` using the `PrismaAdapter` and provider(s).
+  - Import `NextAuth`, `PrismaAdapter`, your `prisma` client instance, and the `CredentialsProvider`.
+  - Configure `authOptions` using the `PrismaAdapter` and the `CredentialsProvider`. You will need to implement the `authorize` function for this provider to handle email/password verification against your database.
   - Implement the `callbacks.session` function to add `user.id` to the session object.
-  - **Verification:** The file exists and type-checks correctly. Ensure necessary environment variables (`GITHUB_ID`, `GITHUB_SECRET`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL`, `DATABASE_URL`) are set in your `.env` file.
+  - **Verification:** The file exists and type-checks correctly. Ensure necessary environment variables (`NEXTAUTH_SECRET`, `NEXTAUTH_URL`, `DATABASE_URL`) are set in your `.env` file. Ensure the `authorize` function logic is correctly implemented for credential validation.
 
 - [ ] **Add SessionProvider Wrapper:**
   - Modify `src/pages/_app.tsx`.
@@ -52,14 +52,15 @@ This plan outlines the steps to integrate authentication (NextAuth.js), a typesa
 - [ ] **Implement Basic Sign-in/Sign-out UI:**
   - Modify `src/pages/index.tsx`.
   - Import and use the `useSession`, `signIn`, `signOut` hooks from `next-auth/react`.
-  - Conditionally render a "Sign In" button if `status === 'unauthenticated'`.
+  - Implement a simple form (or use fields) for email/password input.
+  - Conditionally render the "Sign In" form/button if `status === 'unauthenticated'`.
   - Conditionally render user information (`session.user.name` or `session.user.email`) and a "Sign Out" button if `status === 'authenticated'`.
   - **Verification:**
-    1. Load the index page. Verify the "Sign In" button is visible.
-    2. Click "Sign In" and complete the authentication flow with your chosen provider (e.g., GitHub).
-    3. Verify you are redirected back to the app and now see your username/email and the "Sign Out" button.
-    4. Check the `User` and `Account` tables in your database to confirm a new record was created for you.
-    5. Click "Sign Out". Verify you see the "Sign In" button again.
+    1. Load the index page. Verify the sign-in form/button is visible.
+    2. Enter valid credentials and trigger the sign-in process.
+    3. Verify you are redirected back (or the UI updates) and now see your username/email and the "Sign Out" button.
+    4. Check the `User` table (and potentially `Session` table) in your database to confirm the session was established correctly. (Note: `CredentialsProvider` typically doesn't create `Account` records unless configured explicitly).
+    5. Click "Sign Out". Verify you see the sign-in form/button again.
 
 ## Phase 4: tRPC Setup
 
@@ -122,25 +123,4 @@ This plan outlines the steps to integrate authentication (NextAuth.js), a typesa
 - [ ] **Create Protected Procedure Helper:**
 
   - In `src/server/api/trpc.ts`:
-    - Define an `enforceUserIsAuthed` middleware using `t.middleware`. This middleware should check for `ctx.session.user` and throw a `TRPCError({ code: 'UNAUTHORIZED' })` if not found. It should pass through the non-nullable `session` and `prisma` in the `next()` call context.
-    - Define and export `protectedProcedure = t.procedure.use(enforceUserIsAuthed)`.
-  - **Verification:** The file type-checks correctly. The middleware logic correctly identifies authenticated/unauthenticated states based on `ctx.session.user`.
-
-- [ ] **Create a Protected Procedure:**
-  - In `src/server/api/root.ts` (or a sub-router):
-    - Import `protectedProcedure`.
-    - Define a new procedure (e.g., `getSecretMessage`) using `protectedProcedure`.
-    - Inside the procedure, access `ctx.session.user` (e.g., `ctx.session.user.id` or `ctx.session.user.name`) and potentially `ctx.prisma`.
-  - **Verification:** The file type-checks correctly. The procedure correctly accesses `ctx.session.user` properties without type errors (TypeScript should infer it's non-null).
-
-## Phase 7: Protected tRPC Call Verification
-
-- [ ] **Call Protected tRPC Procedure:**
-  - Modify `src/pages/index.tsx`.
-  - Import the `api` object.
-  - Use the hook for your protected procedure (e.g., `api.getSecretMessage.useQuery()`).
-  - Crucially, add the option `{ enabled: !!sessionData }` (where `sessionData` comes from `useSession`) to the `useQuery` hook.
-  - Display the data, loading state, or an indication that the user needs to log in.
-  - **Verification:**
-    1. **Logged Out:** Load the index page. Verify the protected query does _not_ run (check the network tab for requests to `/api/trpc/getSecretMessage`). No secret message should be displayed.
-    2. **Logged In:** Sign in. Verify the protected query _does_ run (check network tab). Verify the secret message, potentially including user-specific data fetched using `ctx.session.user`, is displayed correctly. Check the browser console for errors.
+    - Define an `enforceUserIsAuthed` middleware using `t.middleware`. This middleware should check for `ctx.session.user` and throw a `TRPCError({ code: 'UNAUTHORIZED' })` if not found. It should pass through the non-nullable `session`
