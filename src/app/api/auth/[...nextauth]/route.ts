@@ -1,0 +1,111 @@
+import NextAuth, { type NextAuthOptions } from "next-auth";
+import { PrismaAdapter } from "@next-auth/prisma-adapter";
+import CredentialsProvider from "next-auth/providers/credentials";
+import bcrypt from "bcryptjs";
+import { prisma } from "@/db/prisma-client"; // Assuming this is the correct path to your prisma client instance
+
+// Ensure you have bcryptjs installed: npm install bcryptjs @types/bcryptjs
+// Also ensure you have NEXTAUTH_SECRET in your .env file
+
+export const authOptions: NextAuthOptions = {
+  // Use Prisma Adapter
+  adapter: PrismaAdapter(prisma),
+  // Configure one or more authentication providers
+  providers: [
+    CredentialsProvider({
+      // The name to display on the sign in form (e.g. "Sign in with...")
+      name: "Credentials",
+      // `credentials` is used to generate a form on the sign in page.
+      credentials: {
+        email: {
+          label: "Email",
+          type: "email",
+          placeholder: "jsmith@example.com",
+        },
+        password: { label: "Password", type: "password" },
+      },
+      async authorize(credentials) {
+        console.log("Attempting authorization for:", credentials?.email);
+
+        if (!credentials?.email || !credentials?.password) {
+          console.error("Missing credentials");
+          throw new Error("Please provide email and password."); // Throw error for feedback
+        }
+
+        const user = await prisma.user.findUnique({
+          where: { email: credentials.email },
+        });
+
+        // Add check for user existence and password hash
+        if (!user || !user.password) {
+          console.log(
+            "User not found or password not set for:",
+            credentials.email
+          );
+          throw new Error("Invalid credentials."); // User not found or no password setup
+        }
+
+        // Compare the provided password with the stored hash
+        const isValid = await bcrypt.compare(
+          credentials.password,
+          user.password
+        );
+
+        if (isValid) {
+          console.log("Password match for:", user.email);
+          // Return the user object, excluding the password hash
+          // IMPORTANT: Never return the password hash in the user object
+          return {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            image: user.image,
+            // Add any other user properties needed, but NOT the password
+          };
+        } else {
+          console.log("Password mismatch for:", user.email);
+          throw new Error("Invalid credentials."); // Password mismatch
+        }
+      },
+    }),
+    // ...add more providers here if needed (e.g., Google, GitHub)
+  ],
+  // Use database sessions
+  session: {
+    strategy: "database", // Changed from 'jwt' as PrismaAdapter handles sessions
+    // You might want to configure maxAge and updateAge for sessions
+    maxAge: 30 * 24 * 60 * 60, // 30 days
+    updateAge: 24 * 60 * 60, // 24 hours
+  },
+  callbacks: {
+    async session({ session, user }) {
+      // The `user` object here comes from the `authorize` function or the adapter's user retrieval
+      // Add custom properties to the session object
+      if (session.user) {
+        session.user.id = user.id; // Add the user ID to the session
+        // Add other properties if needed, like roles:
+        // session.user.role = user.role; // Assuming 'role' exists on your User model
+      }
+      return session;
+    },
+    // Note: JWT callback is not typically needed when using database sessions with PrismaAdapter,
+    // as the session callback receives the user object directly.
+    // If you needed custom JWT logic (e.g., adding roles to the token itself), you would configure it here.
+  },
+  // Specify pages if you have custom sign-in, sign-out, error pages
+  // pages: {
+  //   signIn: '/auth/signin',
+  //   signOut: '/auth/signout',
+  //   error: '/auth/error', // Error code passed in query string as ?error=
+  //   verifyRequest: '/auth/verify-request', // (used for email/passwordless sign in)
+  //   newUser: '/auth/new-user' // New users will be directed here on first sign in (leave the property out if not of interest)
+  // },
+  // Secret for signing strategies (like JWT) - REQUIRED
+  secret: process.env.NEXTAUTH_SECRET,
+  // Enable debug messages in development for troubleshooting
+  debug: process.env.NODE_ENV === "development",
+};
+
+// Export handlers for GET and POST requests
+const handler = NextAuth(authOptions);
+export { handler as GET, handler as POST };
