@@ -72,25 +72,34 @@ export const authOptions: NextAuthOptions = {
   ],
   // Use database sessions
   session: {
-    strategy: "database", // Changed from 'jwt' as PrismaAdapter handles sessions
+    strategy: "jwt", // Explicitly set JWT strategy as required for Credentials Provider with Adapter
     // You might want to configure maxAge and updateAge for sessions
     maxAge: 30 * 24 * 60 * 60, // 30 days
     updateAge: 24 * 60 * 60, // 24 hours
   },
   callbacks: {
-    async session({ session, user }) {
-      // The `user` object here comes from the `authorize` function or the adapter's user retrieval
-      // Add custom properties to the session object
-      if (session.user) {
-        session.user.id = user.id; // Add the user ID to the session
-        // Add other properties if needed, like roles:
-        // session.user.role = user.role; // Assuming 'role' exists on your User model
+    // Restore callbacks needed for JWT strategy
+    // JWT callback is used to persist user ID into the token/session cookie
+    // even when using database strategy, it can simplify session callback
+    async jwt({ token, user }) {
+      // The 'user' object is available on initial sign-in
+      if (user) {
+        token.id = user.id;
+        // Add other properties from `user` to `token` if needed later in session callback
+        // token.role = user.role; // Example
+      }
+      return token;
+    },
+    async session({ session, token }) {
+      // The 'token' contains the data we put in the jwt callback (or defaults)
+      // Assign the user ID from the token to the session
+      if (session.user && token.id) {
+        session.user.id = token.id as string; // Cast because token properties can be string | undefined
+        // Assign other properties from token if needed
+        // session.user.role = token.role; // Example
       }
       return session;
     },
-    // Note: JWT callback is not typically needed when using database sessions with PrismaAdapter,
-    // as the session callback receives the user object directly.
-    // If you needed custom JWT logic (e.g., adding roles to the token itself), you would configure it here.
   },
   // Specify pages if you have custom sign-in, sign-out, error pages
   // pages: {

@@ -42,15 +42,16 @@ This plan outlines the steps to integrate authentication (NextAuth.js), a typesa
   - Export the result of `NextAuth(authOptions)` as `GET` and `POST` handlers.
   - **Verification:** The file exists and type-checks correctly. Ensure necessary environment variables (`NEXTAUTH_SECRET`, `NEXTAUTH_URL`, `DATABASE_URL`) are set. Ensure `authorize` logic is correct.
 
-- [ ] **Add SessionProvider Wrapper:**
-  - Create a provider component (e.g., `src/app/providers.tsx`) with the `"use client"` directive.
+- [x] **Add SessionProvider Wrapper:**
+  - Create a provider component (e.g., `src/app/providers.tsx`) with the `"use client"` directive. _(Note: Used existing `src/components/providers/session-provider.tsx` instead)_
   - Inside this component, import and render `SessionProvider` from `next-auth/react`, wrapping `{children}`.
-  - Import and use this provider component in your root layout (`src/app/layout.tsx`) to wrap the main content (e.g., inside `<body>`).
+  - Import and use this provider component in your root layout (`src/app/layout.tsx`) to wrap the main content (e.g., inside `<body>`). _(Note: Already correctly implemented in layout)_
   - **Verification:** The application should build and run. Open the browser dev tools; no console errors related to `SessionProvider`.
 
 ## Phase 3: Basic Authentication Flow Verification
 
 - [x] **Implement Basic Sign-in/Sign-out UI:**
+
   - Modify `src/app/page.tsx`. Add `"use client"` directive at the top.
   - Import and use the `useSession`, `signIn`, `signOut` hooks from `next-auth/react`.
   - Implement a simple form for email/password input.
