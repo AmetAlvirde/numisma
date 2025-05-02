@@ -45,7 +45,7 @@ This plan outlines the steps to integrate tRPC into the Next.js application to f
 - Create a new test procedure that accesses `ctx.prisma`. For example, a procedure that counts users (`prisma.user.count()`).
 - Test this new procedure endpoint similarly to Step 2 (using POST). Verify it returns a valid count (e.g., `{"result":{"data":0}}` if no users exist) without errors.
 
-## Step 4: Create User Listing Procedure
+- [x] ## Step 4: Create User Listing Procedure
 
 **Goal:** Implement the specific tRPC procedure to fetch users.
 
@@ -67,10 +67,10 @@ This plan outlines the steps to integrate tRPC into the Next.js application to f
 
 **Tasks:**
 
-- Create a utility file (`src/lib/trpc/client.ts`) to initialize the tRPC client (`createTRPCProxyClient`) for Server Components.
-- Create a separate utility file (`src/lib/trpc/react.ts`) for the React Query integration (`createTRPCReact`) needed for Client Components.
+- Create a utility file (`src/trpc/client.ts`) to initialize the tRPC client (`createTRPCProxyClient`) for Server Components.
+- Create a separate utility file (`src/trpc/react.ts`) for the React Query integration (`createTRPCReact`) needed for Client Components.
 - Configure `superjson` for data transformation in both client setups.
-- Create a `TrpcProvider` component (`src/lib/trpc/Provider.tsx`) that sets up `QueryClient` and wraps children with `QueryClientProvider` and the tRPC Provider.
+- Create a `TrpcProvider` component (`src/trpc/Provider.tsx`) that sets up `QueryClient` and wraps children with `QueryClientProvider` and the tRPC Provider.
 - Use the `TrpcProvider` in the root layout (`src/app/layout.tsx`).
 
 **Verify:**
@@ -86,7 +86,7 @@ This plan outlines the steps to integrate tRPC into the Next.js application to f
 **Tasks:**
 
 - Create a new React **Client Component** (e.g., `src/components/UserList.tsx` with `"use client"` directive).
-- Inside the component, import the React Query client (`@/lib/trpc/react.ts`) and use the `trpc.user.list.useQuery()` hook to fetch data.
+- Inside the component, import the React Query client (`@/trpc/react.ts`) and use the `trpc.user.list.useQuery()` hook to fetch data.
 - Render the user data (e.g., in a list or table).
 - Handle loading and error states returned by the hook.
 - Add this `UserList` component to the desired protected page (e.g., the root page after login). Assume page-level protection is already handled by other means (e.g., NextAuth middleware).
