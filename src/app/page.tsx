@@ -10,7 +10,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "./api/auth/[...nextauth]/route";
 import { redirect } from "next/navigation";
-// import { SignOutButton } from "@/components/auth/SignOutButton";
+import { SignOutButton } from "@/components/SignOutButton";
 import { UserList } from "@/components/UserList";
 
 // Just export default async function
@@ -34,7 +34,7 @@ export default async function Home() {
         <p>Welcome, {session.user?.name ?? session.user?.email}!</p>
         <UserList />{" "}
         {/* UserList is still a Client Component, rendered by this Server Component */}
-        {/* <SignOutButton /> Remove usage */}
+        <SignOutButton /> {/* Render the SignOutButton Client Component */}
       </main>
     </>
   );
