@@ -22,6 +22,25 @@ export const appRouter = router({
         greeting: `Hello ${input?.name ?? "world"}`,
       };
     }),
+
+  userCount: publicProcedure.query(async ({ ctx }) => {
+    const count = await ctx.prisma.user.count();
+    return {
+      count,
+    };
+  }),
+
+  listUsers: publicProcedure.query(async ({ ctx }) => {
+    const users = await ctx.prisma.user.findMany({
+      select: {
+        id: true,
+        name: true,
+        email: true,
+      },
+    });
+    return users;
+  }),
+
   // Add other routers here...
 });
 

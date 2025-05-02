@@ -31,7 +31,7 @@ This plan outlines the steps to integrate tRPC into the Next.js application to f
 - Start the development server (`npm run dev` or `yarn dev`).
 - Use `curl` or a similar tool to send a POST request to the test procedure endpoint (e.g., `curl -X POST http://localhost:3000/api/trpc/hello -H "Content-Type: application/json" -d '{"name":"World"}'`). Check for a successful JSON response (e.g., `{"result":{"data":{"greeting":"Hello World"}}}`). _Note the POST method and endpoint structure difference from Pages Router._
 
-## Step 3: Integrate Prisma with tRPC Context
+- [x] ## Step 3: Integrate Prisma with tRPC Context
 
 **Goal:** Make the Prisma client available within tRPC procedures.
 
