@@ -1,101 +1,100 @@
-# Implementation Plan: NextAuth.js + tRPC + Prisma Integration (App Router)
+# Plan: Implement tRPC for User Listing
 
-This plan outlines the steps to integrate authentication (NextAuth.js), a typesafe API (tRPC), and database interaction (Prisma) into the Next.js **App Router** application. Each step includes verification instructions.
+This plan outlines the steps to integrate tRPC into the Next.js application to fetch and display a list of users from the database on a protected page using the App Router. Authentication via tRPC is deferred.
 
-## Phase 1: Setup & Prisma Integration
+- [x] ## Step 1: Install tRPC Dependencies
 
-- [x] **Install Dependencies:**
+**Goal:** Add the necessary tRPC packages to the project.
 
-  - Install `next-auth`, `@next-auth/prisma-adapter`, `@prisma/client`, `@tanstack/react-query@^4`, `@trpc/client`, `@trpc/server`, `@trpc/react-query`, `@trpc/next`.
-  - Install `prisma` as a dev dependency if not already present.
-  - **Verification:** Check `package.json` to confirm all dependencies are listed. Run `npm install` (or yarn/pnpm equivalent) - it should complete without errors.
+**Tasks:**
 
-- [x] **Update Prisma Schema:**
+- Install `@trpc/server`, `@trpc/client`, `@trpc/react-query`, `@trpc/next`, `react-query`, `superjson`, and `zod`.
 
-  - Add the required models for `@next-auth/prisma-adapter` (Account, Session, User, VerificationToken) to `prisma/schema.prisma`.
-  - Adapt the existing `User` model to include fields expected by NextAuth.js (e.g., `emailVerified`, `image`, relationships to `Account` and `Session`). Ensure field types match adapter requirements.
-  - **Verification:** Compare `prisma/schema.prisma` against the schema provided in the `@next-auth/prisma-adapter` documentation. Ensure all required models, fields, and relations (`@relation`) are present and correctly defined.
+**Verify:**
 
-- [x] **Run Prisma Migration:**
+- Check `package.json` to confirm the dependencies have been added.
+- Run the package manager's install command (e.g., `npm install` or `yarn`) without errors.
 
-  - Execute `npx prisma migrate dev --name init-auth` (or a suitable name).
-  - **Verification:** The command should complete successfully in the terminal. Inspect your PostgreSQL database (using `psql`, pgAdmin, or another tool) to confirm that the `Account`, `Session`, `User`, and `VerificationToken` tables (or tables matching your model names) have been created or updated correctly.
+- [x] ## Step 2: Set Up tRPC Server (App Router)
 
-- [x] **Create Prisma Client Singleton:**
+**Goal:** Create the basic tRPC server infrastructure compatible with Next.js App Router.
 
-  - Create the file `src/db/prisma-client.ts`.
-  - Implement the singleton pattern to instantiate `PrismaClient`, preventing multiple instances during development.
-  - **Verification:** The file `src/db/prisma-client.ts` exists and the code type-checks correctly (e.g., run `tsc --noEmit` or rely on editor feedback).
+**Tasks:**
 
-- [x] **Generate Prisma Client:**
-  - Execute `npx prisma generate`.
-  - **Verification:** The command should complete successfully. The `prisma/generated/client` directory should be updated, reflecting the latest schema.
+- Create a tRPC router (`src/server/trpc/router.ts`).
+- Define a context creation function (`src/server/trpc/context.ts`) - initially can be simple, will add Prisma later.
+- Create the App Router API route handler (`src/app/api/trpc/[trpc]/route.ts`) to expose the tRPC router using `fetchRequestHandler`.
+- Add a simple test procedure (e.g., `hello`) to the router.
 
-## Phase 2: NextAuth.js Core Setup
+**Verify:**
 
-- [x] **Create NextAuth.js API Route Handler:**
+- Start the development server (`npm run dev` or `yarn dev`).
+- Use `curl` or a similar tool to send a POST request to the test procedure endpoint (e.g., `curl -X POST http://localhost:3000/api/trpc/hello -H "Content-Type: application/json" -d '{"name":"World"}'`). Check for a successful JSON response (e.g., `{"result":{"data":{"greeting":"Hello World"}}}`). _Note the POST method and endpoint structure difference from Pages Router._
 
-  - Create the file `src/app/api/auth/[...nextauth]/route.ts`.
-  - Import `NextAuth`, `PrismaAdapter`, your `prisma` client instance, and the `CredentialsProvider`.
-  - Configure `authOptions` using the `PrismaAdapter` and the `CredentialsProvider`. Implement the `authorize` function for credential handling.
-  - Implement the `callbacks.session` function to add `user.id` to the session object.
-  - Export the result of `NextAuth(authOptions)` as `GET` and `POST` handlers.
-  - **Verification:** The file exists and type-checks correctly. Ensure necessary environment variables (`NEXTAUTH_SECRET`, `NEXTAUTH_URL`, `DATABASE_URL`) are set. Ensure `authorize` logic is correct.
+## Step 3: Integrate Prisma with tRPC Context
 
-- [x] **Add SessionProvider Wrapper:**
-  - Create a provider component (e.g., `src/app/providers.tsx`) with the `"use client"` directive. _(Note: Used existing `src/components/providers/session-provider.tsx` instead)_
-  - Inside this component, import and render `SessionProvider` from `next-auth/react`, wrapping `{children}`.
-  - Import and use this provider component in your root layout (`src/app/layout.tsx`) to wrap the main content (e.g., inside `<body>`). _(Note: Already correctly implemented in layout)_
-  - **Verification:** The application should build and run. Open the browser dev tools; no console errors related to `SessionProvider`.
+**Goal:** Make the Prisma client available within tRPC procedures.
 
-## Phase 3: Basic Authentication Flow Verification
+**Tasks:**
 
-- [x] **Implement Basic Sign-in/Sign-out UI:**
+- Import and initialize the Prisma client (`src/lib/prisma.ts` or wherever it resides).
+- Modify the tRPC context creation function (`src/server/trpc/context.ts`) to include the Prisma client instance in the returned context object.
 
-  - Modify `src/app/page.tsx`. Add `"use client"` directive at the top.
-  - Import and use the `useSession`, `signIn`, `signOut` hooks from `next-auth/react`.
-  - Implement a simple form for email/password input.
-  - Conditionally render the "Sign In" form if `status === 'unauthenticated'`.
-  - Conditionally render user info (`session.user.name` or `session.user.email`) and a "Sign Out" button if `status === 'authenticated'`.
-  - **Verification:**
-    1. Load the root page (`/`). Verify the sign-in form is visible.
-    2. Enter valid credentials and trigger sign-in.
-    3. Verify the UI updates to show your username/email and the "Sign Out" button.
-    4. Check the `User` and `Session` tables in the database.
-    5. Click "Sign Out". Verify the sign-in form appears again.
+**Verify:**
 
-## Phase 4: Protected Routes & Login Page
+- Create a new test procedure that accesses `ctx.prisma`. For example, a procedure that counts users (`prisma.user.count()`).
+- Test this new procedure endpoint similarly to Step 2 (using POST). Verify it returns a valid count (e.g., `{"result":{"data":0}}` if no users exist) without errors.
 
-- [x] **Define Protected Routes using Middleware:**
+## Step 4: Create User Listing Procedure
 
-  - Create `middleware.ts` in the `src` directory (or root).
-  - Import `withAuth` from `next-auth/middleware`.
-  - Export a default middleware function using `withAuth`.
-  - Configure `withAuth` with a `matcher` to protect the root route (`/`).
-  - Configure the `pages` option within `withAuth` to specify the sign-in page path (e.g., `/login`).
-  - **Verification:** Unauthenticated access to `/` should automatically redirect to the path specified in `pages.signIn`. The `middleware.ts` file should exist and be correctly configured.
+**Goal:** Implement the specific tRPC procedure to fetch users.
 
-- [x] **Create Dedicated Login Page:**
+**Tasks:**
 
-  - Create the file `src/app/login/page.tsx`.
-  - Implement a client component (`"use client"`) containing the sign-in form (similar to the one previously on the root page).
-  - Use `useSession`, `signIn` from `next-auth/react`.
-  - Ensure the `signIn` function handles redirection correctly after successful login (NextAuth.js typically handles the `callbackUrl` automatically when middleware is used).
-  - **Verification:**
-    1. Navigate to `/login` directly. The login form should be displayed.
-    2. Log in using valid credentials. Verify you are redirected to the root page (`/`).
-    3. Check database tables (`Session`, `User`) if needed.
+- Create a user router (`src/server/trpc/routers/user.ts`) or add directly to the main router.
+- Define a `list` procedure within the user router that uses `ctx.prisma.user.findMany()` to fetch users.
+- Select only necessary fields (id, name, email, etc.) to avoid over-fetching.
+- Merge the user router into the main `appRouter`.
 
-- [x] **Update Root Page (`/`):**
+**Verify:**
 
-  - Modify `src/app/page.tsx`.
-  - Remove the conditional logic based on `useSession` status (`unauthenticated`, `authenticated`). Since the route is now protected by middleware, we can assume the user is authenticated when this page renders.
-  - Remove the sign-in form elements.
-  - Keep the display of authenticated user information (e.g., `session.user.email`) and the "Sign Out" button.
-  - **Verification:**
-    1. After logging in via `/login`, navigate to `/`. Verify only the authenticated content (user info, sign-out button) is shown, and the sign-in form is gone.
-    2. Click "Sign Out". Verify you are redirected back to the `/login` page.
+- Add some test users to the database manually if none exist.
+- Test the `user.list` procedure endpoint (e.g., `curl -X POST http://localhost:3000/api/trpc/user.list -H "Content-Type: application/json"`). Verify it returns an array of user objects with the selected fields.
 
-- [x] **Update NextAuth Configuration (Optional but Recommended):**
-  - In `src/app/api/auth/[...nextauth]/route.ts`, add the `pages: { signIn: '/login' }` option to the main `authOptions`.
-  - **Verification:** This ensures consistency and provides a fallback if middleware redirection fails for any reason. The sign-in process should continue to work as expected.
+## Step 5: Set Up tRPC Client (App Router)
+
+**Goal:** Configure the tRPC client for use in the frontend React Server and Client Components.
+
+**Tasks:**
+
+- Create a utility file (`src/lib/trpc/client.ts`) to initialize the tRPC client (`createTRPCProxyClient`) for Server Components.
+- Create a separate utility file (`src/lib/trpc/react.ts`) for the React Query integration (`createTRPCReact`) needed for Client Components.
+- Configure `superjson` for data transformation in both client setups.
+- Create a `TrpcProvider` component (`src/lib/trpc/Provider.tsx`) that sets up `QueryClient` and wraps children with `QueryClientProvider` and the tRPC Provider.
+- Use the `TrpcProvider` in the root layout (`src/app/layout.tsx`).
+
+**Verify:**
+
+- Run the application (`npm run dev` or `yarn dev`).
+- Check the browser's developer console for any errors related to tRPC client setup.
+- Ensure the application still renders correctly without runtime errors.
+
+## Step 6: Implement User List Component on Protected Page
+
+**Goal:** Fetch and display the user list in a React component using the tRPC client hook.
+
+**Tasks:**
+
+- Create a new React **Client Component** (e.g., `src/components/UserList.tsx` with `"use client"` directive).
+- Inside the component, import the React Query client (`@/lib/trpc/react.ts`) and use the `trpc.user.list.useQuery()` hook to fetch data.
+- Render the user data (e.g., in a list or table).
+- Handle loading and error states returned by the hook.
+- Add this `UserList` component to the desired protected page (e.g., the root page after login). Assume page-level protection is already handled by other means (e.g., NextAuth middleware).
+
+**Verify:**
+
+- Navigate to the protected page in the browser.
+- Observe that the component initially shows a loading state.
+- Verify that the list of users (fetched from the database via tRPC) is displayed correctly.
+- Check the browser's network tab to confirm a POST request is made to the `/api/trpc/user.list` endpoint and receives the expected data.
+- Test the error state (e.g., by temporarily breaking the API route or database connection) and verify the component displays an appropriate error message.
