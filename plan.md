@@ -61,7 +61,7 @@ This plan outlines the steps to integrate tRPC into the Next.js application to f
 - Add some test users to the database manually if none exist.
 - Test the `user.list` procedure endpoint (e.g., `curl -X POST http://localhost:3000/api/trpc/user.list -H "Content-Type: application/json"`). Verify it returns an array of user objects with the selected fields.
 
-## Step 5: Set Up tRPC Client (App Router)
+- [x] ## Step 5: Set Up tRPC Client (App Router)
 
 **Goal:** Configure the tRPC client for use in the frontend React Server and Client Components.
 
