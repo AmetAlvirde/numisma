@@ -75,7 +75,7 @@ This plan outlines the steps to integrate authentication (NextAuth.js), a typesa
   - Configure the `pages` option within `withAuth` to specify the sign-in page path (e.g., `/login`).
   - **Verification:** Unauthenticated access to `/` should automatically redirect to the path specified in `pages.signIn`. The `middleware.ts` file should exist and be correctly configured.
 
-- [ ] **Create Dedicated Login Page:**
+- [x] **Create Dedicated Login Page:**
 
   - Create the file `src/app/login/page.tsx`.
   - Implement a client component (`"use client"`) containing the sign-in form (similar to the one previously on the root page).
@@ -86,7 +86,7 @@ This plan outlines the steps to integrate authentication (NextAuth.js), a typesa
     2. Log in using valid credentials. Verify you are redirected to the root page (`/`).
     3. Check database tables (`Session`, `User`) if needed.
 
-- [ ] **Update Root Page (`/`):**
+- [x] **Update Root Page (`/`):**
 
   - Modify `src/app/page.tsx`.
   - Remove the conditional logic based on `useSession` status (`unauthenticated`, `authenticated`). Since the route is now protected by middleware, we can assume the user is authenticated when this page renders.
@@ -96,6 +96,6 @@ This plan outlines the steps to integrate authentication (NextAuth.js), a typesa
     1. After logging in via `/login`, navigate to `/`. Verify only the authenticated content (user info, sign-out button) is shown, and the sign-in form is gone.
     2. Click "Sign Out". Verify you are redirected back to the `/login` page.
 
-- [ ] **Update NextAuth Configuration (Optional but Recommended):**
+- [x] **Update NextAuth Configuration (Optional but Recommended):**
   - In `src/app/api/auth/[...nextauth]/route.ts`, add the `pages: { signIn: '/login' }` option to the main `authOptions`.
   - **Verification:** This ensures consistency and provides a fallback if middleware redirection fails for any reason. The sign-in process should continue to work as expected.

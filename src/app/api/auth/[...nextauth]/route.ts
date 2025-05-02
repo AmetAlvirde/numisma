@@ -102,13 +102,13 @@ export const authOptions: NextAuthOptions = {
     },
   },
   // Specify pages if you have custom sign-in, sign-out, error pages
-  // pages: {
-  //   signIn: '/auth/signin',
-  //   signOut: '/auth/signout',
-  //   error: '/auth/error', // Error code passed in query string as ?error=
-  //   verifyRequest: '/auth/verify-request', // (used for email/passwordless sign in)
-  //   newUser: '/auth/new-user' // New users will be directed here on first sign in (leave the property out if not of interest)
-  // },
+  pages: {
+    signIn: "/login",
+    // signOut: '/auth/signout', // Example
+    // error: '/auth/error', // Example
+    // verifyRequest: '/auth/verify-request', // Example
+    // newUser: '/auth/new-user' // Example
+  },
   // Secret for signing strategies (like JWT) - REQUIRED
   secret: process.env.NEXTAUTH_SECRET,
   // Enable debug messages in development for troubleshooting
