@@ -53,12 +53,6 @@ const LoginPage: NextPage = () => {
     }
   };
 
-  // If authenticated, redirect to home (should ideally be handled by middleware)
-  if (status === "authenticated") {
-    router.replace("/"); // Use replace to avoid adding login to history
-    return <div>Redirecting...</div>; // Or a loading indicator
-  }
-
   if (status === "loading") {
     return <div>Loading...</div>; // Show loading state
   }
