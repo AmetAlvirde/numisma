@@ -32,8 +32,8 @@ interface ThemeProviderProps {
 export function ThemeProvider({
   children,
   defaultTheme = "system",
-  storageKey = "theme",
-}: ThemeProviderProps) {
+}: // storageKey = "theme",
+ThemeProviderProps) {
   // State for the user's preference ('light', 'dark', or 'system')
   // TODO (Phase 4): Initialize from localStorage if available
   const [themePreference, setThemePreference] =
