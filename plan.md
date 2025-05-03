@@ -40,3 +40,42 @@
   - [x] Select "Dark" theme manually. Close and reopen the app. Verify "Dark" theme is active and the UI element shows "Dark" selected.
   - [x] Select "System" theme manually. Close and reopen the app. Verify the theme matches the current system theme and the UI element shows "System" selected.
   - [x] Clear the saved preference from storage. Relaunch the app. Verify it defaults to the "System" setting and applies the correct theme based on the OS preference.
+
+## Phase 5: Storybook Theme Integration
+
+- [ ] **Problem:** Components (e.g., `LoginCard`) don't switch themes correctly in Storybook, even though they do in the main app. Text color might remain unchanged.
+- [ ] **Goal:** Ensure Storybook accurately reflects the light/dark themes defined in the application.
+
+- [ ] **Investigation & Fixes:**
+
+  - [ ] **Check Storybook Global Decorators:** Examine `.storybook/preview.tsx` (or similar global setup file). Ensure the application's theme provider (e.g., `ThemeProvider`) wraps all stories. This provider is likely responsible for applying theme classes or variables.
+
+    ```tsx
+    // Example structure in .storybook/preview.tsx
+    import { ThemeProvider } from "../src/path/to/theme-provider"; // Adjust path
+    import React from "react";
+
+    export const decorators = [
+      Story => (
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+          {/* Might need to add Tailwind's dark class wrapper if using class strategy */}
+          {/* <div className="story-wrapper"> */}
+          <Story />
+          {/* </div> */}
+        </ThemeProvider>
+      ),
+    ];
+    ```
+
+  - [ ] **Verify Tailwind Integration:** Confirm that Storybook's build process correctly includes and processes Tailwind CSS, especially the `darkMode: 'class'` configuration in `tailwind.config.js` if you're using the class strategy. Check if the expected CSS variables or utility classes (`dark:*` prefixes) are present in the Storybook environment's CSS.
+  - [ ] **Inspect Rendered Output:** Use the browser's developer tools within Storybook. Inspect the `LoginCard` or other affected components.
+    - Check if the root `<html>` or `<body>` element (or a designated wrapper) gets the `dark` class applied when switching themes in Storybook's toolbar.
+    - Verify if the component's elements receive the correct theme-specific Tailwind classes (e.g., `text-foreground`, `bg-background`) and if these classes correspond to the expected light/dark styles.
+  - [ ] **Consider Storybook Theme Addon:** If manual provider wrapping isn't sufficient or you want a dedicated Storybook UI for theme switching, explore addons like `@storybook/addon-themes` or `storybook-dark-mode`. Configure the addon to toggle the same class (`dark`) or mechanism your application uses.
+  - [ ] **Review `LoginCard.stories.ts`:** Ensure the story itself isn't doing anything specific that overrides or interferes with the theme application (unlikely for basic stories, but worth a check).
+
+- [ ] **Verification:**
+  - [ ] Open `LoginCard.stories.ts` in Storybook.
+  - [ ] Use Storybook's theme toggle (either the native one if configured via addon, or potentially a global control if added via decorator) to switch between light and dark modes.
+  - [ ] Verify that the `LoginCard`'s text colors, background, input styles, and button styles update correctly according to the selected theme, matching the behavior in the main application.
+  - [ ] Repeat verification for a few other key components.
