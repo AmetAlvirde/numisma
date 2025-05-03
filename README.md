@@ -50,3 +50,5 @@ Right of the bat, it has:
 - A page that leverages tRPC and shows a list of users from the database.
 - Storybook configured with shadcn and tailwind and the viewoports I use
   (tailwind s,m,l, 2xl and xs[which is a min-width of 375px]).
+- A theme switcher (light | dark | system) using next-themes both for the
+  app and for the storybook.
