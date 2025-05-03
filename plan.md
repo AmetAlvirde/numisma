@@ -32,11 +32,11 @@
 
 ## Phase 4: Persistence (Recommended)
 
-- [ ] Choose a storage mechanism (e.g., `localStorage`, settings file).
-- [ ] Save the user's explicit theme selection ("Light", "Dark", or "System") to storage whenever they change it using the UI element.
-- [ ] On app startup, load the saved preference. If no preference is saved, default to "System".
-- [ ] **Verification:**
-  - [ ] Select "Light" theme manually. Close and reopen the app. Verify "Light" theme is active and the UI element shows "Light" selected.
-  - [ ] Select "Dark" theme manually. Close and reopen the app. Verify "Dark" theme is active and the UI element shows "Dark" selected.
-  - [ ] Select "System" theme manually. Close and reopen the app. Verify the theme matches the current system theme and the UI element shows "System" selected.
-  - [ ] Clear the saved preference from storage. Relaunch the app. Verify it defaults to the "System" setting and applies the correct theme based on the OS preference.
+- [x] Choose a storage mechanism (e.g., `localStorage`, settings file).
+- [x] Save the user's explicit theme selection ("Light", "Dark", or "System") to storage whenever they change it using the UI element.
+- [x] On app startup, load the saved preference. If no preference is saved, default to "System".
+- [x] **Verification:**
+  - [x] Select "Light" theme manually. Close and reopen the app. Verify "Light" theme is active and the UI element shows "Light" selected.
+  - [x] Select "Dark" theme manually. Close and reopen the app. Verify "Dark" theme is active and the UI element shows "Dark" selected.
+  - [x] Select "System" theme manually. Close and reopen the app. Verify the theme matches the current system theme and the UI element shows "System" selected.
+  - [x] Clear the saved preference from storage. Relaunch the app. Verify it defaults to the "System" setting and applies the correct theme based on the OS preference.
