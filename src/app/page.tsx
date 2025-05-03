@@ -1,25 +1,16 @@
-// REMOVE "use client";
-
-// import { Button } from "@/components/ui/button"; // Remove unused import
-// import { Input } from "@/components/ui/input";
-// import { Label } from "@/components/ui/label";
-// import { NextPage } from "next"; // Remove type, not needed for Server Component default export
-// import Head from "next/head";
-// import { signOut, useSession } from "next-auth/react"; // Remove client hook import
-// import { useState } from "react";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/utils/auth";
 import { redirect } from "next/navigation";
 import { SignOutButton } from "@/components/SignOutButton";
 import { UserList } from "@/components/UserList";
+import { ThemeSelector } from "@/components/utils/ThemeSelector";
 
 // Just export default async function
 export default async function Home() {
   const session = await getServerSession(authOptions);
 
   if (!session) {
-    // Redirect to login page if not authenticated
-    redirect("/api/auth/signin"); // Adjust if your signin page is different
+    redirect("/api/auth/signin");
   }
 
   return (
@@ -30,6 +21,7 @@ export default async function Home() {
       {/*   <link rel="icon" href="/favicon.ico" /> */}
       {/* </Head> */}
       <main className="flex min-h-screen flex-col items-center justify-start p-12 space-y-4">
+        <ThemeSelector />
         <h1 className="text-2xl font-bold">Protected Page</h1>
         <p>Welcome, {session.user?.name ?? session.user?.email}!</p>
         <UserList />{" "}
@@ -39,6 +31,3 @@ export default async function Home() {
     </>
   );
 }
-
-// Remove named export if it exists
-// export default Home;
