@@ -8,11 +8,13 @@ import { Button } from "@/components/ui/button";
 
 export function SignOutButton() {
   return (
-    <Button
-      variant="outline"
-      onClick={() => signOut({ callbackUrl: "/api/auth/signin" })} // Redirect to signin page after sign out
-    >
-      Sign Out
-    </Button>
+    <>
+      <Button
+        variant="outline"
+        onClick={() => signOut({ callbackUrl: "/api/auth/signin" })} // Redirect to signin page after sign out
+      >
+        Sign Out
+      </Button>
+    </>
   );
 }
