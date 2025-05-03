@@ -27,7 +27,7 @@ export const LoginCard: React.FC<LoginCardProps> = ({
   return (
     <form
       onSubmit={handleSubmit}
-      className="flex flex-col gap-4 p-8 border rounded shadow-md w-full max-w-sm"
+      className="flex flex-col gap-4 p-8 border bg-card text-card-foreground rounded shadow-md w-full max-w-sm"
     >
       <h1 className="text-2xl font-bold mb-4 text-center">Sign In</h1>
       {error && <p className="text-red-500 text-center">{error}</p>}
