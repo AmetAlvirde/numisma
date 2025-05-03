@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { QueryClient } from "@tanstack/react-query";
 import { httpBatchLink } from "@trpc/client";
 import superjson from "superjson";
-import { getBaseUrl } from "@/utils/getBaseUrl"; // Import the utility
+import { getBaseUrl } from "@/utils/get-base-url"; // Import the utility
 
 import { trpc } from "./react"; // Import the React Query client
 
