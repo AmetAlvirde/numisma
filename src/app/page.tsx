@@ -8,7 +8,7 @@
 // import { signOut, useSession } from "next-auth/react"; // Remove client hook import
 // import { useState } from "react";
 import { getServerSession } from "next-auth";
-import { authOptions } from "./api/auth/[...nextauth]/route";
+import { authOptions } from "@/utils/auth";
 import { redirect } from "next/navigation";
 import { SignOutButton } from "@/components/SignOutButton";
 import { UserList } from "@/components/UserList";
