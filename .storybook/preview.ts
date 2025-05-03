@@ -58,6 +58,9 @@ const preview: Preview = {
       },
       defaultViewport: "xs",
     },
+    backgrounds: {
+      disable: true,
+    },
   },
   decorators: [
     withThemeByClassName({
