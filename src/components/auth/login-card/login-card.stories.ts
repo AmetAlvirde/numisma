@@ -1,7 +1,7 @@
 import { Meta, StoryObj } from "@storybook/react";
 import { LoginCard } from "@/components/auth/login-card/login-card";
 const meta = {
-  title: "Sign out button",
+  title: "Login Card",
   component: LoginCard,
   tags: ["autodocs"],
   argTypes: {},

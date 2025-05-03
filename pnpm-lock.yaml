@@ -23,6 +23,9 @@ importers:
       '@radix-ui/react-slot':
         specifier: ^1.2.0
         version: 1.2.0(@types/react@19.1.2)(react@19.1.0)
+      '@storybook/addon-themes':
+        specifier: ^8.6.12
+        version: 8.6.12(storybook@8.6.12)
       '@tanstack/react-query':
         specifier: ^5.75.1
         version: 5.75.1(react@19.1.0)
@@ -1808,6 +1811,11 @@ packages:
 
   '@storybook/addon-outline@8.6.12':
     resolution: {integrity: sha512-1ylwm+n1s40S91No0v9T4tCjZORu3GbnjINlyjYTDLLhQHyBQd3nWR1Y1eewU4xH4cW9SnSLcMQFS/82xHqU6A==}
+    peerDependencies:
+      storybook: ^8.6.12
+
+  '@storybook/addon-themes@8.6.12':
+    resolution: {integrity: sha512-eqE40MUKTz9lLEOusXjRuDC7DwCSIwlgEnlbvhhEEme8IeKf2di6yvlhenY4nn5QfkUwY1POnZxfJ2OpXj0gqQ==}
     peerDependencies:
       storybook: ^8.6.12
 
@@ -7201,6 +7209,11 @@ snapshots:
   '@storybook/addon-outline@8.6.12(storybook@8.6.12)':
     dependencies:
       '@storybook/global': 5.0.0
+      storybook: 8.6.12
+      ts-dedent: 2.2.0
+
+  '@storybook/addon-themes@8.6.12(storybook@8.6.12)':
+    dependencies:
       storybook: 8.6.12
       ts-dedent: 2.2.0
 
