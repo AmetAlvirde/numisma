@@ -32,7 +32,7 @@
 
 ## Phase 4: Persistence (Recommended)
 
-- [ ] Choose a storage mechanism (e.g., `localStorage`, `SharedPreferences`, `UserDefaults`, settings file).
+- [ ] Choose a storage mechanism (e.g., `localStorage`, settings file).
 - [ ] Save the user's explicit theme selection ("Light", "Dark", or "System") to storage whenever they change it using the UI element.
 - [ ] On app startup, load the saved preference. If no preference is saved, default to "System".
 - [ ] **Verification:**

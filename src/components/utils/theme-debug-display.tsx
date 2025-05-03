@@ -1,13 +1,13 @@
 "use client";
 
-import { useTheme } from "@/components/providers/theme-provider";
+import { useTheme } from "next-themes";
 import { useState, useEffect } from "react";
 
 /**
  * A client component to display theme debug information.
  */
 export function ThemeDebugDisplay() {
-  const { themePreference, resolvedTheme } = useTheme();
+  const { theme, resolvedTheme } = useTheme();
   const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
@@ -21,7 +21,7 @@ export function ThemeDebugDisplay() {
   return (
     <div className="p-2 border rounded bg-muted text-muted-foreground text-xs">
       <p>Debug Info:</p>
-      <p>Preference: {themePreference}</p>
+      <p>Preference: {theme}</p>
       <p>Resolved: {resolvedTheme}</p>
     </div>
   );
