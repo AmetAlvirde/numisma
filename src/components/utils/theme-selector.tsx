@@ -1,49 +1,58 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import * as React from "react";
+import { Moon, Sun } from "lucide-react";
+import { useTheme } from "next-themes";
 
-type Theme = "light" | "dark" | "system";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export function ThemeSelector() {
-  // Initialize state, defaulting to 'system' for now
-  // We'll add persistence/loading logic later
-  const [theme, setTheme] = useState<Theme>("system");
+  const { setTheme } = useTheme();
+  const [mounted, setMounted] = React.useState(false);
 
-  // Effect to apply the theme class to the <html> element
-  useEffect(() => {
-    const root = window.document.documentElement;
-    if (theme === "dark") {
-      root.classList.add("dark");
-    } else if (theme === "light") {
-      root.classList.remove("dark");
-    } else {
-      // Handle 'system' - for now, default to light (remove dark class)
-      // In Phase 2, this will check system preference
-      root.classList.remove("dark");
-      // TODO: Implement system theme detection logic here later
-    }
-  }, [theme]);
+  // useEffect only runs on the client, so now we can safely show the UI
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
 
-  const handleChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-    setTheme(event.target.value as Theme);
-    // TODO: Save preference to storage later (Phase 4)
-  };
+  if (!mounted) {
+    // Render a placeholder or null on the server to avoid hydration mismatch
+    // You could render a skeleton loader here if preferred
+    return (
+      <Button variant="ghost" size="icon" disabled>
+        <Sun className="h-[1.2rem] w-[1.2rem] rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
+        <Moon className="absolute h-[1.2rem] w-[1.2rem] rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+        <span className="sr-only">Toggle theme</span>
+      </Button>
+    );
+  }
 
   return (
-    <div className="mb-4">
-      <label htmlFor="theme-select" className="mr-2">
-        Theme:
-      </label>
-      <select
-        id="theme-select"
-        value={theme} // Bind select value to state
-        onChange={handleChange} // Handle changes
-        className="p-1 border rounded bg-background text-foreground border-border"
-      >
-        <option value="system">System</option>
-        <option value="light">Light</option>
-        <option value="dark">Dark</option>
-      </select>
-    </div>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon">
+          <Sun className="h-[1.2rem] w-[1.2rem] rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
+          <Moon className="absolute h-[1.2rem] w-[1.2rem] rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+          <span className="sr-only">Toggle theme</span>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={() => setTheme("light")}>
+          Light
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setTheme("dark")}>
+          Dark
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setTheme("system")}>
+          System
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

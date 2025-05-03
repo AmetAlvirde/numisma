@@ -22,10 +22,11 @@ export default async function Home() {
       {/*   <link rel="icon" href="/favicon.ico" /> */}
       {/* </Head> */}
       <main className="flex min-h-screen flex-col items-center justify-start p-12 space-y-4">
-        <ThemeSelector />
         <ThemeDebugDisplay />
         <h1 className="text-2xl font-bold">Protected Page</h1>
         <p>Welcome, {session.user?.name ?? session.user?.email}!</p>
+        <p>pick your theme:</p>
+        <ThemeSelector />
         <UserList />
         <SignOutButton />
       </main>
