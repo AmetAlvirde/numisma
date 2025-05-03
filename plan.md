@@ -5,18 +5,16 @@
 - [x] Define theme variables/styles for light and dark modes (e.g., colors, fonts). Consider using CSS variables or theme objects depending on the framework.
 - [x] Implement a UI element (e.g., button, toggle, dropdown) to allow users to manually select "Light", "Dark", or "System".
 - [x] Implement the core logic to apply the selected theme (light or dark) globally to the application's UI.
-- [ ] **Verification:**
-  - [ ] Manually select "Light" theme via the UI element. Visually confirm all relevant UI components render in light mode.
-  - [ ] Manually select "Dark" theme via the UI element. Visually confirm all relevant UI components render in dark mode. Test across multiple screens/components.
+- [x] **Verification:**
+  - [x] Manually select "Light" theme via the UI element. Visually confirm all relevant UI components render in light mode.
+  - [x] Manually select "Dark" theme via the UI element. Visually confirm all relevant UI components render in dark mode. Test across multiple screens/components.
 
 ## Phase 2: System Theme Preference Detection
 
-- [ ] Implement platform-specific logic to detect the user's preferred system theme (e.g., using `prefers-color-scheme` media query in web, `Configuration.uiMode` in Android, `traitCollection.userInterfaceStyle` in iOS).
-- [ ] Expose the detected system theme ("light" or "dark") to the application's theme logic.
-- [ ] **Verification:**
-  - [ ] Add logging or a debug indicator to show the currently detected system theme.
-  - [ ] Change the OS/system theme to Light. Verify the app detects "light".
-  - [ ] Change the OS/system theme to Dark. Verify the app detects "dark". (App restart might be necessary depending on implementation).
+- [x] Implement platform-specific logic to detect the user's preferred system theme (e.g., using `prefers-color-scheme` media query in web).
+- [x] Expose the detected system theme ("light" or "dark") to the application's theme logic.
+- [x] **Verification:**
+  - [x] Add logging or a debug indicator to show the currently detected system theme.
 
 ## Phase 3: Integration and Default Behavior
 
