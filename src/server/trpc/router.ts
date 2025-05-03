@@ -17,7 +17,7 @@ export const publicProcedure = t.procedure;
 export const appRouter = router({
   hello: publicProcedure
     .input(z.object({ name: z.string() }).nullish())
-    .query(({ input, ctx }) => {
+    .query(({ input }) => {
       return {
         greeting: `Hello ${input?.name ?? "world"}`,
       };
