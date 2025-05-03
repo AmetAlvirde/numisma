@@ -5,7 +5,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/utils/auth"; // Adjust path if needed
 import { NextAuthProvider } from "@/components/providers/session-provider";
 import { TrpcProvider } from "@/trpc/Provider";
-import { ThemeProvider } from "@/components/providers/theme-provider";
+import { ThemeProvider as NextThemesProvider } from "next-themes";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -34,11 +34,16 @@ export default async function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <ThemeProvider defaultTheme="system">
+        <NextThemesProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
           <TrpcProvider>
             <NextAuthProvider session={session}>{children}</NextAuthProvider>
           </TrpcProvider>
-        </ThemeProvider>
+        </NextThemesProvider>
       </body>
     </html>
   );
