@@ -52,3 +52,5 @@ Right of the bat, it has:
   (tailwind s,m,l, 2xl and xs[which is a min-width of 375px]).
 - A theme switcher (light | dark | system) using next-themes both for the
   app and for the storybook.
+- A story for the color system. I want it to build a full base desgin
+  system documentation, but colors are a great starting point
