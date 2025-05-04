@@ -59,7 +59,17 @@ const preview: Preview = {
       defaultViewport: "xs",
     },
     backgrounds: {
-      disable: true,
+      default: "light",
+      values: [
+        {
+          name: "light",
+          value: "oklch(1 0 0)", // Your light theme --background
+        },
+        {
+          name: "dark",
+          value: "oklch(0.145 0 0)", // Your dark theme --background
+        },
+      ],
     },
   },
   decorators: [
