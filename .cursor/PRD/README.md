@@ -80,7 +80,12 @@ performance across all asset classes and exchanges.
 - storybook 8.6
 - next-themes 0.4
 
+## Active focus
+
+We are currently working on [these features](active-focus.md)
+
 ## Other relevant information
 
 - [project-structure.md](project-structure.md)
+- [product-backlog.md](product-backlog.md)
 - [sitemap.md](sitemap.md)

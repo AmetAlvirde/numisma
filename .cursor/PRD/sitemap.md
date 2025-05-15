@@ -36,7 +36,7 @@ flowchart TD
     subgraph legend["Legend"]
         alpha_example["Alpha Version"]:::alpha
         mvp_example["MVP"]:::mvp
-        future_example["Future Release"]:::future
+        backlog_example["Backlog"]:::backlog
     end
 
     %% Subgraphs - defining sections
@@ -125,7 +125,7 @@ flowchart TD
     %% Feature set styling
     classDef alpha fill:#1a472a,stroke:#5dc792,color:#fff,stroke-width:2px
     classDef mvp fill:#482a08,stroke:#fac661,color:#fff,stroke-width:1px
-    classDef future fill:#000,stroke:#fff,color:#fff,stroke-width:1px
+    classDef backlog fill:#000,stroke:#fff,color:#fff,stroke-width:1px
 
     %% Apply section styling
     class public,core_nav,nav_tools,portfolio,positions,analysis section
@@ -134,5 +134,5 @@ flowchart TD
     %% Apply feature set styling
     class login,home,portfolio_selector,create_portfolio,portfolio_summary,create_position,positions_list,position_details,position_manager alpha
     class landing,signup,auth_reset,onboarding,user_profile mvp
-    class mental_dashboard,create_perspective,trading_journal,performance_report future
+    class mental_dashboard,create_perspective,trading_journal,performance_report backlog
 ```
