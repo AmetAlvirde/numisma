@@ -38,7 +38,7 @@ export default async function Home() {
             <div className="text-xs font-medium text-muted-foreground mb-2">
               {currentPeriod}
             </div>
-            <h1 className="text-xl font-bold mb-8">Overview</h1>
+            <h1 className="text-2xl font-bold mb-2">Highlights</h1>
           </div>
 
           <Avatar className="h-12 w-12">
