@@ -15,7 +15,6 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { useEffect, useRef } from "react";
 
 interface Portfolio {
   id: string;
@@ -42,28 +41,8 @@ export function PortfolioSelectDialog({
   title,
   description,
 }: PortfolioSelectDialogProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (open) {
-      // Focus the input when dialog opens
-      const focusInput = () => {
-        if (inputRef.current) {
-          inputRef.current.focus();
-        }
-      };
-
-      // Use requestAnimationFrame to ensure DOM is ready
-      requestAnimationFrame(focusInput);
-    }
-  }, [open]);
-
   const handleSelect = (portfolioId: string) => {
     onSelect(portfolioId);
-    onOpenChange(false);
-  };
-
-  const handleCancel = () => {
     onOpenChange(false);
   };
 
@@ -75,11 +54,7 @@ export function PortfolioSelectDialog({
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <Command className="rounded-lg border shadow-md">
-          <CommandInput
-            ref={inputRef}
-            placeholder="Search portfolios..."
-            autoFocus
-          />
+          <CommandInput placeholder="Search portfolios..." />
           <CommandList>
             <CommandEmpty>No portfolios found.</CommandEmpty>
             <CommandGroup>
@@ -101,7 +76,11 @@ export function PortfolioSelectDialog({
           </CommandList>
         </Command>
         <DialogFooter>
-          <Button variant="outline" onClick={handleCancel} type="button">
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            type="button"
+          >
             Cancel
           </Button>
         </DialogFooter>
