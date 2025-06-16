@@ -1,4 +1,5 @@
 "use client";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -60,18 +61,18 @@ export function PortfolioOverview({ className }: PortfolioOverviewProps) {
 
   const handleChangePinnedPortfolio = useCallback(() => {
     setIsDropdownOpen(false);
-    // Use setTimeout to ensure dropdown closes before dialog opens
-    setTimeout(() => {
+    // Use requestAnimationFrame to ensure dropdown closes before dialog opens
+    requestAnimationFrame(() => {
       setIsChangeDialogOpen(true);
-    }, 100);
+    });
   }, []);
 
   const handleAddPinnedPortfolio = useCallback(() => {
     setIsDropdownOpen(false);
-    // Use setTimeout to ensure dropdown closes before dialog opens
-    setTimeout(() => {
+    // Use requestAnimationFrame to ensure dropdown closes before dialog opens
+    requestAnimationFrame(() => {
       setIsAddDialogOpen(true);
-    }, 100);
+    });
   }, []);
 
   const handlePortfolioSelect = useCallback(
@@ -124,11 +125,21 @@ export function PortfolioOverview({ className }: PortfolioOverviewProps) {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-[200px]">
-                  <DropdownMenuItem onClick={handleChangePinnedPortfolio}>
+                  <DropdownMenuItem
+                    onClick={e => {
+                      e.preventDefault();
+                      handleChangePinnedPortfolio();
+                    }}
+                  >
                     <ArrowRightLeft className="mr-2 h-4 w-4" />
                     <span>Change pinned portfolio</span>
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={handleAddPinnedPortfolio}>
+                  <DropdownMenuItem
+                    onClick={e => {
+                      e.preventDefault();
+                      handleAddPinnedPortfolio();
+                    }}
+                  >
                     <Plus className="mr-2 h-4 w-4" />
                     <span>Add pinned portfolio</span>
                   </DropdownMenuItem>
