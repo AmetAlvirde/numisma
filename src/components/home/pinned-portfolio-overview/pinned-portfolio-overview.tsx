@@ -4,10 +4,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Pin, TrendingUp, TrendingDown, Eye } from "lucide-react";
-import { useState, useCallback } from "react";
 import { PortfolioSelectDialog } from "./portfolio-select-dialog";
 import { PinnedPortfolioOverviewActions } from "./pinned-portfolio-overview-actions";
-import { mockPortfolioOverview, mockAvailablePortfolios } from "./mock-data";
+import { mockAvailablePortfolios } from "./mock-data";
+import { usePinnedPortfolio } from "./use-pinned-portfolio";
 
 interface PinnedPortfolioOverviewProps {
   className?: string;
@@ -16,54 +16,22 @@ interface PinnedPortfolioOverviewProps {
 export function PinnedPortfolioOverview({
   className,
 }: PinnedPortfolioOverviewProps) {
-  const [isChangeDialogOpen, setIsChangeDialogOpen] = useState(false);
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [pinnedPortfolio, setPinnedPortfolio] = useState(mockPortfolioOverview);
-
-  const isPositive = pinnedPortfolio.dayChange > 0;
-
-  const handleChangePinnedPortfolio = useCallback(() => {
-    setIsDropdownOpen(false);
-    // Use requestAnimationFrame to ensure dropdown closes before dialog opens
-    requestAnimationFrame(() => {
-      setIsChangeDialogOpen(true);
-    });
-  }, []);
-
-  const handleAddPinnedPortfolio = useCallback(() => {
-    setIsDropdownOpen(false);
-    // Use requestAnimationFrame to ensure dropdown closes before dialog opens
-    requestAnimationFrame(() => {
-      setIsAddDialogOpen(true);
-    });
-  }, []);
-
-  const handlePortfolioSelect = useCallback(
-    (portfolioId: string) => {
-      const selectedPortfolio = mockAvailablePortfolios.find(
-        p => p.id === portfolioId
-      );
-      if (selectedPortfolio) {
-        if (isChangeDialogOpen) {
-          // Update the current portfolio
-          setPinnedPortfolio(prev => ({
-            ...selectedPortfolio,
-            dayChange: 2847.32, // Mock data
-            dayChangePercent: 1.99, // Mock data
-            topHoldings: ["AAPL", "GOOGL", "TSLA"], // Mock data
-          }));
-        } else if (isAddDialogOpen) {
-          // TODO: Implement adding a new portfolio card
-          console.log("Adding new portfolio:", selectedPortfolio);
-        }
-      }
-    },
-    [isChangeDialogOpen, isAddDialogOpen, mockAvailablePortfolios]
-  );
+  const {
+    pinnedPortfolio,
+    isPositive,
+    isChangeDialogOpen,
+    setIsChangeDialogOpen,
+    isAddDialogOpen,
+    setIsAddDialogOpen,
+    isDropdownOpen,
+    setIsDropdownOpen,
+    handleChangePinnedPortfolio,
+    handleAddPinnedPortfolio,
+    handlePortfolioSelect,
+  } = usePinnedPortfolio();
 
   return (
-    <div className={`w-full max-w-4xl ${className}`}>
+    <div className={`w-full max-w-6xl ${className}`}>
       <Card className="relative gap-0">
         <CardHeader>
           <CardTitle className="text-base font-semibold text-muted-foreground">
