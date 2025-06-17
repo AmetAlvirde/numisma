@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { AuthenticatedLayout } from "@/components/layouts/authenticated-layout";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { PortfolioOverview } from "@/components/portfolio-overview/portfolio-overview";
+import { RecentPositions } from "@/components/recent-positions/recent-positions";
 
 // Helper function to get quarter and week
 function getCurrentPeriod() {
@@ -38,7 +39,7 @@ export default async function Home() {
             <div className="text-xs font-medium text-muted-foreground mb-2">
               {currentPeriod}
             </div>
-            <h1 className="text-2xl font-bold mb-2">Highlights</h1>
+            <h1 className="text-3xl font-bold mb-2">Overview</h1>
           </div>
 
           <Avatar className="h-12 w-12">
@@ -54,6 +55,12 @@ export default async function Home() {
 
         {/* Portfolio Overview */}
         <PortfolioOverview />
+
+        {/* Recent Positions */}
+        <div className="w-full max-w-6xl flex items-start justify-between">
+          <h1 className="text-2xl font-bold mb-2">Recent Positions</h1>
+        </div>
+        <RecentPositions />
       </main>
     </AuthenticatedLayout>
   );
