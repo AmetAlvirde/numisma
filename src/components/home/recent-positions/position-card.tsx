@@ -128,7 +128,7 @@ export function PositionCard({ position }: PositionCardProps) {
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <div className="flex items-center space-x-3">
               <span className="font-medium">{timeFrame}</span>
-              {riskRewardRatio && <span>R:R {riskRewardRatio.toFixed(1)}</span>}
+              {riskRewardRatio && <span>{riskRewardRatio.toFixed(1)}R</span>}
               {totalSize && (
                 <span>
                   $
