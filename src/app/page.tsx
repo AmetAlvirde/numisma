@@ -2,9 +2,10 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/utils/auth";
 import { redirect } from "next/navigation";
 import { AuthenticatedLayout } from "@/components/layouts/authenticated-layout";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { PageHeader } from "@/components/page-header/page-header";
 import { PortfolioOverview } from "@/components/portfolio-overview/portfolio-overview";
 import { RecentPositions } from "@/components/recent-positions/recent-positions";
+import { RecentJournal } from "@/components/recent-journal/recent-journal";
 
 // Helper function to get quarter and week
 function getCurrentPeriod() {
@@ -34,24 +35,11 @@ export default async function Home() {
     <AuthenticatedLayout>
       <main className="flex min-h-screen flex-col items-center justify-start p-6 space-y-4">
         {/* Header Section */}
-        <div className="w-full max-w-6xl flex items-start justify-between">
-          <div>
-            <div className="text-xs font-medium text-muted-foreground mb-2">
-              {currentPeriod}
-            </div>
-            <h1 className="text-3xl font-bold mb-2">Overview</h1>
-          </div>
-
-          <Avatar className="h-12 w-12">
-            <AvatarImage
-              src={session.user?.image || ""}
-              alt={session.user?.name || "User"}
-            />
-            <AvatarFallback>
-              {session.user?.name?.charAt(0).toUpperCase() || "U"}
-            </AvatarFallback>
-          </Avatar>
-        </div>
+        <PageHeader
+          currentPeriod={currentPeriod}
+          title="Overview"
+          session={session}
+        />
 
         {/* Portfolio Overview */}
         <PortfolioOverview />
@@ -61,6 +49,12 @@ export default async function Home() {
           <h1 className="text-2xl font-bold mb-2">Recent Positions</h1>
         </div>
         <RecentPositions />
+
+        {/* Journal Entries */}
+        <div className="w-full max-w-6xl flex items-start justify-between">
+          <h1 className="text-2xl font-bold mb-2">Recent Journal</h1>
+        </div>
+        <RecentJournal />
       </main>
     </AuthenticatedLayout>
   );
