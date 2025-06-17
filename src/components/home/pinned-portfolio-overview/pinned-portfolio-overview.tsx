@@ -3,59 +3,23 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  Pin,
-  TrendingUp,
-  TrendingDown,
-  Eye,
-  MoreHorizontal,
-  Plus,
-  ArrowRightLeft,
-} from "lucide-react";
+import { Pin, TrendingUp, TrendingDown, Eye } from "lucide-react";
 import { useState, useCallback } from "react";
 import { PortfolioSelectDialog } from "./portfolio-select-dialog";
+import { PinnedPortfolioOverviewActions } from "./pinned-portfolio-overview-actions";
+import { mockPortfolioOverview, mockAvailablePortfolios } from "./mock-data";
 
-interface PortfolioOverviewProps {
+interface PinnedPortfolioOverviewProps {
   className?: string;
 }
 
-export function PortfolioOverview({ className }: PortfolioOverviewProps) {
+export function PinnedPortfolioOverview({
+  className,
+}: PinnedPortfolioOverviewProps) {
   const [isChangeDialogOpen, setIsChangeDialogOpen] = useState(false);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [pinnedPortfolio, setPinnedPortfolio] = useState({
-    id: "1",
-    name: "Growth Portfolio",
-    totalValue: 145672.89,
-    dayChange: 2847.32,
-    dayChangePercent: 1.99,
-    topHoldings: ["AAPL", "GOOGL", "TSLA"],
-  });
-
-  // Mock available portfolios
-  const availablePortfolios = [
-    {
-      id: "1",
-      name: "Growth Portfolio",
-      totalValue: 145672.89,
-    },
-    {
-      id: "2",
-      name: "Income Portfolio",
-      totalValue: 98765.43,
-    },
-    {
-      id: "3",
-      name: "Balanced Portfolio",
-      totalValue: 234567.89,
-    },
-  ];
+  const [pinnedPortfolio, setPinnedPortfolio] = useState(mockPortfolioOverview);
 
   const isPositive = pinnedPortfolio.dayChange > 0;
 
@@ -77,7 +41,7 @@ export function PortfolioOverview({ className }: PortfolioOverviewProps) {
 
   const handlePortfolioSelect = useCallback(
     (portfolioId: string) => {
-      const selectedPortfolio = availablePortfolios.find(
+      const selectedPortfolio = mockAvailablePortfolios.find(
         p => p.id === portfolioId
       );
       if (selectedPortfolio) {
@@ -95,7 +59,7 @@ export function PortfolioOverview({ className }: PortfolioOverviewProps) {
         }
       }
     },
-    [isChangeDialogOpen, isAddDialogOpen, availablePortfolios]
+    [isChangeDialogOpen, isAddDialogOpen, mockAvailablePortfolios]
   );
 
   return (
@@ -110,41 +74,12 @@ export function PortfolioOverview({ className }: PortfolioOverviewProps) {
                   {pinnedPortfolio.name}
                 </span>
               </div>
-              <DropdownMenu
-                open={isDropdownOpen}
-                onOpenChange={setIsDropdownOpen}
-              >
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 w-6 p-0"
-                    type="button"
-                  >
-                    <MoreHorizontal className="h-3 w-3" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-[200px]">
-                  <DropdownMenuItem
-                    onClick={e => {
-                      e.preventDefault();
-                      handleChangePinnedPortfolio();
-                    }}
-                  >
-                    <ArrowRightLeft className="mr-2 h-4 w-4" />
-                    <span>Change pinned portfolio</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={e => {
-                      e.preventDefault();
-                      handleAddPinnedPortfolio();
-                    }}
-                  >
-                    <Plus className="mr-2 h-4 w-4" />
-                    <span>Add pinned portfolio</span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <PinnedPortfolioOverviewActions
+                isDropdownOpen={isDropdownOpen}
+                onDropdownOpenChange={setIsDropdownOpen}
+                onChangePinnedPortfolio={handleChangePinnedPortfolio}
+                onAddPinnedPortfolio={handleAddPinnedPortfolio}
+              />
             </div>
           </CardTitle>
         </CardHeader>
@@ -211,7 +146,7 @@ export function PortfolioOverview({ className }: PortfolioOverviewProps) {
       <PortfolioSelectDialog
         open={isChangeDialogOpen}
         onOpenChange={setIsChangeDialogOpen}
-        portfolios={availablePortfolios}
+        portfolios={mockAvailablePortfolios}
         selectedPortfolioId={pinnedPortfolio.id}
         onSelect={handlePortfolioSelect}
         title="Change Pinned Portfolio"
@@ -221,7 +156,7 @@ export function PortfolioOverview({ className }: PortfolioOverviewProps) {
       <PortfolioSelectDialog
         open={isAddDialogOpen}
         onOpenChange={setIsAddDialogOpen}
-        portfolios={availablePortfolios}
+        portfolios={mockAvailablePortfolios}
         onSelect={handlePortfolioSelect}
         title="Add Pinned Portfolio"
         description="Select a portfolio to add to your dashboard"
