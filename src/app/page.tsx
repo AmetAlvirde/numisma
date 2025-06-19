@@ -21,17 +21,17 @@ export default async function Home() {
         <HomeHeader title="Overview" session={session} />
 
         <div className="w-full max-w-6xl flex items-start justify-between">
-          <h1 className="text-2xl font-bold mb-2">Recent Portfolio</h1>
+          <h1 className="text-2xl font-bold mb-2">Primary focus</h1>
         </div>
         <PinnedPortfolioOverview />
 
         <div className="w-full max-w-6xl flex items-start justify-between">
-          <h1 className="text-2xl font-bold mb-2">Recent Positions</h1>
+          <h1 className="text-2xl font-bold mb-2">Action required</h1>
         </div>
         <RecentPositions />
 
         <div className="w-full max-w-6xl flex items-start justify-between">
-          <h1 className="text-2xl font-bold mb-2">Recent Journal</h1>
+          <h1 className="text-2xl font-bold mb-2">Context and insights</h1>
         </div>
         <RecentJournal />
       </main>

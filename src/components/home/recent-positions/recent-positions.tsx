@@ -24,6 +24,40 @@ const getMockPositions = (): PositionCardData[] => {
       targetPrice: 255.5,
       stopPrice: 260.0,
       totalSize: 10000,
+      // Enhanced information
+      currentPrice: 258.75,
+      entryPrice: 251.2,
+      timeInPosition: {
+        hours: 26,
+        minutes: 15,
+        totalMinutes: 1575,
+      },
+      distanceToLevels: {
+        toTarget: {
+          percentage: 1.24,
+          price: 3.25,
+          direction: "approaching",
+        },
+        toStop: {
+          percentage: 0.48,
+          price: 1.25,
+          direction: "approaching",
+        },
+      },
+      recentEvents: [
+        {
+          timestamp: new Date(now.getTime() - 2 * 60 * 60 * 1000), // 2 hours ago
+          type: "price_alert",
+          description: "Broke below key support at $259",
+          impact: "positive",
+        },
+        {
+          timestamp: new Date(now.getTime() - 8 * 60 * 60 * 1000), // 8 hours ago
+          type: "news",
+          description: "Earnings miss reported",
+          impact: "positive",
+        },
+      ],
     },
     {
       id: "2",
@@ -38,6 +72,40 @@ const getMockPositions = (): PositionCardData[] => {
       targetPrice: 52000,
       stopPrice: 47500,
       totalSize: 50000,
+      // Enhanced information
+      currentPrice: 49890,
+      entryPrice: 49000,
+      timeInPosition: {
+        hours: 12,
+        minutes: 30,
+        totalMinutes: 750,
+      },
+      distanceToLevels: {
+        toTarget: {
+          percentage: 4.23,
+          price: 2110,
+          direction: "moving_toward",
+        },
+        toStop: {
+          percentage: 5.03,
+          price: 2390,
+          direction: "safe",
+        },
+      },
+      recentEvents: [
+        {
+          timestamp: new Date(now.getTime() - 1 * 60 * 60 * 1000), // 1 hour ago
+          type: "technical",
+          description: "Broke above $49,500 resistance",
+          impact: "positive",
+        },
+        {
+          timestamp: new Date(now.getTime() - 4 * 60 * 60 * 1000), // 4 hours ago
+          type: "volume",
+          description: "Volume spike detected",
+          impact: "positive",
+        },
+      ],
     },
   ];
 };
