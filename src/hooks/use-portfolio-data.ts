@@ -199,7 +199,7 @@ export function useSetPinnedPortfolio() {
       // Return context object with snapshot
       return { previousUserPortfolios, previousPinnedPortfolio };
     },
-    onError: (err, input, context) => {
+    onError: (err, _input, context) => {
       // Revert optimistic updates on error
       if (context?.previousUserPortfolios) {
         utils.portfolio.getUserPortfolios.setData(

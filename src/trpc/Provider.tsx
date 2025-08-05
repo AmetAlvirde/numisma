@@ -19,11 +19,15 @@ export function TrpcProvider({ children }: { children: React.ReactNode }) {
             gcTime: 10 * 60 * 1000, // 10 minutes default
             refetchOnWindowFocus: true,
             refetchOnReconnect: true,
-            retry: (failureCount, error: any) => {
+            retry: (failureCount, error: Error) => {
               // Don't retry on 4xx errors (client errors)
+              const errorWithData = error as Error & {
+                data?: { httpStatus?: number };
+              };
               if (
-                error?.data?.httpStatus >= 400 &&
-                error?.data?.httpStatus < 500
+                errorWithData?.data?.httpStatus &&
+                errorWithData.data.httpStatus >= 400 &&
+                errorWithData.data.httpStatus < 500
               ) {
                 return false;
               }
