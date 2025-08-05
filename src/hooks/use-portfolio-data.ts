@@ -1,59 +1,201 @@
+"use client";
+
 import { trpc } from "@/trpc/react";
+import { useRetryWithBackoff } from "./use-network-status";
+import { useCallback, useMemo } from "react";
 
 /**
- * Hook to fetch all portfolios for the authenticated user
- * Returns basic portfolio information including id, name, and totalValue
+ * Hook for user portfolios with comprehensive error handling
  */
 export function useUserPortfolios() {
+  const { retry, networkStatus } = useRetryWithBackoff();
+
   const query = trpc.portfolio.getUserPortfolios.useQuery(undefined, {
-    // Cache data for 5 minutes
+    // Caching strategy
     staleTime: 5 * 60 * 1000,
-    // Keep cache for 10 minutes when unused
     gcTime: 10 * 60 * 1000,
-    // Refetch when window gains focus
     refetchOnWindowFocus: true,
-    // Retry failed requests up to 3 times
-    retry: 3,
+    refetchOnReconnect: true,
+
+    // Retry logic
+    retry: (failureCount, error) => {
+      // Don't retry if offline
+      if (!networkStatus.isOnline) return false;
+
+      // Don't retry client errors
+      const errorWithData = error as unknown as {
+        data?: { httpStatus?: number };
+      };
+      if (
+        errorWithData?.data?.httpStatus &&
+        errorWithData.data.httpStatus >= 400 &&
+        errorWithData.data.httpStatus < 500
+      ) {
+        return false;
+      }
+
+      // Retry up to 3 times for server errors
+      return failureCount < 3;
+    },
+
+    retryDelay: attemptIndex =>
+      Math.min(1000 * Math.pow(2, attemptIndex), 30000),
+
+    // Network-aware settings
+    enabled: networkStatus.isOnline,
   });
+
+  const retryQuery = useCallback(async () => {
+    try {
+      await retry(() => query.refetch(), {
+        maxAttempts: 3,
+        baseDelay: 1000,
+        onRetry: (attempt, error) => {
+          console.log(
+            `Retrying portfolio query, attempt ${attempt}:`,
+            error.message
+          );
+        },
+      });
+    } catch (error) {
+      console.error(
+        "Failed to retry portfolio query after multiple attempts:",
+        error
+      );
+    }
+  }, [retry, query]);
+
+  // Error context
+  const errorContext = useMemo(() => {
+    if (!query.error) return null;
+
+    const error = query.error as {
+      data?: { code?: string; httpStatus?: number };
+      message?: string;
+    };
+    return {
+      code: error?.data?.code,
+      httpStatus: error?.data?.httpStatus,
+      isNetworkError: !networkStatus.isOnline,
+      isServerError: error?.data?.httpStatus && error.data.httpStatus >= 500,
+      isClientError:
+        error?.data?.httpStatus &&
+        error.data.httpStatus >= 400 &&
+        error.data.httpStatus < 500,
+      canRetry:
+        !error?.data?.httpStatus ||
+        (error.data.httpStatus && error.data.httpStatus >= 500),
+      suggestion: getSuggestionForError(error, networkStatus.isOnline),
+    };
+  }, [query.error, networkStatus.isOnline]);
 
   return {
     portfolios: query.data ?? [],
     isLoading: query.isLoading,
     isError: query.isError,
     error: query.error,
+    errorContext,
     refetch: query.refetch,
+    retryQuery,
     isFetching: query.isFetching,
+    networkStatus,
   };
 }
 
 /**
- * Hook to fetch detailed information for the user's pinned portfolio
- * Returns portfolio details including day change calculations and top holdings
- * Returns null if no pinned portfolio exists
+ * Hook for pinned portfolio with comprehensive error handling
  */
 export function usePinnedPortfolio() {
+  const { retry, networkStatus } = useRetryWithBackoff();
+
   const query = trpc.portfolio.getPinnedPortfolio.useQuery(undefined, {
-    // Cache data for 2 minutes (more frequent updates for pinned portfolio)
+    // More frequent updates for pinned portfolio
     staleTime: 2 * 60 * 1000,
-    // Keep cache for 5 minutes when unused
     gcTime: 5 * 60 * 1000,
-    // Refetch when window gains focus
     refetchOnWindowFocus: true,
-    // Retry failed requests up to 3 times
-    retry: 3,
-    // Refetch every 5 minutes in the background
-    refetchInterval: 5 * 60 * 1000,
+    refetchOnReconnect: true,
+    refetchInterval: networkStatus.isOnline ? 5 * 60 * 1000 : false,
+
+    // Retry logic
+    retry: (failureCount, error) => {
+      if (!networkStatus.isOnline) return false;
+
+      const errorWithData = error as unknown as {
+        data?: { httpStatus?: number };
+      };
+      if (
+        errorWithData?.data?.httpStatus &&
+        errorWithData.data.httpStatus >= 400 &&
+        errorWithData.data.httpStatus < 500
+      ) {
+        return false;
+      }
+
+      return failureCount < 3;
+    },
+
+    retryDelay: attemptIndex =>
+      Math.min(1000 * Math.pow(2, attemptIndex), 30000),
+
+    // Network-aware settings
+    enabled: networkStatus.isOnline,
   });
+
+  const retryQuery = useCallback(async () => {
+    try {
+      await retry(() => query.refetch(), {
+        maxAttempts: 3,
+        baseDelay: 1000,
+        onRetry: (attempt, error) => {
+          console.log(
+            `Retrying pinned portfolio query, attempt ${attempt}:`,
+            error.message
+          );
+        },
+      });
+    } catch (error) {
+      console.error(
+        "Failed to retry pinned portfolio query after multiple attempts:",
+        error
+      );
+    }
+  }, [retry, query]);
+
+  // Error context
+  const errorContext = useMemo(() => {
+    if (!query.error) return null;
+
+    const error = query.error as {
+      data?: { code?: string; httpStatus?: number };
+      message?: string;
+    };
+    return {
+      code: error?.data?.code,
+      httpStatus: error?.data?.httpStatus,
+      isNetworkError: !networkStatus.isOnline,
+      isServerError: error?.data?.httpStatus && error.data.httpStatus >= 500,
+      isClientError:
+        error?.data?.httpStatus &&
+        error.data.httpStatus >= 400 &&
+        error.data.httpStatus < 500,
+      canRetry:
+        !error?.data?.httpStatus ||
+        (error.data.httpStatus && error.data.httpStatus >= 500),
+      suggestion: getSuggestionForError(error, networkStatus.isOnline),
+    };
+  }, [query.error, networkStatus.isOnline]);
 
   return {
     pinnedPortfolio: query.data ?? null,
     isLoading: query.isLoading,
     isError: query.isError,
     error: query.error,
+    errorContext,
     refetch: query.refetch,
+    retryQuery,
     isFetching: query.isFetching,
-    // Convenience computed value
     hasPinnedPortfolio: !!query.data,
+    networkStatus,
   };
 }
 
@@ -144,26 +286,23 @@ export function useUpdatePortfolio() {
 }
 
 /**
- * Hook to set which portfolio is pinned
- * Ensures only one portfolio can be pinned at a time per user
- * Now with optimistic updates for instant UI feedback
+ * Hook for portfolio mutations with better error handling
  */
 export function useSetPinnedPortfolio() {
   const utils = trpc.useUtils();
+  const { retry, networkStatus } = useRetryWithBackoff();
 
   const mutation = trpc.portfolio.setPinnedPortfolio.useMutation({
+    // Optimistic updates
     onMutate: async input => {
-      // Cancel outgoing refetches so they don't overwrite optimistic update
       await utils.portfolio.getUserPortfolios.cancel();
       await utils.portfolio.getPinnedPortfolio.cancel();
 
-      // Snapshot the previous values
       const previousUserPortfolios =
         utils.portfolio.getUserPortfolios.getData();
       const previousPinnedPortfolio =
         utils.portfolio.getPinnedPortfolio.getData();
 
-      // Optimistically update user portfolios list
       if (previousUserPortfolios) {
         utils.portfolio.getUserPortfolios.setData(
           undefined,
@@ -175,7 +314,6 @@ export function useSetPinnedPortfolio() {
         );
       }
 
-      // Optimistically update pinned portfolio
       if (previousUserPortfolios) {
         const newPinnedPortfolio = previousUserPortfolios.find(
           p => p.id === input.portfolioId
@@ -185,22 +323,20 @@ export function useSetPinnedPortfolio() {
             id: newPinnedPortfolio.id,
             name: newPinnedPortfolio.name,
             totalValue: Number(newPinnedPortfolio.totalValue),
-            // Keep existing calculated fields if they exist, or provide defaults
             dayChange: previousPinnedPortfolio?.dayChange ?? 0,
             dayChangePercent: previousPinnedPortfolio?.dayChangePercent ?? 0,
             topHoldings: previousPinnedPortfolio?.topHoldings ?? [],
           });
         } else {
-          // If we can't find the portfolio in the list, clear pinned data
           utils.portfolio.getPinnedPortfolio.setData(undefined, null);
         }
       }
 
-      // Return context object with snapshot
       return { previousUserPortfolios, previousPinnedPortfolio };
     },
+
     onError: (err, _input, context) => {
-      // Revert optimistic updates on error
+      // Revert optimistic updates
       if (context?.previousUserPortfolios) {
         utils.portfolio.getUserPortfolios.setData(
           undefined,
@@ -215,8 +351,8 @@ export function useSetPinnedPortfolio() {
       }
       console.error("Failed to set pinned portfolio:", err);
     },
+
     onSettled: async () => {
-      // Always refetch after mutation settles (success or error) to ensure data consistency
       await Promise.all([
         utils.portfolio.getUserPortfolios.invalidate(),
         utils.portfolio.getPinnedPortfolio.invalidate(),
@@ -224,15 +360,78 @@ export function useSetPinnedPortfolio() {
     },
   });
 
+  const setPinnedPortfolioWithRetry = useCallback(
+    async (input: { portfolioId: string }) => {
+      if (!networkStatus.isOnline) {
+        throw new Error("Cannot update portfolio while offline");
+      }
+
+      try {
+        await retry(() => mutation.mutateAsync(input), {
+          maxAttempts: 2, // Fewer retries for mutations
+          baseDelay: 1000,
+          onRetry: (attempt, error) => {
+            console.log(
+              `Retrying set pinned portfolio, attempt ${attempt}:`,
+              error.message
+            );
+          },
+          shouldRetry: (error, attempt) => {
+            // Only retry server errors for mutations
+            const errorWithData = error as unknown as {
+              data?: { httpStatus?: number };
+            };
+            return (
+              attempt < 2 &&
+              (!errorWithData?.data?.httpStatus ||
+                errorWithData.data.httpStatus >= 500)
+            );
+          },
+        });
+      } catch (error) {
+        console.error("Failed to set pinned portfolio after retries:", error);
+        throw error;
+      }
+    },
+    [retry, mutation, networkStatus.isOnline]
+  );
+
+  // Error context
+  const errorContext = useMemo(() => {
+    if (!mutation.error) return null;
+
+    const error = mutation.error as {
+      data?: { code?: string; httpStatus?: number };
+      message?: string;
+    };
+    return {
+      code: error?.data?.code,
+      httpStatus: error?.data?.httpStatus,
+      isNetworkError: !networkStatus.isOnline,
+      isServerError: error?.data?.httpStatus && error.data.httpStatus >= 500,
+      isClientError:
+        error?.data?.httpStatus &&
+        error.data.httpStatus >= 400 &&
+        error.data.httpStatus < 500,
+      canRetry:
+        !error?.data?.httpStatus ||
+        (error.data.httpStatus && error.data.httpStatus >= 500),
+      suggestion: getSuggestionForError(error, networkStatus.isOnline),
+    };
+  }, [mutation.error, networkStatus.isOnline]);
+
   return {
     setPinnedPortfolio: mutation.mutate,
     setPinnedPortfolioAsync: mutation.mutateAsync,
+    setPinnedPortfolioWithRetry,
     isLoading: mutation.isPending,
     isError: mutation.isError,
     error: mutation.error,
+    errorContext,
     isSuccess: mutation.isSuccess,
     data: mutation.data,
     reset: mutation.reset,
+    networkStatus,
   };
 }
 
@@ -273,6 +472,38 @@ export function useInvalidatePortfolioQueries() {
     invalidatePinnedPortfolio,
     invalidatePortfolioValuations,
   };
+}
+
+// Helper function to provide user-friendly error suggestions
+function getSuggestionForError(
+  error: { data?: { code?: string; httpStatus?: number }; message?: string },
+  isOnline: boolean
+): string {
+  if (!isOnline) {
+    return "Check your internet connection and try again.";
+  }
+
+  if (error?.data?.code === "UNAUTHORIZED") {
+    return "Please sign in to access your portfolios.";
+  }
+
+  if (error?.data?.code === "FORBIDDEN") {
+    return "You don't have permission to access this portfolio.";
+  }
+
+  if (error?.data?.code === "NOT_FOUND") {
+    return "The portfolio you're looking for doesn't exist or has been deleted.";
+  }
+
+  if (error?.data?.httpStatus && error.data.httpStatus >= 500) {
+    return "Our servers are experiencing issues. Please try again in a moment.";
+  }
+
+  if (error?.data?.code === "TIMEOUT") {
+    return "The request took too long. Please check your connection and try again.";
+  }
+
+  return "An unexpected error occurred. Please try refreshing the page.";
 }
 
 /**
