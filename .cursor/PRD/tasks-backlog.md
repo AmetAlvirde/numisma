@@ -72,7 +72,7 @@ Replace mock data in the home page with real database data using tRPC and react-
 - Relationships are properly connected
 - Data structure matches expected format
 
-#### Task 1.4: Create Data Migration Strategy
+#### 📋 Task 1.4: Create Data Migration Strategy (TO DO LATER)
 
 **What:** Plan and implement migration of existing portfolio data to new schema
 **Why:** User wants to migrate existing data to the new database structure
@@ -93,7 +93,7 @@ Replace mock data in the home page with real database data using tRPC and react-
 
 ### Phase 2: tRPC Backend Procedures
 
-#### Task 2.1: Create Portfolio tRPC Router
+#### ✅ Task 2.1: Create Portfolio tRPC Router (COMPLETED)
 
 **What:** Create dedicated router for portfolio-related procedures
 **Why:** Organize portfolio endpoints separately from main router
@@ -109,7 +109,7 @@ Replace mock data in the home page with real database data using tRPC and react-
 - Router structure follows tRPC patterns
 - Exports are properly typed
 
-#### Task 2.2: Implement getUserPortfolios Procedure
+#### ✅ Task 2.2: Implement getUserPortfolios Procedure (COMPLETED)
 
 **What:** Create procedure to fetch all portfolios for authenticated user
 **Why:** Home page needs list of user's portfolios
@@ -127,7 +127,7 @@ Replace mock data in the home page with real database data using tRPC and react-
 - Authentication is enforced
 - Error cases are handled
 
-#### Task 2.3: Implement getPinnedPortfolio Procedure
+#### ✅ Task 2.3: Implement getPinnedPortfolio Procedure (COMPLETED)
 
 **What:** Create procedure to fetch the user's pinned portfolio with detailed info
 **Why:** PinnedPortfolioOverview component needs detailed portfolio data
@@ -146,7 +146,7 @@ Replace mock data in the home page with real database data using tRPC and react-
 - Handles edge cases (no pinned portfolio)
 - Performance is acceptable
 
-#### Task 2.4: Implement getPortfolioValuations Procedure
+#### ✅ Task 2.4: Implement getPortfolioValuations Procedure (COMPLETED)
 
 **What:** Create procedure to fetch historical valuations for a portfolio
 **Why:** Need historical data for charts and performance metrics
@@ -160,11 +160,12 @@ Replace mock data in the home page with real database data using tRPC and react-
 **Verification:**
 
 - Returns properly structured time-series data
-- Date filtering works correctly for monthly/yearly ranges
-- Performance is good for 1 month to 1 year of data
+- Date filtering works correctly for weekly/monthly/yearly ranges
+- Performance is optimized for 1 week to 1 year of data (especially weekly)
 - Data integrity is maintained
+- Weekly data queries are optimized for high-frequency usage patterns
 
-#### Task 2.5: Integrate Portfolio Router with Main App Router
+#### ✅ Task 2.5: Integrate Portfolio Router with Main App Router (COMPLETED)
 
 **What:** Add portfolio router to main tRPC router
 **Why:** Make portfolio procedures available to frontend
@@ -183,7 +184,7 @@ Replace mock data in the home page with real database data using tRPC and react-
 
 ### Phase 3: Frontend Integration
 
-#### Task 3.1: Create Portfolio Query Hooks
+#### ✅ Task 3.1: Create Portfolio Query Hooks (COMPLETED)
 
 **What:** Create custom hooks using tRPC for portfolio data fetching
 **Why:** Encapsulate data fetching logic and provide consistent interface
@@ -202,7 +203,7 @@ Replace mock data in the home page with real database data using tRPC and react-
 - Loading states work correctly
 - Error handling is implemented
 
-#### Task 3.2: Update PinnedPortfolioOverview Component
+#### ✅ Task 3.2: Update PinnedPortfolioOverview Component (COMPLETED)
 
 **What:** Replace mock data with real tRPC queries in PinnedPortfolioOverview
 **Why:** Connect component to actual database data
@@ -222,7 +223,7 @@ Replace mock data in the home page with real database data using tRPC and react-
 - Error states are handled gracefully
 - All interactive features still work
 
-#### Task 3.3: Update Portfolio Selection Dialog
+#### ✅ Task 3.3: Update Portfolio Selection Dialog (COMPLETED)
 
 **What:** Replace available portfolios mock data with real query
 **Why:** Dialog should show actual user portfolios
@@ -240,7 +241,7 @@ Replace mock data in the home page with real database data using tRPC and react-
 - Loading states work properly
 - Empty state is handled appropriately
 
-#### Task 3.4: Add Portfolio Data Mutations
+#### ✅ Task 3.4: Add Portfolio Data Mutations (COMPLETED)
 
 **What:** Create tRPC mutations for updating portfolio data
 **Why:** Allow users to pin/unpin portfolios and update settings
