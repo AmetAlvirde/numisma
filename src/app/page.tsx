@@ -6,6 +6,7 @@ import { HomeHeader } from "@/components/home/home-header/home-header";
 import { PinnedPortfolioOverview } from "@/components/home/pinned-portfolio-overview/pinned-portfolio-overview";
 import { RecentPositions } from "@/components/home/recent-positions/recent-positions";
 import { RecentJournal } from "@/components/home/recent-journal/recent-journal";
+import { ErrorBoundary } from "@/components/ui/error-boundary";
 
 // Just export default async function
 export default async function Home() {
@@ -28,12 +29,28 @@ export default async function Home() {
         <div className="w-full max-w-6xl flex items-start justify-between">
           <h1 className="text-2xl font-bold mb-2">Action required</h1>
         </div>
-        <RecentPositions />
+        <ErrorBoundary
+          title="Recent Positions Error"
+          description="There was an error loading your recent positions."
+          showRetryButton={true}
+          showHomeButton={false}
+          resetKeys={["recent-positions"]}
+        >
+          <RecentPositions />
+        </ErrorBoundary>
 
         <div className="w-full max-w-6xl flex items-start justify-between">
           <h1 className="text-2xl font-bold mb-2">Context and insights</h1>
         </div>
-        <RecentJournal />
+        <ErrorBoundary
+          title="Recent Journal Error"
+          description="There was an error loading your recent journal entries."
+          showRetryButton={true}
+          showHomeButton={false}
+          resetKeys={["recent-journal"]}
+        >
+          <RecentJournal />
+        </ErrorBoundary>
       </main>
     </AuthenticatedLayout>
   );
