@@ -1,27 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { initTRPC } from "@trpc/server";
-import { Context } from "../context";
-import superjson from "superjson";
-
-// Initialize tRPC instance
-const t = initTRPC.context<Context>().create({
-  transformer: superjson,
-});
-
-// Protected procedure helper that requires authentication
-const protectedProcedure = t.procedure.use(({ ctx, next }) => {
-  if (!ctx.session || !ctx.session.user) {
-    throw new TRPCError({ code: "UNAUTHORIZED" });
-  }
-  return next({
-    ctx: {
-      ...ctx,
-      // infers the `session` as non-nullable
-      session: { ...ctx.session, user: ctx.session.user },
-    },
-  });
-});
+import { router, protectedProcedure } from "../trpc";
 
 /**
  * Portfolio tRPC Router
@@ -31,8 +10,10 @@ const protectedProcedure = t.procedure.use(({ ctx, next }) => {
  * - Getting pinned portfolio details
  * - Managing portfolio valuations
  * - Portfolio mutations (pin/unpin, updates)
+ *
+ * Uses shared tRPC instance from ../trpc for consistency and scalability
  */
-export const portfolioRouter = t.router({
+export const portfolioRouter = router({
   /**
    * Get all portfolios for the authenticated user
    * Returns basic portfolio information including id, name, and totalValue
