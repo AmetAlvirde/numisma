@@ -15,6 +15,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import { Loader2, AlertCircle } from "lucide-react";
 
 interface Portfolio {
   id: string;
@@ -30,6 +31,8 @@ interface PortfolioSelectDialogProps {
   onSelect: (portfolioId: string) => void;
   title: string;
   description: string;
+  isLoading?: boolean;
+  isError?: boolean;
 }
 
 export function PortfolioSelectDialog({
@@ -40,6 +43,8 @@ export function PortfolioSelectDialog({
   onSelect,
   title,
   description,
+  isLoading = false,
+  isError = false,
 }: PortfolioSelectDialogProps) {
   const handleSelect = (portfolioId: string) => {
     onSelect(portfolioId);
@@ -54,25 +59,44 @@ export function PortfolioSelectDialog({
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <Command className="rounded-lg border shadow-md">
-          <CommandInput placeholder="Search portfolios..." />
+          <CommandInput
+            placeholder="Search portfolios..."
+            disabled={isLoading || isError}
+          />
           <CommandList>
-            <CommandEmpty>No portfolios found.</CommandEmpty>
-            <CommandGroup>
-              {portfolios.map(portfolio => (
-                <CommandItem
-                  key={portfolio.id}
-                  value={portfolio.name}
-                  onSelect={() => handleSelect(portfolio.id)}
-                >
-                  <div className="flex flex-col">
-                    <span className="font-medium">{portfolio.name}</span>
-                    <span className="text-sm text-muted-foreground">
-                      ${portfolio.totalValue.toLocaleString()}
-                    </span>
-                  </div>
-                </CommandItem>
-              ))}
-            </CommandGroup>
+            {isLoading ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                <span className="text-sm text-muted-foreground">
+                  Loading portfolios...
+                </span>
+              </div>
+            ) : isError ? (
+              <div className="flex items-center justify-center py-6 text-red-600">
+                <AlertCircle className="h-4 w-4 mr-2" />
+                <span className="text-sm">Failed to load portfolios</span>
+              </div>
+            ) : (
+              <>
+                <CommandEmpty>No portfolios found.</CommandEmpty>
+                <CommandGroup>
+                  {portfolios.map(portfolio => (
+                    <CommandItem
+                      key={portfolio.id}
+                      value={portfolio.name}
+                      onSelect={() => handleSelect(portfolio.id)}
+                    >
+                      <div className="flex flex-col">
+                        <span className="font-medium">{portfolio.name}</span>
+                        <span className="text-sm text-muted-foreground">
+                          ${portfolio.totalValue.toLocaleString()}
+                        </span>
+                      </div>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </>
+            )}
           </CommandList>
         </Command>
         <DialogFooter>
