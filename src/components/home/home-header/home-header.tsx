@@ -1,5 +1,6 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Session } from "next-auth";
+import { getCurrentPeriod } from "@/utils/period-utils";
 
 interface HomeHeaderProps {
   title: string;
@@ -27,16 +28,4 @@ export function HomeHeader({ title, session }: HomeHeaderProps) {
       </Avatar>
     </div>
   );
-}
-
-function getCurrentPeriod() {
-  const now = new Date();
-  const quarter = Math.ceil((now.getMonth() + 1) / 3);
-
-  // Calculate week number
-  const startOfYear = new Date(now.getFullYear(), 0, 1);
-  const pastDaysOfYear = (now.getTime() - startOfYear.getTime()) / 86400000;
-  const week = Math.ceil((pastDaysOfYear + startOfYear.getDay() + 1) / 7);
-
-  return `Q${quarter}/W${week}`;
 }
