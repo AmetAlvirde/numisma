@@ -42,7 +42,7 @@ export function usePinnedPortfolio() {
 
         if (isChangeDialogOpen) {
           // Update the current portfolio
-          setPinnedPortfolio(prev => ({
+          setPinnedPortfolio(_prev => ({
             ...selectedPortfolio,
             dayChange: 2847.32, // Mock data
             dayChangePercent: 1.99, // Mock data

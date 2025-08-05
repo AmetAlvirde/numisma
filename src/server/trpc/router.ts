@@ -56,7 +56,7 @@ export const appRouter = router({
     return users;
   }),
 
-  // Portfolio router
+  // Portfolio router with all portfolio-related procedures
   portfolio: portfolioRouter,
 });
 
