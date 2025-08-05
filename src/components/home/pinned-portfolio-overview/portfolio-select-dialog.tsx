@@ -36,7 +36,7 @@ export function PortfolioSelectDialog({
   open,
   onOpenChange,
   portfolios,
-  selectedPortfolioId,
+  selectedPortfolioId: _selectedPortfolioId,
   onSelect,
   title,
   description,

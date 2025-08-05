@@ -1,6 +1,27 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { router, protectedProcedure } from "../router";
+import { initTRPC } from "@trpc/server";
+import { Context } from "../context";
+import superjson from "superjson";
+
+// Initialize tRPC instance
+const t = initTRPC.context<Context>().create({
+  transformer: superjson,
+});
+
+// Protected procedure helper that requires authentication
+const protectedProcedure = t.procedure.use(({ ctx, next }) => {
+  if (!ctx.session || !ctx.session.user) {
+    throw new TRPCError({ code: "UNAUTHORIZED" });
+  }
+  return next({
+    ctx: {
+      ...ctx,
+      // infers the `session` as non-nullable
+      session: { ...ctx.session, user: ctx.session.user },
+    },
+  });
+});
 
 /**
  * Portfolio tRPC Router
@@ -11,7 +32,7 @@ import { router, protectedProcedure } from "../router";
  * - Managing portfolio valuations
  * - Portfolio mutations (pin/unpin, updates)
  */
-export const portfolioRouter = router({
+export const portfolioRouter = t.router({
   /**
    * Get all portfolios for the authenticated user
    * Returns basic portfolio information including id, name, and totalValue
@@ -212,7 +233,14 @@ export const portfolioRouter = router({
         }
 
         // Build the where clause for historical valuations
-        const whereClause: any = {
+        const whereClause: {
+          portfolioId: string;
+          timestamp?: {
+            gte?: Date;
+            lte?: Date;
+          };
+          dateStatus?: "ACTIVE" | "HISTORICAL" | "PROJECTED";
+        } = {
           portfolioId: portfolioId,
         };
 
