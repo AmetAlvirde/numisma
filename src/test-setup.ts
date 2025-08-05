@@ -6,6 +6,12 @@ import "@testing-library/jest-dom/vitest";
 import React from "react";
 globalThis.React = React;
 
+// Fix React.act compatibility for React 19
+import { act } from "react";
+if (!React.act) {
+  React.act = act;
+}
+
 // Mock Next.js router
 import { vi } from "vitest";
 

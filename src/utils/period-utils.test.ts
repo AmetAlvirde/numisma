@@ -77,9 +77,9 @@ describe("getCurrentPeriod", () => {
   });
 
   it("calculates week numbers correctly for middle of year", () => {
-    vi.setSystemTime(new Date("2024-07-01")); // July 1st is month 6 (1-based), so Q2
+    vi.setSystemTime(new Date(2024, 6, 1)); // July 1st (month 6 in 0-based indexing), so Q3
     const result = getCurrentPeriod();
-    expect(result).toMatch(/^Q2\/W\d+$/); // Should be Q2 for July (month 6)
+    expect(result).toMatch(/^Q3\/W\d+$/); // Should be Q3 for July
   });
 
   it("handles year boundaries correctly", () => {
