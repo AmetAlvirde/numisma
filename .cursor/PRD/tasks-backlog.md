@@ -184,7 +184,7 @@ Replace mock data in the home page with real database data using tRPC and react-
 
 ### Phase 3: Frontend Integration
 
-#### Task 3.1: Create Portfolio Query Hooks
+#### ✅ Task 3.1: Create Portfolio Query Hooks (COMPLETED)
 
 **What:** Create custom hooks using tRPC for portfolio data fetching
 **Why:** Encapsulate data fetching logic and provide consistent interface
@@ -203,7 +203,7 @@ Replace mock data in the home page with real database data using tRPC and react-
 - Loading states work correctly
 - Error handling is implemented
 
-#### Task 3.2: Update PinnedPortfolioOverview Component
+#### ✅ Task 3.2: Update PinnedPortfolioOverview Component (COMPLETED)
 
 **What:** Replace mock data with real tRPC queries in PinnedPortfolioOverview
 **Why:** Connect component to actual database data
@@ -223,7 +223,7 @@ Replace mock data in the home page with real database data using tRPC and react-
 - Error states are handled gracefully
 - All interactive features still work
 
-#### Task 3.3: Update Portfolio Selection Dialog
+#### ✅ Task 3.3: Update Portfolio Selection Dialog (COMPLETED)
 
 **What:** Replace available portfolios mock data with real query
 **Why:** Dialog should show actual user portfolios
@@ -241,7 +241,7 @@ Replace mock data in the home page with real database data using tRPC and react-
 - Loading states work properly
 - Empty state is handled appropriately
 
-#### Task 3.4: Add Portfolio Data Mutations
+#### ✅ Task 3.4: Add Portfolio Data Mutations (COMPLETED)
 
 **What:** Create tRPC mutations for updating portfolio data
 **Why:** Allow users to pin/unpin portfolios and update settings

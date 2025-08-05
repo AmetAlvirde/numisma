@@ -337,9 +337,174 @@ export const portfolioRouter = router({
       }
     }),
 
-  // TODO: Add the following procedures in subsequent tasks:
-  // - updatePortfolio: Update portfolio settings
-  // - setPinnedPortfolio: Set which portfolio is pinned
+  /**
+   * Update portfolio settings
+   * Allows updating basic portfolio information like name and description
+   */
+  updatePortfolio: protectedProcedure
+    .input(
+      z.object({
+        portfolioId: z.string().cuid("Invalid portfolio ID"),
+        name: z.string().min(1, "Portfolio name is required").optional(),
+        description: z.string().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const userId = ctx.session.user.id;
+        const { portfolioId, name, description } = input;
+
+        // First verify that the portfolio belongs to the authenticated user
+        const existingPortfolio = await ctx.prisma.portfolio.findFirst({
+          where: {
+            id: portfolioId,
+            userId: userId,
+          },
+        });
+
+        if (!existingPortfolio) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Portfolio not found or access denied",
+          });
+        }
+
+        // Build update data object with only provided fields
+        const updateData: {
+          name?: string;
+          description?: string;
+          updatedAt: Date;
+        } = {
+          updatedAt: new Date(),
+        };
+
+        if (name !== undefined) {
+          updateData.name = name;
+        }
+        if (description !== undefined) {
+          updateData.description = description;
+        }
+
+        // Update the portfolio
+        const updatedPortfolio = await ctx.prisma.portfolio.update({
+          where: {
+            id: portfolioId,
+          },
+          data: updateData,
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            totalValue: true,
+            isPinned: true,
+            updatedAt: true,
+          },
+        });
+
+        return updatedPortfolio;
+      } catch (error) {
+        console.error("Error updating portfolio:", error);
+
+        // Re-throw TRPCError as-is
+        if (error instanceof TRPCError) {
+          throw error;
+        }
+
+        // Handle other errors
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to update portfolio",
+        });
+      }
+    }),
+
+  /**
+   * Set which portfolio is pinned for the user
+   * Ensures only one portfolio can be pinned at a time per user
+   */
+  setPinnedPortfolio: protectedProcedure
+    .input(
+      z.object({
+        portfolioId: z.string().cuid("Invalid portfolio ID"),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const userId = ctx.session.user.id;
+        const { portfolioId } = input;
+
+        // First verify that the portfolio belongs to the authenticated user
+        const targetPortfolio = await ctx.prisma.portfolio.findFirst({
+          where: {
+            id: portfolioId,
+            userId: userId,
+          },
+        });
+
+        if (!targetPortfolio) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Portfolio not found or access denied",
+          });
+        }
+
+        // Use a transaction to ensure atomicity
+        await ctx.prisma.$transaction(async prisma => {
+          // First, unpin all portfolios for this user
+          await prisma.portfolio.updateMany({
+            where: {
+              userId: userId,
+              isPinned: true,
+            },
+            data: {
+              isPinned: false,
+              updatedAt: new Date(),
+            },
+          });
+
+          // Then pin the selected portfolio
+          await prisma.portfolio.update({
+            where: {
+              id: portfolioId,
+            },
+            data: {
+              isPinned: true,
+              updatedAt: new Date(),
+            },
+          });
+        });
+
+        // Return the updated portfolio
+        const pinnedPortfolio = await ctx.prisma.portfolio.findUnique({
+          where: {
+            id: portfolioId,
+          },
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            totalValue: true,
+            isPinned: true,
+            updatedAt: true,
+          },
+        });
+
+        return pinnedPortfolio;
+      } catch (error) {
+        console.error("Error setting pinned portfolio:", error);
+
+        // Re-throw TRPCError as-is
+        if (error instanceof TRPCError) {
+          throw error;
+        }
+
+        // Handle other errors
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to set pinned portfolio",
+        });
+      }
+    }),
 });
 
 export type PortfolioRouter = typeof portfolioRouter;
