@@ -146,20 +146,81 @@ export function useUpdatePortfolio() {
 /**
  * Hook to set which portfolio is pinned
  * Ensures only one portfolio can be pinned at a time per user
+ * Now with optimistic updates for instant UI feedback
  */
 export function useSetPinnedPortfolio() {
   const utils = trpc.useUtils();
 
   const mutation = trpc.portfolio.setPinnedPortfolio.useMutation({
-    onSuccess: async () => {
-      // Invalidate both user portfolios and pinned portfolio data
+    onMutate: async input => {
+      // Cancel outgoing refetches so they don't overwrite optimistic update
+      await utils.portfolio.getUserPortfolios.cancel();
+      await utils.portfolio.getPinnedPortfolio.cancel();
+
+      // Snapshot the previous values
+      const previousUserPortfolios =
+        utils.portfolio.getUserPortfolios.getData();
+      const previousPinnedPortfolio =
+        utils.portfolio.getPinnedPortfolio.getData();
+
+      // Optimistically update user portfolios list
+      if (previousUserPortfolios) {
+        utils.portfolio.getUserPortfolios.setData(
+          undefined,
+          old =>
+            old?.map(portfolio => ({
+              ...portfolio,
+              isPinned: portfolio.id === input.portfolioId,
+            })) ?? []
+        );
+      }
+
+      // Optimistically update pinned portfolio
+      if (previousUserPortfolios) {
+        const newPinnedPortfolio = previousUserPortfolios.find(
+          p => p.id === input.portfolioId
+        );
+        if (newPinnedPortfolio) {
+          utils.portfolio.getPinnedPortfolio.setData(undefined, {
+            id: newPinnedPortfolio.id,
+            name: newPinnedPortfolio.name,
+            totalValue: Number(newPinnedPortfolio.totalValue),
+            // Keep existing calculated fields if they exist, or provide defaults
+            dayChange: previousPinnedPortfolio?.dayChange ?? 0,
+            dayChangePercent: previousPinnedPortfolio?.dayChangePercent ?? 0,
+            topHoldings: previousPinnedPortfolio?.topHoldings ?? [],
+          });
+        } else {
+          // If we can't find the portfolio in the list, clear pinned data
+          utils.portfolio.getPinnedPortfolio.setData(undefined, null);
+        }
+      }
+
+      // Return context object with snapshot
+      return { previousUserPortfolios, previousPinnedPortfolio };
+    },
+    onError: (err, input, context) => {
+      // Revert optimistic updates on error
+      if (context?.previousUserPortfolios) {
+        utils.portfolio.getUserPortfolios.setData(
+          undefined,
+          context.previousUserPortfolios
+        );
+      }
+      if (context?.previousPinnedPortfolio !== undefined) {
+        utils.portfolio.getPinnedPortfolio.setData(
+          undefined,
+          context.previousPinnedPortfolio
+        );
+      }
+      console.error("Failed to set pinned portfolio:", err);
+    },
+    onSettled: async () => {
+      // Always refetch after mutation settles (success or error) to ensure data consistency
       await Promise.all([
         utils.portfolio.getUserPortfolios.invalidate(),
         utils.portfolio.getPinnedPortfolio.invalidate(),
       ]);
-    },
-    onError: error => {
-      console.error("Failed to set pinned portfolio:", error);
     },
   });
 
