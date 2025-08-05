@@ -3,14 +3,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Pin,
-  TrendingUp,
-  TrendingDown,
-  Eye,
-  Loader2,
-  AlertCircle,
-} from "lucide-react";
+import { Pin, TrendingUp, TrendingDown, Eye } from "lucide-react";
 import { PortfolioSelectDialog } from "./portfolio-select-dialog";
 import { PinnedPortfolioOverviewActions } from "./pinned-portfolio-overview-actions";
 import {
@@ -19,12 +12,20 @@ import {
   useSetPinnedPortfolio,
 } from "@/hooks/use-portfolio-data";
 import { useState, useCallback, useMemo } from "react";
+import { ErrorBoundary } from "@/components/ui/error-boundary";
+import {
+  PortfolioLoadingSkeleton,
+  PortfolioErrorFallback,
+  TrpcErrorFallback,
+  NetworkStatusIndicator,
+  NoPortfoliosFallback,
+} from "@/components/ui/portfolio-fallbacks";
 
 interface PinnedPortfolioOverviewProps {
   className?: string;
 }
 
-export function PinnedPortfolioOverview({
+function PinnedPortfolioOverviewContent({
   className,
 }: PinnedPortfolioOverviewProps) {
   // State for dialog management
@@ -32,19 +33,23 @@ export function PinnedPortfolioOverview({
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
-  // Real data hooks
+  // Data hooks with comprehensive error handling
   const {
     pinnedPortfolio,
     isLoading: isPinnedLoading,
     isError: isPinnedError,
     error: pinnedError,
+    errorContext: pinnedErrorContext,
     hasPinnedPortfolio,
+    retryQuery: retryPinnedQuery,
+    networkStatus,
   } = usePinnedPortfolio();
 
   const {
     portfolios: rawPortfolios,
     isLoading: isPortfoliosLoading,
     isError: isPortfoliosError,
+    retryQuery: retryPortfoliosQuery,
   } = useUserPortfolios();
 
   // Convert Decimal totalValue to number for dialog compatibility
@@ -55,12 +60,11 @@ export function PinnedPortfolioOverview({
     }));
   }, [rawPortfolios]);
 
-  // Mutation hook for setting pinned portfolio
+  // Mutation hook with retry capabilities
   const {
-    setPinnedPortfolio,
+    setPinnedPortfolioWithRetry,
     isLoading: isSettingPinned,
     isError: isPinError,
-    error: pinError,
   } = useSetPinnedPortfolio();
 
   // Computed values
@@ -85,7 +89,7 @@ export function PinnedPortfolioOverview({
   }, []);
 
   const handlePortfolioSelect = useCallback(
-    (portfolioId: string) => {
+    async (portfolioId: string) => {
       try {
         const selectedPortfolio = availablePortfolios.find(
           p => p.id === portfolioId
@@ -97,95 +101,90 @@ export function PinnedPortfolioOverview({
         }
 
         if (isChangeDialogOpen) {
-          // Set the selected portfolio as pinned
-          setPinnedPortfolio(
-            { portfolioId },
-            {
-              onSuccess: () => {
-                console.log(
-                  "Successfully changed pinned portfolio to:",
-                  selectedPortfolio.name
-                );
-                setIsChangeDialogOpen(false);
-              },
-              onError: error => {
-                console.error("Failed to change pinned portfolio:", error);
-                // Keep dialog open on error so user can retry
-              },
-            }
+          // Use retry mechanism
+          await setPinnedPortfolioWithRetry({ portfolioId });
+          console.log(
+            "Successfully changed pinned portfolio to:",
+            selectedPortfolio.name
           );
+          setIsChangeDialogOpen(false);
         } else if (isAddDialogOpen) {
-          // For "add" dialog, also pin the selected portfolio
-          setPinnedPortfolio(
-            { portfolioId },
-            {
-              onSuccess: () => {
-                console.log(
-                  "Successfully pinned new portfolio:",
-                  selectedPortfolio.name
-                );
-                setIsAddDialogOpen(false);
-              },
-              onError: error => {
-                console.error("Failed to pin portfolio:", error);
-                // Keep dialog open on error so user can retry
-              },
-            }
+          // Use retry mechanism
+          await setPinnedPortfolioWithRetry({ portfolioId });
+          console.log(
+            "Successfully pinned new portfolio:",
+            selectedPortfolio.name
           );
+          setIsAddDialogOpen(false);
         }
       } catch (error) {
         console.error("Error selecting portfolio:", error);
+        // Keep dialog open on error so user can retry
+        // Error will be displayed via the error context
       }
     },
     [
       availablePortfolios,
       isChangeDialogOpen,
       isAddDialogOpen,
-      setPinnedPortfolio,
+      setPinnedPortfolioWithRetry,
     ]
   );
 
-  // Loading state
-  if (isPinnedLoading) {
+  // Global retry handler for all portfolio operations
+  const handleRetryAll = useCallback(async () => {
+    try {
+      await Promise.all([retryPinnedQuery(), retryPortfoliosQuery()]);
+    } catch (error) {
+      console.error("Failed to retry portfolio operations:", error);
+    }
+  }, [retryPinnedQuery, retryPortfoliosQuery]);
+
+  // Loading state with skeleton
+  if (isPinnedLoading && !pinnedPortfolio) {
+    return <PortfolioLoadingSkeleton className={className} />;
+  }
+
+  // Network-specific error handling
+  if (!networkStatus.isOnline) {
     return (
-      <div className={`w-full max-w-6xl ${className}`}>
-        <Card className="relative gap-0">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-center space-x-2">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span className="text-sm text-muted-foreground">
-                Loading portfolio...
-              </span>
-            </div>
-          </CardContent>
-        </Card>
+      <div className={className}>
+        <PortfolioErrorFallback onRetry={networkStatus.testConnection} />
+        <NetworkStatusIndicator
+          isOnline={networkStatus.isOnline}
+          onRetryConnection={networkStatus.testConnection}
+        />
       </div>
     );
   }
 
-  // Error state
-  if (isPinnedError) {
-    return (
-      <div className={`w-full max-w-6xl ${className}`}>
-        <Card className="relative gap-0">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-center space-x-2 text-red-600">
-              <AlertCircle className="h-4 w-4" />
-              <span className="text-sm">
-                Failed to load portfolio:{" "}
-                {pinnedError?.message || "Unknown error"}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
+  // Error handling with specific error types
+  if (isPinnedError && pinnedErrorContext) {
+    if (pinnedErrorContext.isClientError) {
+      return (
+        <TrpcErrorFallback
+          error={pinnedError}
+          onRetry={pinnedErrorContext.canRetry ? retryPinnedQuery : undefined}
+          className={className}
+        />
+      );
+    } else {
+      return (
+        <PortfolioErrorFallback
+          onRetry={pinnedErrorContext.canRetry ? retryPinnedQuery : undefined}
+          className={className}
+        />
+      );
+    }
   }
 
-  // Show mutation error as overlay if pinning fails
-  const showMutationError = isPinError && pinError;
-  if (showMutationError) {
-    console.warn("Portfolio mutation error:", pinError.message);
+  // Handle case where user has no portfolios at all
+  if (
+    !isPortfoliosLoading &&
+    !isPortfoliosError &&
+    availablePortfolios.length === 0
+  ) {
+    return <NoPortfoliosFallback className={className} />;
   }
 
   // No pinned portfolio state
@@ -202,7 +201,13 @@ export function PinnedPortfolioOverview({
                   Pin a portfolio to see it on your dashboard
                 </p>
               </div>
-              <Button onClick={handleAddPinnedPortfolio} variant="outline">
+              <Button
+                onClick={handleAddPinnedPortfolio}
+                variant="outline"
+                disabled={
+                  isPortfoliosLoading || availablePortfolios.length === 0
+                }
+              >
                 Pin a Portfolio
               </Button>
             </div>
@@ -293,6 +298,7 @@ export function PinnedPortfolioOverview({
         </CardContent>
       </Card>
 
+      {/* Portfolio Selection Dialogs */}
       <PortfolioSelectDialog
         open={isChangeDialogOpen}
         onOpenChange={setIsChangeDialogOpen}
@@ -315,6 +321,40 @@ export function PinnedPortfolioOverview({
         isLoading={isPortfoliosLoading || isSettingPinned}
         isError={isPortfoliosError || isPinError}
       />
+
+      {/* Global network status indicator */}
+      <NetworkStatusIndicator
+        isOnline={networkStatus.isOnline}
+        onRetryConnection={handleRetryAll}
+      />
     </div>
+  );
+}
+
+// Component with error boundary
+export function PinnedPortfolioOverview({
+  className,
+}: PinnedPortfolioOverviewProps) {
+  return (
+    <ErrorBoundary
+      title="Portfolio Overview Error"
+      description="There was an error loading your portfolio overview. This might be a temporary issue."
+      onError={(error, errorInfo) => {
+        console.error("PinnedPortfolioOverview error:", error, errorInfo);
+
+        // TODO: Report to error monitoring service
+        // Sentry.captureException(error, { extra: errorInfo });
+      }}
+      resetKeys={[className || ""]} // Reset on prop changes
+      showErrorDetails={process.env.NODE_ENV === "development"}
+      fallback={
+        <PortfolioErrorFallback
+          onRetry={() => window.location.reload()}
+          className={className}
+        />
+      }
+    >
+      <PinnedPortfolioOverviewContent className={className} />
+    </ErrorBoundary>
   );
 }
