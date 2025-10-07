@@ -7,7 +7,10 @@ import { PinnedPortfolioOverview } from "@/components/home/pinned-portfolio-over
 import { RecentPositions } from "@/components/home/recent-positions/recent-positions";
 import { RecentJournal } from "@/components/home/recent-journal/recent-journal";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
-
+import { AccountHeader } from "@/components/account-header/account-header";
+import { PerformanceMetric } from "@/components/home/performance-metric/performance-metric";
+import { AreaChart } from "@/components/home/area-chart/area-chart";
+import { ActionItem } from "@/components/home/action-item/action-item";
 // Just export default async function
 export default async function Home() {
   const session = await getServerSession(authOptions);
@@ -18,39 +21,30 @@ export default async function Home() {
 
   return (
     <AuthenticatedLayout>
-      <main className="flex min-h-screen flex-col items-center justify-start p-6 space-y-4 min-w-sm">
-        <HomeHeader title="Overview" session={session} />
-
-        <div className="w-full max-w-6xl flex items-start justify-between">
-          <h1 className="text-2xl font-bold mb-2">Primary focus</h1>
-        </div>
-        <PinnedPortfolioOverview />
-
-        <div className="w-full max-w-6xl flex items-start justify-between">
-          <h1 className="text-2xl font-bold mb-2">Action required</h1>
-        </div>
-        <ErrorBoundary
-          title="Recent Positions Error"
-          description="There was an error loading your recent positions."
-          showRetryButton={true}
-          showHomeButton={false}
-          resetKeys={["recent-positions"]}
-        >
-          <RecentPositions />
-        </ErrorBoundary>
-
-        <div className="w-full max-w-6xl flex items-start justify-between">
-          <h1 className="text-2xl font-bold mb-2">Context and insights</h1>
-        </div>
-        <ErrorBoundary
-          title="Recent Journal Error"
-          description="There was an error loading your recent journal entries."
-          showRetryButton={true}
-          showHomeButton={false}
-          resetKeys={["recent-journal"]}
-        >
-          <RecentJournal />
-        </ErrorBoundary>
+      <main className="min-h-screen px-6 pt-8 min-w-sm">
+        <AccountHeader session={session} />
+        <section className="performance-metrics my-6">
+          <h2 className="text-3xl font-semibold">Market Cap</h2>
+          <div className="my-6 flex justify-between">
+            <PerformanceMetric value="28.2K" lastCloseTimeFrame="1D" />
+            <PerformanceMetric value="+4.8%" lastCloseTimeFrame="1W" />
+          </div>
+        </section>
+        <section className="my-6">
+          <AreaChart />
+        </section>
+        <h2 className="text-2xl font-semibold">Trading Desk/Floor</h2>
+        <section className="my-6">
+          <ActionItem
+            layout="stats-condensed"
+            type="tempo|active-trade|closed-trade|paper-trade|journal-entry|journal-prompt"
+            data=""
+          />
+          <br />
+          <br />
+          <br />
+          <br />
+        </section>
       </main>
     </AuthenticatedLayout>
   );
