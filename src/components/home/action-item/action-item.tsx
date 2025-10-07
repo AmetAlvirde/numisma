@@ -73,17 +73,17 @@ function ActionItemLayoutStatsDetailed() {
   );
 }
 
-export function ActionItem({ layout, type, data }: ActionItemProps) {
+export function ActionItem({ layout }: ActionItemProps) {
   if (layout === "cta-main") return <ActionItemLayoutCtaMain />;
   if (layout === "stats-condensed") return <ActionItemLayoutStatsCondensed />;
   if (layout === "stats-detailed") return <ActionItemLayoutStatsDetailed />;
 
   return (
     <div>
-      <code className="bg-yellow-200">&lt;ActionItem /&gt;</code>
+      <code className="bg-yellow-200">ActionItem</code>
       <p className="font-mono">
-        You need to select a layout. Your options are 'cta-main',
-        'stats-condensed', 'stats-detailed'
+        You need to select a layout. Your options are cta-main, stats-condensed,
+        stats-detailed
       </p>
     </div>
   );
