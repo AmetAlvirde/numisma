@@ -1,4 +1,4 @@
-import { Navbar } from "@/components/auth/authenticated-navbar/authenticated-navbar";
+// import { Navbar } from "@/components/auth/authenticated-navbar/authenticated-navbar";
 
 interface AuthenticatedLayoutProps {
   children: React.ReactNode;
@@ -7,7 +7,7 @@ interface AuthenticatedLayoutProps {
 export function AuthenticatedLayout({ children }: AuthenticatedLayoutProps) {
   return (
     <>
-      <Navbar />
+      {/* <Navbar /> */}
       {children}
     </>
   );
