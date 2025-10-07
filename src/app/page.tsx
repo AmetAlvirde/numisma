@@ -7,6 +7,8 @@ import { AccountHeader } from "@/components/account-header/account-header";
 import { PerformanceMetric } from "@/components/home/performance-metric/performance-metric";
 import { AreaChart } from "@/components/home/area-chart/area-chart";
 import { ActionItem } from "@/components/home/action-item/action-item";
+import { ScrollableRow } from "@/components/scrollable-row/scrollable-row";
+import { HomeSection } from "@/components/home-section/home-section";
 // Just export default async function
 export default async function Home() {
   const session = await getServerSession(authOptions);
@@ -29,17 +31,12 @@ export default async function Home() {
         <section className="my-6">
           <AreaChart />
         </section>
-        <h2 className="text-2xl font-semibold">Trading Desk/Floor</h2>
+
         <section className="my-6">
-          <ActionItem
-            layout="stats-condensed"
-            type="tempo|active-trade|closed-trade|paper-trade|journal-entry|journal-prompt"
-            data=""
-          />
-          <br />
-          <br />
-          <br />
-          <br />
+          <HomeSection title="Trading Desk/Floor" />
+          <HomeSection title="Active trades" />
+          <HomeSection title="Tempos" />
+          <HomeSection title="Trade journal" />
         </section>
       </main>
     </AuthenticatedLayout>

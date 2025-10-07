@@ -1,323 +1,178 @@
-# Active Focus
+# Horizontal Scrollable ActionItem Row Feature
 
-We are currently working on the [Home Page](epics/epic-02-home-page.md)
+## Overview
 
-What we want is to connect the home page to the database. So we need the following
-prisma schemas:
+Create a horizontal scrollable row of ActionItem elements that users can swipe through with touch gestures on mobile and scroll through on desktop. This will replace the current vertical stacking of ActionItems and provide a more engaging, space-efficient interface.
 
-<prisma-schemas>
-// Portfolio model - represents a collection of positions
-model Portfolio {
-  id          String   @id @default(cuid())
-  name        String
-  description String?
-  dateCreated DateTime
-  dateStatus  DateStatus @default(actual)
-  status      String // "active" or "archived"
-  userId      String
-  tags        String[] // Array of tags for categorization
-  notes       String?
+## Technical Analysis
 
-// Display metadata
-color String?
-sortOrder Int?
-isPinned Boolean? @default(false)
+- **Current State**: ActionItems are displayed vertically in a basic section
+- **Target**: Horizontal scrollable container with touch/swipe support
+- **Dependencies**: No additional dependencies required (using native CSS scroll-snap and Tailwind)
+- **Approach**: CSS-based solution following the project's preference for simplicity
 
-// Relations
-portfolioPositions PortfolioPosition[]
-valuations HistoricalValuation[]
+## Task Checklist
 
-createdAt DateTime @default(now())
-updatedAt DateTime @updatedAt
+### Task 1: Create ActionItemRow Container Component
 
-@@map("portfolios")
-}
+**Status**: Pending
 
-// Junction table between Portfolio and Position with metadata
-model PortfolioPosition {
-id String @id @default(cuid())
-portfolio Portfolio @relation(fields: [portfolioId], references: [id])
-portfolioId String
-position Position @relation(fields: [positionId], references: [id])
-positionId String
-addedAt DateTime
-addedBy String // User ID who added this position
-isHidden Boolean @default(false)
-displayOrder Int
+**Description**: Create a new container component that wraps multiple ActionItem components in a horizontal scrollable layout.
 
-@@unique([portfolioId, positionId])
-@@map("portfolio_positions")
-}
+**Implementation Details**:
 
-// Historical valuation for portfolios
-model HistoricalValuation {
-id String @id @default(cuid())
-portfolio Portfolio @relation(fields: [portfolioId], references: [id])
-portfolioId String
-timestamp DateTime
-timestampStatus DateStatus @default(actual)
+- Create `src/components/home/action-item-row/action-item-row.tsx`
+- Use CSS Grid or Flexbox with horizontal scroll
+- Implement scroll-snap for smooth item-to-item scrolling
+- Support responsive sizing (different item counts visible on different screen sizes)
 
-// Temporal metadata
-year Int
-month Int?
-day Int?
-periodKey String
-periodName String
-timeFrameUnit String
-periodStart DateTime
-periodStartStatus DateStatus @default(actual)
-periodEnd DateTime
-periodEndStatus DateStatus @default(actual)
-isTimeframeBoundary Boolean
+**Verification Checklist**:
 
-// Aggregation metadata
-isAggregated Boolean @default(false)
-aggregationMethod String
-sourceGranularity String
-targetGranularity String
+- [ ] Component renders multiple ActionItems horizontally
+- [ ] Container scrolls smoothly on desktop with mouse wheel
+- [ ] Scroll-snap behavior works (items snap to positions)
+- [ ] Component is responsive (shows appropriate number of items per viewport)
+- [ ] No horizontal overflow issues on mobile
+- [ ] Maintains existing ActionItem styling and functionality
 
-// Valuation data
-totalValue Float
-valueCurrency String
-initialInvestment Float
-profitLoss Float
-percentageReturn Float
+### Task 2: Implement Touch/Swipe Gestures
 
-// Position valuations as JSON
-positionValuations Json
+**Status**: Pending
 
-// Additional metadata
-isRetroactive Boolean @default(false)
+**Description**: Add native touch support for mobile swiping without external dependencies.
 
-// Add key analytics fields
-realizedProfitLoss Float?
-unrealizedProfitLoss Float?
+**Implementation Details**:
 
-// Add fields for risk metrics
-volatility Float?
-maxDrawdown Float?
+- Use native CSS `overflow-x: scroll` with `-webkit-overflow-scrolling: touch`
+- Implement CSS scroll-snap-type for smooth snapping
+- Add momentum scrolling for iOS Safari
+- Ensure touch events don't interfere with other page interactions
 
-// Add fields for return metrics
-dailyReturn Float?
-weeklyReturn Float?
-monthlyReturn Float?
-quarterlyReturn Float?
-yearlyReturn Float?
-inceptionReturn Float?
+**Verification Checklist**:
 
-// Position metrics
-positionCount Int?
+- [ ] Smooth horizontal swiping works on iOS Safari
+- [ ] Smooth horizontal swiping works on Android Chrome
+- [ ] Items snap to positions during swipe gestures
+- [ ] Momentum scrolling feels natural
+- [ ] No vertical scroll interference during horizontal swipes
+- [ ] Touch targets remain accessible (buttons, links within ActionItems)
 
-// Keep using JSON for complex nested structures
-returnMetrics Json?
-riskMetrics Json?
-assetAllocation Json?
+### Task 3: Add Visual Scroll Indicators
 
-notes String?
+**Status**: Pending
 
-createdAt DateTime @default(now())
-updatedAt DateTime @updatedAt
+**Description**: Provide visual cues to indicate scrollable content and current position.
 
-@@index([portfolioId, timestamp])
-@@index([periodKey, timeFrameUnit])
-@@map("historical_valuations")
-}
+**Implementation Details**:
 
-</prisma-schemas>
+- Add subtle fade gradients at container edges
+- Implement optional dot indicators showing current position
+- Add scroll shadows to indicate more content
+- Ensure indicators work with the existing design system
 
-This portfolio should support positions such as:
-<sample-position>
+**Verification Checklist**:
 
-const position018 = {
-id: "numisma-global-position-018",
-name: "BTC Trading Strategy",
-market: {
-id: "market_btcusdt",
-baseAssetId: "asset_btc",
-quoteAssetId: "asset_usdt",
-marketSymbol: "BTCUSDT",
-pairNotation: "BTC/USDT",
-exchange: "BingX",
-isTradable: true,
-},
-walletLocationId: "bingx-spot",
-walletType: "hot",
-lifecycle: "closed", // Updated from "active" to "closed"
-capitalTier: "C1", // Remains C1 - position was funded with fresh capital
-riskLevel: 5,
-strategy: "swing",
-positionDetails: {
-id: "numisma-global-position-018-position-details",
-side: "long",
-status: "closed", // Updated from "active" to "closed"
-timeFrame: "1D",
-initialInvestment: 99.3,
-currentInvestment: 0.0, // Updated - no current investment as position is closed
-recoveredAmount: 118.26, // Net proceeds from stop profit sale
-dateOpened: "2025-04-06T15:40:35Z",
-dateOpenedStatus: "actual",
-dateClosed: "2025-05-05T01:06:49Z", // Added close date
-dateClosedStatus: "actual", // Added close date status
-closedPercentage: 100.0, // Updated - position fully closed
-averageEntryPrice: 79442.75,
-averageExitPrice: 94700.0, // Added average exit price
-totalSize: 0.00125, // Remains the same (total size ever held)
-totalCost: 99.3,
-isLeveraged: false,
-realizedProfitLoss: 18.96, // Updated with calculated realized P&L
-unrealizedProfitLoss: 0.0, // Reset to 0 as position is closed
-currentReturn: 19.09, // Percentage return: (18.96 / 99.3) \* 100
-// Capital breakdown upon closure:
-capitalBreakdown: {
-recoveredC1: 99.3, // Original C1 capital recovered
-generatedC2: 18.96, // New C2 capital created from profits
-totalRecovered: 118.26, // Total amount recovered (net of fees)
-},
-},
-positionOrders: [
-{
-id: "numisma-global-position-018-order_btc_1",
-positionDetailsId: "numisma-global-position-018-position-details",
-dateOpen: "2025-04-06T15:40:35Z",
-dateOpenStatus: "actual",
-dateFilled: "2025-04-06T15:40:35Z",
-dateFilledStatus: "actual",
-averagePrice: 79442.75,
-totalCost: 99.3,
-status: "filled",
-type: "market",
-purpose: "entry",
-direction: "entry",
-filled: 0.00125,
-unit: "base",
-fee: 0.00000125,
-feeUnit: "base",
-},
-{
-id: "numisma-global-position-018-order_btc_2",
-positionDetailsId: "numisma-global-position-018-position-details",
-dateOpen: "2025-04-06T15:40:35Z",
-dateOpenStatus: "actual",
-dateFilled: null,
-dateFilledStatus: "unknown",
-averagePrice: 73500.0,
-totalCost: 100.0,
-status: "cancelled", // Updated from "submitted" to "cancelled" since position is closed
-type: "limit",
-purpose: "entry",
-direction: "entry",
-filled: null,
-unit: "quote",
-fee: null,
-feeUnit: null,
-},
-// New stop profit order
-{
-id: "numisma-global-position-018-order_btc_3",
-positionDetailsId: "numisma-global-position-018-position-details",
-dateOpen: "2025-05-05T01:06:49Z",
-dateOpenStatus: "actual",
-dateFilled: "2025-05-05T01:06:49Z",
-dateFilledStatus: "actual",
-averagePrice: 94700.0,
-totalCost: 118.375, // Gross proceeds before fee
-status: "filled",
-type: "market", // Assuming market order for stop profit trigger
-purpose: "exit",
-direction: "exit",
-filled: 0.00125, // Full position size
-unit: "base",
-fee: 0.1188485,
-feeUnit: "quote", // Fee in USDT
-},
-],
-positionMetrics: {
-id: "numisma-global-position-018-metrics",
-positionId: "numisma-global-position-018",
-realizedPnL: 18.96, // Updated with calculated realized P&L
-unrealizedPnL: 0.0, // Reset to 0 as position is closed
-roi: 19.09, // Return on investment percentage
-maxDrawdown: 0.0, // Assuming no significant drawdown occurred
-duration: "29d", // From 2025-04-06 to 2025-05-05
-},
-positionJournal: [
-{
-id: "numisma-global-position-018-journal_btc_1",
-positionId: "numisma-global-position-018",
-thought:
-"Initiated BTC position with initial entry of 0.00125 BTC at 79,442.75 USDT. Additional limit order placed at 73,500 USDT for 100 USDT worth of BTC. Strategy aims to accumulate BTC at lower price points.",
-attachments: [],
-timestamp: "2025-04-06T15:40:35Z",
-timestampStatus: "actual",
-userId: "numisma-alpha-tester-global-portfolio",
-tags: ["btc-trade", "accumulation", "limit-order"],
-sentiment: "bullish",
-isKeyLearning: true,
-},
-// New journal entry for position closure
-{
-id: "numisma-global-position-018-journal_btc_2",
-positionId: "numisma-global-position-018",
-thought:
-"Position closed via stop profit order at 94,700 USDT. Sold entire 0.00125 BTC position for 118.26 USDT net proceeds (after 0.1188485 USDT fee). Realized profit of 18.96 USDT representing a 19.09% return over 29 days. Capital breakdown: 99.3 USDT recovered as C1 (original capital), 18.96 USDT generated as new C2 capital (realized profits). This position created new C2 tier capital while recovering the original C1 investment.",
-attachments: [],
-timestamp: "2025-05-05T01:06:49Z",
-timestampStatus: "actual",
-userId: "numisma-alpha-tester-global-portfolio",
-tags: ["btc-trade", "position-closed", "profit-taking", "stop-profit"],
-sentiment: "bullish",
-isKeyLearning: true,
-},
-],
-createdAt: "2025-03-03T00:00:00Z",
-updatedAt: "2025-05-05T01:06:49Z", // Updated to match the stop profit execution time
-};
+- [ ] Left/right fade gradients appear when content is scrollable
+- [ ] Gradients disappear at scroll boundaries (start/end)
+- [ ] Dot indicators (if implemented) show current position accurately
+- [ ] Visual indicators match the existing design language
+- [ ] Indicators don't interfere with content interaction
+- [ ] Works correctly in both light and dark themes
 
-</sample-position>
+### Task 4: Optimize Performance and Accessibility
 
-<sample-position-log>
+**Status**: Pending
 
-## Summary of Changes
+**Description**: Ensure the scrollable row performs well and meets accessibility standards.
 
-**Key Updates Made:**
+**Implementation Details**:
 
-1.  **Position Status**: Changed `lifecycle` and `status` from "active" to "closed"
-2.  **Capital Tier**: Remains "C1" (position was funded with fresh capital)
-3.  **Position Details**:
+- Implement proper ARIA labels for screen readers
+- Add keyboard navigation support (arrow keys)
+- Optimize rendering performance for large item counts
+- Add proper focus management
+- Test with screen readers
 
-    - `currentInvestment`: 99.3 → 0.0 (no current investment)
-    - `recoveredAmount`: 0.0 → 118.26 (net proceeds)
-    - `dateClosed`: Added "2025-05-05T01:06:49Z"
-    - `closedPercentage`: 0.0 → 100.0 (fully closed)
-    - `averageExitPrice`: Added 94,700.0
-    - `realizedProfitLoss`: 0.0 → 18.96
-    - `unrealizedProfitLoss`: 0.0 (reset since closed)
-    - `currentReturn`: Added 19.09%
-    - `capitalBreakdown`: Added breakdown showing C1 recovery (99.3) and C2 generation (18.96)
+**Verification Checklist**:
 
-4.  **Orders**:
+- [ ] Screen readers announce the scrollable region properly
+- [ ] Keyboard navigation works (left/right arrows, tab navigation)
+- [ ] Focus indicators are visible and logical
+- [ ] Performance is smooth with 10+ ActionItems
+- [ ] No layout shifts during scroll operations
+- [ ] Meets WCAG 2.1 AA accessibility standards
 
-    - Cancelled pending limit order (order_btc_2)
-    - Added new stop profit order (order_btc_3)
+### Task 5: Integration and Responsive Design
 
-5.  **Metrics**: Updated all P&L and ROI calculations
+**Status**: Pending
 
-6.  **Journal**: Added new entry documenting the position closure
+**Description**: Integrate the new component into the home page and ensure responsive behavior.
 
-**Math Verification:**
+**Implementation Details**:
 
-- Entry cost: 99.3 USDT
-- Exit proceeds: 118.26 USDT (net after fees)
-- Realized P&L: 18.96 USDT
-- ROI: 19.09%
-- Duration: 29 days (excellent swing trade result)
+- Replace current ActionItem section in `src/app/page.tsx`
+- Implement responsive breakpoints (mobile: 1 item, tablet: 2-3 items, desktop: 3-4 items visible)
+- Ensure proper spacing and margins
+- Test across different screen sizes and orientations
 
-The position now correctly reflects a successful closed trade that:
+**Verification Checklist**:
 
-- **Recovers** 99.3 USDT of C1 capital (original fresh capital)
-- **Generates** 18.96 USDT of new C2 capital (realized profits)
-- **Maintains** proper capital tier tracking showing the position was C1-funded but created C2 capital
+- [ ] Component integrates seamlessly into existing home page layout
+- [ ] Responsive breakpoints work correctly (mobile: 1 item, tablet: 2-3, desktop: 3-4 visible)
+- [ ] Proper spacing maintained with other page sections
+- [ ] Works correctly in portrait and landscape orientations
+- [ ] No layout breaks on very small screens (320px width)
+- [ ] Maintains design consistency with rest of the application
 
-This approach properly separates the recovery of original capital from the generation of new profit-based capital, which is crucial for accurate capital tier progression tracking.
+### Task 6: Testing and Polish
 
-</sample-position-log>
+**Status**: Pending
+
+**Description**: Comprehensive testing and final polish of the feature.
+
+**Implementation Details**:
+
+- Write unit tests for the ActionItemRow component
+- Test edge cases (single item, empty state, many items)
+- Cross-browser testing
+- Performance testing on lower-end devices
+- Final UX polish and animations
+
+**Verification Checklist**:
+
+- [ ] Unit tests cover component rendering and behavior
+- [ ] Edge cases handled gracefully (0 items, 1 item, 20+ items)
+- [ ] Works correctly in Chrome, Safari, Firefox, Edge
+- [ ] Smooth performance on older mobile devices
+- [ ] Animations and transitions feel polished
+- [ ] No console errors or warnings
+- [ ] Feature works with existing ActionItem layouts (cta-main, stats-condensed, stats-detailed)
+
+## Success Criteria
+
+- Users can smoothly swipe through ActionItems on mobile devices
+- Desktop users can scroll horizontally with mouse wheel or trackpad
+- The interface feels native and responsive across all devices
+- No additional JavaScript dependencies required
+- Maintains all existing ActionItem functionality
+- Meets accessibility standards
+- Performance remains optimal
+
+## Technical Notes
+
+- **CSS Approach**: Using `scroll-snap-type: x mandatory` for smooth snapping
+- **Touch Support**: Native CSS with `-webkit-overflow-scrolling: touch`
+- **Responsive**: CSS Grid with `grid-template-columns` based on viewport
+- **Performance**: CSS-only solution minimizes JavaScript overhead
+- **Accessibility**: Proper ARIA labels and keyboard navigation support
+
+## Risk Mitigation
+
+- **Browser Compatibility**: Test thoroughly on older browsers, provide fallbacks
+- **Performance**: Monitor scroll performance on low-end devices
+- **Touch Conflicts**: Ensure horizontal scroll doesn't interfere with vertical page scroll
+- **Content Overflow**: Handle cases where ActionItem content is too wide
+
+---
+
+_This document will be updated as tasks are completed and new requirements emerge._
