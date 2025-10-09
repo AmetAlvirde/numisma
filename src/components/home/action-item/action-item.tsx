@@ -1,3 +1,4 @@
+"use client";
 import {
   Card,
   CardContent,
@@ -6,8 +7,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-
-import { cn } from "@/lib/utils";
+import { PositionSetupDiagram } from "@/components/home/position-setup-diagram/position-setup-diagram";
+import { cn } from "@/utils/cn";
 
 interface ActionItemProps {
   variant?: string;
@@ -34,19 +35,31 @@ function ActionItemLayoutCtaMain() {
   );
 }
 
-function ActionItemLayoutStatsCondensed({ className }: { className?: string }) {
+function ActionItemLayoutStatsCondensed({
+  className,
+  ...props
+}: {
+  className?: string;
+}) {
   return (
-    <Card className={cn("h-64 py-0 overflow-hidden max-w-md", className)}>
+    <Card
+      className={cn("h-90 w-80 py-0 overflow-hidden max-w-md", className)}
+      // className="h-90 w-80 py-0 overflow-hidden max-w-md"
+      {...props}
+    >
       <CardHeader className="">
         <CardTitle className="text-slate-200 text-2xl font-bold mt-6 mb-1">
-          Bitcoin long @ 111k
+          10X Bitcoin long @ 111k
         </CardTitle>
         <CardTitle className="text-slate-300 text-xl font-mono">
           0.009 BTC @ 111K on BingX
         </CardTitle>
       </CardHeader>
       <CardContent className="flex-1">
-        <CardDescription>Action Card</CardDescription>
+        <CardDescription className="text-slate-200">
+          4% (+4 USDT) since 10/06
+          <PositionSetupDiagram value={40} />
+        </CardDescription>
       </CardContent>
       <CardFooter className="bg-slate-200 px-6 py-4 mt-auto rounded-b-md">
         <CardDescription className="text-lg text-bloomberg-blue font-bold uppercase">
@@ -84,8 +97,7 @@ export function ActionItem({ variant }: ActionItemProps) {
     "bg-bloomberg-gold",
   ];
 
-  const randomBackground =
-    backgrounds[Math.floor(Math.random() * backgrounds.length)];
+  const randomBackground = backgrounds[1];
 
   if (variant === "cta-main") return <ActionItemLayoutCtaMain />;
   if (variant === "stats-condensed")

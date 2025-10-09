@@ -112,7 +112,7 @@
   --bloomberg-blue: oklch(37.55% 0.07458 238.494);
   --bloomberg-teal: oklch(60.488% 0.10705 184.202);
   --bloomberg-off-white: oklch(92.191% 0.0001 271.152);
-  --bloomberg-gold: oklch(0.7 0.15 80);
+  --bloomberg-gold: #cf9200;
 
   --chart-1: oklch(0.646 0.222 41.116);
   --numisma-1: oklch(0.646 0.222 41.116);
