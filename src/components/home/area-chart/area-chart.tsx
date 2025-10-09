@@ -21,6 +21,12 @@ const chartData = [
   { month: "April", desktop: 73 },
   { month: "May", desktop: 209 },
   { month: "June", desktop: 214 },
+  { month: "July", desktop: 214 },
+  { month: "August", desktop: 224 },
+  { month: "September", desktop: 214 },
+  { month: "October", desktop: 244 },
+  { month: "November", desktop: 234 },
+  { month: "December", desktop: 354 },
 ];
 const chartConfig = {
   desktop: {
@@ -32,7 +38,7 @@ const chartConfig = {
 export function AreaChart() {
   return (
     <section>
-      <ChartContainer config={chartConfig}>
+      <ChartContainer config={chartConfig} className="h-32 w-full">
         <RechartsAreaChart
           accessibilityLayer
           data={chartData}
