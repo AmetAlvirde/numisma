@@ -1,5 +1,5 @@
 "use client";
-import { TrendingUp } from "lucide-react";
+// import { TrendingUp } from "lucide-react";
 import {
   Area,
   AreaChart as RechartsAreaChart,
