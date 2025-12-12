@@ -66,6 +66,7 @@ model Portfolio {
   updatedAt            DateTime              @updatedAt
   user                 User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   historicalValuations HistoricalValuation[]
+  positions            Position[]
 
   @@index([userId])
   @@index([userId, isPinned])
@@ -84,6 +85,27 @@ model HistoricalValuation {
   @@unique([portfolioId, timestamp])
   @@index([portfolioId, timestamp])
   @@index([portfolioId, dateStatus, timestamp])
+}
+
+model Position {
+  id           String   @id @default(cuid())
+  symbol       String
+  size         Decimal  @db.Decimal(15, 6)
+  entryPrice   Decimal  @db.Decimal(15, 4)
+  currentPrice Decimal  @db.Decimal(15, 4)
+  currency     String   @default("MXN")
+  status       String   @default("active") // "active", "closed", "partial"
+  side         String   @default("long") // "long", "short"
+  portfolioId  String
+  dateOpened   DateTime
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([portfolioId])
+  @@index([symbol])
 }
 
 model VerificationRequest {
