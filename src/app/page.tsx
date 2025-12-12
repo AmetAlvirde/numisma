@@ -2,12 +2,11 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/utils/auth";
 import { redirect } from "next/navigation";
 import { AuthenticatedLayout } from "@/components/auth/authenticated-layout";
-import { HomeHeader } from "@/components/home/home-header/home-header";
-import { PinnedPortfolioOverview } from "@/components/home/pinned-portfolio-overview/pinned-portfolio-overview";
-import { RecentPositions } from "@/components/home/recent-positions/recent-positions";
-import { RecentJournal } from "@/components/home/recent-journal/recent-journal";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
-
+import { AccountHeader } from "@/components/account-header/account-header";
+import { PerformanceMetric } from "@/components/home/performance-metric/performance-metric";
+import { AreaChart } from "@/components/home/area-chart/area-chart";
+import { HomeSection } from "@/components/home/home-section/home-section";
 // Just export default async function
 export default async function Home() {
   const session = await getServerSession(authOptions);
@@ -18,39 +17,81 @@ export default async function Home() {
 
   return (
     <AuthenticatedLayout>
-      <main className="flex min-h-screen flex-col items-center justify-start p-6 space-y-4 min-w-sm">
-        <HomeHeader title="Overview" session={session} />
-
-        <div className="w-full max-w-6xl flex items-start justify-between">
-          <h1 className="text-2xl font-bold mb-2">Primary focus</h1>
-        </div>
-        <PinnedPortfolioOverview />
-
-        <div className="w-full max-w-6xl flex items-start justify-between">
-          <h1 className="text-2xl font-bold mb-2">Action required</h1>
-        </div>
+      <main className="min-h-screen px-6 pt-8 min-w-sm">
         <ErrorBoundary
-          title="Recent Positions Error"
-          description="There was an error loading your recent positions."
+          title="Account Header Error"
+          description="There was an error loading your account header."
           showRetryButton={true}
           showHomeButton={false}
-          resetKeys={["recent-positions"]}
+          resetKeys={["account-header"]}
         >
-          <RecentPositions />
+          <AccountHeader session={session} />
         </ErrorBoundary>
-
-        <div className="w-full max-w-6xl flex items-start justify-between">
-          <h1 className="text-2xl font-bold mb-2">Context and insights</h1>
-        </div>
         <ErrorBoundary
-          title="Recent Journal Error"
-          description="There was an error loading your recent journal entries."
+          title="Performance Metrics Error"
+          description="There was an error loading performance metrics."
           showRetryButton={true}
           showHomeButton={false}
-          resetKeys={["recent-journal"]}
+          resetKeys={["performance-metrics"]}
         >
-          <RecentJournal />
+          <section className="performance-metrics my-6">
+            <h2 className="text-3xl font-semibold">Market Cap</h2>
+            <div className="my-6 flex justify-between">
+              <PerformanceMetric value="28.2K" lastCloseTimeFrame="1D" />
+              <PerformanceMetric value="+4.8%" lastCloseTimeFrame="1W" />
+            </div>
+          </section>
         </ErrorBoundary>
+        <ErrorBoundary
+          title="Area Chart Error"
+          description="There was an error loading the area chart."
+          showRetryButton={true}
+          showHomeButton={false}
+          resetKeys={["area-chart"]}
+        >
+          <section className="my-6">
+            <AreaChart />
+          </section>
+        </ErrorBoundary>
+
+        <section className="my-6">
+          <ErrorBoundary
+            title="Trading Desk/Floor Error"
+            description="There was an error loading the trading desk/floor section."
+            showRetryButton={true}
+            showHomeButton={false}
+            resetKeys={["trading-desk-floor"]}
+          >
+            <HomeSection title="Trading Desk/Floor" />
+          </ErrorBoundary>
+          <ErrorBoundary
+            title="Active Trades Error"
+            description="There was an error loading active trades."
+            showRetryButton={true}
+            showHomeButton={false}
+            resetKeys={["active-trades"]}
+          >
+            <HomeSection title="Active trades" />
+          </ErrorBoundary>
+          <ErrorBoundary
+            title="Tempos Error"
+            description="There was an error loading tempos."
+            showRetryButton={true}
+            showHomeButton={false}
+            resetKeys={["tempos"]}
+          >
+            <HomeSection title="Tempos" />
+          </ErrorBoundary>
+          <ErrorBoundary
+            title="Trade Journal Error"
+            description="There was an error loading the trade journal."
+            showRetryButton={true}
+            showHomeButton={false}
+            resetKeys={["trade-journal"]}
+          >
+            <HomeSection title="Trade journal" />
+          </ErrorBoundary>
+        </section>
       </main>
     </AuthenticatedLayout>
   );

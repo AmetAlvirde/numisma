@@ -1,7 +1,7 @@
 "use client";
 
 import { signOut } from "next-auth/react";
-import { ThemeSelector } from "@/components/utils/theme-selector";
+import { ThemeSelector } from "@/utils/theme-selector";
 import { Button } from "@/components/ui/button";
 import {
   NavigationMenu,
@@ -17,7 +17,6 @@ export function Navbar() {
         <div className="flex items-center">
           <span className="text-lg font-semibold">Numisma</span>
         </div>
-
         {/* Center: Navigation Menu (hidden for now, ready for future items) */}
         <NavigationMenu className="hidden md:flex">
           <NavigationMenuList>
