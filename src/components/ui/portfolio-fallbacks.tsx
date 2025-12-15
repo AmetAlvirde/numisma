@@ -107,10 +107,10 @@ export function PortfolioErrorFallback({ onRetry, className }: FallbackProps) {
                 </Button>
               )}
               <Button variant="ghost" size="sm" asChild>
-                <a href="/portfolios">
+                <Link href="/portfolios">
                   <Wallet className="h-4 w-4 mr-2" />
                   View All Portfolios
-                </a>
+                </Link>
               </Button>
             </div>
           </div>
