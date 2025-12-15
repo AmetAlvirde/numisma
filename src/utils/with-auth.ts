@@ -20,5 +20,5 @@ export default withAuth(
 
 // Define which routes are protected by this middleware
 export const config = {
-  matcher: ["/"],
+  matcher: ["/", "/portfolios/:path*"],
 };

@@ -125,6 +125,105 @@ export const portfolioRouter = router({
   }),
 
   /**
+   * Get detailed information for a specific portfolio by ID
+   * Returns portfolio details including day change calculations and top holdings
+   * Verifies that the portfolio belongs to the authenticated user
+   */
+  getPortfolioById: protectedProcedure
+    .input(z.object({ portfolioId: z.string().cuid("Invalid portfolio ID") }))
+    .query(async ({ ctx, input }) => {
+      try {
+        const userId = ctx.session.user.id;
+        const { portfolioId } = input;
+
+        // Find the portfolio and verify ownership
+        const portfolio = await ctx.prisma.portfolio.findFirst({
+          where: {
+            id: portfolioId,
+            userId: userId,
+          },
+          include: {
+            historicalValuations: {
+              orderBy: {
+                timestamp: "desc",
+              },
+              take: 2, // Get latest and previous day for day change calculation
+            },
+            positions: {
+              take: 5, // Get top positions for holdings preview
+              orderBy: {
+                dateOpened: "desc",
+              },
+            },
+          },
+        });
+
+        if (!portfolio) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Portfolio not found or access denied",
+          });
+        }
+
+        // Calculate day change from historical valuations
+        let dayChange = 0;
+        let dayChangePercent = 0;
+
+        if (portfolio.historicalValuations.length >= 2) {
+          const latestValuation = portfolio.historicalValuations[0];
+          const previousValuation = portfolio.historicalValuations[1];
+
+          const currentValue = Number(latestValuation.value);
+          const previousValue = Number(previousValuation.value);
+
+          dayChange = currentValue - previousValue;
+          dayChangePercent =
+            previousValue > 0 ? (dayChange / previousValue) * 100 : 0;
+        } else if (portfolio.historicalValuations.length === 1) {
+          // If only one valuation exists, compare with portfolio totalValue
+          const latestValuation = portfolio.historicalValuations[0];
+          const currentValue = Number(latestValuation.value);
+          const portfolioValue = Number(portfolio.totalValue);
+
+          dayChange = currentValue - portfolioValue;
+          dayChangePercent =
+            portfolioValue > 0 ? (dayChange / portfolioValue) * 100 : 0;
+        }
+
+        // Extract top holdings from positions
+        const topHoldings = portfolio.positions
+          .slice(0, 5)
+          .map(position => position.symbol);
+
+        return {
+          id: portfolio.id,
+          name: portfolio.name,
+          description: portfolio.description,
+          totalValue: Number(portfolio.totalValue),
+          isPinned: portfolio.isPinned,
+          dayChange: Number(dayChange.toFixed(2)),
+          dayChangePercent: Number(dayChangePercent.toFixed(2)),
+          topHoldings: topHoldings.length > 0 ? topHoldings : ["AAPL", "GOOGL", "TSLA"], // Fallback placeholder
+          createdAt: portfolio.createdAt,
+          updatedAt: portfolio.updatedAt,
+        };
+      } catch (error) {
+        console.error("Error fetching portfolio by ID:", error);
+
+        // Re-throw TRPCError as-is
+        if (error instanceof TRPCError) {
+          throw error;
+        }
+
+        // Handle other errors
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to fetch portfolio",
+        });
+      }
+    }),
+
+  /**
    * Get historical valuations for a specific portfolio
    * Returns time-series data with optional date range filtering
    * Optimized for common time periods: week, month, year

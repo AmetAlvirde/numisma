@@ -200,6 +200,105 @@ export function usePinnedPortfolio() {
 }
 
 /**
+ * Hook to fetch a single portfolio by ID with comprehensive error handling
+ */
+export function usePortfolioById(portfolioId: string) {
+  const { retry, networkStatus } = useRetryWithBackoff();
+
+  const query = trpc.portfolio.getPortfolioById.useQuery(
+    { portfolioId },
+    {
+      // Only run query if portfolioId is provided and online
+      enabled: !!portfolioId && networkStatus.isOnline,
+      // Cache data for 3 minutes
+      staleTime: 3 * 60 * 1000,
+      // Keep cache for 8 minutes when unused
+      gcTime: 8 * 60 * 1000,
+      // Refetch when window gains focus
+      refetchOnWindowFocus: true,
+      refetchOnReconnect: true,
+
+      // Retry logic
+      retry: (failureCount, error) => {
+        if (!networkStatus.isOnline) return false;
+
+        const errorWithData = error as unknown as {
+          data?: { httpStatus?: number };
+        };
+        if (
+          errorWithData?.data?.httpStatus &&
+          errorWithData.data.httpStatus >= 400 &&
+          errorWithData.data.httpStatus < 500
+        ) {
+          return false;
+        }
+
+        return failureCount < 3;
+      },
+
+      retryDelay: attemptIndex =>
+        Math.min(1000 * Math.pow(2, attemptIndex), 30000),
+    }
+  );
+
+  const retryQuery = useCallback(async () => {
+    try {
+      await retry(() => query.refetch(), {
+        maxAttempts: 3,
+        baseDelay: 1000,
+        onRetry: (attempt, error) => {
+          console.log(
+            `Retrying portfolio by ID query, attempt ${attempt}:`,
+            error.message
+          );
+        },
+      });
+    } catch (error) {
+      console.error(
+        "Failed to retry portfolio by ID query after multiple attempts:",
+        error
+      );
+    }
+  }, [retry, query]);
+
+  // Error context
+  const errorContext = useMemo(() => {
+    if (!query.error) return null;
+
+    const error = query.error as {
+      data?: { code?: string; httpStatus?: number };
+      message?: string;
+    };
+    return {
+      code: error?.data?.code,
+      httpStatus: error?.data?.httpStatus,
+      isNetworkError: !networkStatus.isOnline,
+      isServerError: error?.data?.httpStatus && error.data.httpStatus >= 500,
+      isClientError:
+        error?.data?.httpStatus &&
+        error.data.httpStatus >= 400 &&
+        error.data.httpStatus < 500,
+      canRetry:
+        !error?.data?.httpStatus ||
+        (error.data.httpStatus && error.data.httpStatus >= 500),
+      suggestion: getSuggestionForError(error, networkStatus.isOnline),
+    };
+  }, [query.error, networkStatus.isOnline]);
+
+  return {
+    portfolio: query.data ?? null,
+    isLoading: query.isLoading,
+    isError: query.isError,
+    error: query.error,
+    errorContext,
+    refetch: query.refetch,
+    retryQuery,
+    isFetching: query.isFetching,
+    networkStatus,
+  };
+}
+
+/**
  * Hook to fetch historical valuations for a specific portfolio
  * Supports flexible date range filtering and time period optimization
  */
