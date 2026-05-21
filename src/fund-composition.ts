@@ -62,6 +62,7 @@ export interface CompositionReport {
   totalUsd: number;
   warnings: string[];
   excludedNonLiveRecords: number;
+  excludedInvalidRecords: number;
   groups: {
     portfolios: CompositionRow[];
     tempos: CompositionRow[];
@@ -126,11 +127,34 @@ export function buildCompositionReport(
   const instruments = indexById(data.instruments, "instrument");
   const canonicalLines: CanonicalLine[] = [];
   let excludedNonLiveRecords = 0;
+  let excludedInvalidRecords = 0;
 
   for (const reserve of data.reserves) {
     validateCapitalBase(reserve, portfolios, accounts, warnings);
-    validateCurrency(reserve.currency, reserve.id);
-    validateNonNegative(reserve.amount, `${reserve.id}.amount`);
+
+    if (!isExecutionMode(reserve.executionMode)) {
+      warnings.push(
+        `Reserve ${reserve.id} uses unsupported Execution Mode ${String(reserve.executionMode)} and was excluded.`,
+      );
+      excludedInvalidRecords += 1;
+      continue;
+    }
+
+    if (!isSupportedCurrency(reserve.currency)) {
+      warnings.push(
+        `Reserve ${reserve.id} uses unsupported Currency ${String(reserve.currency)} and was excluded.`,
+      );
+      excludedInvalidRecords += 1;
+      continue;
+    }
+
+    if (!isNonNegativeNumber(reserve.amount)) {
+      warnings.push(
+        `Reserve ${reserve.id} has invalid amount and was excluded.`,
+      );
+      excludedInvalidRecords += 1;
+      continue;
+    }
 
     if (reserve.executionMode !== "live") {
       excludedNonLiveRecords += 1;
@@ -149,10 +173,43 @@ export function buildCompositionReport(
 
   for (const position of data.positions) {
     validateCapitalBase(position, portfolios, accounts, warnings);
-    validateCurrency(position.currency, position.id);
-    validateNonNegative(position.quantity, `${position.id}.quantity`);
-    validateNonNegative(position.averageCost, `${position.id}.averageCost`);
-    validateNonNegative(position.markPrice, `${position.id}.markPrice`);
+
+    if (!isExecutionMode(position.executionMode)) {
+      warnings.push(
+        `Position ${position.id} uses unsupported Execution Mode ${String(position.executionMode)} and was excluded.`,
+      );
+      excludedInvalidRecords += 1;
+      continue;
+    }
+
+    if (!isSupportedCurrency(position.currency)) {
+      warnings.push(
+        `Position ${position.id} uses unsupported Currency ${String(position.currency)} and was excluded.`,
+      );
+      excludedInvalidRecords += 1;
+      continue;
+    }
+
+    if (!isDirection(position.direction)) {
+      warnings.push(
+        `Position ${position.id} uses unsupported Direction ${String(position.direction)} and was excluded.`,
+      );
+      excludedInvalidRecords += 1;
+      continue;
+    }
+
+    const invalidNumericFields = [
+      ["quantity", position.quantity],
+      ["averageCost", position.averageCost],
+      ["markPrice", position.markPrice],
+    ].filter(([, value]) => !isNonNegativeNumber(value));
+    if (invalidNumericFields.length > 0) {
+      warnings.push(
+        `Position ${position.id} has invalid ${invalidNumericFields.map(([field]) => field).join(", ")} and was excluded.`,
+      );
+      excludedInvalidRecords += 1;
+      continue;
+    }
 
     const instrument = instruments.get(position.instrumentId);
     if (!instrument) {
@@ -209,6 +266,7 @@ export function buildCompositionReport(
     totalUsd,
     warnings,
     excludedNonLiveRecords,
+    excludedInvalidRecords,
     groups: {
       portfolios: groupLines(canonicalLines, "portfolio", totalUsd),
       tempos: groupLines(canonicalLines, "tempo", totalUsd),
@@ -225,10 +283,13 @@ export function formatCompositionReport(report: CompositionReport): string {
     `Fund: ${report.fundName}`,
     `As of: ${report.asOf}`,
     "",
+    formatWeeklyReviewFocus(report),
+    "",
     "Canonical Summary",
     `Fund value: ${formatUsd(report.totalUsd)}`,
     `Manual FX: 1 USD = ${report.usdMxn.toFixed(4)} MXN`,
     `Mode filter: live only; ${report.excludedNonLiveRecords} non-live record(s) excluded`,
+    `Record safety: ${report.excludedInvalidRecords} invalid record(s) excluded`,
     "",
     formatRows("Portfolio Composition", report.groups.portfolios),
     "",
@@ -242,13 +303,50 @@ export function formatCompositionReport(report: CompositionReport): string {
   if (report.warnings.length > 0) {
     sections.push(
       "",
-      "Warnings",
+      "!!! WARNINGS !!!",
       ...report.warnings.map((warning) => `- ${warning}`),
     );
   }
 
   sections.push("", "Keys: q quit | r reload data");
   return sections.join("\n");
+}
+
+function formatWeeklyReviewFocus(report: CompositionReport): string {
+  const portfolio = report.groups.portfolios[0];
+  const tempo = report.groups.tempos[0];
+  const account = report.groups.accounts[0];
+  const instrument = report.groups.instruments[0];
+  const reserve = report.groups.instruments.find(
+    (row) => row.label === "Reserve",
+  );
+
+  return [
+    "Weekly Review Focus",
+    "-------------------",
+    `Fund now: ${formatUsd(report.totalUsd)} in live canonical records`,
+    `Largest Portfolio: ${formatRowFocus(portfolio)}`,
+    `Largest Tempo: ${formatRowFocus(tempo)}`,
+    `Largest Account: ${formatRowFocus(account)}`,
+    `Largest Instrument: ${formatRowFocus(instrument)}`,
+    `Reserve: ${formatRowFocus(reserve)}`,
+    `Data safety: ${formatDataSafety(report)}`,
+  ].join("\n");
+}
+
+function formatRowFocus(row: CompositionRow | undefined): string {
+  if (!row) return "No live records";
+  return `${row.label} ${formatUsd(row.usdValue)} (${formatPercent(row.percentOfFund)})`;
+}
+
+function formatDataSafety(report: CompositionReport): string {
+  const exclusions = [
+    `${report.excludedNonLiveRecords} non-live excluded`,
+    `${report.excludedInvalidRecords} invalid excluded`,
+  ];
+  return report.warnings.length > 0
+    ? `${exclusions.join("; ")}; warnings shown below`
+    : `${exclusions.join("; ")}; no warnings`;
 }
 
 function groupLines(
@@ -386,18 +484,25 @@ function validateCapitalBase(
   }
 }
 
-function validateCurrency(currency: Currency, recordId: string): void {
-  if (currency !== "USD" && currency !== "MXN") {
-    throw new Error(
-      `${recordId} uses unsupported currency ${currency}. Prototype supports USD and MXN only.`,
-    );
-  }
+function isSupportedCurrency(currency: unknown): currency is Currency {
+  return currency === "USD" || currency === "MXN";
 }
 
-function validateNonNegative(value: number, label: string): void {
-  if (!Number.isFinite(value) || value < 0) {
-    throw new Error(`${label} must be a non-negative number.`);
-  }
+function isExecutionMode(value: unknown): value is ExecutionMode {
+  return (
+    value === "live" ||
+    value === "paper" ||
+    value === "back-test" ||
+    value === "forward-test"
+  );
+}
+
+function isDirection(value: unknown): value is Direction {
+  return value === "long" || value === "short";
+}
+
+function isNonNegativeNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
 function isPositiveNumber(value: unknown): value is number {
