@@ -1,0 +1,119 @@
+{
+  "fund": {
+    "id": "numisma-fund",
+    "name": "Numisma Fund",
+    "baseCurrency": "USD"
+  },
+  "review": {
+    "asOf": "2026-05-21",
+    "usdMxn": 17.32
+  },
+  "portfolios": [
+    { "id": "core", "name": "Core" },
+    { "id": "opportunistic", "name": "Opportunistic" }
+  ],
+  "accounts": [
+    {
+      "id": "coinbase",
+      "name": "Coinbase Main",
+      "platform": "Coinbase",
+      "currency": "USD"
+    },
+    { "id": "gbm", "name": "GBM Broker", "platform": "GBM", "currency": "MXN" },
+    {
+      "id": "bank-usd",
+      "name": "USD Bank Reserve",
+      "platform": "Bank",
+      "currency": "USD"
+    }
+  ],
+  "instruments": [
+    { "id": "btc-usd", "name": "Bitcoin", "symbol": "BTC", "currency": "USD" },
+    {
+      "id": "spy-usd",
+      "name": "SPDR S&P 500 ETF",
+      "symbol": "SPY",
+      "currency": "USD"
+    },
+    {
+      "id": "naftrac-mxn",
+      "name": "NAFTRAC",
+      "symbol": "NAFTRAC",
+      "currency": "MXN"
+    }
+  ],
+  "reserves": [
+    {
+      "id": "usd-reserve",
+      "portfolioId": "core",
+      "tempo": "Reserve",
+      "executionMode": "live",
+      "accountId": "bank-usd",
+      "currency": "USD",
+      "amount": 12500
+    },
+    {
+      "id": "mxn-reserve",
+      "portfolioId": "opportunistic",
+      "tempo": "Reserve",
+      "executionMode": "live",
+      "accountId": "gbm",
+      "currency": "MXN",
+      "amount": 180000
+    }
+  ],
+  "positions": [
+    {
+      "id": "btc-liquid-live",
+      "portfolioId": "opportunistic",
+      "tempo": "Liquid",
+      "executionMode": "live",
+      "accountId": "coinbase",
+      "instrumentId": "btc-usd",
+      "direction": "long",
+      "quantity": 0.52,
+      "averageCost": 55500,
+      "markPrice": 80250,
+      "currency": "USD"
+    },
+    {
+      "id": "spy-capital-live",
+      "portfolioId": "core",
+      "tempo": "Capital",
+      "executionMode": "live",
+      "accountId": "coinbase",
+      "instrumentId": "spy-usd",
+      "direction": "long",
+      "quantity": 90,
+      "averageCost": 505.15,
+      "markPrice": 527.4,
+      "currency": "USD"
+    },
+    {
+      "id": "naftrac-wealth-live",
+      "portfolioId": "core",
+      "tempo": "Wealth",
+      "executionMode": "live",
+      "accountId": "gbm",
+      "instrumentId": "naftrac-mxn",
+      "direction": "long",
+      "quantity": 2400,
+      "averageCost": 54.2,
+      "markPrice": 57.85,
+      "currency": "MXN"
+    },
+    {
+      "id": "btc-paper-excluded",
+      "portfolioId": "opportunistic",
+      "tempo": "Pulse",
+      "executionMode": "paper",
+      "accountId": "coinbase",
+      "instrumentId": "btc-usd",
+      "direction": "long",
+      "quantity": 0.1,
+      "averageCost": 99000,
+      "markPrice": 101250,
+      "currency": "USD"
+    }
+  ]
+}

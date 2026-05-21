@@ -1,0 +1,59 @@
+import { buildCompositionReport, formatCompositionReport, loadFundReview } from "./fund-composition.js"
+
+const { BoxRenderable, RGBA, TextRenderable } = await loadOpenTuiCore()
+const { createTestRenderer } = await loadOpenTuiTesting()
+const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({ width: 120, height: 36 })
+const data = await loadFundReview("data/fund-review.sample.json")
+const report = buildCompositionReport(data)
+
+const shell = new BoxRenderable(renderer, {
+  id: "smoke-shell",
+  width: "100%",
+  height: "100%",
+  border: true,
+  borderColor: RGBA.defaultForeground(),
+  padding: 1,
+})
+const dashboard = new TextRenderable(renderer, {
+  id: "smoke-dashboard",
+  width: "100%",
+  height: "100%",
+  fg: RGBA.defaultForeground(),
+  content: formatCompositionReport(report),
+})
+
+shell.add(dashboard)
+renderer.root.add(shell)
+await renderOnce()
+
+const frame = captureCharFrame()
+renderer.destroy()
+
+if (!frame.includes("Canonical Summary")) {
+  throw new Error("openTUI smoke render did not include the canonical summary.")
+}
+
+process.stdout.write("openTUI smoke render completed.\n")
+
+async function loadOpenTuiCore(): Promise<typeof import("@opentui/core")> {
+  try {
+    return await import("@opentui/core")
+  } catch (error) {
+    throw openTuiRuntimeError(error)
+  }
+}
+
+async function loadOpenTuiTesting(): Promise<typeof import("@opentui/core/testing")> {
+  try {
+    return await import("@opentui/core/testing")
+  } catch (error) {
+    throw openTuiRuntimeError(error)
+  }
+}
+
+function openTuiRuntimeError(error: unknown): Error {
+  const detail = error instanceof Error ? error.message : String(error)
+  return new Error(
+    `openTUI could not load in this runtime. @opentui/core currently needs Bun or a Node build that exposes node:ffi. This prototype uses Bun only to run openTUI while keeping pnpm for package management. Runtime: ${process.release.name} ${process.version}. Original error: ${detail}`,
+  )
+}
