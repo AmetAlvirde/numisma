@@ -40,6 +40,13 @@
 | **Account**    | The user-specific container on a Platform.                       | wallet           |
 | **Direction**  | The market exposure orientation of a Position.                   | side             |
 
+## Valuation
+
+| Term         | Definition                                                                                                      | Aliases to avoid |
+| ------------ | --------------------------------------------------------------------------------------------------------------- | ---------------- |
+| **Currency** | The denomination used to record, hold, convert, or report a monetary value.                                     | money type       |
+| **FX Rate**  | A conversion rate between two Currencies used to translate values for reporting at a specific review point.     | forex price      |
+
 ## Risk, Reporting, and Records
 
 | Term                        | Definition                                                                                                                                 | Aliases to avoid        |
@@ -81,6 +88,9 @@
   forward-test.
 - An **Instrument** references an **Asset**.
 - An **Account** belongs to a **Platform**.
+- A **Fund** has a base **Currency** for canonical reporting.
+- An **FX Rate** translates non-base **Currency** values into the Fund base
+  **Currency** for review and reporting.
 - A **Perspective** never owns capital.
 - A **Close** can exist at **Fund** level or **Portfolio** level.
 - **Execution Mode** controls whether performance can contribute to canonical
