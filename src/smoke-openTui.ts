@@ -1,9 +1,62 @@
-import { buildCompositionReport, formatCompositionReport, loadFundReview } from "./fund-composition.js"
+import { buildCompositionReport, formatCompositionReport, parseFundReview } from "./fund-composition.js"
 
 const { BoxRenderable, RGBA, TextRenderable } = await loadOpenTuiCore()
 const { createTestRenderer } = await loadOpenTuiTesting()
 const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({ width: 120, height: 36 })
-const data = await loadFundReview("data/fund-review.sample.json")
+const data = parseFundReview({
+  fund: {
+    id: "smoke-fund",
+    name: "Smoke Fund",
+    baseCurrency: "USD",
+  },
+  review: {
+    asOf: "2026-05-28",
+    usdMxn: 17.32,
+  },
+  portfolios: [{ id: "core", name: "Core" }],
+  accounts: [
+    {
+      id: "xtb",
+      name: "XTB Broker",
+      platform: "XTB",
+      currency: "USD",
+    },
+  ],
+  instruments: [
+    {
+      id: "aapl-usd",
+      name: "Apple Inc.",
+      symbol: "AAPL",
+      currency: "USD",
+    },
+  ],
+  reserves: [
+    {
+      id: "usd-reserve",
+      portfolioId: "core",
+      tempo: "Reserve",
+      executionMode: "live",
+      accountId: "xtb",
+      currency: "USD",
+      amount: 500,
+    },
+  ],
+  positions: [
+    {
+      id: "aapl-capital",
+      portfolioId: "core",
+      tempo: "Capital",
+      executionMode: "live",
+      accountId: "xtb",
+      instrumentId: "aapl-usd",
+      direction: "long",
+      quantity: 2,
+      averageCost: 195,
+      markPrice: 205,
+      currency: "USD",
+    },
+  ],
+})
 const report = buildCompositionReport(data)
 
 const shell = new BoxRenderable(renderer, {

@@ -1,12 +1,17 @@
-import { resolve } from "node:path";
 import {
   buildCompositionReport,
   formatCompositionReport,
   loadFundReview,
 } from "./fund-composition.js";
+import { resolveFundReviewFilePath } from "./review-file.js";
 
-const filePath = resolve(process.argv[2] ?? "data/fund-review.sample.json");
-const data = await loadFundReview(filePath);
-const report = buildCompositionReport(data);
-
-process.stdout.write(`${formatCompositionReport(report)}\n`);
+try {
+  const filePath = resolveFundReviewFilePath(process.argv);
+  const data = await loadFundReview(filePath);
+  const report = buildCompositionReport(data);
+  process.stdout.write(`${formatCompositionReport(report)}\n`);
+} catch (error) {
+  const detail = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`${detail}\n`);
+  process.exitCode = 1;
+}

@@ -1,4 +1,3 @@
-import { resolve } from "node:path";
 import {
   buildCompositionReport,
   type CompositionReport,
@@ -6,10 +5,9 @@ import {
   formatCompositionReport,
   loadFundReview,
 } from "./fund-composition.js";
+import { resolveFundReviewFilePath } from "./review-file.js";
 
-const filePath = resolve(
-  parseFileArg(process.argv) ?? "data/fund-review.sample.json",
-);
+const filePath = resolveFundReviewFilePath(process.argv);
 const {
   BoxRenderable,
   RGBA,
@@ -133,14 +131,6 @@ renderer.keyInput.on("keypress", (key) => {
 
 await refresh();
 renderer.start();
-
-function parseFileArg(args: string[]): string | undefined {
-  const fileFlagIndex = args.indexOf("--file");
-  if (fileFlagIndex >= 0) {
-    return args[fileFlagIndex + 1];
-  }
-  return args.find((arg) => arg.endsWith(".json"));
-}
 
 function renderDashboard(): void {
   if (!currentReview) return;
