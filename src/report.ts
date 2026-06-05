@@ -1,0 +1,17 @@
+import {
+  buildCompositionReport,
+  formatCompositionReport,
+  loadFundReview,
+} from "./fund-composition.js";
+import { resolveFundReviewFilePath } from "./review-file.js";
+
+try {
+  const filePath = resolveFundReviewFilePath(process.argv);
+  const data = await loadFundReview(filePath);
+  const report = buildCompositionReport(data);
+  process.stdout.write(`${formatCompositionReport(report)}\n`);
+} catch (error) {
+  const detail = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`${detail}\n`);
+  process.exitCode = 1;
+}

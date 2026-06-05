@@ -3,3 +3,5 @@
 .codex/
 .cursor/
 .opencode/
+node_modules/
+dist/
