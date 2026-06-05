@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { missingFundReviewFileMessage } from "./review-file.js";
 
 export type Currency = "USD" | "MXN";
 export type ExecutionMode = "live" | "paper" | "back-test" | "forward-test";
@@ -84,8 +85,12 @@ interface CanonicalLine {
 export async function loadFundReview(
   filePath: string,
 ): Promise<FundReviewData> {
-  const raw = await readFile(filePath, "utf8");
-  return parseFundReview(JSON.parse(raw));
+  try {
+    const raw = await readFile(filePath, "utf8");
+    return parseFundReview(JSON.parse(raw));
+  } catch (error) {
+    throw normalizeLoadFundReviewError(filePath, error);
+  }
 }
 
 export function parseFundReview(value: unknown): FundReviewData {
@@ -116,6 +121,22 @@ export function parseFundReview(value: unknown): FundReviewData {
   }
 
   return data;
+}
+
+function normalizeLoadFundReviewError(filePath: string, error: unknown): Error {
+  if (hasErrorCode(error, "ENOENT")) {
+    return new Error(missingFundReviewFileMessage(filePath));
+  }
+
+  if (error instanceof SyntaxError) {
+    return new Error(`Review file contains invalid JSON: ${filePath}\n\n${error.message}`);
+  }
+
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+function hasErrorCode(error: unknown, code: string): error is Error & { code: string } {
+  return error instanceof Error && "code" in error && error.code === code;
 }
 
 export function buildCompositionReport(
