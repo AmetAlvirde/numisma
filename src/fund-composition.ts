@@ -317,7 +317,7 @@ function formatWeeklyReviewFocus(report: CompositionReport): string {
   const tempo = report.groups.tempos[0];
   const account = report.groups.accounts[0];
   const instrument = report.groups.instruments[0];
-  const reserve = report.groups.instruments.find(
+  const reserve = report.groups.tempos.find(
     (row) => row.label === "Reserve",
   );
 
