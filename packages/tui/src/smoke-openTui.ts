@@ -1,4 +1,4 @@
-import { buildCompositionReport, formatCompositionReport, parseFundReview } from "./fund-composition.js"
+import { buildCompositionReport, formatCompositionReport, parseFundReview } from "@numisma/engine"
 
 const { BoxRenderable, RGBA, TextRenderable } = await loadOpenTuiCore()
 const { createTestRenderer } = await loadOpenTuiTesting()
