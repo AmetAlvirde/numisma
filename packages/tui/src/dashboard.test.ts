@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
 import {
   buildCompositionReport,
   buildDashboardDetail,
+  parseFundReview,
   type FundReviewData,
 } from "@numisma/engine";
 import {
@@ -98,7 +100,64 @@ describe("@numisma/tui dashboard rendering", () => {
     expect(lines.some((line) => line.content.includes("1 deferred short record(s) excluded"))).toBe(true);
     expect(warningContents.some((content) => content.toLowerCase().includes("short"))).toBe(false);
   });
+
+  it("smoke-renders the pinned realistic fixture from engine read models", () => {
+    const data = loadSanitizedRealisticFixture();
+    const report = buildCompositionReport(data, {
+      load: {
+        status: "loaded",
+        sourcePath: "packages/engine/tests/fixtures/sanitized-realistic-fund-review.json",
+        loadedAt: "2026-06-05T12:34:56.000Z",
+      },
+    });
+    const detail = buildDashboardDetail(data, report, "account:xtb-usd");
+    const lines = buildDashboardLines(report, detail);
+    const text = renderDashboardText(lines, report.load);
+
+    expect(detail).toMatchObject({
+      rowId: "account:xtb-usd",
+      kind: "account",
+    });
+    expect(detail?.rows.map((row) => row.kind)).toContain("reserve");
+    expect(detail?.rows.some((row) => row.recordLabel === "AAPL (Apple Inc.)")).toBe(true);
+    expect(detail?.rows.some((row) => row.recordLabel === "TSLA (Tesla Inc.)")).toBe(true);
+
+    const openDetailRowIds = lines.flatMap((line) =>
+      line.action?.type === "open-detail" ? [line.action.rowId] : [],
+    );
+    expect(openDetailRowIds).toEqual(
+      report.dashboard.sections.flatMap((section) =>
+        section.rows
+          .filter((row) => row.kind !== "instrument")
+          .map((row) => row.id),
+      ),
+    );
+
+    expect(text).toContain("Fund: Sanitized Exploratory Fund");
+    expect(text).toContain("Weekly Review Focus");
+    expect(text).toContain("Portfolio Composition");
+    expect(text).toContain("Instrument Composition");
+    expect(text).toContain("Selected Row Detail  [enter collapse]");
+    expect(text).toContain("Account: XTB: Main Broker");
+    expect(text).toContain("!!! WARNINGS !!!");
+    expect(text).toContain("- Position sol-binance-invalid references missing Instrument sol-usd and was excluded.");
+    expect(text).toContain("Data file: packages/engine/tests/fixtures/sanitized-realistic-fund-review.json");
+  });
 });
+
+function loadSanitizedRealisticFixture(): FundReviewData {
+  const parsed = parseFundReview(
+    readFileSync(
+      new URL("../../engine/tests/fixtures/sanitized-realistic-fund-review.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  expect(parsed.kind).toBe("ok");
+  if (parsed.kind !== "ok") {
+    throw new Error(`Expected realistic fixture to parse, got ${parsed.kind}`);
+  }
+  return parsed.value;
+}
 
 function makeFixture(): FundReviewData {
   return {
