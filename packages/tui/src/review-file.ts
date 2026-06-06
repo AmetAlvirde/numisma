@@ -17,7 +17,11 @@ export async function loadFundReview(
 ): Promise<FundReviewData> {
   try {
     const raw = await readFile(filePath, "utf8");
-    return parseFundReview(JSON.parse(raw));
+    const parsed = parseFundReview(raw);
+    if (parsed.kind !== "ok") {
+      throw parseFundReviewError(filePath, parsed);
+    }
+    return parsed.value;
   } catch (error) {
     throw normalizeLoadFundReviewError(filePath, error);
   }
@@ -47,11 +51,23 @@ function normalizeLoadFundReviewError(filePath: string, error: unknown): Error {
     return new Error(missingFundReviewFileMessage(filePath));
   }
 
-  if (error instanceof SyntaxError) {
-    return new Error(`Review file contains invalid JSON: ${filePath}\n\n${error.message}`);
-  }
-
   return error instanceof Error ? error : new Error(String(error));
+}
+
+function parseFundReviewError(
+  filePath: string,
+  failure: Exclude<ReturnType<typeof parseFundReview>, { kind: "ok" }>,
+): Error {
+  switch (failure.kind) {
+    case "invalid-json":
+      return new Error(
+        `Review file contains invalid JSON: ${filePath}\n\n${failure.detail}`,
+      );
+    case "schema-error":
+    case "unsupported-base-currency":
+    case "invalid-fx-rate":
+      return new Error(failure.message);
+  }
 }
 
 function hasErrorCode(error: unknown, code: string): error is Error & { code: string } {

@@ -45,7 +45,76 @@ export interface PositionRecord extends CapitalRecordBase {
   markPrice: number;
 }
 
+export interface Ok {
+  kind: "ok";
+  value: FundReviewData;
+}
+
+export interface InvalidJson {
+  kind: "invalid-json";
+  message: string;
+  detail: string;
+}
+
+export interface SchemaError {
+  kind: "schema-error";
+  path: string;
+  message: string;
+}
+
+export interface UnsupportedBaseCurrency {
+  kind: "unsupported-base-currency";
+  baseCurrency: unknown;
+  message: string;
+}
+
+export interface InvalidFxRate {
+  kind: "invalid-fx-rate";
+  path: "review.usdMxn";
+  value: unknown;
+  message: string;
+}
+
+export type ParseResult =
+  | Ok
+  | InvalidJson
+  | SchemaError
+  | UnsupportedBaseCurrency
+  | InvalidFxRate;
+
+export interface LoadOutcome {
+  status: "loaded";
+  sourcePath?: string;
+  loadedAt?: string;
+}
+
+export type WarningCode =
+  | "missing-portfolio"
+  | "missing-account"
+  | "missing-instrument"
+  | "unsupported-execution-mode"
+  | "unsupported-currency"
+  | "unsupported-direction"
+  | "invalid-amount"
+  | "invalid-position-number"
+  | "non-positive-fund-value";
+
+export interface Warning {
+  code: WarningCode;
+  message: string;
+  recordId?: string;
+}
+
+export type DashboardRowKind = "portfolio" | "tempo" | "account" | "instrument";
+export type DashboardSectionId =
+  | "portfolios"
+  | "tempos"
+  | "accounts"
+  | "instruments";
+
 export interface CompositionRow {
+  id: string;
+  kind: DashboardRowKind;
   label: string;
   usdValue: number;
   percentOfFund: number;
@@ -53,38 +122,96 @@ export interface CompositionRow {
   unrealizedPnlUsd?: number;
 }
 
-export interface CompositionReport {
+export interface DashboardFocus {
+  rowId: string;
+  kind: DashboardRowKind;
+  label: string;
+  usdValue: number;
+  percentOfFund: number;
+}
+
+export interface DashboardSummary {
   fundName: string;
   asOf: string;
+  fundValueUsd: number;
   usdMxn: number;
-  totalUsd: number;
-  warnings: string[];
-  excludedNonLiveRecords: number;
-  excludedInvalidRecords: number;
-  groups: {
-    portfolios: CompositionRow[];
-    tempos: CompositionRow[];
-    accounts: CompositionRow[];
-    instruments: CompositionRow[];
+  largestPortfolio?: DashboardFocus;
+  largestTempo?: DashboardFocus;
+  largestAccount?: DashboardFocus;
+  largestInstrument?: DashboardFocus;
+  reserve?: DashboardFocus;
+  dataSafety: {
+    nonLiveExcluded: number;
+    invalidExcluded: number;
+    shortDeferredExcluded: number;
+    hasWarnings: boolean;
   };
 }
 
+export interface DashboardSection {
+  id: DashboardSectionId;
+  title: string;
+  rows: CompositionRow[];
+}
+
+export interface DashboardModel {
+  summary: DashboardSummary;
+  sections: DashboardSection[];
+}
+
+export interface CompositionReport {
+  totals: {
+    baseCurrency: "USD";
+    fundValueUsd: number;
+    usdMxn: number;
+  };
+  dashboard: DashboardModel;
+  warnings: Warning[];
+  excluded: {
+    nonLive: number;
+    invalid: number;
+    shortDeferred: number;
+  };
+  load: LoadOutcome;
+}
+
 interface CanonicalLine {
-  portfolio: string;
-  tempo: string;
-  account: string;
-  instrument: string;
+  portfolioId: string;
+  portfolioLabel: string;
+  tempoId: string;
+  tempoLabel: string;
+  accountId: string;
+  accountLabel: string;
+  instrumentId: string;
+  instrumentLabel: string;
   usdValue: number;
   costBasisUsd?: number;
   unrealizedPnlUsd?: number;
 }
 
-export function parseFundReview(value: unknown): FundReviewData {
-  if (!isRecord(value)) {
-    throw new Error("Review file must contain a JSON object.");
+interface BuildCompositionReportOptions {
+  load?: LoadOutcome;
+}
+
+interface GroupAccumulator {
+  id: string;
+  label: string;
+  usdValue: number;
+  costBasisUsd: number;
+  unrealizedPnlUsd: number;
+}
+
+export function parseFundReview(input: unknown): ParseResult {
+  const parsed = parseReviewInput(input);
+  if (parsed.kind !== "ok") {
+    return parsed;
   }
 
-  const data = value as unknown as FundReviewData;
+  const value = parsed.value;
+  if (!isRecord(value)) {
+    return schemaError("$", "Review file must contain a JSON object.");
+  }
+
   const requiredArrays = [
     "portfolios",
     "accounts",
@@ -93,71 +220,107 @@ export function parseFundReview(value: unknown): FundReviewData {
     "positions",
   ] as const;
   for (const key of requiredArrays) {
-    if (!Array.isArray(data[key])) {
-      throw new Error(`Review file is missing array: ${key}`);
+    if (!Array.isArray(value[key])) {
+      return schemaError(key, `Review file is missing array: ${key}`);
     }
   }
 
-  if (!isRecord(data.fund) || data.fund.baseCurrency !== "USD") {
-    throw new Error("Prototype only supports a USD base Fund.");
+  if (!isRecord(value.fund)) {
+    return schemaError("fund", "Review file must contain fund details.");
   }
 
-  if (!isRecord(data.review) || !isPositiveNumber(data.review.usdMxn)) {
-    throw new Error("review.usdMxn must be a positive MXN-per-USD rate.");
+  if (value.fund.baseCurrency !== "USD") {
+    return {
+      kind: "unsupported-base-currency",
+      baseCurrency: value.fund.baseCurrency,
+      message: "Prototype only supports a USD base Fund.",
+    };
   }
 
-  return data;
+  if (!isRecord(value.review)) {
+    return schemaError("review", "Review file must contain review details.");
+  }
+
+  if (!isPositiveNumber(value.review.usdMxn)) {
+    return {
+      kind: "invalid-fx-rate",
+      path: "review.usdMxn",
+      value: value.review.usdMxn,
+      message: "review.usdMxn must be a positive MXN-per-USD rate.",
+    };
+  }
+
+  return {
+    kind: "ok",
+    value: value as FundReviewData,
+  };
 }
 
 export function buildCompositionReport(
   data: FundReviewData,
+  options: BuildCompositionReportOptions = {},
 ): CompositionReport {
-  const warnings: string[] = [];
+  const warnings: Warning[] = [];
   const portfolios = indexById(data.portfolios, "portfolio");
   const accounts = indexById(data.accounts, "account");
   const instruments = indexById(data.instruments, "instrument");
   const canonicalLines: CanonicalLine[] = [];
-  let excludedNonLiveRecords = 0;
-  let excludedInvalidRecords = 0;
+  const excluded = {
+    nonLive: 0,
+    invalid: 0,
+    shortDeferred: 0,
+  };
 
   for (const reserve of data.reserves) {
     validateCapitalBase(reserve, portfolios, accounts, warnings);
 
     if (!isExecutionMode(reserve.executionMode)) {
-      warnings.push(
+      pushWarning(
+        warnings,
+        "unsupported-execution-mode",
         `Reserve ${reserve.id} uses unsupported Execution Mode ${String(reserve.executionMode)} and was excluded.`,
+        reserve.id,
       );
-      excludedInvalidRecords += 1;
+      excluded.invalid += 1;
       continue;
     }
 
     if (!isSupportedCurrency(reserve.currency)) {
-      warnings.push(
+      pushWarning(
+        warnings,
+        "unsupported-currency",
         `Reserve ${reserve.id} uses unsupported Currency ${String(reserve.currency)} and was excluded.`,
+        reserve.id,
       );
-      excludedInvalidRecords += 1;
+      excluded.invalid += 1;
       continue;
     }
 
     if (!isNonNegativeNumber(reserve.amount)) {
-      warnings.push(
+      pushWarning(
+        warnings,
+        "invalid-amount",
         `Reserve ${reserve.id} has invalid amount and was excluded.`,
+        reserve.id,
       );
-      excludedInvalidRecords += 1;
+      excluded.invalid += 1;
       continue;
     }
 
     if (reserve.executionMode !== "live") {
-      excludedNonLiveRecords += 1;
+      excluded.nonLive += 1;
       continue;
     }
 
     canonicalLines.push({
-      portfolio:
-        portfolios.get(reserve.portfolioId)?.name ?? reserve.portfolioId,
-      tempo: reserve.tempo,
-      account: accountLabel(accounts.get(reserve.accountId), reserve.accountId),
-      instrument: "Reserve",
+      portfolioId: reserve.portfolioId,
+      portfolioLabel: portfolios.get(reserve.portfolioId)?.name ?? reserve.portfolioId,
+      tempoId: reserve.tempo,
+      tempoLabel: reserve.tempo,
+      accountId: reserve.accountId,
+      accountLabel: accountLabel(accounts.get(reserve.accountId), reserve.accountId),
+      instrumentId: "reserve",
+      instrumentLabel: "Reserve",
       usdValue: toUsd(reserve.amount, reserve.currency, data.review.usdMxn),
     });
   }
@@ -166,26 +329,45 @@ export function buildCompositionReport(
     validateCapitalBase(position, portfolios, accounts, warnings);
 
     if (!isExecutionMode(position.executionMode)) {
-      warnings.push(
+      pushWarning(
+        warnings,
+        "unsupported-execution-mode",
         `Position ${position.id} uses unsupported Execution Mode ${String(position.executionMode)} and was excluded.`,
+        position.id,
       );
-      excludedInvalidRecords += 1;
+      excluded.invalid += 1;
       continue;
     }
 
     if (!isSupportedCurrency(position.currency)) {
-      warnings.push(
+      pushWarning(
+        warnings,
+        "unsupported-currency",
         `Position ${position.id} uses unsupported Currency ${String(position.currency)} and was excluded.`,
+        position.id,
       );
-      excludedInvalidRecords += 1;
+      excluded.invalid += 1;
       continue;
     }
 
     if (!isDirection(position.direction)) {
-      warnings.push(
+      pushWarning(
+        warnings,
+        "unsupported-direction",
         `Position ${position.id} uses unsupported Direction ${String(position.direction)} and was excluded.`,
+        position.id,
       );
-      excludedInvalidRecords += 1;
+      excluded.invalid += 1;
+      continue;
+    }
+
+    if (position.executionMode !== "live") {
+      excluded.nonLive += 1;
+      continue;
+    }
+
+    if (position.direction === "short") {
+      excluded.shortDeferred += 1;
       continue;
     }
 
@@ -195,42 +377,39 @@ export function buildCompositionReport(
       ["markPrice", position.markPrice],
     ].filter(([, value]) => !isNonNegativeNumber(value));
     if (invalidNumericFields.length > 0) {
-      warnings.push(
+      pushWarning(
+        warnings,
+        "invalid-position-number",
         `Position ${position.id} has invalid ${invalidNumericFields.map(([field]) => field).join(", ")} and was excluded.`,
+        position.id,
       );
-      excludedInvalidRecords += 1;
+      excluded.invalid += 1;
       continue;
     }
 
     const instrument = instruments.get(position.instrumentId);
     if (!instrument) {
-      warnings.push(
+      pushWarning(
+        warnings,
+        "missing-instrument",
         `Position ${position.id} references missing Instrument ${position.instrumentId}.`,
+        position.id,
       );
     }
 
-    if (position.executionMode !== "live") {
-      excludedNonLiveRecords += 1;
-      continue;
-    }
-
-    const directionSign = position.direction === "short" ? -1 : 1;
-    const marketValue = directionSign * position.quantity * position.markPrice;
+    const marketValue = position.quantity * position.markPrice;
     const costBasis = position.quantity * position.averageCost;
-    const unrealizedPnl =
-      position.direction === "short"
-        ? (position.averageCost - position.markPrice) * position.quantity
-        : (position.markPrice - position.averageCost) * position.quantity;
+    const unrealizedPnl = (position.markPrice - position.averageCost) * position.quantity;
 
     canonicalLines.push({
-      portfolio:
-        portfolios.get(position.portfolioId)?.name ?? position.portfolioId,
-      tempo: position.tempo,
-      account: accountLabel(
-        accounts.get(position.accountId),
-        position.accountId,
-      ),
-      instrument: instrument
+      portfolioId: position.portfolioId,
+      portfolioLabel: portfolios.get(position.portfolioId)?.name ?? position.portfolioId,
+      tempoId: position.tempo,
+      tempoLabel: position.tempo,
+      accountId: position.accountId,
+      accountLabel: accountLabel(accounts.get(position.accountId), position.accountId),
+      instrumentId: position.instrumentId,
+      instrumentLabel: instrument
         ? `${instrument.symbol} (${instrument.name})`
         : position.instrumentId,
       usdValue: toUsd(marketValue, position.currency, data.review.usdMxn),
@@ -243,27 +422,97 @@ export function buildCompositionReport(
     });
   }
 
-  const totalUsd = canonicalLines.reduce((sum, line) => sum + line.usdValue, 0);
-  if (totalUsd <= 0) {
-    warnings.push(
+  const fundValueUsd = canonicalLines.reduce((sum, line) => sum + line.usdValue, 0);
+  if (fundValueUsd <= 0) {
+    pushWarning(
+      warnings,
+      "non-positive-fund-value",
       "Canonical live Fund value is not positive; percent-of-Fund values may be misleading.",
     );
   }
 
+  const portfolioRows = groupLines(
+    canonicalLines,
+    "portfolio",
+    (line) => line.portfolioId,
+    (line) => line.portfolioLabel,
+    fundValueUsd,
+  );
+  const tempoRows = groupLines(
+    canonicalLines,
+    "tempo",
+    (line) => line.tempoId,
+    (line) => line.tempoLabel,
+    fundValueUsd,
+  );
+  const accountRows = groupLines(
+    canonicalLines,
+    "account",
+    (line) => line.accountId,
+    (line) => line.accountLabel,
+    fundValueUsd,
+  );
+  const instrumentRows = groupLines(
+    canonicalLines,
+    "instrument",
+    (line) => line.instrumentId,
+    (line) => line.instrumentLabel,
+    fundValueUsd,
+  );
+
   return {
-    fundName: data.fund.name,
-    asOf: data.review.asOf,
-    usdMxn: data.review.usdMxn,
-    totalUsd,
-    warnings,
-    excludedNonLiveRecords,
-    excludedInvalidRecords,
-    groups: {
-      portfolios: groupLines(canonicalLines, "portfolio", totalUsd),
-      tempos: groupLines(canonicalLines, "tempo", totalUsd),
-      accounts: groupLines(canonicalLines, "account", totalUsd),
-      instruments: groupLines(canonicalLines, "instrument", totalUsd),
+    totals: {
+      baseCurrency: "USD",
+      fundValueUsd,
+      usdMxn: data.review.usdMxn,
     },
+    dashboard: {
+      summary: {
+        fundName: data.fund.name,
+        asOf: data.review.asOf,
+        fundValueUsd,
+        usdMxn: data.review.usdMxn,
+        ...optionalSummaryFocus("largestPortfolio", toFocus(portfolioRows[0])),
+        ...optionalSummaryFocus("largestTempo", toFocus(tempoRows[0])),
+        ...optionalSummaryFocus("largestAccount", toFocus(accountRows[0])),
+        ...optionalSummaryFocus("largestInstrument", toFocus(instrumentRows[0])),
+        ...optionalSummaryFocus(
+          "reserve",
+          toFocus(tempoRows.find((row) => row.id === "tempo:Reserve")),
+        ),
+        dataSafety: {
+          nonLiveExcluded: excluded.nonLive,
+          invalidExcluded: excluded.invalid,
+          shortDeferredExcluded: excluded.shortDeferred,
+          hasWarnings: warnings.length > 0,
+        },
+      },
+      sections: [
+        {
+          id: "portfolios",
+          title: "Portfolio Composition",
+          rows: portfolioRows,
+        },
+        {
+          id: "tempos",
+          title: "Tempo Composition",
+          rows: tempoRows,
+        },
+        {
+          id: "accounts",
+          title: "Account Composition",
+          rows: accountRows,
+        },
+        {
+          id: "instruments",
+          title: "Instrument Composition",
+          rows: instrumentRows,
+        },
+      ],
+    },
+    warnings,
+    excluded,
+    load: options.load ?? { status: "loaded" },
   };
 }
 
@@ -271,31 +520,40 @@ export function formatCompositionReport(report: CompositionReport): string {
   const sections = [
     `Numisma Fund Composition Prototype`,
     divider(),
-    `Fund: ${report.fundName}`,
-    `As of: ${report.asOf}`,
+    `Fund: ${report.dashboard.summary.fundName}`,
+    `As of: ${report.dashboard.summary.asOf}`,
     "",
     formatWeeklyReviewFocus(report),
     "",
     "Canonical Summary",
-    `Fund value: ${formatUsd(report.totalUsd)}`,
-    `Manual FX: 1 USD = ${report.usdMxn.toFixed(4)} MXN`,
-    `Mode filter: live only; ${report.excludedNonLiveRecords} non-live record(s) excluded`,
-    `Record safety: ${report.excludedInvalidRecords} invalid record(s) excluded`,
+    `Fund value: ${formatUsd(report.totals.fundValueUsd)}`,
+    `Manual FX: 1 USD = ${report.totals.usdMxn.toFixed(4)} MXN`,
+    `Mode filter: live only; ${report.excluded.nonLive} non-live record(s) excluded`,
+    `Record safety: ${report.excluded.invalid} invalid record(s) excluded`,
+    ...(report.excluded.shortDeferred > 0
+      ? [
+          `Short direction: ${report.excluded.shortDeferred} deferred short record(s) excluded`,
+        ]
+      : []),
     "",
-    formatRows("Portfolio Composition", report.groups.portfolios),
+    formatRows("Portfolio Composition", sectionRows(report, "portfolios")),
     "",
-    formatRows("Tempo Composition", report.groups.tempos),
+    formatRows("Tempo Composition", sectionRows(report, "tempos")),
     "",
-    formatRows("Account Composition", report.groups.accounts),
+    formatRows("Account Composition", sectionRows(report, "accounts")),
     "",
-    formatRows("Instrument Composition", report.groups.instruments, true),
+    formatRows(
+      "Instrument Composition",
+      sectionRows(report, "instruments"),
+      true,
+    ),
   ];
 
   if (report.warnings.length > 0) {
     sections.push(
       "",
       "!!! WARNINGS !!!",
-      ...report.warnings.map((warning) => `- ${warning}`),
+      ...report.warnings.map((warning) => `- ${warning.message}`),
     );
   }
 
@@ -304,83 +562,122 @@ export function formatCompositionReport(report: CompositionReport): string {
 }
 
 function formatWeeklyReviewFocus(report: CompositionReport): string {
-  const portfolio = report.groups.portfolios[0];
-  const tempo = report.groups.tempos[0];
-  const account = report.groups.accounts[0];
-  const instrument = report.groups.instruments[0];
-  const reserve = report.groups.tempos.find(
-    (row) => row.label === "Reserve",
-  );
+  const { summary } = report.dashboard;
 
   return [
     "Weekly Review Focus",
     "-------------------",
-    `Fund now: ${formatUsd(report.totalUsd)} in live canonical records`,
-    `Largest Portfolio: ${formatRowFocus(portfolio)}`,
-    `Largest Tempo: ${formatRowFocus(tempo)}`,
-    `Largest Account: ${formatRowFocus(account)}`,
-    `Largest Instrument: ${formatRowFocus(instrument)}`,
-    `Reserve: ${formatRowFocus(reserve)}`,
+    `Fund now: ${formatUsd(summary.fundValueUsd)} in live canonical records`,
+    `Largest Portfolio: ${formatRowFocus(summary.largestPortfolio)}`,
+    `Largest Tempo: ${formatRowFocus(summary.largestTempo)}`,
+    `Largest Account: ${formatRowFocus(summary.largestAccount)}`,
+    `Largest Instrument: ${formatRowFocus(summary.largestInstrument)}`,
+    `Reserve: ${formatRowFocus(summary.reserve)}`,
     `Data safety: ${formatDataSafety(report)}`,
   ].join("\n");
 }
 
-function formatRowFocus(row: CompositionRow | undefined): string {
+function formatRowFocus(row: DashboardFocus | undefined): string {
   if (!row) return "No live records";
   return `${row.label} ${formatUsd(row.usdValue)} (${formatPercent(row.percentOfFund)})`;
 }
 
 function formatDataSafety(report: CompositionReport): string {
   const exclusions = [
-    `${report.excludedNonLiveRecords} non-live excluded`,
-    `${report.excludedInvalidRecords} invalid excluded`,
+    `${report.excluded.nonLive} non-live excluded`,
+    `${report.excluded.invalid} invalid excluded`,
+    ...(report.excluded.shortDeferred > 0
+      ? [`${report.excluded.shortDeferred} short deferred`]
+      : []),
   ];
   return report.warnings.length > 0
     ? `${exclusions.join("; ")}; warnings shown below`
     : `${exclusions.join("; ")}; no warnings`;
 }
 
+function sectionRows(
+  report: CompositionReport,
+  sectionId: DashboardSectionId,
+): CompositionRow[] {
+  return (
+    report.dashboard.sections.find((section) => section.id === sectionId)?.rows ?? []
+  );
+}
+
+function toFocus(row: CompositionRow | undefined): DashboardFocus | undefined {
+  if (!row) return undefined;
+  return {
+    rowId: row.id,
+    kind: row.kind,
+    label: row.label,
+    usdValue: row.usdValue,
+    percentOfFund: row.percentOfFund,
+  };
+}
+
+function optionalSummaryFocus<
+  Key extends
+    | "largestPortfolio"
+    | "largestTempo"
+    | "largestAccount"
+    | "largestInstrument"
+    | "reserve",
+>(
+  key: Key,
+  value: DashboardSummary[Key],
+): Pick<DashboardSummary, Key> | Record<string, never> {
+  return value === undefined ? {} : ({ [key]: value } as Pick<DashboardSummary, Key>);
+}
+
 function groupLines(
   lines: CanonicalLine[],
-  key: keyof CanonicalLine,
-  totalUsd: number,
+  kind: DashboardRowKind,
+  idSelector: (line: CanonicalLine) => string,
+  labelSelector: (line: CanonicalLine) => string,
+  fundValueUsd: number,
 ): CompositionRow[] {
-  const rows = new Map<string, Omit<CompositionRow, "percentOfFund">>();
+  const rows = new Map<string, GroupAccumulator>();
 
   for (const line of lines) {
-    const label = String(line[key]);
-    const existing = rows.get(label) ?? {
+    const rawId = idSelector(line);
+    const label = labelSelector(line);
+    const id = `${kind}:${rawId}`;
+    const existing = rows.get(id) ?? {
+      id,
       label,
       usdValue: 0,
       costBasisUsd: 0,
       unrealizedPnlUsd: 0,
     };
     existing.usdValue += line.usdValue;
-    existing.costBasisUsd =
-      (existing.costBasisUsd ?? 0) + (line.costBasisUsd ?? 0);
-    existing.unrealizedPnlUsd =
-      (existing.unrealizedPnlUsd ?? 0) + (line.unrealizedPnlUsd ?? 0);
-    rows.set(label, existing);
+    existing.costBasisUsd += line.costBasisUsd ?? 0;
+    existing.unrealizedPnlUsd += line.unrealizedPnlUsd ?? 0;
+    rows.set(id, existing);
   }
 
   return [...rows.values()]
     .map((row) => {
       const result: CompositionRow = {
+        id: row.id,
+        kind,
         label: row.label,
         usdValue: row.usdValue,
-        percentOfFund: totalUsd === 0 ? 0 : (row.usdValue / totalUsd) * 100,
+        percentOfFund: percentOfFund(row.usdValue, fundValueUsd),
       };
 
-      if (row.costBasisUsd !== undefined && row.costBasisUsd !== 0) {
+      if (row.costBasisUsd !== 0) {
         result.costBasisUsd = row.costBasisUsd;
       }
-      if (row.unrealizedPnlUsd !== undefined && row.unrealizedPnlUsd !== 0) {
+      if (row.unrealizedPnlUsd !== 0) {
         result.unrealizedPnlUsd = row.unrealizedPnlUsd;
       }
 
       return result;
     })
-    .sort((a, b) => Math.abs(b.usdValue) - Math.abs(a.usdValue));
+    .sort(
+      (a, b) =>
+        Math.abs(b.usdValue) - Math.abs(a.usdValue) || a.label.localeCompare(b.label),
+    );
 }
 
 function formatRows(
@@ -397,7 +694,13 @@ function formatRows(
     return `${base} ${padLeft(formatMaybeUsd(row.costBasisUsd), 14)} ${padLeft(formatMaybeUsd(row.unrealizedPnlUsd), 14)}`;
   });
 
-  return [title, "-".repeat(title.length), header, "-".repeat(header.length), ...(body.length > 0 ? body : ["No live records."])].join("\n");
+  return [
+    title,
+    "-".repeat(title.length),
+    header,
+    "-".repeat(header.length),
+    ...(body.length > 0 ? body : ["No live records."]),
+  ].join("\n");
 }
 
 function divider(): string {
@@ -406,6 +709,16 @@ function divider(): string {
 
 function toUsd(amount: number, currency: Currency, usdMxn: number): number {
   return currency === "USD" ? amount : amount / usdMxn;
+}
+
+function percentOfFund(usdValue: number, fundValueUsd: number): number {
+  if (fundValueUsd === 0) return 0;
+  return roundNumber((usdValue / fundValueUsd) * 100, 12);
+}
+
+function roundNumber(value: number, decimals: number): number {
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
 }
 
 function formatUsd(value: number): string {
@@ -461,17 +774,63 @@ function validateCapitalBase(
   record: CapitalRecordBase,
   portfolios: Map<string, NamedRecord>,
   accounts: Map<string, NamedRecord>,
-  warnings: string[],
+  warnings: Warning[],
 ): void {
   if (!portfolios.has(record.portfolioId)) {
-    warnings.push(
+    pushWarning(
+      warnings,
+      "missing-portfolio",
       `${record.id} references missing Portfolio ${record.portfolioId}.`,
+      record.id,
     );
   }
   if (!accounts.has(record.accountId)) {
-    warnings.push(
+    pushWarning(
+      warnings,
+      "missing-account",
       `${record.id} references missing Account ${record.accountId}.`,
+      record.id,
     );
+  }
+}
+
+function pushWarning(
+  warnings: Warning[],
+  code: WarningCode,
+  message: string,
+  recordId?: string,
+): void {
+  warnings.push(recordId ? { code, message, recordId } : { code, message });
+}
+
+function schemaError(path: string, message: string): SchemaError {
+  return {
+    kind: "schema-error",
+    path,
+    message,
+  };
+}
+
+function parseReviewInput(input: unknown): Ok | InvalidJson {
+  if (typeof input !== "string") {
+    return {
+      kind: "ok",
+      value: input as FundReviewData,
+    };
+  }
+
+  try {
+    return {
+      kind: "ok",
+      value: JSON.parse(input) as FundReviewData,
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return {
+      kind: "invalid-json",
+      message: "Review file contains invalid JSON.",
+      detail,
+    };
   }
 }
 
