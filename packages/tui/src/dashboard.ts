@@ -166,7 +166,7 @@ export function renderDashboardText(
 
 export function renderLoadFailureText(load: LoadFailedOutcome): string {
   return [
-    "Could not render Fund composition.",
+    "Unsafe render blocked by engine validation.",
     "",
     load.message,
     "",

@@ -52,26 +52,53 @@ export interface Ok {
 
 export interface InvalidJson {
   kind: "invalid-json";
+  severity: "blocking";
   message: string;
   detail: string;
 }
 
 export interface SchemaError {
   kind: "schema-error";
+  severity: "blocking";
   path: string;
   message: string;
 }
 
 export interface UnsupportedBaseCurrency {
   kind: "unsupported-base-currency";
+  severity: "blocking";
   baseCurrency: unknown;
   message: string;
 }
 
 export interface InvalidFxRate {
   kind: "invalid-fx-rate";
+  severity: "blocking";
   path: "review.usdMxn";
   value: unknown;
+  message: string;
+}
+
+export interface InvalidAsOf {
+  kind: "invalid-as-of";
+  severity: "blocking";
+  path: "review.asOf";
+  value: unknown;
+  message: string;
+}
+
+export interface DuplicateReferenceId {
+  kind: "duplicate-reference-id";
+  severity: "blocking";
+  recordType: "portfolio" | "account" | "instrument";
+  id: string;
+  message: string;
+}
+
+export interface DuplicateCapitalRecordId {
+  kind: "duplicate-capital-record-id";
+  severity: "blocking";
+  id: string;
   message: string;
 }
 
@@ -80,7 +107,12 @@ export type ParseResult =
   | InvalidJson
   | SchemaError
   | UnsupportedBaseCurrency
-  | InvalidFxRate;
+  | InvalidFxRate
+  | InvalidAsOf
+  | DuplicateReferenceId
+  | DuplicateCapitalRecordId;
+
+export type ValidationSeverity = "blocking" | "warning";
 
 export interface LoadedOutcome {
   status: "loaded";
@@ -104,12 +136,40 @@ export type WarningCode =
   | "unsupported-execution-mode"
   | "unsupported-currency"
   | "unsupported-direction"
+  | "currency-mismatch"
   | "invalid-amount"
   | "invalid-position-number"
   | "non-positive-fund-value";
 
+export type ValidationCode =
+  | Exclude<ParseResult["kind"], "ok">
+  | WarningCode
+  | "short-deferred";
+
+export const validationSeverityByCode: Record<ValidationCode, ValidationSeverity> = {
+  "invalid-json": "blocking",
+  "schema-error": "blocking",
+  "unsupported-base-currency": "blocking",
+  "invalid-fx-rate": "blocking",
+  "invalid-as-of": "blocking",
+  "duplicate-reference-id": "blocking",
+  "duplicate-capital-record-id": "blocking",
+  "missing-portfolio": "warning",
+  "missing-account": "warning",
+  "missing-instrument": "warning",
+  "unsupported-execution-mode": "warning",
+  "unsupported-currency": "warning",
+  "unsupported-direction": "warning",
+  "currency-mismatch": "warning",
+  "invalid-amount": "warning",
+  "invalid-position-number": "warning",
+  "non-positive-fund-value": "warning",
+  "short-deferred": "warning",
+};
+
 export interface Warning {
   code: WarningCode;
+  severity: "warning";
   message: string;
   recordId?: string;
 }
@@ -265,9 +325,20 @@ export function parseFundReview(input: unknown): ParseResult {
     return schemaError("fund", "Review file must contain fund details.");
   }
 
+  const fundIdError = requireNonEmptyString(value.fund.id, "fund.id");
+  if (fundIdError) {
+    return fundIdError;
+  }
+
+  const fundNameError = requireNonEmptyString(value.fund.name, "fund.name");
+  if (fundNameError) {
+    return fundNameError;
+  }
+
   if (value.fund.baseCurrency !== "USD") {
     return {
       kind: "unsupported-base-currency",
+      severity: "blocking",
       baseCurrency: value.fund.baseCurrency,
       message: "Prototype only supports a USD base Fund.",
     };
@@ -277,13 +348,62 @@ export function parseFundReview(input: unknown): ParseResult {
     return schemaError("review", "Review file must contain review details.");
   }
 
+  const asOfTypeError = requireNonEmptyString(value.review.asOf, "review.asOf");
+  if (asOfTypeError) {
+    return asOfTypeError;
+  }
+
+  if (!isIsoDate(value.review.asOf)) {
+    return {
+      kind: "invalid-as-of",
+      severity: "blocking",
+      path: "review.asOf",
+      value: value.review.asOf,
+      message: "review.asOf must be a valid YYYY-MM-DD date.",
+    };
+  }
+
   if (!isPositiveNumber(value.review.usdMxn)) {
     return {
       kind: "invalid-fx-rate",
+      severity: "blocking",
       path: "review.usdMxn",
       value: value.review.usdMxn,
       message: "review.usdMxn must be a positive MXN-per-USD rate.",
     };
+  }
+
+  const portfolioError = validateNamedRecords(value.portfolios, "portfolios", "portfolio");
+  if (portfolioError) {
+    return portfolioError;
+  }
+
+  const accountError = validateAccounts(value.accounts);
+  if (accountError) {
+    return accountError;
+  }
+
+  const instrumentError = validateInstruments(value.instruments);
+  if (instrumentError) {
+    return instrumentError;
+  }
+
+  const reserveError = validateReserves(value.reserves);
+  if (reserveError) {
+    return reserveError;
+  }
+
+  const positionError = validatePositions(value.positions);
+  if (positionError) {
+    return positionError;
+  }
+
+  const duplicateCapitalIdError = validateCapitalRecordIds(
+    value.reserves,
+    value.positions,
+  );
+  if (duplicateCapitalIdError) {
+    return duplicateCapitalIdError;
   }
 
   return {
@@ -492,8 +612,6 @@ function buildCanonicalState(data: FundReviewData): CanonicalState {
   };
 
   for (const reserve of data.reserves) {
-    validateCapitalBase(reserve, portfolios, accounts, warnings);
-
     if (!isExecutionMode(reserve.executionMode)) {
       pushWarning(
         warnings,
@@ -505,11 +623,39 @@ function buildCanonicalState(data: FundReviewData): CanonicalState {
       continue;
     }
 
+    if (reserve.executionMode !== "live") {
+      excluded.nonLive += 1;
+      continue;
+    }
+
     if (!isSupportedCurrency(reserve.currency)) {
       pushWarning(
         warnings,
         "unsupported-currency",
         `Reserve ${reserve.id} uses unsupported Currency ${String(reserve.currency)} and was excluded.`,
+        reserve.id,
+      );
+      excluded.invalid += 1;
+      continue;
+    }
+
+    const reserveHasMissingReference = validateCapitalBase(
+      reserve,
+      portfolios,
+      accounts,
+      warnings,
+    );
+    if (reserveHasMissingReference) {
+      excluded.invalid += 1;
+      continue;
+    }
+
+    const reserveAccount = accounts.get(reserve.accountId);
+    if (reserveAccount && reserveAccount.currency !== reserve.currency) {
+      pushWarning(
+        warnings,
+        "currency-mismatch",
+        `Reserve ${reserve.id} currency ${reserve.currency} does not match Account ${reserve.accountId} currency ${reserveAccount.currency} and was excluded.`,
         reserve.id,
       );
       excluded.invalid += 1;
@@ -527,11 +673,6 @@ function buildCanonicalState(data: FundReviewData): CanonicalState {
       continue;
     }
 
-    if (reserve.executionMode !== "live") {
-      excluded.nonLive += 1;
-      continue;
-    }
-
     canonicalLines.push({
       recordId: reserve.id,
       recordKind: "reserve",
@@ -541,7 +682,7 @@ function buildCanonicalState(data: FundReviewData): CanonicalState {
       tempoId: reserve.tempo,
       tempoLabel: reserve.tempo,
       accountId: reserve.accountId,
-      accountLabel: accountLabel(accounts.get(reserve.accountId), reserve.accountId),
+      accountLabel: accountLabel(reserveAccount, reserve.accountId),
       instrumentId: "reserve",
       instrumentLabel: "Reserve",
       usdValue: toUsd(reserve.amount, reserve.currency, data.review.usdMxn),
@@ -549,8 +690,6 @@ function buildCanonicalState(data: FundReviewData): CanonicalState {
   }
 
   for (const position of data.positions) {
-    validateCapitalBase(position, portfolios, accounts, warnings);
-
     if (!isExecutionMode(position.executionMode)) {
       pushWarning(
         warnings,
@@ -559,6 +698,11 @@ function buildCanonicalState(data: FundReviewData): CanonicalState {
         position.id,
       );
       excluded.invalid += 1;
+      continue;
+    }
+
+    if (position.executionMode !== "live") {
+      excluded.nonLive += 1;
       continue;
     }
 
@@ -584,13 +728,47 @@ function buildCanonicalState(data: FundReviewData): CanonicalState {
       continue;
     }
 
-    if (position.executionMode !== "live") {
-      excluded.nonLive += 1;
+    if (position.direction === "short") {
+      excluded.shortDeferred += 1;
       continue;
     }
 
-    if (position.direction === "short") {
-      excluded.shortDeferred += 1;
+    let invalidRecord = validateCapitalBase(position, portfolios, accounts, warnings);
+
+    const instrument = instruments.get(position.instrumentId);
+    if (!instrument) {
+      pushWarning(
+        warnings,
+        "missing-instrument",
+        `Position ${position.id} references missing Instrument ${position.instrumentId} and was excluded.`,
+        position.id,
+      );
+      invalidRecord = true;
+    }
+
+    const account = accounts.get(position.accountId);
+    if (account && account.currency !== position.currency) {
+      pushWarning(
+        warnings,
+        "currency-mismatch",
+        `Position ${position.id} currency ${position.currency} does not match Account ${position.accountId} currency ${account.currency} and was excluded.`,
+        position.id,
+      );
+      invalidRecord = true;
+    }
+
+    if (instrument && instrument.currency !== position.currency) {
+      pushWarning(
+        warnings,
+        "currency-mismatch",
+        `Position ${position.id} currency ${position.currency} does not match Instrument ${position.instrumentId} currency ${instrument.currency} and was excluded.`,
+        position.id,
+      );
+      invalidRecord = true;
+    }
+
+    if (invalidRecord) {
+      excluded.invalid += 1;
       continue;
     }
 
@@ -610,16 +788,6 @@ function buildCanonicalState(data: FundReviewData): CanonicalState {
       continue;
     }
 
-    const instrument = instruments.get(position.instrumentId);
-    if (!instrument) {
-      pushWarning(
-        warnings,
-        "missing-instrument",
-        `Position ${position.id} references missing Instrument ${position.instrumentId}.`,
-        position.id,
-      );
-    }
-
     const marketValue = position.quantity * position.markPrice;
     const costBasis = position.quantity * position.averageCost;
     const unrealizedPnl = (position.markPrice - position.averageCost) * position.quantity;
@@ -627,19 +795,15 @@ function buildCanonicalState(data: FundReviewData): CanonicalState {
     canonicalLines.push({
       recordId: position.id,
       recordKind: "position",
-      recordLabel: instrument
-        ? `${instrument.symbol} (${instrument.name})`
-        : position.instrumentId,
+      recordLabel: `${instrument!.symbol} (${instrument!.name})`,
       portfolioId: position.portfolioId,
       portfolioLabel: portfolios.get(position.portfolioId)?.name ?? position.portfolioId,
       tempoId: position.tempo,
       tempoLabel: position.tempo,
       accountId: position.accountId,
-      accountLabel: accountLabel(accounts.get(position.accountId), position.accountId),
+      accountLabel: accountLabel(account, position.accountId),
       instrumentId: position.instrumentId,
-      instrumentLabel: instrument
-        ? `${instrument.symbol} (${instrument.name})`
-        : position.instrumentId,
+      instrumentLabel: `${instrument!.symbol} (${instrument!.name})`,
       usdValue: toUsd(marketValue, position.currency, data.review.usdMxn),
       costBasisUsd: toUsd(costBasis, position.currency, data.review.usdMxn),
       unrealizedPnlUsd: toUsd(
@@ -892,23 +1056,254 @@ function validateCapitalBase(
   portfolios: Map<string, NamedRecord>,
   accounts: Map<string, NamedRecord>,
   warnings: Warning[],
-): void {
+): boolean {
+  let hasMissingReference = false;
   if (!portfolios.has(record.portfolioId)) {
     pushWarning(
       warnings,
       "missing-portfolio",
-      `${record.id} references missing Portfolio ${record.portfolioId}.`,
+      `${record.id} references missing Portfolio ${record.portfolioId} and was excluded.`,
       record.id,
     );
+    hasMissingReference = true;
   }
   if (!accounts.has(record.accountId)) {
     pushWarning(
       warnings,
       "missing-account",
-      `${record.id} references missing Account ${record.accountId}.`,
+      `${record.id} references missing Account ${record.accountId} and was excluded.`,
       record.id,
     );
+    hasMissingReference = true;
   }
+  return hasMissingReference;
+}
+
+function validateNamedRecords(
+  value: unknown,
+  path: string,
+  recordType: DuplicateReferenceId["recordType"],
+): ParseResult | undefined {
+  if (!Array.isArray(value)) {
+    return schemaError(path, `Review file is missing array: ${path}`);
+  }
+
+  const ids = new Set<string>();
+  for (const [index, record] of value.entries()) {
+    const itemPath = `${path}[${index}]`;
+    if (!isRecord(record)) {
+      return schemaError(itemPath, `${itemPath} must be an object.`);
+    }
+
+    const idError = requireNonEmptyString(record.id, `${itemPath}.id`);
+    if (idError) {
+      return idError;
+    }
+
+    const nameError = requireNonEmptyString(record.name, `${itemPath}.name`);
+    if (nameError) {
+      return nameError;
+    }
+
+    const id = record.id as string;
+    if (ids.has(id)) {
+      return {
+        kind: "duplicate-reference-id",
+        severity: "blocking",
+        recordType,
+        id,
+        message: `Duplicate ${recordType} id: ${id}`,
+      };
+    }
+
+    ids.add(id);
+  }
+
+  return undefined;
+}
+
+function validateAccounts(value: unknown): ParseResult | undefined {
+  const namedError = validateNamedRecords(value, "accounts", "account");
+  if (namedError) {
+    return namedError;
+  }
+
+  const accounts = value as Array<Record<string, unknown>>;
+  for (const [index, account] of accounts.entries()) {
+    const itemPath = `accounts[${index}]`;
+    const platformError = requireNonEmptyString(account.platform, `${itemPath}.platform`);
+    if (platformError) {
+      return platformError;
+    }
+
+    const currencyError = requireNonEmptyString(account.currency, `${itemPath}.currency`);
+    if (currencyError) {
+      return currencyError;
+    }
+  }
+
+  return undefined;
+}
+
+function validateInstruments(value: unknown): ParseResult | undefined {
+  const namedError = validateNamedRecords(value, "instruments", "instrument");
+  if (namedError) {
+    return namedError;
+  }
+
+  const instruments = value as Array<Record<string, unknown>>;
+  for (const [index, instrument] of instruments.entries()) {
+    const itemPath = `instruments[${index}]`;
+    const symbolError = requireNonEmptyString(instrument.symbol, `${itemPath}.symbol`);
+    if (symbolError) {
+      return symbolError;
+    }
+
+    const currencyError = requireNonEmptyString(instrument.currency, `${itemPath}.currency`);
+    if (currencyError) {
+      return currencyError;
+    }
+  }
+
+  return undefined;
+}
+
+function validateReserves(value: unknown): ParseResult | undefined {
+  if (!Array.isArray(value)) {
+    return schemaError("reserves", "Review file is missing array: reserves");
+  }
+
+  const reserves = value as Array<Record<string, unknown>>;
+  for (const [index, reserve] of reserves.entries()) {
+    const itemPath = `reserves[${index}]`;
+    const baseError = validateCapitalRecordShape(reserve, itemPath);
+    if (baseError) {
+      return baseError;
+    }
+
+    if (typeof reserve.amount !== "number") {
+      return schemaError(`${itemPath}.amount`, `${itemPath}.amount must be a number.`);
+    }
+  }
+
+  return undefined;
+}
+
+function validatePositions(value: unknown): ParseResult | undefined {
+  if (!Array.isArray(value)) {
+    return schemaError("positions", "Review file is missing array: positions");
+  }
+
+  const positions = value as Array<Record<string, unknown>>;
+  for (const [index, position] of positions.entries()) {
+    const itemPath = `positions[${index}]`;
+    const baseError = validateCapitalRecordShape(position, itemPath);
+    if (baseError) {
+      return baseError;
+    }
+
+    const instrumentIdError = requireNonEmptyString(
+      position.instrumentId,
+      `${itemPath}.instrumentId`,
+    );
+    if (instrumentIdError) {
+      return instrumentIdError;
+    }
+
+    const directionError = requireNonEmptyString(position.direction, `${itemPath}.direction`);
+    if (directionError) {
+      return directionError;
+    }
+
+    for (const field of ["quantity", "averageCost", "markPrice"] as const) {
+      if (typeof position[field] !== "number") {
+        return schemaError(
+          `${itemPath}.${field}`,
+          `${itemPath}.${field} must be a number.`,
+        );
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function validateCapitalRecordShape(
+  value: unknown,
+  path: string,
+): ParseResult | undefined {
+  if (!isRecord(value)) {
+    return schemaError(path, `${path} must be an object.`);
+  }
+
+  for (const field of [
+    "id",
+    "portfolioId",
+    "tempo",
+    "executionMode",
+    "accountId",
+    "currency",
+  ] as const) {
+    const error = requireNonEmptyString(value[field], `${path}.${field}`);
+    if (error) {
+      return error;
+    }
+  }
+
+  return undefined;
+}
+
+function validateCapitalRecordIds(
+  reserves: unknown[],
+  positions: unknown[],
+): DuplicateCapitalRecordId | undefined {
+  const ids = new Set<string>();
+
+  for (const record of [...reserves, ...positions]) {
+    if (!isRecord(record) || typeof record.id !== "string") {
+      continue;
+    }
+
+    if (ids.has(record.id)) {
+      return {
+        kind: "duplicate-capital-record-id",
+        severity: "blocking",
+        id: record.id,
+        message: `Duplicate capital record id: ${record.id}`,
+      };
+    }
+
+    ids.add(record.id);
+  }
+
+  return undefined;
+}
+
+function requireNonEmptyString(value: unknown, path: string): SchemaError | undefined {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return schemaError(path, `${path} must be a non-empty string.`);
+  }
+
+  return undefined;
+}
+
+function isIsoDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) {
+    return false;
+  }
+
+  const [, yearText, monthText, dayText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
 }
 
 function pushWarning(
@@ -917,12 +1312,17 @@ function pushWarning(
   message: string,
   recordId?: string,
 ): void {
-  warnings.push(recordId ? { code, message, recordId } : { code, message });
+  warnings.push(
+    recordId
+      ? { code, severity: "warning", message, recordId }
+      : { code, severity: "warning", message },
+  );
 }
 
 function schemaError(path: string, message: string): SchemaError {
   return {
     kind: "schema-error",
+    severity: "blocking",
     path,
     message,
   };
@@ -945,6 +1345,7 @@ function parseReviewInput(input: unknown): Ok | InvalidJson {
     const detail = error instanceof Error ? error.message : String(error);
     return {
       kind: "invalid-json",
+      severity: "blocking",
       message: "Review file contains invalid JSON.",
       detail,
     };
