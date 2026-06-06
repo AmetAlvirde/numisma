@@ -8,18 +8,17 @@
     "node": ">=24.0.0"
   },
   "scripts": {
-    "dev": "bun src/app.ts",
-    "report": "tsx src/report.ts",
-    "smoke:tui": "bun src/smoke-openTui.ts",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@opentui/core": "0.2.15"
+    "dev": "bun packages/tui/src/app.ts",
+    "report": "tsx packages/tui/src/report.ts",
+    "smoke:tui": "bun packages/tui/src/smoke-openTui.ts",
+    "typecheck": "pnpm --filter @numisma/engine run typecheck && pnpm --filter @numisma/tui run typecheck",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "tsx": "^4.20.6",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
   },
   "pnpm": {
     "onlyBuiltDependencies": ["esbuild"]

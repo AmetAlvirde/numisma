@@ -3,9 +3,8 @@ import {
   type CompositionReport,
   type FundReviewData,
   formatCompositionReport,
-  loadFundReview,
-} from "./fund-composition.js";
-import { resolveFundReviewFilePath } from "./review-file.js";
+} from "@numisma/engine";
+import { loadFundReview, resolveFundReviewFilePath } from "./review-file.js";
 
 const filePath = resolveFundReviewFilePath(process.argv);
 const {
@@ -480,16 +479,6 @@ function formatPortfolioDetail(
       ? body
       : [{ content: "No live Positions in this Portfolio.", selectable: true }]),
   ];
-}
-
-function renderLines(lines: DashboardLine[]): string {
-  return lines
-    .map((line, index) => {
-      if (!line.selectable) return `  ${line.content}`;
-      const cursor = index === selectedLine ? ">" : " ";
-      return `${cursor} ${line.content}`;
-    })
-    .join("\n");
 }
 
 function renderStyledDashboard(

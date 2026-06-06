@@ -1,9 +1,8 @@
 import {
   buildCompositionReport,
   formatCompositionReport,
-  loadFundReview,
-} from "./fund-composition.js";
-import { resolveFundReviewFilePath } from "./review-file.js";
+} from "@numisma/engine";
+import { loadFundReview, resolveFundReviewFilePath } from "./review-file.js";
 
 try {
   const filePath = resolveFundReviewFilePath(process.argv);
