@@ -86,8 +86,15 @@ async function refresh(): Promise<void> {
 
   try {
     const data = await loadFundReview(filePath);
-    const report = buildCompositionReport(data);
-    currentReview = { data, report, loadedAt: new Date() };
+    const loadedAt = new Date();
+    const report = buildCompositionReport(data, {
+      load: {
+        status: "loaded",
+        sourcePath: filePath,
+        loadedAt: loadedAt.toISOString(),
+      },
+    });
+    currentReview = { data, report, loadedAt };
     renderDashboard();
   } catch (error) {
     currentReview = undefined;
@@ -249,7 +256,7 @@ function attachPortfolioActions(
   if (sectionIndex < 0) return;
 
   const firstPortfolioRow = sectionIndex + 4;
-  for (const [index, row] of report.groups.portfolios.entries()) {
+  for (const [index, row] of rowsFor(report, "portfolios").entries()) {
     const line = lines[firstPortfolioRow + index];
     const portfolio = data.portfolios.find((item) => item.name === row.label);
     if (!line || !portfolio) continue;
@@ -273,7 +280,7 @@ function attachTempoActions(
   if (sectionIndex < 0) return;
 
   const firstTempoRow = sectionIndex + 4;
-  for (const [index, row] of report.groups.tempos.entries()) {
+  for (const [index, row] of rowsFor(report, "tempos").entries()) {
     const line = lines[firstTempoRow + index];
     if (!line) continue;
 
@@ -297,7 +304,7 @@ function attachAccountActions(
   if (sectionIndex < 0) return;
 
   const firstAccountRow = sectionIndex + 4;
-  for (const [index, row] of report.groups.accounts.entries()) {
+  for (const [index, row] of rowsFor(report, "accounts").entries()) {
     const line = lines[firstAccountRow + index];
     const account = data.accounts.find(
       (item) => `${item.platform}: ${item.name}` === row.label,
@@ -319,12 +326,19 @@ function detailInsertIndex(
   detail: DashboardAction,
 ): number {
   if (detail.type === "portfolio-detail") {
-    return sectionEndIndex(lines, "Portfolio Composition", report.groups.portfolios.length);
+    return sectionEndIndex(lines, "Portfolio Composition", rowsFor(report, "portfolios").length);
   }
   if (detail.type === "tempo-detail") {
-    return sectionEndIndex(lines, "Tempo Composition", report.groups.tempos.length);
+    return sectionEndIndex(lines, "Tempo Composition", rowsFor(report, "tempos").length);
   }
-  return sectionEndIndex(lines, "Account Composition", report.groups.accounts.length);
+  return sectionEndIndex(lines, "Account Composition", rowsFor(report, "accounts").length);
+}
+
+function rowsFor(
+  report: CompositionReport,
+  sectionId: "portfolios" | "tempos" | "accounts" | "instruments",
+) {
+  return report.dashboard.sections.find((section) => section.id === sectionId)?.rows ?? [];
 }
 
 function sectionEndIndex(

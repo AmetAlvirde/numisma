@@ -3,7 +3,7 @@ import { buildCompositionReport, formatCompositionReport, parseFundReview } from
 const { BoxRenderable, RGBA, TextRenderable } = await loadOpenTuiCore()
 const { createTestRenderer } = await loadOpenTuiTesting()
 const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({ width: 120, height: 36 })
-const data = parseFundReview({
+const parsed = parseFundReview({
   fund: {
     id: "smoke-fund",
     name: "Smoke Fund",
@@ -57,7 +57,10 @@ const data = parseFundReview({
     },
   ],
 })
-const report = buildCompositionReport(data)
+if (parsed.kind !== "ok") {
+  throw new Error(`Expected smoke fixture to parse, got ${parsed.kind}`)
+}
+const report = buildCompositionReport(parsed.value)
 
 const shell = new BoxRenderable(renderer, {
   id: "smoke-shell",
