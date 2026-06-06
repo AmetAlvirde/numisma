@@ -61,12 +61,15 @@ function parseFundReviewError(
   switch (failure.kind) {
     case "invalid-json":
       return new Error(
-        `Review file contains invalid JSON: ${filePath}\n\n${failure.detail}`,
+        `Blocking validation error (${failure.kind}) in ${filePath}: ${failure.message}\n\n${failure.detail}`,
       );
     case "schema-error":
     case "unsupported-base-currency":
     case "invalid-fx-rate":
-      return new Error(failure.message);
+    case "invalid-as-of":
+    case "duplicate-reference-id":
+    case "duplicate-capital-record-id":
+      return new Error(`Blocking validation error (${failure.kind}): ${failure.message}`);
   }
 }
 

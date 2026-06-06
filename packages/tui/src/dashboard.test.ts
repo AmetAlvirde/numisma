@@ -66,13 +66,37 @@ describe("@numisma/tui dashboard rendering", () => {
       status: "load-failed",
       sourcePath: "/tmp/fund-review.json",
       loadedAt: "2026-06-05T12:34:56.000Z",
-      message: "Review file contains invalid JSON.",
+      message: "Blocking validation error (invalid-json) in /tmp/fund-review.json: Review file contains invalid JSON.",
     });
 
-    expect(text).toContain("Could not render Fund composition.");
-    expect(text).toContain("Review file contains invalid JSON.");
+    expect(text).toContain("Unsafe render blocked by engine validation.");
+    expect(text).toContain("Blocking validation error (invalid-json)");
     expect(text).toContain("Load failed:");
     expect(text).toContain("Data file: /tmp/fund-review.json");
+  });
+
+  it("keeps deferred short exclusions visible without rendering warning rows for them", () => {
+    const data = makeFixture();
+    data.positions.push({
+      id: "btc-short",
+      portfolioId: "core",
+      tempo: "Pulse",
+      executionMode: "live",
+      accountId: "xtb-usd",
+      instrumentId: "aapl-usd",
+      direction: "short",
+      quantity: 1,
+      averageCost: 100,
+      markPrice: 50,
+      currency: "USD",
+    });
+
+    const report = buildCompositionReport(data);
+    const lines = buildDashboardLines(report, undefined);
+    const warningContents = lines.filter((line) => line.warning).map((line) => line.content);
+
+    expect(lines.some((line) => line.content.includes("1 deferred short record(s) excluded"))).toBe(true);
+    expect(warningContents.some((content) => content.toLowerCase().includes("short"))).toBe(false);
   });
 });
 
