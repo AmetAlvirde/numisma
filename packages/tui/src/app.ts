@@ -12,7 +12,7 @@ import {
 } from "./dashboard.js";
 import { loadFundReview, resolveFundReviewFilePath } from "./review-file.js";
 
-const filePath = resolveFundReviewFilePath(process.argv);
+const filePath = resolveStartupFundReviewFilePath();
 const {
   BoxRenderable,
   RGBA,
@@ -262,6 +262,20 @@ function findNextSelectableLine(
   }
 
   return from;
+}
+
+function resolveStartupFundReviewFilePath(): string {
+  try {
+    return resolveFundReviewFilePath(process.argv);
+  } catch (error) {
+    failStartup(error);
+  }
+}
+
+function failStartup(error: unknown): never {
+  const detail = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`${detail}\n`);
+  process.exit(1);
 }
 
 async function loadOpenTuiCore(): Promise<typeof import("@opentui/core")> {

@@ -7,7 +7,7 @@ export const localFundReviewPath = "data/fund-review.local.json";
 export function resolveFundReviewFilePath(args: string[]): string {
   return resolve(
     parseFundReviewFileArg(args) ??
-      process.env.NUMISMA_FUND_REVIEW_FILE ??
+      parseFundReviewFileEnvVar() ??
       localFundReviewPath,
   );
 }
@@ -31,6 +31,11 @@ export function missingFundReviewFileMessage(filePath: string): string {
   return [
     `Fund review file not found: ${filePath}`,
     "",
+    "Resolution order:",
+    "1. --file <path-to-review.json>",
+    "2. NUMISMA_FUND_REVIEW_FILE=<path-to-review.json>",
+    `3. ${resolve(localFundReviewPath)} (gitignored local default)`,
+    "",
     "Provide a review file with one of:",
     "- --file <path-to-review.json>",
     "- NUMISMA_FUND_REVIEW_FILE=<path-to-review.json>",
@@ -39,16 +44,65 @@ export function missingFundReviewFileMessage(filePath: string): string {
 }
 
 function parseFundReviewFileArg(args: string[]): string | undefined {
-  const fileFlagIndex = args.indexOf("--file");
-  if (fileFlagIndex >= 0) {
-    return args[fileFlagIndex + 1];
+  const positionalJsonArgs: string[] = [];
+  let explicitFilePath: string | undefined;
+
+  for (let index = 2; index < args.length; index += 1) {
+    const arg = args[index];
+    if (!arg) {
+      continue;
+    }
+
+    if (arg === "--file") {
+      const value = args[index + 1];
+      if (!isFundReviewFileArgValue(value)) {
+        throw new Error(missingFundReviewFileArgMessage());
+      }
+      explicitFilePath = value;
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--file=")) {
+      const value = arg.slice("--file=".length);
+      if (!isFundReviewFileArgValue(value)) {
+        throw new Error(missingFundReviewFileArgMessage());
+      }
+      explicitFilePath = value;
+      continue;
+    }
+
+    if (arg.endsWith(".json")) {
+      positionalJsonArgs.push(arg);
+    }
   }
-  return args.find((arg) => arg.endsWith(".json"));
+
+  if (explicitFilePath) {
+    return explicitFilePath;
+  }
+
+  if (positionalJsonArgs.length === 1) {
+    return positionalJsonArgs[0];
+  }
+
+  if (positionalJsonArgs.length > 1) {
+    throw new Error(ambiguousFundReviewFileArgMessage(positionalJsonArgs));
+  }
+
+  return undefined;
 }
 
 function normalizeLoadFundReviewError(filePath: string, error: unknown): Error {
   if (hasErrorCode(error, "ENOENT")) {
     return new Error(missingFundReviewFileMessage(filePath));
+  }
+
+  if (hasErrorCode(error, "EISDIR")) {
+    return new Error(`Fund review path is a directory, not a file: ${filePath}`);
+  }
+
+  if (hasErrorCode(error, "EACCES")) {
+    return new Error(`Fund review file is not readable: ${filePath}`);
   }
 
   return error instanceof Error ? error : new Error(String(error));
@@ -75,4 +129,29 @@ function parseFundReviewError(
 
 function hasErrorCode(error: unknown, code: string): error is Error & { code: string } {
   return error instanceof Error && "code" in error && error.code === code;
+}
+
+function parseFundReviewFileEnvVar(): string | undefined {
+  const filePath = process.env.NUMISMA_FUND_REVIEW_FILE?.trim();
+  return filePath ? filePath : undefined;
+}
+
+function missingFundReviewFileArgMessage(): string {
+  return [
+    "Missing value for --file.",
+    "",
+    "Use --file <path-to-review.json> to select a Fund review file explicitly.",
+  ].join("\n");
+}
+
+function ambiguousFundReviewFileArgMessage(filePaths: string[]): string {
+  return [
+    `Ambiguous positional review file arguments: ${filePaths.join(", ")}`,
+    "",
+    "Use --file <path-to-review.json> to select the intended Fund review file.",
+  ].join("\n");
+}
+
+function isFundReviewFileArgValue(value: string | undefined): value is string {
+  return Boolean(value && value.trim() && !value.startsWith("-"));
 }
