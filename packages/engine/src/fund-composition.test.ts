@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import {
   buildDashboardDetail,
   buildCompositionReport,
@@ -514,6 +515,237 @@ describe("@numisma/engine buildCompositionReport", () => {
 
     expect(buildDashboardDetail(data, report, "instrument:reserve")).toBeUndefined();
   });
+
+  it("pins the sanitized realistic fixture as the stable canonical answer", () => {
+    const report = buildCompositionReport(loadSanitizedRealisticFixture());
+
+    expect(canonicalSnapshot(report)).toEqual({
+      totals: {
+        baseCurrency: "USD",
+        fundValueUsd: 10340,
+        usdMxn: 17.31,
+      },
+      excluded: {
+        nonLive: 1,
+        invalid: 1,
+        shortDeferred: 0,
+      },
+      warnings: [{ code: "missing-instrument", recordId: "sol-binance-invalid" }],
+      summary: {
+        fundValueUsd: 10340,
+        largestPortfolio: "portfolio:core",
+        largestTempo: "tempo:Capital",
+        largestAccount: "account:xtb-usd",
+        largestInstrument: "instrument:btc-usd",
+        reserve: "tempo:Reserve",
+        dataSafety: {
+          nonLiveExcluded: 1,
+          invalidExcluded: 1,
+          shortDeferredExcluded: 0,
+          hasWarnings: true,
+        },
+      },
+      sections: {
+        portfolios: [
+          {
+            id: "portfolio:core",
+            usdValue: 6220,
+            percentOfFund: 60.154739,
+            costBasisUsd: 5040,
+            unrealizedPnlUsd: 260,
+          },
+          {
+            id: "portfolio:tactical",
+            usdValue: 4120,
+            percentOfFund: 39.845261,
+            costBasisUsd: 3061,
+            unrealizedPnlUsd: 139,
+          },
+        ],
+        tempos: [
+          {
+            id: "tempo:Capital",
+            usdValue: 3090,
+            percentOfFund: 29.883946,
+            costBasisUsd: 3016,
+            unrealizedPnlUsd: 74,
+          },
+          {
+            id: "tempo:Wealth",
+            usdValue: 2950,
+            percentOfFund: 28.529981,
+            costBasisUsd: 2696,
+            unrealizedPnlUsd: 254,
+          },
+          {
+            id: "tempo:Reserve",
+            usdValue: 1840,
+            percentOfFund: 17.794971,
+            costBasisUsd: undefined,
+            unrealizedPnlUsd: undefined,
+          },
+          {
+            id: "tempo:Liquid",
+            usdValue: 1150,
+            percentOfFund: 11.121857,
+            costBasisUsd: 1077.5,
+            unrealizedPnlUsd: 72.5,
+          },
+          {
+            id: "tempo:Pulse",
+            usdValue: 750,
+            percentOfFund: 7.253385,
+            costBasisUsd: 784.5,
+            unrealizedPnlUsd: -34.5,
+          },
+          {
+            id: "tempo:Foresight",
+            usdValue: 560,
+            percentOfFund: 5.415861,
+            costBasisUsd: 527,
+            unrealizedPnlUsd: 33,
+          },
+        ],
+        accounts: [
+          {
+            id: "account:xtb-usd",
+            usdValue: 2270,
+            percentOfFund: 21.953578,
+            costBasisUsd: 1510,
+            unrealizedPnlUsd: 140,
+          },
+          {
+            id: "account:t1-usd",
+            usdValue: 2100,
+            percentOfFund: 20.309478,
+            costBasisUsd: 1896,
+            unrealizedPnlUsd: 204,
+          },
+          {
+            id: "account:binance-usd",
+            usdValue: 1710,
+            percentOfFund: 16.537718,
+            costBasisUsd: 1289.5,
+            unrealizedPnlUsd: 60.5,
+          },
+          {
+            id: "account:bingx-usd",
+            usdValue: 1270,
+            percentOfFund: 12.282398,
+            costBasisUsd: 932.5,
+            unrealizedPnlUsd: 17.5,
+          },
+          {
+            id: "account:gbm-usd",
+            usdValue: 950,
+            percentOfFund: 9.187621,
+            costBasisUsd: 982,
+            unrealizedPnlUsd: -32,
+          },
+          {
+            id: "account:t2-usd",
+            usdValue: 900,
+            percentOfFund: 8.704062,
+            costBasisUsd: 882,
+            unrealizedPnlUsd: 18,
+          },
+          {
+            id: "account:bitget-usd",
+            usdValue: 540,
+            percentOfFund: 5.222437,
+            costBasisUsd: 312,
+            unrealizedPnlUsd: -12,
+          },
+          {
+            id: "account:bitso-usd",
+            usdValue: 300,
+            percentOfFund: 2.901354,
+            costBasisUsd: 297,
+            unrealizedPnlUsd: 3,
+          },
+          {
+            id: "account:bitso-mxn",
+            usdValue: 300,
+            percentOfFund: 2.901354,
+            costBasisUsd: undefined,
+            unrealizedPnlUsd: undefined,
+          },
+        ],
+        instruments: [
+          {
+            id: "instrument:btc-usd",
+            usdValue: 3500,
+            percentOfFund: 33.84913,
+            costBasisUsd: 3373,
+            unrealizedPnlUsd: 127,
+          },
+          {
+            id: "instrument:eth-usd",
+            usdValue: 2400,
+            percentOfFund: 23.210832,
+            costBasisUsd: 2236,
+            unrealizedPnlUsd: 164,
+          },
+          {
+            id: "instrument:reserve",
+            usdValue: 1840,
+            percentOfFund: 17.794971,
+            costBasisUsd: undefined,
+            unrealizedPnlUsd: undefined,
+          },
+          {
+            id: "instrument:aapl-usd",
+            usdValue: 850,
+            percentOfFund: 8.220503,
+            costBasisUsd: 800,
+            unrealizedPnlUsd: 50,
+          },
+          {
+            id: "instrument:googl-usd",
+            usdValue: 510,
+            percentOfFund: 4.932302,
+            costBasisUsd: 480,
+            unrealizedPnlUsd: 30,
+          },
+          {
+            id: "instrument:rivn-usd",
+            usdValue: 310,
+            percentOfFund: 2.998066,
+            costBasisUsd: 260,
+            unrealizedPnlUsd: 50,
+          },
+          {
+            id: "instrument:tsla-usd",
+            usdValue: 260,
+            percentOfFund: 2.514507,
+            costBasisUsd: 230,
+            unrealizedPnlUsd: 30,
+          },
+          {
+            id: "instrument:intc-usd",
+            usdValue: 240,
+            percentOfFund: 2.321083,
+            costBasisUsd: 310,
+            unrealizedPnlUsd: -70,
+          },
+          {
+            id: "instrument:sbux-usd",
+            usdValue: 230,
+            percentOfFund: 2.224371,
+            costBasisUsd: 220,
+            unrealizedPnlUsd: 10,
+          },
+          {
+            id: "instrument:nke-usd",
+            usdValue: 200,
+            percentOfFund: 1.934236,
+            costBasisUsd: 192,
+            unrealizedPnlUsd: 8,
+          },
+        ],
+      },
+    });
+  });
 });
 
 function parseFixture(value: unknown): FundReviewData {
@@ -527,6 +759,56 @@ function parseFixture(value: unknown): FundReviewData {
 
 function cloneFixture<T>(value: T): T {
   return structuredClone(value);
+}
+
+function loadSanitizedRealisticFixture(): FundReviewData {
+  return parseFixture(
+    JSON.parse(
+      readFileSync(
+        new URL("../tests/fixtures/sanitized-realistic-fund-review.json", import.meta.url),
+        "utf8",
+      ),
+    ),
+  );
+}
+
+function canonicalSnapshot(report: ReturnType<typeof buildCompositionReport>) {
+  return {
+    totals: report.totals,
+    excluded: report.excluded,
+    warnings: report.warnings.map(({ code, recordId }) => ({ code, recordId })),
+    summary: {
+      fundValueUsd: roundSnapshotNumber(report.dashboard.summary.fundValueUsd),
+      largestPortfolio: report.dashboard.summary.largestPortfolio?.rowId,
+      largestTempo: report.dashboard.summary.largestTempo?.rowId,
+      largestAccount: report.dashboard.summary.largestAccount?.rowId,
+      largestInstrument: report.dashboard.summary.largestInstrument?.rowId,
+      reserve: report.dashboard.summary.reserve?.rowId,
+      dataSafety: report.dashboard.summary.dataSafety,
+    },
+    sections: Object.fromEntries(
+      report.dashboard.sections.map((section) => [
+        section.id,
+        section.rows.map((row) => ({
+          id: row.id,
+          usdValue: roundSnapshotNumber(row.usdValue),
+          percentOfFund: roundSnapshotNumber(row.percentOfFund, 6),
+          costBasisUsd:
+            row.costBasisUsd === undefined
+              ? undefined
+              : roundSnapshotNumber(row.costBasisUsd),
+          unrealizedPnlUsd:
+            row.unrealizedPnlUsd === undefined
+              ? undefined
+              : roundSnapshotNumber(row.unrealizedPnlUsd),
+        })),
+      ]),
+    ),
+  };
+}
+
+function roundSnapshotNumber(value: number, decimals = 2): number {
+  return Number(value.toFixed(decimals));
 }
 
 function sectionRows(
