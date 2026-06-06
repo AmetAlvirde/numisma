@@ -1,4 +1,5 @@
 import {
+  buildDashboardDetail,
   buildCompositionReport,
   formatCompositionReport,
   parseFundReview,
@@ -292,6 +293,53 @@ describe("@numisma/engine buildCompositionReport", () => {
       formatted.indexOf("Portfolio Composition"),
     );
     expect(formatted).toContain("Data safety: 2 non-live excluded; 2 invalid excluded; warnings shown below");
+  });
+
+  it("builds dashboard detail rows from the canonical engine model", () => {
+    const data = parseFixture(makeCanonicalFixture());
+    const report = buildCompositionReport(data);
+
+    expect(buildDashboardDetail(data, report, "portfolio:tactical")).toMatchObject({
+      rowId: "portfolio:tactical",
+      kind: "portfolio",
+      label: "Tactical",
+      rows: [
+        {
+          kind: "position",
+          recordLabel: "BTC (Bitcoin)",
+          tempoLabel: "Liquid",
+          accountLabel: "BINANCE: Liquid Desk",
+          usdValue: 150,
+        },
+        {
+          kind: "position",
+          recordLabel: "CEMEXCPO (Cemex)",
+          tempoLabel: "Foresight",
+          accountLabel: "BITSO: MXN Reserve",
+          usdValue: 50,
+        },
+      ],
+    });
+
+    expect(buildDashboardDetail(data, report, "tempo:Reserve")).toMatchObject({
+      rowId: "tempo:Reserve",
+      kind: "tempo",
+      rows: [
+        { kind: "reserve", recordLabel: "Reserve", usdValue: 250 },
+        { kind: "reserve", recordLabel: "Reserve", usdValue: 250 },
+      ],
+    });
+
+    expect(buildDashboardDetail(data, report, "account:bitso-mxn")).toMatchObject({
+      rowId: "account:bitso-mxn",
+      kind: "account",
+      rows: [
+        { kind: "reserve", recordLabel: "Reserve", usdValue: 250 },
+        { kind: "position", recordLabel: "CEMEXCPO (Cemex)", usdValue: 50 },
+      ],
+    });
+
+    expect(buildDashboardDetail(data, report, "instrument:reserve")).toBeUndefined();
   });
 });
 

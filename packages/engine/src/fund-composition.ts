@@ -82,11 +82,20 @@ export type ParseResult =
   | UnsupportedBaseCurrency
   | InvalidFxRate;
 
-export interface LoadOutcome {
+export interface LoadedOutcome {
   status: "loaded";
   sourcePath?: string;
   loadedAt?: string;
 }
+
+export interface LoadFailedOutcome {
+  status: "load-failed";
+  sourcePath?: string;
+  loadedAt?: string;
+  message: string;
+}
+
+export type LoadOutcome = LoadedOutcome | LoadFailedOutcome;
 
 export type WarningCode =
   | "missing-portfolio"
@@ -175,7 +184,28 @@ export interface CompositionReport {
   load: LoadOutcome;
 }
 
+export type DetailRecordKind = "reserve" | "position";
+
+export interface DashboardDetailRow {
+  kind: DetailRecordKind;
+  recordLabel: string;
+  portfolioLabel: string;
+  tempoLabel: string;
+  accountLabel: string;
+  usdValue: number;
+}
+
+export interface DashboardDetail {
+  rowId: string;
+  kind: Exclude<DashboardRowKind, "instrument">;
+  label: string;
+  rows: DashboardDetailRow[];
+}
+
 interface CanonicalLine {
+  recordId: string;
+  recordKind: DetailRecordKind;
+  recordLabel: string;
   portfolioId: string;
   portfolioLabel: string;
   tempoId: string;
@@ -199,6 +229,12 @@ interface GroupAccumulator {
   usdValue: number;
   costBasisUsd: number;
   unrealizedPnlUsd: number;
+}
+
+interface CanonicalState {
+  canonicalLines: CanonicalLine[];
+  warnings: Warning[];
+  excluded: CompositionReport["excluded"];
 }
 
 export function parseFundReview(input: unknown): ParseResult {
@@ -260,167 +296,7 @@ export function buildCompositionReport(
   data: FundReviewData,
   options: BuildCompositionReportOptions = {},
 ): CompositionReport {
-  const warnings: Warning[] = [];
-  const portfolios = indexById(data.portfolios, "portfolio");
-  const accounts = indexById(data.accounts, "account");
-  const instruments = indexById(data.instruments, "instrument");
-  const canonicalLines: CanonicalLine[] = [];
-  const excluded = {
-    nonLive: 0,
-    invalid: 0,
-    shortDeferred: 0,
-  };
-
-  for (const reserve of data.reserves) {
-    validateCapitalBase(reserve, portfolios, accounts, warnings);
-
-    if (!isExecutionMode(reserve.executionMode)) {
-      pushWarning(
-        warnings,
-        "unsupported-execution-mode",
-        `Reserve ${reserve.id} uses unsupported Execution Mode ${String(reserve.executionMode)} and was excluded.`,
-        reserve.id,
-      );
-      excluded.invalid += 1;
-      continue;
-    }
-
-    if (!isSupportedCurrency(reserve.currency)) {
-      pushWarning(
-        warnings,
-        "unsupported-currency",
-        `Reserve ${reserve.id} uses unsupported Currency ${String(reserve.currency)} and was excluded.`,
-        reserve.id,
-      );
-      excluded.invalid += 1;
-      continue;
-    }
-
-    if (!isNonNegativeNumber(reserve.amount)) {
-      pushWarning(
-        warnings,
-        "invalid-amount",
-        `Reserve ${reserve.id} has invalid amount and was excluded.`,
-        reserve.id,
-      );
-      excluded.invalid += 1;
-      continue;
-    }
-
-    if (reserve.executionMode !== "live") {
-      excluded.nonLive += 1;
-      continue;
-    }
-
-    canonicalLines.push({
-      portfolioId: reserve.portfolioId,
-      portfolioLabel: portfolios.get(reserve.portfolioId)?.name ?? reserve.portfolioId,
-      tempoId: reserve.tempo,
-      tempoLabel: reserve.tempo,
-      accountId: reserve.accountId,
-      accountLabel: accountLabel(accounts.get(reserve.accountId), reserve.accountId),
-      instrumentId: "reserve",
-      instrumentLabel: "Reserve",
-      usdValue: toUsd(reserve.amount, reserve.currency, data.review.usdMxn),
-    });
-  }
-
-  for (const position of data.positions) {
-    validateCapitalBase(position, portfolios, accounts, warnings);
-
-    if (!isExecutionMode(position.executionMode)) {
-      pushWarning(
-        warnings,
-        "unsupported-execution-mode",
-        `Position ${position.id} uses unsupported Execution Mode ${String(position.executionMode)} and was excluded.`,
-        position.id,
-      );
-      excluded.invalid += 1;
-      continue;
-    }
-
-    if (!isSupportedCurrency(position.currency)) {
-      pushWarning(
-        warnings,
-        "unsupported-currency",
-        `Position ${position.id} uses unsupported Currency ${String(position.currency)} and was excluded.`,
-        position.id,
-      );
-      excluded.invalid += 1;
-      continue;
-    }
-
-    if (!isDirection(position.direction)) {
-      pushWarning(
-        warnings,
-        "unsupported-direction",
-        `Position ${position.id} uses unsupported Direction ${String(position.direction)} and was excluded.`,
-        position.id,
-      );
-      excluded.invalid += 1;
-      continue;
-    }
-
-    if (position.executionMode !== "live") {
-      excluded.nonLive += 1;
-      continue;
-    }
-
-    if (position.direction === "short") {
-      excluded.shortDeferred += 1;
-      continue;
-    }
-
-    const invalidNumericFields = [
-      ["quantity", position.quantity],
-      ["averageCost", position.averageCost],
-      ["markPrice", position.markPrice],
-    ].filter(([, value]) => !isNonNegativeNumber(value));
-    if (invalidNumericFields.length > 0) {
-      pushWarning(
-        warnings,
-        "invalid-position-number",
-        `Position ${position.id} has invalid ${invalidNumericFields.map(([field]) => field).join(", ")} and was excluded.`,
-        position.id,
-      );
-      excluded.invalid += 1;
-      continue;
-    }
-
-    const instrument = instruments.get(position.instrumentId);
-    if (!instrument) {
-      pushWarning(
-        warnings,
-        "missing-instrument",
-        `Position ${position.id} references missing Instrument ${position.instrumentId}.`,
-        position.id,
-      );
-    }
-
-    const marketValue = position.quantity * position.markPrice;
-    const costBasis = position.quantity * position.averageCost;
-    const unrealizedPnl = (position.markPrice - position.averageCost) * position.quantity;
-
-    canonicalLines.push({
-      portfolioId: position.portfolioId,
-      portfolioLabel: portfolios.get(position.portfolioId)?.name ?? position.portfolioId,
-      tempoId: position.tempo,
-      tempoLabel: position.tempo,
-      accountId: position.accountId,
-      accountLabel: accountLabel(accounts.get(position.accountId), position.accountId),
-      instrumentId: position.instrumentId,
-      instrumentLabel: instrument
-        ? `${instrument.symbol} (${instrument.name})`
-        : position.instrumentId,
-      usdValue: toUsd(marketValue, position.currency, data.review.usdMxn),
-      costBasisUsd: toUsd(costBasis, position.currency, data.review.usdMxn),
-      unrealizedPnlUsd: toUsd(
-        unrealizedPnl,
-        position.currency,
-        data.review.usdMxn,
-      ),
-    });
-  }
+  const { canonicalLines, warnings, excluded } = buildCanonicalState(data);
 
   const fundValueUsd = canonicalLines.reduce((sum, line) => sum + line.usdValue, 0);
   if (fundValueUsd <= 0) {
@@ -516,6 +392,32 @@ export function buildCompositionReport(
   };
 }
 
+export function buildDashboardDetail(
+  data: FundReviewData,
+  report: CompositionReport,
+  rowId: string,
+): DashboardDetail | undefined {
+  const row = findDashboardRow(report, rowId);
+  if (!row || row.kind === "instrument") {
+    return undefined;
+  }
+
+  const { canonicalLines } = buildCanonicalState(data);
+  return {
+    rowId: row.id,
+    kind: row.kind,
+    label: row.label,
+    rows: detailLinesForRow(canonicalLines, row).map((line) => ({
+      kind: line.recordKind,
+      recordLabel: line.recordLabel,
+      portfolioLabel: line.portfolioLabel,
+      tempoLabel: line.tempoLabel,
+      accountLabel: line.accountLabel,
+      usdValue: line.usdValue,
+    })),
+  };
+}
+
 export function formatCompositionReport(report: CompositionReport): string {
   const sections = [
     `Numisma Fund Composition Prototype`,
@@ -575,6 +477,221 @@ function formatWeeklyReviewFocus(report: CompositionReport): string {
     `Reserve: ${formatRowFocus(summary.reserve)}`,
     `Data safety: ${formatDataSafety(report)}`,
   ].join("\n");
+}
+
+function buildCanonicalState(data: FundReviewData): CanonicalState {
+  const warnings: Warning[] = [];
+  const portfolios = indexById(data.portfolios, "portfolio");
+  const accounts = indexById(data.accounts, "account");
+  const instruments = indexById(data.instruments, "instrument");
+  const canonicalLines: CanonicalLine[] = [];
+  const excluded = {
+    nonLive: 0,
+    invalid: 0,
+    shortDeferred: 0,
+  };
+
+  for (const reserve of data.reserves) {
+    validateCapitalBase(reserve, portfolios, accounts, warnings);
+
+    if (!isExecutionMode(reserve.executionMode)) {
+      pushWarning(
+        warnings,
+        "unsupported-execution-mode",
+        `Reserve ${reserve.id} uses unsupported Execution Mode ${String(reserve.executionMode)} and was excluded.`,
+        reserve.id,
+      );
+      excluded.invalid += 1;
+      continue;
+    }
+
+    if (!isSupportedCurrency(reserve.currency)) {
+      pushWarning(
+        warnings,
+        "unsupported-currency",
+        `Reserve ${reserve.id} uses unsupported Currency ${String(reserve.currency)} and was excluded.`,
+        reserve.id,
+      );
+      excluded.invalid += 1;
+      continue;
+    }
+
+    if (!isNonNegativeNumber(reserve.amount)) {
+      pushWarning(
+        warnings,
+        "invalid-amount",
+        `Reserve ${reserve.id} has invalid amount and was excluded.`,
+        reserve.id,
+      );
+      excluded.invalid += 1;
+      continue;
+    }
+
+    if (reserve.executionMode !== "live") {
+      excluded.nonLive += 1;
+      continue;
+    }
+
+    canonicalLines.push({
+      recordId: reserve.id,
+      recordKind: "reserve",
+      recordLabel: "Reserve",
+      portfolioId: reserve.portfolioId,
+      portfolioLabel: portfolios.get(reserve.portfolioId)?.name ?? reserve.portfolioId,
+      tempoId: reserve.tempo,
+      tempoLabel: reserve.tempo,
+      accountId: reserve.accountId,
+      accountLabel: accountLabel(accounts.get(reserve.accountId), reserve.accountId),
+      instrumentId: "reserve",
+      instrumentLabel: "Reserve",
+      usdValue: toUsd(reserve.amount, reserve.currency, data.review.usdMxn),
+    });
+  }
+
+  for (const position of data.positions) {
+    validateCapitalBase(position, portfolios, accounts, warnings);
+
+    if (!isExecutionMode(position.executionMode)) {
+      pushWarning(
+        warnings,
+        "unsupported-execution-mode",
+        `Position ${position.id} uses unsupported Execution Mode ${String(position.executionMode)} and was excluded.`,
+        position.id,
+      );
+      excluded.invalid += 1;
+      continue;
+    }
+
+    if (!isSupportedCurrency(position.currency)) {
+      pushWarning(
+        warnings,
+        "unsupported-currency",
+        `Position ${position.id} uses unsupported Currency ${String(position.currency)} and was excluded.`,
+        position.id,
+      );
+      excluded.invalid += 1;
+      continue;
+    }
+
+    if (!isDirection(position.direction)) {
+      pushWarning(
+        warnings,
+        "unsupported-direction",
+        `Position ${position.id} uses unsupported Direction ${String(position.direction)} and was excluded.`,
+        position.id,
+      );
+      excluded.invalid += 1;
+      continue;
+    }
+
+    if (position.executionMode !== "live") {
+      excluded.nonLive += 1;
+      continue;
+    }
+
+    if (position.direction === "short") {
+      excluded.shortDeferred += 1;
+      continue;
+    }
+
+    const invalidNumericFields = [
+      ["quantity", position.quantity],
+      ["averageCost", position.averageCost],
+      ["markPrice", position.markPrice],
+    ].filter(([, value]) => !isNonNegativeNumber(value));
+    if (invalidNumericFields.length > 0) {
+      pushWarning(
+        warnings,
+        "invalid-position-number",
+        `Position ${position.id} has invalid ${invalidNumericFields.map(([field]) => field).join(", ")} and was excluded.`,
+        position.id,
+      );
+      excluded.invalid += 1;
+      continue;
+    }
+
+    const instrument = instruments.get(position.instrumentId);
+    if (!instrument) {
+      pushWarning(
+        warnings,
+        "missing-instrument",
+        `Position ${position.id} references missing Instrument ${position.instrumentId}.`,
+        position.id,
+      );
+    }
+
+    const marketValue = position.quantity * position.markPrice;
+    const costBasis = position.quantity * position.averageCost;
+    const unrealizedPnl = (position.markPrice - position.averageCost) * position.quantity;
+
+    canonicalLines.push({
+      recordId: position.id,
+      recordKind: "position",
+      recordLabel: instrument
+        ? `${instrument.symbol} (${instrument.name})`
+        : position.instrumentId,
+      portfolioId: position.portfolioId,
+      portfolioLabel: portfolios.get(position.portfolioId)?.name ?? position.portfolioId,
+      tempoId: position.tempo,
+      tempoLabel: position.tempo,
+      accountId: position.accountId,
+      accountLabel: accountLabel(accounts.get(position.accountId), position.accountId),
+      instrumentId: position.instrumentId,
+      instrumentLabel: instrument
+        ? `${instrument.symbol} (${instrument.name})`
+        : position.instrumentId,
+      usdValue: toUsd(marketValue, position.currency, data.review.usdMxn),
+      costBasisUsd: toUsd(costBasis, position.currency, data.review.usdMxn),
+      unrealizedPnlUsd: toUsd(
+        unrealizedPnl,
+        position.currency,
+        data.review.usdMxn,
+      ),
+    });
+  }
+
+  return {
+    canonicalLines,
+    warnings,
+    excluded,
+  };
+}
+
+function findDashboardRow(
+  report: CompositionReport,
+  rowId: string,
+): CompositionRow | undefined {
+  for (const section of report.dashboard.sections) {
+    const row = section.rows.find((candidate) => candidate.id === rowId);
+    if (row) {
+      return row;
+    }
+  }
+  return undefined;
+}
+
+function detailLinesForRow(
+  canonicalLines: CanonicalLine[],
+  row: CompositionRow,
+): CanonicalLine[] {
+  const rawId = row.id.slice(row.id.indexOf(":") + 1);
+
+  if (row.kind === "portfolio") {
+    return canonicalLines.filter(
+      (line) => line.recordKind === "position" && line.portfolioId === rawId,
+    );
+  }
+
+  if (row.kind === "tempo") {
+    return canonicalLines.filter((line) => line.tempoId === rawId);
+  }
+
+  const accountLines = canonicalLines.filter((line) => line.accountId === rawId);
+  if (accountLines.some((line) => line.recordKind === "reserve")) {
+    return accountLines;
+  }
+
+  return accountLines.filter((line) => line.recordKind === "position");
 }
 
 function formatRowFocus(row: DashboardFocus | undefined): string {
