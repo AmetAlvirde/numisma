@@ -1,0 +1,416 @@
+{
+  "fund": {
+    "id": "sanitized-realistic-fund",
+    "name": "Sanitized Exploratory Fund",
+    "baseCurrency": "USD"
+  },
+  "review": {
+    "asOf": "2026-05-29",
+    "usdMxn": 17.31
+  },
+  "portfolios": [
+    {
+      "id": "core",
+      "name": "Core"
+    },
+    {
+      "id": "tactical",
+      "name": "Tactical"
+    }
+  ],
+  "accounts": [
+    {
+      "id": "xtb-usd",
+      "name": "Main Broker",
+      "platform": "XTB",
+      "currency": "USD"
+    },
+    {
+      "id": "gbm-usd",
+      "name": "Capital Broker",
+      "platform": "GBM",
+      "currency": "USD"
+    },
+    {
+      "id": "binance-usd",
+      "name": "Primary Exchange",
+      "platform": "BINANCE",
+      "currency": "USD"
+    },
+    {
+      "id": "bingx-usd",
+      "name": "Swing Exchange",
+      "platform": "BINGX",
+      "currency": "USD"
+    },
+    {
+      "id": "bitget-usd",
+      "name": "Pulse Exchange",
+      "platform": "BITGET",
+      "currency": "USD"
+    },
+    {
+      "id": "bitso-usd",
+      "name": "Crypto Spot Desk",
+      "platform": "BITSO",
+      "currency": "USD"
+    },
+    {
+      "id": "bitso-mxn",
+      "name": "MXN Reserve",
+      "platform": "BITSO",
+      "currency": "MXN"
+    },
+    {
+      "id": "t1-usd",
+      "name": "Cold Storage T1",
+      "platform": "T1",
+      "currency": "USD"
+    },
+    {
+      "id": "t2-usd",
+      "name": "Cold Storage T2",
+      "platform": "T2",
+      "currency": "USD"
+    }
+  ],
+  "instruments": [
+    {
+      "id": "btc-usd",
+      "name": "Bitcoin",
+      "symbol": "BTC",
+      "currency": "USD"
+    },
+    {
+      "id": "eth-usd",
+      "name": "Ethereum",
+      "symbol": "ETH",
+      "currency": "USD"
+    },
+    {
+      "id": "aapl-usd",
+      "name": "Apple Inc.",
+      "symbol": "AAPL",
+      "currency": "USD"
+    },
+    {
+      "id": "tsla-usd",
+      "name": "Tesla Inc.",
+      "symbol": "TSLA",
+      "currency": "USD"
+    },
+    {
+      "id": "googl-usd",
+      "name": "Alphabet Inc.",
+      "symbol": "GOOGL",
+      "currency": "USD"
+    },
+    {
+      "id": "rivn-usd",
+      "name": "Rivian Automotive",
+      "symbol": "RIVN",
+      "currency": "USD"
+    },
+    {
+      "id": "intc-usd",
+      "name": "Intel Corp.",
+      "symbol": "INTC",
+      "currency": "USD"
+    },
+    {
+      "id": "sbux-usd",
+      "name": "Starbucks",
+      "symbol": "SBUX",
+      "currency": "USD"
+    },
+    {
+      "id": "nke-usd",
+      "name": "Nike",
+      "symbol": "NKE",
+      "currency": "USD"
+    }
+  ],
+  "reserves": [
+    {
+      "id": "reserve-xtb-usd-core",
+      "portfolioId": "core",
+      "tempo": "Reserve",
+      "executionMode": "live",
+      "accountId": "xtb-usd",
+      "currency": "USD",
+      "amount": 620
+    },
+    {
+      "id": "reserve-bitso-mxn-core",
+      "portfolioId": "core",
+      "tempo": "Reserve",
+      "executionMode": "live",
+      "accountId": "bitso-mxn",
+      "currency": "MXN",
+      "amount": 5193
+    },
+    {
+      "id": "reserve-binance-usd-tactical",
+      "portfolioId": "tactical",
+      "tempo": "Reserve",
+      "executionMode": "live",
+      "accountId": "binance-usd",
+      "currency": "USD",
+      "amount": 360
+    },
+    {
+      "id": "reserve-bingx-usd-tactical",
+      "portfolioId": "tactical",
+      "tempo": "Reserve",
+      "executionMode": "live",
+      "accountId": "bingx-usd",
+      "currency": "USD",
+      "amount": 320
+    },
+    {
+      "id": "reserve-bitget-usd-tactical",
+      "portfolioId": "tactical",
+      "tempo": "Reserve",
+      "executionMode": "live",
+      "accountId": "bitget-usd",
+      "currency": "USD",
+      "amount": 240
+    }
+  ],
+  "positions": [
+    {
+      "id": "btc-t1-wealth",
+      "portfolioId": "core",
+      "tempo": "Wealth",
+      "executionMode": "live",
+      "accountId": "t1-usd",
+      "instrumentId": "btc-usd",
+      "direction": "long",
+      "quantity": 0.012,
+      "averageCost": 92000,
+      "markPrice": 100000,
+      "currency": "USD"
+    },
+    {
+      "id": "eth-t1-wealth",
+      "portfolioId": "core",
+      "tempo": "Wealth",
+      "executionMode": "live",
+      "accountId": "t1-usd",
+      "instrumentId": "eth-usd",
+      "direction": "long",
+      "quantity": 0.36,
+      "averageCost": 2200,
+      "markPrice": 2500,
+      "currency": "USD"
+    },
+    {
+      "id": "aapl-xtb-wealth",
+      "portfolioId": "core",
+      "tempo": "Wealth",
+      "executionMode": "live",
+      "accountId": "xtb-usd",
+      "instrumentId": "aapl-usd",
+      "direction": "long",
+      "quantity": 4,
+      "averageCost": 200,
+      "markPrice": 212.5,
+      "currency": "USD"
+    },
+    {
+      "id": "btc-t2-capital",
+      "portfolioId": "core",
+      "tempo": "Capital",
+      "executionMode": "live",
+      "accountId": "t2-usd",
+      "instrumentId": "btc-usd",
+      "direction": "long",
+      "quantity": 0.009,
+      "averageCost": 98000,
+      "markPrice": 100000,
+      "currency": "USD"
+    },
+    {
+      "id": "eth-binance-capital",
+      "portfolioId": "core",
+      "tempo": "Capital",
+      "executionMode": "live",
+      "accountId": "binance-usd",
+      "instrumentId": "eth-usd",
+      "direction": "long",
+      "quantity": 0.28,
+      "averageCost": 2400,
+      "markPrice": 2500,
+      "currency": "USD"
+    },
+    {
+      "id": "googl-gbm-capital",
+      "portfolioId": "core",
+      "tempo": "Capital",
+      "executionMode": "live",
+      "accountId": "gbm-usd",
+      "instrumentId": "googl-usd",
+      "direction": "long",
+      "quantity": 3,
+      "averageCost": 160,
+      "markPrice": 170,
+      "currency": "USD"
+    },
+    {
+      "id": "intc-gbm-capital",
+      "portfolioId": "core",
+      "tempo": "Capital",
+      "executionMode": "live",
+      "accountId": "gbm-usd",
+      "instrumentId": "intc-usd",
+      "direction": "long",
+      "quantity": 10,
+      "averageCost": 31,
+      "markPrice": 24,
+      "currency": "USD"
+    },
+    {
+      "id": "btc-binance-liquid",
+      "portfolioId": "tactical",
+      "tempo": "Liquid",
+      "executionMode": "live",
+      "accountId": "binance-usd",
+      "instrumentId": "btc-usd",
+      "direction": "long",
+      "quantity": 0.0065,
+      "averageCost": 95000,
+      "markPrice": 100000,
+      "currency": "USD"
+    },
+    {
+      "id": "eth-bingx-liquid",
+      "portfolioId": "tactical",
+      "tempo": "Liquid",
+      "executionMode": "live",
+      "accountId": "bingx-usd",
+      "instrumentId": "eth-usd",
+      "direction": "long",
+      "quantity": 0.2,
+      "averageCost": 2300,
+      "markPrice": 2500,
+      "currency": "USD"
+    },
+    {
+      "id": "btc-bingx-pulse",
+      "portfolioId": "tactical",
+      "tempo": "Pulse",
+      "executionMode": "live",
+      "accountId": "bingx-usd",
+      "instrumentId": "btc-usd",
+      "direction": "long",
+      "quantity": 0.0045,
+      "averageCost": 105000,
+      "markPrice": 100000,
+      "currency": "USD"
+    },
+    {
+      "id": "eth-bitget-pulse",
+      "portfolioId": "tactical",
+      "tempo": "Pulse",
+      "executionMode": "live",
+      "accountId": "bitget-usd",
+      "instrumentId": "eth-usd",
+      "direction": "long",
+      "quantity": 0.12,
+      "averageCost": 2600,
+      "markPrice": 2500,
+      "currency": "USD"
+    },
+    {
+      "id": "btc-bitso-foresight",
+      "portfolioId": "tactical",
+      "tempo": "Foresight",
+      "executionMode": "live",
+      "accountId": "bitso-usd",
+      "instrumentId": "btc-usd",
+      "direction": "long",
+      "quantity": 0.003,
+      "averageCost": 99000,
+      "markPrice": 100000,
+      "currency": "USD"
+    },
+    {
+      "id": "tsla-xtb-foresight",
+      "portfolioId": "tactical",
+      "tempo": "Foresight",
+      "executionMode": "live",
+      "accountId": "xtb-usd",
+      "instrumentId": "tsla-usd",
+      "direction": "long",
+      "quantity": 1,
+      "averageCost": 230,
+      "markPrice": 260,
+      "currency": "USD"
+    },
+    {
+      "id": "rivn-xtb-capital",
+      "portfolioId": "tactical",
+      "tempo": "Capital",
+      "executionMode": "live",
+      "accountId": "xtb-usd",
+      "instrumentId": "rivn-usd",
+      "direction": "long",
+      "quantity": 20,
+      "averageCost": 13,
+      "markPrice": 15.5,
+      "currency": "USD"
+    },
+    {
+      "id": "sbux-xtb-capital",
+      "portfolioId": "tactical",
+      "tempo": "Capital",
+      "executionMode": "live",
+      "accountId": "xtb-usd",
+      "instrumentId": "sbux-usd",
+      "direction": "long",
+      "quantity": 2.5,
+      "averageCost": 88,
+      "markPrice": 92,
+      "currency": "USD"
+    },
+    {
+      "id": "nke-gbm-capital",
+      "portfolioId": "tactical",
+      "tempo": "Capital",
+      "executionMode": "live",
+      "accountId": "gbm-usd",
+      "instrumentId": "nke-usd",
+      "direction": "long",
+      "quantity": 4,
+      "averageCost": 48,
+      "markPrice": 50,
+      "currency": "USD"
+    },
+    {
+      "id": "eth-binance-paper",
+      "portfolioId": "tactical",
+      "tempo": "Pulse",
+      "executionMode": "paper",
+      "accountId": "binance-usd",
+      "instrumentId": "eth-usd",
+      "direction": "long",
+      "quantity": 0.05,
+      "averageCost": 2100,
+      "markPrice": 2500,
+      "currency": "USD"
+    },
+    {
+      "id": "sol-binance-invalid",
+      "portfolioId": "tactical",
+      "tempo": "Pulse",
+      "executionMode": "live",
+      "accountId": "binance-usd",
+      "instrumentId": "sol-usd",
+      "direction": "long",
+      "quantity": 25,
+      "averageCost": 4,
+      "markPrice": 3,
+      "currency": "USD"
+    }
+  ]
+}

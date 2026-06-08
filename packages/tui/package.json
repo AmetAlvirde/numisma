@@ -1,0 +1,16 @@
+{
+  "name": "@numisma/tui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@numisma/engine": "workspace:*",
+    "@opentui/core": "0.2.15"
+  },
+  "scripts": {
+    "dev": "bun src/app.ts",
+    "report": "tsx src/report.ts",
+    "smoke:tui": "bun src/smoke-openTui.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}
