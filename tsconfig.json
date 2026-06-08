@@ -10,6 +10,5 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "types": ["node"]
-  },
-  "include": ["src/**/*.ts"]
+  }
 }
