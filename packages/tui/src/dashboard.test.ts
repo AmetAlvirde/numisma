@@ -128,7 +128,7 @@ describe("@numisma/tui dashboard rendering", () => {
     expect(openDetailRowIds).toEqual(
       report.dashboard.sections.flatMap((section) =>
         section.rows
-          .filter((row) => row.kind !== "instrument")
+          .filter((row) => row.kind !== "instrument" && row.kind !== "tier")
           .map((row) => row.id),
       ),
     );

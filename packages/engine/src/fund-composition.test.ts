@@ -516,6 +516,98 @@ describe("@numisma/engine buildCompositionReport", () => {
     expect(buildDashboardDetail(data, report, "instrument:reserve")).toBeUndefined();
   });
 
+  it("attributes per-tier P&L from Lots and converts cost basis at entry FX", () => {
+    // Two tiers of one instrument with DIFFERENT costs (50 vs 80) prove the
+    // model is a per-Lot join, not a "one cost + tier-quantity split" shortcut.
+    // The c1 Lot also carries an entry FX (25) distinct from the review FX (20),
+    // proving cost basis converts at acquisition rate while value uses review.
+    const data = parseFixture({
+      fund: { id: "fx-fund", name: "FX Fund", baseCurrency: "USD" },
+      review: { asOf: "2026-06-25", usdMxn: 20 },
+      portfolios: [{ id: "core", name: "Core" }],
+      accounts: [
+        { id: "gbm-mxn", name: "Casa de Bolsa", platform: "GBM", currency: "MXN" },
+      ],
+      instruments: [
+        { id: "cemex-mxn", name: "Cemex", symbol: "CEMEXCPO", currency: "MXN" },
+      ],
+      reserves: [],
+      positions: [
+        {
+          id: "cemex-house-money",
+          portfolioId: "core",
+          tempo: "Capital",
+          executionMode: "live",
+          accountId: "gbm-mxn",
+          instrumentId: "cemex-mxn",
+          direction: "long",
+          markPrice: 100,
+          currency: "MXN",
+          lots: [
+            { quantity: 10, cost: 50, tier: "c1", entryFx: 25 },
+            { quantity: 10, cost: 80, tier: "c2" },
+          ],
+        },
+      ],
+    });
+
+    const report = buildCompositionReport(data);
+
+    expect(report.dashboard.summary.totalUnrealizedPnlUsd).toBe(40);
+    expect(sectionRows(report, "tiers")).toEqual([
+      {
+        id: "tier:c1",
+        kind: "tier",
+        label: "c1",
+        usdValue: 50,
+        percentOfFund: 50,
+        costBasisUsd: 20,
+        unrealizedPnlUsd: 30,
+      },
+      {
+        id: "tier:c2",
+        kind: "tier",
+        label: "c2",
+        usdValue: 50,
+        percentOfFund: 50,
+        costBasisUsd: 40,
+        unrealizedPnlUsd: 10,
+      },
+    ]);
+  });
+
+  it("derives a sorted price journey with Price P&L from the Close series", () => {
+    const report = buildCompositionReport(loadSanitizedRealisticFixture());
+
+    const btc = report.priceJourneys.find((journey) => journey.instrumentId === "btc-usd");
+    expect(btc).toMatchObject({
+      label: "BTC (Bitcoin)",
+      currency: "USD",
+      firstPrice: 115340,
+      latestPrice: 100000,
+      changeAbs: -15340,
+    });
+    expect(btc?.points.map((point) => point.asOf)).toEqual([
+      "2026-05-08",
+      "2026-05-15",
+      "2026-05-22",
+      "2026-05-29",
+    ]);
+    expect(btc?.changePct).toBeCloseTo(-13.30, 2);
+
+    // Instruments with fewer than two anchors are not a journey.
+    expect(report.priceJourneys.map((journey) => journey.instrumentId).sort()).toEqual([
+      "aapl-usd",
+      "btc-usd",
+      "eth-usd",
+    ]);
+  });
+
+  it("returns no price journeys when the review records no Close history", () => {
+    const report = buildCompositionReport(parseFixture(makeCanonicalFixture()));
+    expect(report.priceJourneys).toEqual([]);
+  });
+
   it("pins the sanitized realistic fixture as the stable canonical answer", () => {
     const report = buildCompositionReport(loadSanitizedRealisticFixture());
 
@@ -533,6 +625,7 @@ describe("@numisma/engine buildCompositionReport", () => {
       warnings: [{ code: "missing-instrument", recordId: "sol-binance-invalid" }],
       summary: {
         fundValueUsd: 10340,
+        totalUnrealizedPnlUsd: 399,
         largestPortfolio: "portfolio:core",
         largestTempo: "tempo:Capital",
         largestAccount: "account:xtb-usd",
@@ -743,6 +836,22 @@ describe("@numisma/engine buildCompositionReport", () => {
             unrealizedPnlUsd: 8,
           },
         ],
+        tiers: [
+          {
+            id: "tier:c1",
+            usdValue: 8100,
+            percentOfFund: 78.336557,
+            costBasisUsd: 7717,
+            unrealizedPnlUsd: 383,
+          },
+          {
+            id: "tier:c2",
+            usdValue: 400,
+            percentOfFund: 3.868472,
+            costBasisUsd: 384,
+            unrealizedPnlUsd: 16,
+          },
+        ],
       },
     });
   });
@@ -779,6 +888,9 @@ function canonicalSnapshot(report: ReturnType<typeof buildCompositionReport>) {
     warnings: report.warnings.map(({ code, recordId }) => ({ code, recordId })),
     summary: {
       fundValueUsd: roundSnapshotNumber(report.dashboard.summary.fundValueUsd),
+      totalUnrealizedPnlUsd: roundSnapshotNumber(
+        report.dashboard.summary.totalUnrealizedPnlUsd,
+      ),
       largestPortfolio: report.dashboard.summary.largestPortfolio?.rowId,
       largestTempo: report.dashboard.summary.largestTempo?.rowId,
       largestAccount: report.dashboard.summary.largestAccount?.rowId,
@@ -813,7 +925,7 @@ function roundSnapshotNumber(value: number, decimals = 2): number {
 
 function sectionRows(
   report: ReturnType<typeof buildCompositionReport>,
-  sectionId: "portfolios" | "tempos" | "accounts" | "instruments",
+  sectionId: "portfolios" | "tempos" | "accounts" | "instruments" | "tiers",
 ) {
   return report.dashboard.sections.find((section) => section.id === sectionId)?.rows ?? [];
 }

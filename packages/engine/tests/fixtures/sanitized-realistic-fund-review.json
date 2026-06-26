@@ -186,10 +186,12 @@
       "accountId": "t1-usd",
       "instrumentId": "btc-usd",
       "direction": "long",
-      "quantity": 0.012,
-      "averageCost": 92000,
       "markPrice": 100000,
-      "currency": "USD"
+      "currency": "USD",
+      "lots": [
+        { "quantity": 0.008, "cost": 90000, "tier": "c1" },
+        { "quantity": 0.004, "cost": 96000, "tier": "c2" }
+      ]
     },
     {
       "id": "eth-t1-wealth",
@@ -412,5 +414,16 @@
       "markPrice": 3,
       "currency": "USD"
     }
+  ],
+  "closes": [
+    { "instrumentId": "btc-usd", "asOf": "2026-05-08", "price": 115340 },
+    { "instrumentId": "btc-usd", "asOf": "2026-05-15", "price": 108900 },
+    { "instrumentId": "btc-usd", "asOf": "2026-05-22", "price": 104200 },
+    { "instrumentId": "btc-usd", "asOf": "2026-05-29", "price": 100000 },
+    { "instrumentId": "eth-usd", "asOf": "2026-05-08", "price": 2810 },
+    { "instrumentId": "eth-usd", "asOf": "2026-05-22", "price": 2640 },
+    { "instrumentId": "eth-usd", "asOf": "2026-05-29", "price": 2500 },
+    { "instrumentId": "aapl-usd", "asOf": "2026-05-15", "price": 198 },
+    { "instrumentId": "aapl-usd", "asOf": "2026-05-29", "price": 212.5 }
   ]
 }
