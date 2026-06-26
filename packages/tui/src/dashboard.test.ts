@@ -142,6 +142,142 @@ describe("@numisma/tui dashboard rendering", () => {
     expect(warningContents.some((content) => content.toLowerCase().includes("short"))).toBe(false);
   });
 
+  it("renders empty section bodies and absent focuses for a fund with no live records", () => {
+    const report = buildCompositionReport(emptyFund());
+    const lines = buildDashboardLines(report, undefined);
+    const text = renderDashboardText(lines, report.load);
+
+    // Every composition section is empty, so each renders the placeholder row.
+    expect(lines.some((line) => line.content === "No live records.")).toBe(true);
+    // Every summary focus is absent, so each renders the placeholder string.
+    expect(text).toContain("Largest Portfolio: No live records");
+    expect(text).toContain("Reserve: No live records");
+  });
+
+  it("renders a Portfolio drill-down with position-style columns", () => {
+    const data = makeFixture();
+    const report = buildCompositionReport(data);
+    // A Portfolio drill-down filters to Positions only, so it uses the
+    // position-style (untyped) columns rather than the Type/Record layout.
+    const detail = buildDashboardDetail(data, report, "portfolio:core");
+    const text = renderDashboardText(buildDashboardLines(report, detail), report.load);
+
+    expect(text).toContain("Portfolio: Core");
+    expect(text).toContain("Live Positions");
+    expect(detail?.rows.every((row) => row.kind === "position")).toBe(true);
+  });
+
+  it("renders an Account drill-down holding only Positions with position-style columns", () => {
+    // An Account with no Reserves uses the untyped (Position/Portfolio/Tempo)
+    // detail columns rather than the Type/Record layout reserved for typed rows.
+    const data: FundReviewData = {
+      fund: { id: "f", name: "F", baseCurrency: "USD" },
+      review: { asOf: "2026-06-25", usdMxn: 20 },
+      portfolios: [{ id: "core", name: "Core" }],
+      accounts: [{ id: "xtb-usd", name: "Broker", platform: "XTB", currency: "USD" }],
+      instruments: [{ id: "aapl-usd", name: "Apple Inc.", symbol: "AAPL", currency: "USD" }],
+      reserves: [],
+      positions: [
+        {
+          id: "aapl-core",
+          portfolioId: "core",
+          tempo: "Capital",
+          executionMode: "live",
+          accountId: "xtb-usd",
+          instrumentId: "aapl-usd",
+          direction: "long",
+          lots: [{ quantity: 2, cost: 100, tier: "c1" }],
+          markPrice: 150,
+          currency: "USD",
+        },
+      ],
+    };
+
+    const report = buildCompositionReport(data);
+    const detail = buildDashboardDetail(data, report, "account:xtb-usd");
+    expect(detail?.rows.every((row) => row.kind === "position")).toBe(true);
+
+    const text = renderDashboardText(buildDashboardLines(report, detail), report.load);
+    expect(text).toContain("Account: XTB: Broker");
+    expect(text).toContain("Live Positions");
+  });
+
+  it("renders a Tempo drill-down titled by Tempo", () => {
+    const data = makeFixture();
+    const report = buildCompositionReport(data);
+    const detail = buildDashboardDetail(data, report, "tempo:Reserve");
+    const text = renderDashboardText(buildDashboardLines(report, detail), report.load);
+
+    expect(text).toContain("Tempo: Reserve");
+  });
+
+  it("renders an empty-detail message for a Portfolio holding only Reserves", () => {
+    // The Portfolio row exists (its Reserve carries value), but the Portfolio
+    // drill-down filters to Positions only, so the detail body is empty.
+    const data: FundReviewData = {
+      fund: { id: "f", name: "F", baseCurrency: "USD" },
+      review: { asOf: "2026-06-25", usdMxn: 20 },
+      portfolios: [{ id: "cash", name: "Cash" }],
+      accounts: [{ id: "xtb-usd", name: "Broker", platform: "XTB", currency: "USD" }],
+      instruments: [],
+      reserves: [
+        {
+          id: "r1",
+          portfolioId: "cash",
+          tempo: "Reserve",
+          executionMode: "live",
+          accountId: "xtb-usd",
+          currency: "USD",
+          amount: 100,
+        },
+      ],
+      positions: [],
+    };
+
+    const report = buildCompositionReport(data);
+    const detail = buildDashboardDetail(data, report, "portfolio:cash");
+    expect(detail?.rows).toEqual([]);
+
+    const text = renderDashboardText(buildDashboardLines(report, detail), report.load);
+    expect(text).toContain("No live Positions in this Portfolio.");
+  });
+
+  it("renders a per-record tier table without dividing by zero on a zero-value record", () => {
+    // A zero-value Position (markPrice 0) still tiers into c1, so expanding it
+    // exercises the Fund %/Rec % guards against a zero denominator.
+    const data: FundReviewData = {
+      fund: { id: "f", name: "F", baseCurrency: "USD" },
+      review: { asOf: "2026-06-25", usdMxn: 20 },
+      portfolios: [{ id: "core", name: "Core" }],
+      accounts: [{ id: "xtb-usd", name: "Broker", platform: "XTB", currency: "USD" }],
+      instruments: [{ id: "aapl-usd", name: "Apple", symbol: "AAPL", currency: "USD" }],
+      reserves: [],
+      positions: [
+        {
+          id: "zero-pos",
+          portfolioId: "core",
+          tempo: "Capital",
+          executionMode: "live",
+          accountId: "xtb-usd",
+          instrumentId: "aapl-usd",
+          direction: "long",
+          markPrice: 0,
+          currency: "USD",
+          lots: [{ quantity: 1, cost: 0, tier: "c1" }],
+        },
+      ],
+    };
+
+    const report = buildCompositionReport(data);
+    const detail = buildDashboardDetail(data, report, "portfolio:core");
+    const expanded = buildDashboardLines(report, detail, "zero-pos");
+
+    // The expanded tier table renders with the Rec % column and a 0.0% row
+    // rather than NaN/Infinity from dividing by the zero denominators.
+    expect(expanded.some((line) => line.content.includes("Rec %"))).toBe(true);
+    expect(expanded.some((line) => /c1\s.*0\.0%/.test(line.content))).toBe(true);
+  });
+
   it("smoke-renders the pinned realistic fixture from engine read models", () => {
     const data = loadSanitizedRealisticFixture();
     const report = buildCompositionReport(data, {
@@ -215,6 +351,18 @@ function loadSanitizedRealisticFixture(): FundReviewData {
     throw new Error(`Expected realistic fixture to parse, got ${parsed.kind}`);
   }
   return parsed.value;
+}
+
+function emptyFund(): FundReviewData {
+  return {
+    fund: { id: "empty-fund", name: "Empty Fund", baseCurrency: "USD" },
+    review: { asOf: "2026-06-25", usdMxn: 20 },
+    portfolios: [],
+    accounts: [],
+    instruments: [],
+    reserves: [],
+    positions: [],
+  };
 }
 
 function makeFixture(): FundReviewData {
