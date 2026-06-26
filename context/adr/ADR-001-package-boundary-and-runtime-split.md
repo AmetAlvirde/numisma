@@ -4,6 +4,15 @@
 
 Accepted
 
+> **Realized (PRD #58):** The follow-on work this ADR anticipated — extracting
+> engine APIs, adding tests, and removing the duplicated TUI logic — has been
+> delivered. `@numisma/engine` is now decomposed into concern-sized modules
+> behind a curated `index.ts`, the shared formatters have one exported source of
+> truth that the TUI consumes (the byte-identical private copies are gone), and a
+> contract test guards against the duplication returning. See
+> `packages/engine/README.md` for the resulting module layout. The decision below
+> is unchanged; this note records that its named follow-on is complete.
+
 ## Context
 
 - The reliable Fund review PRD requires a reusable engine that future access
