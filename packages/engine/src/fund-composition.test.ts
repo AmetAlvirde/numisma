@@ -576,6 +576,168 @@ describe("@numisma/engine buildCompositionReport", () => {
     ]);
   });
 
+  it("attributes tiered cash Reserves into the Capital Tier rollup, untiered cash stays out", () => {
+    // A cash Lot is degenerate: value == cost, Price P&L == 0. Two tiered
+    // Reserves (USD + MXN) contribute to the tier rollup; an untiered Reserve
+    // opts out, so the tier total deliberately sits below the fund total.
+    const data = parseFixture({
+      fund: { id: "cash-fund", name: "Cash Fund", baseCurrency: "USD" },
+      review: { asOf: "2026-06-25", usdMxn: 20 },
+      portfolios: [{ id: "core", name: "Core" }],
+      accounts: [
+        { id: "xtb-usd", name: "Broker", platform: "XTB", currency: "USD" },
+        { id: "bitso-mxn", name: "MXN Cash", platform: "BITSO", currency: "MXN" },
+      ],
+      instruments: [],
+      reserves: [
+        {
+          id: "tiered-usd",
+          portfolioId: "core",
+          tempo: "Reserve",
+          executionMode: "live",
+          accountId: "xtb-usd",
+          currency: "USD",
+          amount: 1000,
+          lots: [
+            { quantity: 600, tier: "c1" },
+            { quantity: 400, tier: "c2" },
+          ],
+        },
+        {
+          id: "untiered-usd",
+          portfolioId: "core",
+          tempo: "Reserve",
+          executionMode: "live",
+          accountId: "xtb-usd",
+          currency: "USD",
+          amount: 500,
+        },
+        {
+          id: "tiered-mxn",
+          portfolioId: "core",
+          tempo: "Reserve",
+          executionMode: "live",
+          accountId: "bitso-mxn",
+          currency: "MXN",
+          amount: 2000,
+          lots: [{ quantity: 2000, tier: "c1" }],
+        },
+      ],
+      positions: [],
+    });
+
+    const report = buildCompositionReport(data);
+
+    // Fund = 1000 + 500 + (2000 / 20) = 1600; cash carries no P&L.
+    expect(report.totals.fundValueUsd).toBe(1600);
+    expect(report.dashboard.summary.totalUnrealizedPnlUsd).toBe(0);
+    expect(report.warnings).toEqual([]);
+
+    expect(sectionRows(report, "tiers")).toEqual([
+      {
+        id: "tier:c1",
+        kind: "tier",
+        label: "c1",
+        usdValue: 700, // 600 USD + 2000 MXN / 20
+        percentOfFund: 43.75,
+        costBasisUsd: 700,
+      },
+      {
+        id: "tier:c2",
+        kind: "tier",
+        label: "c2",
+        usdValue: 400,
+        percentOfFund: 25,
+        costBasisUsd: 400,
+      },
+    ]);
+
+    // Untiered cash ($500) keeps the tier rollup honestly below 100% of fund.
+    const tierTotal = sectionRows(report, "tiers").reduce(
+      (sum, row) => sum + row.usdValue,
+      0,
+    );
+    expect(tierTotal).toBe(1100);
+    expect(tierTotal).toBeLessThan(report.totals.fundValueUsd);
+  });
+
+  it("warns when Reserve Lot tiers do not reconcile to amount, keeping amount authoritative", () => {
+    const data = parseFixture({
+      fund: { id: "cash-fund", name: "Cash Fund", baseCurrency: "USD" },
+      review: { asOf: "2026-06-25", usdMxn: 20 },
+      portfolios: [{ id: "core", name: "Core" }],
+      accounts: [
+        { id: "xtb-usd", name: "Broker", platform: "XTB", currency: "USD" },
+      ],
+      instruments: [],
+      reserves: [
+        {
+          id: "blended-usd",
+          portfolioId: "core",
+          tempo: "Reserve",
+          executionMode: "live",
+          accountId: "xtb-usd",
+          currency: "USD",
+          amount: 579.88,
+          // Approximate source split: sums to 580.00, 0.12 over the balance.
+          lots: [
+            { quantity: 453, tier: "c1" },
+            { quantity: 127, tier: "c2" },
+          ],
+        },
+      ],
+      positions: [],
+    });
+
+    const report = buildCompositionReport(data);
+
+    const mismatch = report.warnings.filter(
+      (warning) => warning.code === "reserve-lot-sum-mismatch",
+    );
+    expect(mismatch).toHaveLength(1);
+    expect(mismatch[0]).toMatchObject({
+      code: "reserve-lot-sum-mismatch",
+      severity: "warning",
+      recordId: "blended-usd",
+    });
+    expect(validationSeverityByCode["reserve-lot-sum-mismatch"]).toBe("warning");
+
+    // amount stays authoritative for fund value; the split is taken as-given.
+    expect(report.totals.fundValueUsd).toBe(579.88);
+    expect(sectionRows(report, "tiers").map((row) => row.usdValue)).toEqual([453, 127]);
+  });
+
+  it("treats Reserve Lot sums within a cent of amount as reconciling (no warning)", () => {
+    const data = parseFixture({
+      fund: { id: "cash-fund", name: "Cash Fund", baseCurrency: "USD" },
+      review: { asOf: "2026-06-25", usdMxn: 20 },
+      portfolios: [{ id: "core", name: "Core" }],
+      accounts: [
+        { id: "xtb-usd", name: "Broker", platform: "XTB", currency: "USD" },
+      ],
+      instruments: [],
+      reserves: [
+        {
+          id: "rounded-usd",
+          portfolioId: "core",
+          tempo: "Reserve",
+          executionMode: "live",
+          accountId: "xtb-usd",
+          currency: "USD",
+          amount: 3763.48682758,
+          lots: [
+            { quantity: 968.5, tier: "c1" },
+            { quantity: 2794.99, tier: "c2" },
+          ],
+        },
+      ],
+      positions: [],
+    });
+
+    const report = buildCompositionReport(data);
+    expect(report.warnings).toEqual([]);
+  });
+
   it("derives a sorted price journey with Price P&L from the Close series", () => {
     const report = buildCompositionReport(loadSanitizedRealisticFixture());
 

@@ -16,6 +16,23 @@ export interface Lot {
   entryFx?: number;
 }
 
+/**
+ * A cash Lot is the degenerate Lot that carries Capital Tier attribution onto a
+ * Reserve. Value == face, so there is no `cost` or `entryFx`: a tiered cash
+ * holding has cost == value and Price P&L == 0.
+ */
+export interface ReserveLot {
+  quantity: number;
+  tier: CapitalTier;
+}
+
+/**
+ * Reserve Lot face sums within this many record-currency units of `amount` are
+ * treated as reconciling (absorbs cent-level rounding in the source); larger
+ * gaps emit `reserve-lot-sum-mismatch`. `amount` always stays authoritative.
+ */
+const RESERVE_LOT_SUM_TOLERANCE = 0.01;
+
 export interface FundReviewData {
   fund: {
     id: string;
@@ -61,6 +78,11 @@ interface CapitalRecordBase {
 
 export interface ReserveRecord extends CapitalRecordBase {
   amount: number;
+  /**
+   * Optional Capital Tier attribution for cash. Absent = untiered = excluded
+   * from the tier rollup (back-compat). `amount` stays the authoritative value.
+   */
+  lots?: ReserveLot[];
 }
 
 export interface PositionRecord extends CapitalRecordBase {
@@ -171,6 +193,7 @@ export type WarningCode =
   | "currency-mismatch"
   | "invalid-amount"
   | "invalid-position-number"
+  | "reserve-lot-sum-mismatch"
   | "non-positive-fund-value";
 
 export type ValidationCode =
@@ -195,6 +218,7 @@ export const validationSeverityByCode: Record<ValidationCode, ValidationSeverity
   "currency-mismatch": "warning",
   "invalid-amount": "warning",
   "invalid-position-number": "warning",
+  "reserve-lot-sum-mismatch": "warning",
   "non-positive-fund-value": "warning",
   "short-deferred": "warning",
 };
@@ -303,12 +327,14 @@ export interface CompositionReport {
 export type DetailRecordKind = "reserve" | "position";
 
 export interface DashboardDetailRow {
+  recordId: string;
   kind: DetailRecordKind;
   recordLabel: string;
   portfolioLabel: string;
   tempoLabel: string;
   accountLabel: string;
   usdValue: number;
+  tierContributions?: TierContribution[];
 }
 
 export interface DashboardDetail {
@@ -336,7 +362,7 @@ interface CanonicalLine {
   tierContributions?: TierContribution[];
 }
 
-interface TierContribution {
+export interface TierContribution {
   tier: CapitalTier;
   usdValue: number;
   costBasisUsd: number;
@@ -657,12 +683,16 @@ export function buildDashboardDetail(
     kind: row.kind,
     label: row.label,
     rows: detailLinesForRow(canonicalLines, row).map((line) => ({
+      recordId: line.recordId,
       kind: line.recordKind,
       recordLabel: line.recordLabel,
       portfolioLabel: line.portfolioLabel,
       tempoLabel: line.tempoLabel,
       accountLabel: line.accountLabel,
       usdValue: line.usdValue,
+      ...(line.tierContributions
+        ? { tierContributions: line.tierContributions }
+        : {}),
     })),
   };
 }
@@ -812,6 +842,16 @@ function buildCanonicalState(data: FundReviewData): CanonicalState {
       continue;
     }
 
+    // Cash Lots attribute the reserve's face to Capital Tiers (cost == value,
+    // Price P&L == 0). `amount` stays the line's authoritative USD value; the
+    // tier contributions are an independent overlay consumed only by the tier
+    // rollup, so untiered reserves and every other section stay unchanged.
+    const tierContributions = buildReserveTierContributions(
+      reserve,
+      data.review.usdMxn,
+      warnings,
+    );
+
     canonicalLines.push({
       recordId: reserve.id,
       recordKind: "reserve",
@@ -825,6 +865,7 @@ function buildCanonicalState(data: FundReviewData): CanonicalState {
       instrumentId: "reserve",
       instrumentLabel: "Reserve",
       usdValue: toUsd(reserve.amount, reserve.currency, data.review.usdMxn),
+      ...(tierContributions ? { tierContributions } : {}),
     });
   }
 
@@ -1126,6 +1167,50 @@ function groupLines(
       (a, b) =>
         Math.abs(b.usdValue) - Math.abs(a.usdValue) || a.label.localeCompare(b.label),
     );
+}
+
+function buildReserveTierContributions(
+  reserve: ReserveRecord,
+  reviewFx: number,
+  warnings: Warning[],
+): TierContribution[] | undefined {
+  const lots = reserve.lots;
+  if (!Array.isArray(lots) || lots.length === 0) {
+    return undefined; // untiered = excluded from the tier rollup (back-compat)
+  }
+
+  // A bad scalar slipped past schema typing leaves the reserve untiered rather
+  // than poisoning the rollup with NaN; `amount` still counts toward the fund.
+  if (lots.some((lot) => !isNonNegativeNumber(lot.quantity))) {
+    return undefined;
+  }
+
+  const tierTotals = new Map<CapitalTier, TierContribution>();
+  let faceSum = 0;
+  for (const lot of lots) {
+    const lotUsd = toUsd(lot.quantity, reserve.currency, reviewFx);
+    faceSum += lot.quantity;
+    const existing = tierTotals.get(lot.tier) ?? {
+      tier: lot.tier,
+      usdValue: 0,
+      costBasisUsd: 0,
+      unrealizedPnlUsd: 0,
+    };
+    existing.usdValue += lotUsd;
+    existing.costBasisUsd += lotUsd; // cash: cost == face, so Price P&L == 0
+    tierTotals.set(lot.tier, existing);
+  }
+
+  if (Math.abs(faceSum - reserve.amount) > RESERVE_LOT_SUM_TOLERANCE) {
+    pushWarning(
+      warnings,
+      "reserve-lot-sum-mismatch",
+      `Reserve ${reserve.id} Lot tiers sum to ${faceSum} ${reserve.currency} but amount is ${reserve.amount} ${reserve.currency}; amount stays authoritative and the tier split is taken as-given.`,
+      reserve.id,
+    );
+  }
+
+  return [...tierTotals.values()];
 }
 
 function normalizePositionLots(position: PositionRecord): Lot[] {
@@ -1439,6 +1524,13 @@ function validateReserves(value: unknown): ParseResult | undefined {
     if (typeof reserve.amount !== "number") {
       return schemaError(`${itemPath}.amount`, `${itemPath}.amount must be a number.`);
     }
+
+    if (reserve.lots !== undefined) {
+      const lotsError = validateLots(reserve.lots, itemPath, { requireCost: false });
+      if (lotsError) {
+        return lotsError;
+      }
+    }
   }
 
   return undefined;
@@ -1529,7 +1621,14 @@ function validateCloses(value: unknown): ParseResult | undefined {
   return undefined;
 }
 
-function validateLots(value: unknown, path: string): ParseResult | undefined {
+function validateLots(
+  value: unknown,
+  path: string,
+  options: { requireCost?: boolean } = {},
+): ParseResult | undefined {
+  // Position Lots carry a cost; cash (Reserve) Lots are degenerate — value ==
+  // face — so they omit `cost`/`entryFx` and only carry `quantity` + `tier`.
+  const requireCost = options.requireCost ?? true;
   if (!Array.isArray(value) || value.length === 0) {
     return schemaError(`${path}.lots`, `${path}.lots must be a non-empty array.`);
   }
@@ -1540,7 +1639,10 @@ function validateLots(value: unknown, path: string): ParseResult | undefined {
       return schemaError(lotPath, `${lotPath} must be an object.`);
     }
 
-    for (const field of ["quantity", "cost"] as const) {
+    const numericFields = requireCost
+      ? (["quantity", "cost"] as const)
+      : (["quantity"] as const);
+    for (const field of numericFields) {
       if (typeof lot[field] !== "number") {
         return schemaError(
           `${lotPath}.${field}`,

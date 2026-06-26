@@ -42,6 +42,48 @@ describe("@numisma/tui dashboard rendering", () => {
     expect(lines.some((line) => line.content.includes("Reserve"))).toBe(true);
   });
 
+  it("shows an inline tier glance and expands a per-record tier table on enter", () => {
+    const data = makeFixture();
+    // Tier the live USD reserve so it carries c1/c2 attribution.
+    const tieredReserve = data.reserves.find((reserve) => reserve.id === "reserve-usd-live");
+    if (!tieredReserve) {
+      throw new Error("Expected reserve-usd-live in fixture.");
+    }
+    tieredReserve.lots = [
+      { quantity: 100, tier: "c1" },
+      { quantity: 150, tier: "c2" },
+    ];
+
+    const report = buildCompositionReport(data);
+    const detail = buildDashboardDetail(data, report, "account:xtb-usd");
+
+    const tieredRow = detail?.rows.find((row) => row.recordId === "reserve-usd-live");
+    expect(tieredRow?.tierContributions).toEqual([
+      expect.objectContaining({ tier: "c1", usdValue: 100 }),
+      expect.objectContaining({ tier: "c2", usdValue: 150 }),
+    ]);
+
+    // Collapsed: inline glance is always visible, the expanded table is not.
+    const collapsed = buildDashboardLines(report, detail);
+    expect(collapsed.some((line) => line.content.includes("c1 $100 / c2 $150"))).toBe(true);
+    expect(
+      collapsed.some(
+        (line) => line.action?.type === "expand-record" && line.action.recordId === "reserve-usd-live",
+      ),
+    ).toBe(true);
+    expect(collapsed.some((line) => line.content.includes("Rec %"))).toBe(false);
+
+    // Expanded: the per-record tier table renders with Fund % and Rec % columns.
+    const expanded = buildDashboardLines(report, detail, "reserve-usd-live");
+    expect(expanded.some((line) => line.content.includes("Rec %"))).toBe(true);
+    expect(expanded.some((line) => /c2\s.*\$150\.00.*60\.0%/.test(line.content))).toBe(true);
+    expect(
+      expanded.some(
+        (line) => line.action?.type === "collapse-record" && line.action.recordId === "reserve-usd-live",
+      ),
+    ).toBe(true);
+  });
+
   it("marks warnings and renders load metadata from report.load", () => {
     const report = buildCompositionReport(makeFixture(), {
       load: {
