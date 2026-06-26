@@ -1385,6 +1385,16 @@ describe("@numisma/engine buildCompositionReport", () => {
       },
     });
   });
+
+  it("pins the full formatted composition report on the realistic fixture (characterization)", () => {
+    // Full-string oracle for the engine CLI text. Unlike the numeric snapshot
+    // above and the `toContain` substring checks, this captures exact rendered
+    // content — column widths, padding, and formatUsd/formatPercent precision —
+    // so the upcoming formatter dedup is provably behavior-preserving.
+    const report = buildCompositionReport(loadSanitizedRealisticFixture());
+
+    expect(formatCompositionReport(report)).toMatchSnapshot();
+  });
 });
 
 function parseFixture(value: unknown): FundReviewData {
