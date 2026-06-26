@@ -10,7 +10,7 @@
 | **Fund**         | The top-level capital ownership and accountability entity that provides the official scoreboard. | account, portfolio |
 | **Portfolio**    | A mandate and constraint container inside a Fund.                                                | tempo, bucket      |
 | **Position**     | The operational market exposure unit managed by the trader.                                      | trade              |
-| **Lot**          | An accounting lineage unit inside a Position.                                                    | fill, parcel       |
+| **Lot**          | An accounting lineage unit inside a Position or Reserve.                                         | fill, parcel       |
 | **Capital Tier** | A capital provenance classification that tracks generated capital lineage.                       | tranche            |
 | **Reserve**      | The Tempo for liquidity and opportunity readiness.                                               | cash bucket        |
 
@@ -42,10 +42,10 @@
 
 ## Valuation
 
-| Term         | Definition                                                                                                      | Aliases to avoid |
-| ------------ | --------------------------------------------------------------------------------------------------------------- | ---------------- |
-| **Currency** | The denomination used to record, hold, convert, or report a monetary value.                                     | money type       |
-| **FX Rate**  | A conversion rate between two Currencies used to translate values for reporting at a specific review point.     | forex price      |
+| Term         | Definition                                                                                                  | Aliases to avoid |
+| ------------ | ----------------------------------------------------------------------------------------------------------- | ---------------- |
+| **Currency** | The denomination used to record, hold, convert, or report a monetary value.                                 | money type       |
+| **FX Rate**  | A conversion rate between two Currencies used to translate values for reporting at a specific review point. | forex price      |
 
 ## Risk, Reporting, and Records
 
@@ -80,7 +80,7 @@
 - A **Position** belongs to exactly one **Fund**, one **Portfolio**, one
   **Tempo**, one **Execution Mode**, one **Strategy Version**, and one
   **Account**.
-- A **Position** contains one or more **Lots**.
+- A **Position** or **Reserve** contains zero or more **Lots**.
 - A **Lot** preserves **Capital Tier** attribution.
 - A **Tempo** is immutable for a **Position**.
 - A **Strategy Version** belongs to a **Strategy**.

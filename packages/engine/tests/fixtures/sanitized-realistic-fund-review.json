@@ -128,6 +128,12 @@
       "name": "Nike",
       "symbol": "NKE",
       "currency": "USD"
+    },
+    {
+      "id": "cemex-mxn",
+      "name": "Cemex CPO",
+      "symbol": "CEMEXCPO",
+      "currency": "MXN"
     }
   ],
   "reserves": [
@@ -189,8 +195,16 @@
       "markPrice": 100000,
       "currency": "USD",
       "lots": [
-        { "quantity": 0.008, "cost": 90000, "tier": "c1" },
-        { "quantity": 0.004, "cost": 96000, "tier": "c2" }
+        {
+          "quantity": 0.008,
+          "cost": 90000,
+          "tier": "c1"
+        },
+        {
+          "quantity": 0.004,
+          "cost": 96000,
+          "tier": "c2"
+        }
       ]
     },
     {
@@ -201,8 +215,13 @@
       "accountId": "t1-usd",
       "instrumentId": "eth-usd",
       "direction": "long",
-      "quantity": 0.36,
-      "averageCost": 2200,
+      "lots": [
+        {
+          "quantity": 0.36,
+          "cost": 2200,
+          "tier": "c1"
+        }
+      ],
       "markPrice": 2500,
       "currency": "USD"
     },
@@ -214,8 +233,13 @@
       "accountId": "xtb-usd",
       "instrumentId": "aapl-usd",
       "direction": "long",
-      "quantity": 4,
-      "averageCost": 200,
+      "lots": [
+        {
+          "quantity": 4,
+          "cost": 200,
+          "tier": "c1"
+        }
+      ],
       "markPrice": 212.5,
       "currency": "USD"
     },
@@ -227,8 +251,13 @@
       "accountId": "t2-usd",
       "instrumentId": "btc-usd",
       "direction": "long",
-      "quantity": 0.009,
-      "averageCost": 98000,
+      "lots": [
+        {
+          "quantity": 0.009,
+          "cost": 98000,
+          "tier": "c1"
+        }
+      ],
       "markPrice": 100000,
       "currency": "USD"
     },
@@ -240,8 +269,13 @@
       "accountId": "binance-usd",
       "instrumentId": "eth-usd",
       "direction": "long",
-      "quantity": 0.28,
-      "averageCost": 2400,
+      "lots": [
+        {
+          "quantity": 0.28,
+          "cost": 2400,
+          "tier": "c1"
+        }
+      ],
       "markPrice": 2500,
       "currency": "USD"
     },
@@ -253,8 +287,13 @@
       "accountId": "gbm-usd",
       "instrumentId": "googl-usd",
       "direction": "long",
-      "quantity": 3,
-      "averageCost": 160,
+      "lots": [
+        {
+          "quantity": 3,
+          "cost": 160,
+          "tier": "c1"
+        }
+      ],
       "markPrice": 170,
       "currency": "USD"
     },
@@ -266,8 +305,13 @@
       "accountId": "gbm-usd",
       "instrumentId": "intc-usd",
       "direction": "long",
-      "quantity": 10,
-      "averageCost": 31,
+      "lots": [
+        {
+          "quantity": 10,
+          "cost": 31,
+          "tier": "c1"
+        }
+      ],
       "markPrice": 24,
       "currency": "USD"
     },
@@ -279,8 +323,13 @@
       "accountId": "binance-usd",
       "instrumentId": "btc-usd",
       "direction": "long",
-      "quantity": 0.0065,
-      "averageCost": 95000,
+      "lots": [
+        {
+          "quantity": 0.0065,
+          "cost": 95000,
+          "tier": "c1"
+        }
+      ],
       "markPrice": 100000,
       "currency": "USD"
     },
@@ -292,8 +341,13 @@
       "accountId": "bingx-usd",
       "instrumentId": "eth-usd",
       "direction": "long",
-      "quantity": 0.2,
-      "averageCost": 2300,
+      "lots": [
+        {
+          "quantity": 0.2,
+          "cost": 2300,
+          "tier": "c1"
+        }
+      ],
       "markPrice": 2500,
       "currency": "USD"
     },
@@ -305,8 +359,13 @@
       "accountId": "bingx-usd",
       "instrumentId": "btc-usd",
       "direction": "long",
-      "quantity": 0.0045,
-      "averageCost": 105000,
+      "lots": [
+        {
+          "quantity": 0.0045,
+          "cost": 105000,
+          "tier": "c1"
+        }
+      ],
       "markPrice": 100000,
       "currency": "USD"
     },
@@ -318,8 +377,13 @@
       "accountId": "bitget-usd",
       "instrumentId": "eth-usd",
       "direction": "long",
-      "quantity": 0.12,
-      "averageCost": 2600,
+      "lots": [
+        {
+          "quantity": 0.12,
+          "cost": 2600,
+          "tier": "c1"
+        }
+      ],
       "markPrice": 2500,
       "currency": "USD"
     },
@@ -331,8 +395,13 @@
       "accountId": "bitso-usd",
       "instrumentId": "btc-usd",
       "direction": "long",
-      "quantity": 0.003,
-      "averageCost": 99000,
+      "lots": [
+        {
+          "quantity": 0.003,
+          "cost": 99000,
+          "tier": "c1"
+        }
+      ],
       "markPrice": 100000,
       "currency": "USD"
     },
@@ -344,8 +413,13 @@
       "accountId": "xtb-usd",
       "instrumentId": "tsla-usd",
       "direction": "long",
-      "quantity": 1,
-      "averageCost": 230,
+      "lots": [
+        {
+          "quantity": 1,
+          "cost": 230,
+          "tier": "c1"
+        }
+      ],
       "markPrice": 260,
       "currency": "USD"
     },
@@ -357,8 +431,13 @@
       "accountId": "xtb-usd",
       "instrumentId": "rivn-usd",
       "direction": "long",
-      "quantity": 20,
-      "averageCost": 13,
+      "lots": [
+        {
+          "quantity": 20,
+          "cost": 13,
+          "tier": "c1"
+        }
+      ],
       "markPrice": 15.5,
       "currency": "USD"
     },
@@ -370,8 +449,13 @@
       "accountId": "xtb-usd",
       "instrumentId": "sbux-usd",
       "direction": "long",
-      "quantity": 2.5,
-      "averageCost": 88,
+      "lots": [
+        {
+          "quantity": 2.5,
+          "cost": 88,
+          "tier": "c1"
+        }
+      ],
       "markPrice": 92,
       "currency": "USD"
     },
@@ -383,8 +467,13 @@
       "accountId": "gbm-usd",
       "instrumentId": "nke-usd",
       "direction": "long",
-      "quantity": 4,
-      "averageCost": 48,
+      "lots": [
+        {
+          "quantity": 4,
+          "cost": 48,
+          "tier": "c1"
+        }
+      ],
       "markPrice": 50,
       "currency": "USD"
     },
@@ -396,8 +485,13 @@
       "accountId": "binance-usd",
       "instrumentId": "eth-usd",
       "direction": "long",
-      "quantity": 0.05,
-      "averageCost": 2100,
+      "lots": [
+        {
+          "quantity": 0.05,
+          "cost": 2100,
+          "tier": "c1"
+        }
+      ],
       "markPrice": 2500,
       "currency": "USD"
     },
@@ -409,21 +503,87 @@
       "accountId": "binance-usd",
       "instrumentId": "sol-usd",
       "direction": "long",
-      "quantity": 25,
-      "averageCost": 4,
+      "lots": [
+        {
+          "quantity": 25,
+          "cost": 4,
+          "tier": "c1"
+        }
+      ],
       "markPrice": 3,
       "currency": "USD"
+    },
+    {
+      "id": "cemex-foresight-mxn",
+      "portfolioId": "tactical",
+      "tempo": "Foresight",
+      "executionMode": "live",
+      "accountId": "bitso-mxn",
+      "instrumentId": "cemex-mxn",
+      "direction": "long",
+      "markPrice": 60,
+      "currency": "MXN",
+      "lots": [
+        {
+          "quantity": 100,
+          "cost": 50,
+          "tier": "c2",
+          "entryFx": 16
+        },
+        {
+          "quantity": 50,
+          "cost": 55,
+          "tier": "c3",
+          "entryFx": 18
+        }
+      ]
     }
   ],
   "closes": [
-    { "instrumentId": "btc-usd", "asOf": "2026-05-08", "price": 115340 },
-    { "instrumentId": "btc-usd", "asOf": "2026-05-15", "price": 108900 },
-    { "instrumentId": "btc-usd", "asOf": "2026-05-22", "price": 104200 },
-    { "instrumentId": "btc-usd", "asOf": "2026-05-29", "price": 100000 },
-    { "instrumentId": "eth-usd", "asOf": "2026-05-08", "price": 2810 },
-    { "instrumentId": "eth-usd", "asOf": "2026-05-22", "price": 2640 },
-    { "instrumentId": "eth-usd", "asOf": "2026-05-29", "price": 2500 },
-    { "instrumentId": "aapl-usd", "asOf": "2026-05-15", "price": 198 },
-    { "instrumentId": "aapl-usd", "asOf": "2026-05-29", "price": 212.5 }
+    {
+      "instrumentId": "btc-usd",
+      "asOf": "2026-05-08",
+      "price": 115340
+    },
+    {
+      "instrumentId": "btc-usd",
+      "asOf": "2026-05-15",
+      "price": 108900
+    },
+    {
+      "instrumentId": "btc-usd",
+      "asOf": "2026-05-22",
+      "price": 104200
+    },
+    {
+      "instrumentId": "btc-usd",
+      "asOf": "2026-05-29",
+      "price": 100000
+    },
+    {
+      "instrumentId": "eth-usd",
+      "asOf": "2026-05-08",
+      "price": 2810
+    },
+    {
+      "instrumentId": "eth-usd",
+      "asOf": "2026-05-22",
+      "price": 2640
+    },
+    {
+      "instrumentId": "eth-usd",
+      "asOf": "2026-05-29",
+      "price": 2500
+    },
+    {
+      "instrumentId": "aapl-usd",
+      "asOf": "2026-05-15",
+      "price": 198
+    },
+    {
+      "instrumentId": "aapl-usd",
+      "asOf": "2026-05-29",
+      "price": 212.5
+    }
   ]
 }
