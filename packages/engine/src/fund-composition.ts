@@ -4,26 +4,27 @@ export type Direction = "long" | "short";
 export type CapitalTier = "c1" | "c2" | "c3";
 
 /**
- * A Lot preserves Capital Tier attribution inside a Position. It binds
- * `(quantity, cost, tier, entryFx)` together so per-tier P&L stays correct even
- * when two tiers of the same instrument were acquired at different costs.
+ * A Lot is the shared genealogy unit: it preserves Capital Tier attribution on a
+ * slice of held capital. It is the base for both record kinds — a Reserve (cash)
+ * Lot is the degenerate `(quantity, tier)` where value == face, no entry FX and
+ * Price P&L == 0; a Position Lot ({@link PositionLot}) adds cost and entry FX.
  */
 export interface Lot {
   quantity: number;
-  cost: number;
   tier: CapitalTier;
-  /** MXN-per-USD rate at acquisition; cost basis converts at this rate. */
-  entryFx?: number;
 }
 
 /**
- * A cash Lot is the degenerate Lot that carries Capital Tier attribution onto a
- * Reserve. Value == face, so there is no `cost` or `entryFx`: a tiered cash
- * holding has cost == value and Price P&L == 0.
+ * A Position Lot adds the cost basis a Position needs to {@link Lot}, binding
+ * `(quantity, cost, tier, entryFx)` together so per-tier P&L stays correct even
+ * when two tiers of the same instrument were acquired at different costs.
+ * Carrying `cost` here (not on the base) keeps it a compile-time guarantee on the
+ * Position path, with no optional-cost runtime guard.
  */
-export interface ReserveLot {
-  quantity: number;
-  tier: CapitalTier;
+export interface PositionLot extends Lot {
+  cost: number;
+  /** MXN-per-USD rate at acquisition; cost basis converts at this rate. */
+  entryFx?: number;
 }
 
 /**
@@ -80,23 +81,21 @@ export interface ReserveRecord extends CapitalRecordBase {
   amount: number;
   /**
    * Optional Capital Tier attribution for cash. Absent = untiered = excluded
-   * from the tier rollup (back-compat). `amount` stays the authoritative value.
+   * from the tier rollup. `amount` stays the authoritative value.
    */
-  lots?: ReserveLot[];
+  lots?: Lot[];
 }
 
 export interface PositionRecord extends CapitalRecordBase {
   instrumentId: string;
   direction: Direction;
   markPrice: number;
-  /** Lot-grained cost + Capital Tier attribution. Canonical going forward. */
-  lots?: Lot[];
   /**
-   * Prototype back-compat: single-tier shorthand. When `lots` is absent these
-   * normalize to one `c1` Lot. The reliable increment drops this shim.
+   * Lot-grained cost + Capital Tier attribution — the only cost-carrier. A
+   * single untiered Position is one `c1` Lot; tiering splits it into more. There
+   * is no flat `{ quantity, averageCost }` shorthand.
    */
-  quantity?: number;
-  averageCost?: number;
+  lots: PositionLot[];
 }
 
 export interface Ok {
@@ -952,7 +951,7 @@ function buildCanonicalState(data: FundReviewData): CanonicalState {
       continue;
     }
 
-    const lots = normalizePositionLots(position);
+    const lots = position.lots;
     const invalidNumericFields: string[] = [];
     if (!isNonNegativeNumber(position.markPrice)) {
       invalidNumericFields.push("markPrice");
@@ -1211,19 +1210,6 @@ function buildReserveTierContributions(
   }
 
   return [...tierTotals.values()];
-}
-
-function normalizePositionLots(position: PositionRecord): Lot[] {
-  if (Array.isArray(position.lots) && position.lots.length > 0) {
-    return position.lots;
-  }
-  if (
-    typeof position.quantity === "number" &&
-    typeof position.averageCost === "number"
-  ) {
-    return [{ quantity: position.quantity, cost: position.averageCost, tier: "c1" }];
-  }
-  return [];
 }
 
 function groupTierLines(
@@ -1569,20 +1555,10 @@ function validatePositions(value: unknown): ParseResult | undefined {
       );
     }
 
-    if (position.lots !== undefined) {
-      const lotsError = validateLots(position.lots, itemPath);
-      if (lotsError) {
-        return lotsError;
-      }
-    } else {
-      for (const field of ["quantity", "averageCost"] as const) {
-        if (typeof position[field] !== "number") {
-          return schemaError(
-            `${itemPath}.${field}`,
-            `${itemPath}.${field} must be a number.`,
-          );
-        }
-      }
+    // `lots` is the only cost-carrier; a Position must carry at least one Lot.
+    const lotsError = validateLots(position.lots, itemPath);
+    if (lotsError) {
+      return lotsError;
     }
   }
 
