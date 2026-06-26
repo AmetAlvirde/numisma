@@ -1041,6 +1041,93 @@ describe("@numisma/engine buildCompositionReport", () => {
     expect(report.priceJourneys).toEqual([]);
   });
 
+  it("surfaces skipped-close for a Close referencing an unknown Instrument while valid anchors still render", () => {
+    const report = buildCompositionReport(
+      parseFixture(
+        priceJourneyReview({
+          closes: [
+            { instrumentId: "btc-usd", asOf: "2026-05-08", price: 100 },
+            { instrumentId: "btc-usd", asOf: "2026-05-15", price: 110 },
+            { instrumentId: "ghost-usd", asOf: "2026-05-15", price: 5 },
+          ],
+        }),
+      ),
+    );
+
+    const skipped = report.warnings.filter((w) => w.code === "skipped-close");
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0]?.recordId).toBe("ghost-usd");
+    expect(skipped[0]?.severity).toBe("warning");
+
+    // The unknown anchor is dropped, but its valid siblings still render.
+    const btc = report.priceJourneys.find((j) => j.instrumentId === "btc-usd");
+    expect(btc?.points.map((p) => p.asOf)).toEqual(["2026-05-08", "2026-05-15"]);
+  });
+
+  it("surfaces skipped-close for invalid Close scalars and still builds the journey from the remaining valid anchors", () => {
+    const report = buildCompositionReport(
+      parseFixture(
+        priceJourneyReview({
+          closes: [
+            { instrumentId: "btc-usd", asOf: "2026-05-08", price: 100 },
+            { instrumentId: "btc-usd", asOf: "2026-05-15", price: -1 }, // invalid price
+            { instrumentId: "btc-usd", asOf: "not-a-date", price: 130 }, // invalid date
+            { instrumentId: "btc-usd", asOf: "2026-05-22", price: 120 },
+          ],
+        }),
+      ),
+    );
+
+    const skipped = report.warnings.filter((w) => w.code === "skipped-close");
+    expect(skipped).toHaveLength(2);
+    expect(skipped.every((w) => w.recordId === "btc-usd")).toBe(true);
+
+    // A dropped/invalid anchor does not block the journey: it renders from the
+    // two valid anchors that remain.
+    const btc = report.priceJourneys.find((j) => j.instrumentId === "btc-usd");
+    expect(btc?.points.map((p) => p.asOf)).toEqual(["2026-05-08", "2026-05-22"]);
+    expect(btc?.firstPrice).toBe(100);
+    expect(btc?.latestPrice).toBe(120);
+    expect(btc?.changeAbs).toBe(20);
+  });
+
+  it("fires markprice-close-mismatch per-position when markPrice diverges from the latest Close beyond tolerance, without altering valuation", () => {
+    const report = buildCompositionReport(
+      parseFixture(
+        priceJourneyReview({
+          markPrice: 210,
+          closes: [{ instrumentId: "aapl-usd", asOf: "2026-05-29", price: 200 }],
+        }),
+      ),
+    );
+
+    const mismatch = report.warnings.filter(
+      (w) => w.code === "markprice-close-mismatch",
+    );
+    expect(mismatch).toHaveLength(1);
+    expect(mismatch[0]?.recordId).toBe("aapl-core");
+    expect(mismatch[0]?.severity).toBe("warning");
+
+    // markPrice (210) stays the authoritative P&L input; the Close (200) is
+    // display-only and never drives valuation: one unit ⇒ fund value 210.
+    expect(report.totals.fundValueUsd).toBe(210);
+  });
+
+  it("does not fire markprice-close-mismatch when markPrice and the latest Close agree within tolerance", () => {
+    const report = buildCompositionReport(
+      parseFixture(
+        priceJourneyReview({
+          markPrice: 200.5,
+          closes: [{ instrumentId: "aapl-usd", asOf: "2026-05-29", price: 200 }],
+        }),
+      ),
+    );
+
+    expect(
+      report.warnings.filter((w) => w.code === "markprice-close-mismatch"),
+    ).toHaveLength(0);
+  });
+
   it("pins the sanitized realistic fixture as the stable canonical answer", () => {
     const report = buildCompositionReport(loadSanitizedRealisticFixture());
 
@@ -1406,6 +1493,38 @@ function singlePositionReview(lots: PositionLot[], markPrice: number) {
         lots,
       },
     ],
+  };
+}
+
+function priceJourneyReview(opts: {
+  markPrice?: number;
+  closes: Array<{ instrumentId: string; asOf: string; price: number }>;
+}) {
+  return {
+    fund: { id: "pj-fund", name: "Price Journey Fund", baseCurrency: "USD" },
+    review: { asOf: "2026-06-25", usdMxn: 20 },
+    portfolios: [{ id: "core", name: "Core" }],
+    accounts: [{ id: "xtb-usd", name: "Broker", platform: "XTB", currency: "USD" }],
+    instruments: [
+      { id: "aapl-usd", name: "Apple", symbol: "AAPL", currency: "USD" },
+      { id: "btc-usd", name: "Bitcoin", symbol: "BTC", currency: "USD" },
+    ],
+    reserves: [],
+    positions: [
+      {
+        id: "aapl-core",
+        portfolioId: "core",
+        tempo: "Capital",
+        executionMode: "live",
+        accountId: "xtb-usd",
+        instrumentId: "aapl-usd",
+        direction: "long",
+        markPrice: opts.markPrice ?? 200,
+        currency: "USD",
+        lots: [{ quantity: 1, cost: 100, tier: "c1" }],
+      },
+    ],
+    closes: opts.closes,
   };
 }
 
