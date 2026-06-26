@@ -82,6 +82,26 @@ import type {
   TierContribution,
 } from "./contracts.js";
 
+// Cross-concern helpers shared with parse/compose/price-journey live in the
+// internal kernel — imported here, never re-exported, so they stay off the
+// public surface.
+import {
+  toUsd,
+  percentOfFund,
+  roundNumber,
+  indexById,
+  requireNonEmptyString,
+  isIsoDate,
+  pushWarning,
+  schemaError,
+  isSupportedCurrency,
+  isExecutionMode,
+  isDirection,
+  isNonNegativeNumber,
+  isPositiveNumber,
+  isRecord,
+} from "./internal.js";
+
 /**
  * Reserve Lot face sums are reconciled against `amount` with a hybrid tolerance:
  * `max(absolute floor, relative fraction × amount)`. The floor absorbs cent-level
@@ -1159,20 +1179,6 @@ function divider(): string {
   return "=".repeat(36);
 }
 
-function toUsd(amount: number, currency: Currency, usdMxn: number): number {
-  return currency === "USD" ? amount : amount / usdMxn;
-}
-
-function percentOfFund(usdValue: number, fundValueUsd: number): number {
-  if (fundValueUsd === 0) return 0;
-  return roundNumber((usdValue / fundValueUsd) * 100, 12);
-}
-
-function roundNumber(value: number, decimals: number): number {
-  const factor = 10 ** decimals;
-  return Math.round(value * factor) / factor;
-}
-
 function formatUsd(value: number): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -1203,23 +1209,6 @@ function accountLabel(
   fallback: string,
 ): string {
   return account ? `${account.platform}: ${account.name}` : fallback;
-}
-
-function indexById<T extends NamedRecord>(
-  records: T[],
-  label: string,
-): Map<string, T> {
-  const result = new Map<string, T>();
-  for (const record of records) {
-    if (!record.id) {
-      throw new Error(`Found ${label} without id.`);
-    }
-    if (result.has(record.id)) {
-      throw new Error(`Duplicate ${label} id: ${record.id}`);
-    }
-    result.set(record.id, record);
-  }
-  return result;
 }
 
 function validateCapitalBase(
@@ -1541,55 +1530,6 @@ function validateCapitalRecordIds(
   return undefined;
 }
 
-function requireNonEmptyString(value: unknown, path: string): SchemaError | undefined {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    return schemaError(path, `${path} must be a non-empty string.`);
-  }
-
-  return undefined;
-}
-
-function isIsoDate(value: string): boolean {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!match) {
-    return false;
-  }
-
-  const [, yearText, monthText, dayText] = match;
-  const year = Number(yearText);
-  const month = Number(monthText);
-  const day = Number(dayText);
-  const date = new Date(Date.UTC(year, month - 1, day));
-
-  return (
-    date.getUTCFullYear() === year &&
-    date.getUTCMonth() === month - 1 &&
-    date.getUTCDate() === day
-  );
-}
-
-function pushWarning(
-  warnings: Warning[],
-  code: WarningCode,
-  message: string,
-  recordId?: string,
-): void {
-  warnings.push(
-    recordId
-      ? { code, severity: "warning", message, recordId }
-      : { code, severity: "warning", message },
-  );
-}
-
-function schemaError(path: string, message: string): SchemaError {
-  return {
-    kind: "schema-error",
-    severity: "blocking",
-    path,
-    message,
-  };
-}
-
 function parseReviewInput(input: unknown): Ok | InvalidJson {
   if (typeof input !== "string") {
     return {
@@ -1614,31 +1554,3 @@ function parseReviewInput(input: unknown): Ok | InvalidJson {
   }
 }
 
-function isSupportedCurrency(currency: unknown): currency is Currency {
-  return currency === "USD" || currency === "MXN";
-}
-
-function isExecutionMode(value: unknown): value is ExecutionMode {
-  return (
-    value === "live" ||
-    value === "paper" ||
-    value === "back-test" ||
-    value === "forward-test"
-  );
-}
-
-function isDirection(value: unknown): value is Direction {
-  return value === "long" || value === "short";
-}
-
-function isNonNegativeNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0;
-}
-
-function isPositiveNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
