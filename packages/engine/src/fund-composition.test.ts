@@ -512,6 +512,219 @@ describe("@numisma/engine buildCompositionReport", () => {
     expect(buildDashboardDetail(data, report, "instrument:reserve")).toBeUndefined();
   });
 
+  it("excludes a live Reserve whose Portfolio and Account references are missing", () => {
+    const fixture = cloneFixture(makeCanonicalFixture());
+    fixture.reserves = [
+      {
+        id: "reserve-missing-refs",
+        portfolioId: "ghost-portfolio",
+        tempo: "Reserve",
+        executionMode: "live",
+        accountId: "ghost-account",
+        currency: "USD",
+        amount: 100,
+      },
+    ] as FundReviewData["reserves"];
+
+    const report = buildCompositionReport(parseFixture(fixture));
+
+    expect(report.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "missing-portfolio", recordId: "reserve-missing-refs" }),
+        expect.objectContaining({ code: "missing-account", recordId: "reserve-missing-refs" }),
+      ]),
+    );
+    // The reserve is excluded, so no Reserve tempo row exists from it.
+    expect(sectionRows(report, "tempos").map((row) => row.id)).not.toContain("tempo:Reserve");
+  });
+
+  it("warns and excludes a Position that uses an unsupported Execution Mode", () => {
+    const fixture = cloneFixture(makeCanonicalFixture());
+    fixture.positions = [
+      {
+        id: "position-bad-mode",
+        portfolioId: "core",
+        tempo: "Capital",
+        executionMode: "demo" as FundReviewData["positions"][number]["executionMode"],
+        accountId: "xtb-usd",
+        instrumentId: "aapl-usd",
+        direction: "long",
+        lots: [{ quantity: 1, cost: 100, tier: "c1" }],
+        markPrice: 110,
+        currency: "USD",
+      },
+    ] as FundReviewData["positions"];
+
+    const report = buildCompositionReport(parseFixture(fixture));
+
+    expect(
+      report.warnings.filter(
+        (warning) =>
+          warning.code === "unsupported-execution-mode" &&
+          warning.recordId === "position-bad-mode",
+      ),
+    ).toHaveLength(1);
+    // The bad-mode Position is excluded; the fixture's live Reserves remain.
+    expect(report.totals.fundValueUsd).toBe(500);
+  });
+
+  it("warns and excludes a Position whose Currency mismatches both Account and Instrument", () => {
+    const fixture = cloneFixture(makeCanonicalFixture());
+    // A USD Position booked on an MXN Account (bitso-mxn) against an MXN
+    // Instrument (cemex-mxn): the Account-currency check and the
+    // Instrument-currency check both fire on the same record.
+    fixture.positions = [
+      {
+        id: "position-currency-clash",
+        portfolioId: "core",
+        tempo: "Capital",
+        executionMode: "live",
+        accountId: "bitso-mxn",
+        instrumentId: "cemex-mxn",
+        direction: "long",
+        lots: [{ quantity: 1, cost: 100, tier: "c1" }],
+        markPrice: 110,
+        currency: "USD",
+      },
+    ] as FundReviewData["positions"];
+
+    const report = buildCompositionReport(parseFixture(fixture));
+
+    const mismatch = report.warnings.filter(
+      (warning) =>
+        warning.code === "currency-mismatch" &&
+        warning.recordId === "position-currency-clash",
+    );
+    expect(mismatch).toHaveLength(2);
+    expect(mismatch.map((warning) => warning.message)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("Account bitso-mxn"),
+        expect.stringContaining("Instrument cemex-mxn"),
+      ]),
+    );
+    // The mismatched Position is excluded; the fixture's live Reserves remain.
+    expect(report.totals.fundValueUsd).toBe(500);
+  });
+
+  it("warns and excludes a Position with invalid Lot quantity, cost, or entryFx", () => {
+    const fixture = cloneFixture(makeCanonicalFixture());
+    // markPrice is valid, isolating the per-Lot numeric checks: one Lot per
+    // invalid field so quantity, cost, and entryFx branches all fire at once.
+    fixture.positions = [
+      {
+        id: "position-bad-lots",
+        portfolioId: "core",
+        tempo: "Capital",
+        executionMode: "live",
+        accountId: "xtb-usd",
+        instrumentId: "aapl-usd",
+        direction: "long",
+        markPrice: 110,
+        currency: "USD",
+        lots: [
+          { quantity: -1, cost: 100, tier: "c1" },
+          { quantity: 1, cost: Number.NaN, tier: "c2" },
+          { quantity: 1, cost: 100, tier: "c3", entryFx: 0 },
+        ],
+      },
+    ] as FundReviewData["positions"];
+
+    const report = buildCompositionReport(parseFixture(fixture));
+
+    const warn = report.warnings.filter(
+      (warning) =>
+        warning.code === "invalid-position-number" &&
+        warning.recordId === "position-bad-lots",
+    );
+    expect(warn).toHaveLength(1);
+    expect(warn[0]?.message).toContain("quantity");
+    expect(warn[0]?.message).toContain("cost");
+    expect(warn[0]?.message).toContain("entryFx");
+    // The invalid Position is excluded; the fixture's live Reserves remain.
+    expect(report.totals.fundValueUsd).toBe(500);
+  });
+
+  it("excludes a Position carrying an empty Lot set", () => {
+    // `parseFundReview` rejects empty `lots` (schema: non-empty array), so this
+    // guards `buildCompositionReport`'s own contract for a caller that builds a
+    // `FundReviewData` without parsing — the same direct-construction path the
+    // TUI dashboard tests exercise. The Position is dropped as invalid.
+    const data: FundReviewData = {
+      fund: { id: "f", name: "F", baseCurrency: "USD" },
+      review: { asOf: "2026-06-25", usdMxn: 20 },
+      portfolios: [{ id: "core", name: "Core" }],
+      accounts: [{ id: "xtb-usd", name: "Broker", platform: "XTB", currency: "USD" }],
+      instruments: [{ id: "aapl-usd", name: "Apple", symbol: "AAPL", currency: "USD" }],
+      reserves: [],
+      positions: [
+        {
+          id: "empty-lots",
+          portfolioId: "core",
+          tempo: "Capital",
+          executionMode: "live",
+          accountId: "xtb-usd",
+          instrumentId: "aapl-usd",
+          direction: "long",
+          markPrice: 100,
+          currency: "USD",
+          lots: [],
+        },
+      ],
+    };
+
+    const report = buildCompositionReport(data);
+
+    expect(report.excluded.invalid).toBe(1);
+    const warn = report.warnings.filter(
+      (warning) => warning.code === "invalid-position-number",
+    );
+    expect(warn).toHaveLength(1);
+    expect(warn[0]?.message).toContain("lots");
+    expect(report.totals.fundValueUsd).toBe(0);
+  });
+
+  it("returns no dashboard detail for an unknown row id", () => {
+    const data = parseFixture(makeCanonicalFixture());
+    const report = buildCompositionReport(data);
+
+    expect(buildDashboardDetail(data, report, "account:does-not-exist")).toBeUndefined();
+    expect(buildDashboardDetail(data, report, "totally-unknown")).toBeUndefined();
+  });
+
+  it("drills an Account holding only Positions down to its Position lines", () => {
+    const data = parseFixture(makeCanonicalFixture());
+    const report = buildCompositionReport(data);
+
+    // binance-usd holds one live Position (btc-liquid); its paper sibling is
+    // excluded, so the drill-down filters to Positions only (no Reserve lines).
+    const detail = buildDashboardDetail(data, report, "account:binance-usd");
+    expect(detail).toMatchObject({
+      rowId: "account:binance-usd",
+      kind: "account",
+      rows: [{ kind: "position", recordLabel: "BTC (Bitcoin)", usdValue: 150 }],
+    });
+    expect(detail?.rows.every((row) => row.kind === "position")).toBe(true);
+  });
+
+  it("formats an empty fund with placeholder focuses and empty section bodies", () => {
+    const report = buildCompositionReport(emptyFundReview());
+    const text = formatCompositionReport(report);
+
+    expect(text).toContain("Largest Portfolio: No live records");
+    expect(text).toContain("Reserve: No live records");
+    // Empty section bodies render the placeholder row.
+    expect(text).toContain("No live records.");
+  });
+
+  it("formats data safety as 'no warnings' for a clean report", () => {
+    const report = buildCompositionReport(
+      parseFixture(singlePositionReview([{ quantity: 1, cost: 100, tier: "c1" }], 150)),
+    );
+
+    expect(report.warnings).toEqual([]);
+    expect(formatCompositionReport(report)).toContain("; no warnings");
+  });
+
   it("attributes per-tier P&L from Lots and converts cost basis at entry FX", () => {
     // Two tiers of one instrument with DIFFERENT costs (50 vs 80) prove the
     // model is a per-Lot join, not a "one cost + tier-quantity split" shortcut.
@@ -1536,6 +1749,18 @@ function priceJourneyReview(opts: {
     ],
     closes: opts.closes,
   };
+}
+
+function emptyFundReview(): FundReviewData {
+  return parseFixture({
+    fund: { id: "empty-fund", name: "Empty Fund", baseCurrency: "USD" },
+    review: { asOf: "2026-06-25", usdMxn: 20 },
+    portfolios: [],
+    accounts: [],
+    instruments: [],
+    reserves: [],
+    positions: [],
+  });
 }
 
 function makeCanonicalFixture() {
