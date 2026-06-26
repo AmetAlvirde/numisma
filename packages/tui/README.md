@@ -17,10 +17,12 @@ under Node while the terminal glue stays isolated in a Bun-only layer.
 - `dashboard.ts` — the `DashboardLine`/`DashboardAction` line model the reducer
   consumes (`dashboard.test.ts`).
 - `review-file.ts` — fund-review path resolution and loading (`review-file.test.ts`).
-- `report.ts` — the `tsx` CLI report entry (`pnpm report`).
 
-**Bun-only (excluded from the coverage number):**
+**Excluded from the coverage number (scripts + Bun-only wiring):**
 
+- `report.ts` — the `tsx` CLI report entry (`pnpm report`). A thin script: a
+  top-level `try/catch` orchestrating already-tested engine/review functions, no
+  unit to assert. Its constituent functions are unit-tested directly.
 - `app.ts` — the self-executing `pnpm dev` entry: path resolution, openTUI
   renderer construction, fail-fast/exit codes, then `mountApp`.
 - `mount-app.ts` — the openTUI-coupled wiring: renderable construction, keypress
@@ -29,10 +31,12 @@ under Node while the terminal glue stays isolated in a Bun-only layer.
   `buildDashboardLines`) whose results are passed into the pure core.
 - `smoke-openTui.ts` — the Bun smoke (`pnpm smoke:tui`).
 
-These three files run under Bun against the real openTUI renderer. They never
-execute under Node's `vitest run`, so instrumenting them would only report them
-as dead 0% and make the percentage dishonest. They are excluded from the
-coverage `include` in `vitest.config.ts`.
+The openTUI files run under Bun against the real renderer and never execute under
+Node's `vitest run`, so instrumenting them would only report dead 0% and make the
+percentage dishonest; `report.ts` is a script entry with no unit to assert. All
+four are excluded from the coverage `include` in `vitest.config.ts`, and the
+exclusion (plus every remaining uncovered line) is accounted for concretely in
+[`docs/coverage-rationale.md`](../../docs/coverage-rationale.md).
 
 ## Coverage
 
@@ -45,6 +49,12 @@ drives real `j`/`k`/`enter` keypresses through `mountApp` and the real openTUI
 test renderer and asserts the cursor moved and a detail row rendered. The
 measured number replaces the prior "all the codebase is reliable" inference from
 reading. No coverage threshold or CI gate is enforced.
+
+Everything the number does **not** cover — the excluded scripts/wiring above,
+the defensive/unreachable guards, and the real behavior still deferred (tracked
+in [#72](https://github.com/AmetAlvirde/numisma/issues/72)) — is accounted for
+line-by-line in [`docs/coverage-rationale.md`](../../docs/coverage-rationale.md),
+so no gap is silent.
 
 ## Decision record: interaction-core / mountApp split (no ADR)
 
