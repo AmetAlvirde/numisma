@@ -51,10 +51,9 @@ measured number replaces the prior "all the codebase is reliable" inference from
 reading. No coverage threshold or CI gate is enforced.
 
 Everything the number does **not** cover — the excluded scripts/wiring above,
-the defensive/unreachable guards, and the real behavior still deferred (tracked
-in [#72](https://github.com/AmetAlvirde/numisma/issues/72)) — is accounted for
-line-by-line in [`docs/coverage-rationale.md`](../../docs/coverage-rationale.md),
-so no gap is silent.
+and the defensive/unreachable guards — is accounted for line-by-line in
+[`docs/coverage-rationale.md`](../../docs/coverage-rationale.md), so no gap is
+silent.
 
 ## Decision record: interaction-core / mountApp split (no ADR)
 
