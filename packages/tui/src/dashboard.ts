@@ -1,9 +1,12 @@
 import {
   type CompositionReport,
+  type Currency,
   type DashboardDetail,
+  type DashboardDetailRow,
   type DashboardRowKind,
   type LoadFailedOutcome,
   type LoadOutcome,
+  type TierContribution,
 } from "@numisma/engine";
 
 export type DashboardAction =
@@ -14,6 +17,14 @@ export type DashboardAction =
   | {
       type: "collapse-detail";
       rowId: string;
+    }
+  | {
+      type: "expand-record";
+      recordId: string;
+    }
+  | {
+      type: "collapse-record";
+      recordId: string;
     };
 
 export interface DashboardLine {
@@ -26,6 +37,7 @@ export interface DashboardLine {
 export function buildDashboardLines(
   report: CompositionReport,
   detail: DashboardDetail | undefined,
+  activeRecordId?: string,
 ): DashboardLine[] {
   const lines: DashboardLine[] = [
     { content: "Numisma Fund Composition Prototype", selectable: false },
@@ -37,6 +49,10 @@ export function buildDashboardLines(
     { content: "-------------------", selectable: false },
     {
       content: `Fund now: ${formatUsd(report.dashboard.summary.fundValueUsd)} in live canonical records`,
+      selectable: false,
+    },
+    {
+      content: `Unrealized P&L: ${formatUsd(report.dashboard.summary.totalUnrealizedPnlUsd)}`,
       selectable: false,
     },
     {
@@ -70,6 +86,10 @@ export function buildDashboardLines(
       selectable: false,
     },
     {
+      content: `Unrealized P&L: ${formatUsd(report.dashboard.summary.totalUnrealizedPnlUsd)}`,
+      selectable: false,
+    },
+    {
       content: `Manual FX: 1 USD = ${report.totals.usdMxn.toFixed(4)} MXN`,
       selectable: false,
     },
@@ -92,19 +112,19 @@ export function buildDashboardLines(
   ];
 
   for (const section of report.dashboard.sections) {
+    const showsPnl = section.id === "instruments" || section.id === "tiers";
     lines.push(
       { content: "", selectable: false },
       { content: section.title, selectable: false },
       { content: "-".repeat(section.title.length), selectable: false },
       {
-        content:
-          section.id === "instruments"
-            ? `${pad("Name", 28)} ${padLeft("USD Value", 14)} ${padLeft("Fund %", 8)} ${padLeft("Cost", 14)} ${padLeft("Unrl P&L", 14)}`
-            : `${pad("Name", 28)} ${padLeft("USD Value", 14)} ${padLeft("Fund %", 8)}`,
+        content: showsPnl
+          ? `${pad("Name", 28)} ${padLeft("USD Value", 14)} ${padLeft("Fund %", 8)} ${padLeft("Cost", 14)} ${padLeft("Unrl P&L", 14)}`
+          : `${pad("Name", 28)} ${padLeft("USD Value", 14)} ${padLeft("Fund %", 8)}`,
         selectable: false,
       },
       {
-        content: "-".repeat(section.id === "instruments" ? 82 : 53),
+        content: "-".repeat(showsPnl ? 82 : 53),
         selectable: false,
       },
     );
@@ -118,19 +138,44 @@ export function buildDashboardLines(
       const selectable = isDetailSelectable(row.kind);
       const rowLine: DashboardLine = selectable
         ? {
-            content: `${formatSectionRow(row, section.id === "instruments")}  [enter details]`,
+            content: `${formatSectionRow(row, showsPnl)}  [enter details]`,
             selectable: true,
             action: { type: "open-detail", rowId: row.id },
           }
         : {
-            content: formatSectionRow(row, section.id === "instruments"),
+            content: formatSectionRow(row, showsPnl),
             selectable: false,
           };
       lines.push(rowLine);
 
       if (detail?.rowId === row.id) {
-        lines.push(...buildDetailLines(detail));
+        lines.push(
+          ...buildDetailLines(
+            detail,
+            report.totals.fundValueUsd,
+            activeRecordId,
+          ),
+        );
       }
+    }
+  }
+
+  lines.push(
+    { content: "", selectable: false },
+    { content: "Weekly Price Journey", selectable: false },
+    { content: "-".repeat("Weekly Price Journey".length), selectable: false },
+  );
+  if (report.priceJourneys.length === 0) {
+    lines.push({ content: "No Close history recorded.", selectable: false });
+  } else {
+    for (const journey of report.priceJourneys) {
+      const series = journey.points
+        .map((point) => `${point.asOf} ${formatPrice(point.price, journey.currency)}`)
+        .join(" -> ");
+      lines.push({
+        content: `${pad(journey.label, 28)} ${series}  (${formatSignedPercent(journey.changePct)})`,
+        selectable: false,
+      });
     }
   }
 
@@ -180,23 +225,45 @@ export function renderLoadFooter(load: LoadOutcome): string {
   return formatLoadState(load);
 }
 
-function buildDetailLines(detail: DashboardDetail): DashboardLine[] {
+function buildDetailLines(
+  detail: DashboardDetail,
+  fundValueUsd: number,
+  activeRecordId: string | undefined,
+): DashboardLine[] {
   const usesTypedRows = detail.kind === "tempo" || detail.rows.some((row) => row.kind === "reserve");
   const header = usesTypedRows
     ? `${pad("Type", 10)} ${pad("Record", 26)} ${pad("Portfolio", 16)} ${pad(detail.kind === "account" ? "Tempo" : "Account", 24)} ${padLeft("USD Value", 14)}`
     : `${pad("Position", 26)} ${pad(detail.kind === "portfolio" ? "Tempo" : "Portfolio", 16)} ${pad(detail.kind === "portfolio" ? "Account" : "Tempo", 24)} ${padLeft("USD Value", 14)}`;
-  const body = detail.rows.map<DashboardLine>((row) => {
-    if (usesTypedRows) {
-      return {
-        content: `${pad(row.kind === "reserve" ? "Reserve" : "Position", 10)} ${pad(row.recordLabel, 26)} ${pad(row.portfolioLabel, 16)} ${pad(detail.kind === "account" ? row.tempoLabel : row.accountLabel, 24)} ${padLeft(formatUsd(row.usdValue), 14)}`,
-        selectable: false,
-      };
+  const body = detail.rows.flatMap<DashboardLine>((row) => {
+    const tiers = row.tierContributions ?? [];
+    const hasTiers = tiers.length > 0;
+    const expanded = hasTiers && row.recordId === activeRecordId;
+    const affordance = hasTiers
+      ? expanded
+        ? "  [enter collapse]"
+        : "  [enter tiers]"
+      : "";
+    const glance = hasTiers ? `  ${formatTierGlance(tiers)}` : "";
+
+    const base = usesTypedRows
+      ? `${pad(row.kind === "reserve" ? "Reserve" : "Position", 10)} ${pad(row.recordLabel, 26)} ${pad(row.portfolioLabel, 16)} ${pad(detail.kind === "account" ? row.tempoLabel : row.accountLabel, 24)} ${padLeft(formatUsd(row.usdValue), 14)}`
+      : `${pad(row.recordLabel, 26)} ${pad(detail.kind === "portfolio" ? row.tempoLabel : row.portfolioLabel, 16)} ${pad(detail.kind === "portfolio" ? row.accountLabel : row.tempoLabel, 24)} ${padLeft(formatUsd(row.usdValue), 14)}`;
+
+    const recordLine: DashboardLine = hasTiers
+      ? {
+          content: `${base}${glance}${affordance}`,
+          selectable: true,
+          action: expanded
+            ? { type: "collapse-record", recordId: row.recordId }
+            : { type: "expand-record", recordId: row.recordId },
+        }
+      : { content: base, selectable: false };
+
+    if (!expanded) {
+      return [recordLine];
     }
 
-    return {
-      content: `${pad(row.recordLabel, 26)} ${pad(detail.kind === "portfolio" ? row.tempoLabel : row.portfolioLabel, 16)} ${pad(detail.kind === "portfolio" ? row.accountLabel : row.tempoLabel, 24)} ${padLeft(formatUsd(row.usdValue), 14)}`,
-      selectable: false,
-    };
+    return [recordLine, ...buildTierDetailLines(row, tiers, fundValueUsd)];
   });
 
   return [
@@ -221,6 +288,36 @@ function buildDetailLines(detail: DashboardDetail): DashboardLine[] {
       ? body
       : [{ content: emptyDetailMessage(detail), selectable: false }]),
   ];
+}
+
+function formatTierGlance(tiers: TierContribution[]): string {
+  return tiers
+    .map((tier) => `${tier.tier} ${formatUsdCompact(tier.usdValue)}`)
+    .join(" / ");
+}
+
+function buildTierDetailLines(
+  row: DashboardDetailRow,
+  tiers: TierContribution[],
+  fundValueUsd: number,
+): DashboardLine[] {
+  const indent = "    ";
+  const header = `${indent}${pad("Tier", 6)} ${padLeft("USD Value", 14)} ${padLeft("Fund %", 8)} ${padLeft("Rec %", 8)} ${padLeft("Cost", 14)} ${padLeft("Unrl P&L", 14)}`;
+  const lines: DashboardLine[] = [
+    { content: header, selectable: false },
+    { content: `${indent}${"-".repeat(header.length - indent.length)}`, selectable: false },
+  ];
+
+  for (const tier of tiers) {
+    const fundPct = fundValueUsd > 0 ? (tier.usdValue / fundValueUsd) * 100 : 0;
+    const recPct = row.usdValue > 0 ? (tier.usdValue / row.usdValue) * 100 : 0;
+    lines.push({
+      content: `${indent}${pad(tier.tier, 6)} ${padLeft(formatUsd(tier.usdValue), 14)} ${padLeft(formatPercent(fundPct), 8)} ${padLeft(formatPercent(recPct), 8)} ${padLeft(formatUsd(tier.costBasisUsd), 14)} ${padLeft(formatUsd(tier.unrealizedPnlUsd), 14)}`,
+      selectable: false,
+    });
+  }
+
+  return lines;
 }
 
 function detailTitle(detail: DashboardDetail): string {
@@ -309,8 +406,28 @@ function formatUsd(value: number): string {
   }).format(value);
 }
 
+function formatUsdCompact(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
 function formatMaybeUsd(value: number | undefined): string {
   return value === undefined ? "-" : formatUsd(value);
+}
+
+function formatPrice(value: number, currency: Currency): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+  }).format(value);
+}
+
+function formatSignedPercent(value: number): string {
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(1)}%`;
 }
 
 function formatPercent(value: number): string {
