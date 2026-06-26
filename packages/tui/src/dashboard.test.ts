@@ -184,6 +184,23 @@ describe("@numisma/tui dashboard rendering", () => {
     expect(text).toContain("- Position sol-binance-invalid references missing Instrument sol-usd and was excluded.");
     expect(text).toContain("Data file: packages/engine/tests/fixtures/sanitized-realistic-fund-review.json");
   });
+
+  it("pins the full dashboard render output on the realistic fixture (characterization)", () => {
+    // Full-string oracle for the TUI surface. The substring `toContain` checks
+    // above leave column widths, padding, and formatUsd/formatPercent precision
+    // unguarded — this snapshot captures the exact rendered content so the
+    // upcoming engine↔TUI formatter dedup is provably behavior-preserving.
+    //
+    // The report carries the default `{ status: "loaded" }` load outcome, so the
+    // footer is empty and the snapshot stays free of the timezone-dependent
+    // `formatLoadTime` output — keeping it deterministic across machines.
+    const data = loadSanitizedRealisticFixture();
+    const report = buildCompositionReport(data);
+    const detail = buildDashboardDetail(data, report, "account:xtb-usd");
+    const lines = buildDashboardLines(report, detail);
+
+    expect(renderDashboardText(lines, report.load)).toMatchSnapshot();
+  });
 });
 
 function loadSanitizedRealisticFixture(): FundReviewData {
