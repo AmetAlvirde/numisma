@@ -14,6 +14,11 @@ export default defineConfig({
       exclude: [
         "**/*.test.ts",
         "**/*.d.ts",
+        // Thin script entries: top-level orchestration over already-tested
+        // functions, no unit to assert. See docs/coverage-rationale.md.
+        "packages/tui/src/report.ts",
+        // Bun-only openTUI wiring: never executes under Node's vitest run, so
+        // instrumenting it would only report dead 0%. Guarded by `pnpm smoke:tui`.
         "packages/tui/src/app.ts",
         "packages/tui/src/mount-app.ts",
         "packages/tui/src/smoke-openTui.ts",

@@ -65,3 +65,8 @@ From the repo root:
 - `pnpm typecheck` — guards the public surface and the no-deep-import boundary.
 - `pnpm test` — the behavioral suite plus the characterization snapshots and the
   engine↔TUI formatter contract test.
+- `pnpm coverage` — the measured Node-side coverage number. Everything it does
+  not cover (defensive/unreachable guards, low-value presentation branches, and
+  the reachable `compose.ts` behavior still deferred) is accounted for
+  line-by-line in
+  [`docs/coverage-rationale.md`](../../docs/coverage-rationale.md).
