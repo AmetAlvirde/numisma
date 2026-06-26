@@ -4,34 +4,70 @@ export type Direction = "long" | "short";
 export type CapitalTier = "c1" | "c2" | "c3";
 
 /**
- * A Lot preserves Capital Tier attribution inside a Position. It binds
- * `(quantity, cost, tier, entryFx)` together so per-tier P&L stays correct even
- * when two tiers of the same instrument were acquired at different costs.
+ * A Lot is the shared genealogy unit: it preserves Capital Tier attribution on a
+ * slice of held capital. It is the base for both record kinds — a Reserve (cash)
+ * Lot is the degenerate `(quantity, tier)` where value == face, no entry FX and
+ * Price P&L == 0; a Position Lot ({@link PositionLot}) adds cost and entry FX.
  */
 export interface Lot {
   quantity: number;
-  cost: number;
   tier: CapitalTier;
+}
+
+/**
+ * A Position Lot adds the cost basis a Position needs to {@link Lot}, binding
+ * `(quantity, cost, tier, entryFx)` together so per-tier P&L stays correct even
+ * when two tiers of the same instrument were acquired at different costs.
+ * Carrying `cost` here (not on the base) keeps it a compile-time guarantee on the
+ * Position path, with no optional-cost runtime guard.
+ */
+export interface PositionLot extends Lot {
+  cost: number;
   /** MXN-per-USD rate at acquisition; cost basis converts at this rate. */
   entryFx?: number;
 }
 
 /**
- * A cash Lot is the degenerate Lot that carries Capital Tier attribution onto a
- * Reserve. Value == face, so there is no `cost` or `entryFx`: a tiered cash
- * holding has cost == value and Price P&L == 0.
+ * Reserve Lot face sums are reconciled against `amount` with a hybrid tolerance:
+ * `max(absolute floor, relative fraction × amount)`. The floor absorbs cent-level
+ * rounding on small balances; the relative term scales the forgiveness with the
+ * balance so a hand-rounded provenance split on a large reserve does not trip the
+ * warning, while real misallocation (beyond the band) still emits
+ * `reserve-lot-sum-mismatch`. `amount` always stays authoritative. Both terms are
+ * named and tunable here.
  */
-export interface ReserveLot {
-  quantity: number;
-  tier: CapitalTier;
+const RESERVE_LOT_SUM_ABS_TOLERANCE = 0.01;
+const RESERVE_LOT_SUM_REL_TOLERANCE = 0.001; // 0.1% of amount
+
+/** Hybrid reconciliation tolerance for a reserve of the given face `amount`. */
+function reserveLotSumTolerance(amount: number): number {
+  return Math.max(
+    RESERVE_LOT_SUM_ABS_TOLERANCE,
+    RESERVE_LOT_SUM_REL_TOLERANCE * Math.abs(amount),
+  );
 }
 
 /**
- * Reserve Lot face sums within this many record-currency units of `amount` are
- * treated as reconciling (absorbs cent-level rounding in the source); larger
- * gaps emit `reserve-lot-sum-mismatch`. `amount` always stays authoritative.
+ * `markPrice` (the authoritative P&L input) and an instrument's latest Close
+ * (display-only) are reconciled with the same hybrid shape as reserves:
+ * `max(absolute floor, relative fraction × latestClose)`. The floor absorbs
+ * sub-cent drift on small-priced instruments; the relative term scales the
+ * forgiveness with the price so routine intraday slippage between a mark and the
+ * weekly Close does not trip the warning, while a real divergence (beyond the
+ * band) emits `markprice-close-mismatch`. The warning never alters valuation —
+ * `markPrice` stays authoritative and Close stays display-only. Both terms are
+ * named and tunable here.
  */
-const RESERVE_LOT_SUM_TOLERANCE = 0.01;
+const MARKPRICE_CLOSE_ABS_TOLERANCE = 0.01;
+const MARKPRICE_CLOSE_REL_TOLERANCE = 0.005; // 0.5% of the latest Close
+
+/** Hybrid coherence tolerance for a markPrice against the given latest Close. */
+function markPriceCloseTolerance(latestClose: number): number {
+  return Math.max(
+    MARKPRICE_CLOSE_ABS_TOLERANCE,
+    MARKPRICE_CLOSE_REL_TOLERANCE * Math.abs(latestClose),
+  );
+}
 
 export interface FundReviewData {
   fund: {
@@ -80,23 +116,21 @@ export interface ReserveRecord extends CapitalRecordBase {
   amount: number;
   /**
    * Optional Capital Tier attribution for cash. Absent = untiered = excluded
-   * from the tier rollup (back-compat). `amount` stays the authoritative value.
+   * from the tier rollup. `amount` stays the authoritative value.
    */
-  lots?: ReserveLot[];
+  lots?: Lot[];
 }
 
 export interface PositionRecord extends CapitalRecordBase {
   instrumentId: string;
   direction: Direction;
   markPrice: number;
-  /** Lot-grained cost + Capital Tier attribution. Canonical going forward. */
-  lots?: Lot[];
   /**
-   * Prototype back-compat: single-tier shorthand. When `lots` is absent these
-   * normalize to one `c1` Lot. The reliable increment drops this shim.
+   * Lot-grained cost + Capital Tier attribution — the only cost-carrier. A
+   * single untiered Position is one `c1` Lot; tiering splits it into more. There
+   * is no flat `{ quantity, averageCost }` shorthand.
    */
-  quantity?: number;
-  averageCost?: number;
+  lots: PositionLot[];
 }
 
 export interface Ok {
@@ -194,6 +228,9 @@ export type WarningCode =
   | "invalid-amount"
   | "invalid-position-number"
   | "reserve-lot-sum-mismatch"
+  | "invalid-reserve-lot-quantity"
+  | "markprice-close-mismatch"
+  | "skipped-close"
   | "non-positive-fund-value";
 
 export type ValidationCode =
@@ -219,6 +256,9 @@ export const validationSeverityByCode: Record<ValidationCode, ValidationSeverity
   "invalid-amount": "warning",
   "invalid-position-number": "warning",
   "reserve-lot-sum-mismatch": "warning",
+  "invalid-reserve-lot-quantity": "warning",
+  "markprice-close-mismatch": "warning",
+  "skipped-close": "warning",
   "non-positive-fund-value": "warning",
   "short-deferred": "warning",
 };
@@ -557,7 +597,7 @@ export function buildCompositionReport(
     (sum, line) => sum + (line.unrealizedPnlUsd ?? 0),
     0,
   );
-  const priceJourneys = buildPriceJourneys(data);
+  const priceJourneys = buildPriceJourneys(data, warnings);
 
   return {
     totals: {
@@ -622,7 +662,10 @@ export function buildCompositionReport(
   };
 }
 
-function buildPriceJourneys(data: FundReviewData): PriceJourney[] {
+function buildPriceJourneys(
+  data: FundReviewData,
+  warnings: Warning[],
+): PriceJourney[] {
   if (!Array.isArray(data.closes) || data.closes.length === 0) {
     return [];
   }
@@ -630,11 +673,29 @@ function buildPriceJourneys(data: FundReviewData): PriceJourney[] {
   const instruments = indexById(data.instruments, "instrument");
   const byInstrument = new Map<string, PriceJourneyPoint[]>();
   for (const close of data.closes) {
-    // Prototype shortcut: silently skip Closes referencing unknown instruments
-    // or carrying invalid scalars, rather than emitting a warning vocabulary.
+    // A Close referencing an unknown Instrument or carrying an invalid scalar is
+    // dropped from its journey, but the drop is surfaced via `skipped-close`
+    // rather than silently swallowed — and a bad anchor never blocks its valid
+    // siblings, which still render the journey for that instrument.
     const instrument = instruments.get(close.instrumentId);
-    if (!instrument) continue;
-    if (!isIsoDate(close.asOf) || !isNonNegativeNumber(close.price)) continue;
+    if (!instrument) {
+      pushWarning(
+        warnings,
+        "skipped-close",
+        `Close for unknown Instrument ${close.instrumentId} (as of ${String(close.asOf)}) was skipped; valid anchors still render.`,
+        close.instrumentId,
+      );
+      continue;
+    }
+    if (!isIsoDate(close.asOf) || !isNonNegativeNumber(close.price)) {
+      pushWarning(
+        warnings,
+        "skipped-close",
+        `Close for Instrument ${close.instrumentId} (as of ${String(close.asOf)}) has an invalid date or price and was skipped; valid anchors still render.`,
+        close.instrumentId,
+      );
+      continue;
+    }
     const points = byInstrument.get(close.instrumentId) ?? [];
     points.push({ asOf: close.asOf, price: close.price });
     byInstrument.set(close.instrumentId, points);
@@ -665,6 +726,28 @@ function buildPriceJourneys(data: FundReviewData): PriceJourney[] {
   return journeys.sort(
     (a, b) => b.points.length - a.points.length || a.label.localeCompare(b.label),
   );
+}
+
+/**
+ * Latest valid Close per instrument, keyed by instrumentId. Only Closes with a
+ * valid date and scalar are considered (an invalid scalar is surfaced as
+ * `skipped-close` in {@link buildPriceJourneys}, not used as a coherence anchor).
+ * "Latest" is the lexicographically greatest ISO `asOf`. Display-only: the result
+ * feeds the non-blocking `markprice-close-mismatch` check and never valuation.
+ */
+function latestCloseByInstrument(
+  closes: Close[] | undefined,
+): Map<string, Close> {
+  const latest = new Map<string, Close>();
+  if (!Array.isArray(closes)) return latest;
+  for (const close of closes) {
+    if (!isIsoDate(close.asOf) || !isNonNegativeNumber(close.price)) continue;
+    const existing = latest.get(close.instrumentId);
+    if (!existing || close.asOf.localeCompare(existing.asOf) > 0) {
+      latest.set(close.instrumentId, close);
+    }
+  }
+  return latest;
 }
 
 export function buildDashboardDetail(
@@ -773,6 +856,7 @@ function buildCanonicalState(data: FundReviewData): CanonicalState {
   const portfolios = indexById(data.portfolios, "portfolio");
   const accounts = indexById(data.accounts, "account");
   const instruments = indexById(data.instruments, "instrument");
+  const latestCloses = latestCloseByInstrument(data.closes);
   const canonicalLines: CanonicalLine[] = [];
   const excluded = {
     nonLive: 0,
@@ -952,7 +1036,7 @@ function buildCanonicalState(data: FundReviewData): CanonicalState {
       continue;
     }
 
-    const lots = normalizePositionLots(position);
+    const lots = position.lots;
     const invalidNumericFields: string[] = [];
     if (!isNonNegativeNumber(position.markPrice)) {
       invalidNumericFields.push("markPrice");
@@ -1020,6 +1104,26 @@ function buildCanonicalState(data: FundReviewData): CanonicalState {
       unrealizedPnlUsd: marketValueUsd - costBasisUsd,
       tierContributions: [...tierTotals.values()],
     });
+
+    // Per-position coherence check (non-blocking, valuation already committed
+    // above): a position's authoritative `markPrice` and its instrument's latest
+    // display-only Close should agree within tolerance. Running per-position
+    // incidentally surfaces cross-position divergence of the same instrument.
+    // markPrice and Close share the instrument's native units (currency is
+    // reconciled above), so they compare directly without FX conversion.
+    const latestClose = latestCloses.get(position.instrumentId);
+    if (
+      latestClose &&
+      Math.abs(position.markPrice - latestClose.price) >
+        markPriceCloseTolerance(latestClose.price)
+    ) {
+      pushWarning(
+        warnings,
+        "markprice-close-mismatch",
+        `Position ${position.id} markPrice ${position.markPrice} disagrees with Instrument ${position.instrumentId} latest Close ${latestClose.price} (as of ${latestClose.asOf}) beyond tolerance; markPrice stays the authoritative P&L input and Close stays display-only.`,
+        position.id,
+      );
+    }
   }
 
   return {
@@ -1181,7 +1285,14 @@ function buildReserveTierContributions(
 
   // A bad scalar slipped past schema typing leaves the reserve untiered rather
   // than poisoning the rollup with NaN; `amount` still counts toward the fund.
+  // The drop is surfaced, never silent.
   if (lots.some((lot) => !isNonNegativeNumber(lot.quantity))) {
+    pushWarning(
+      warnings,
+      "invalid-reserve-lot-quantity",
+      `Reserve ${reserve.id} has a Lot with a negative or non-finite quantity; the Reserve stays untiered and amount stays authoritative.`,
+      reserve.id,
+    );
     return undefined;
   }
 
@@ -1201,7 +1312,7 @@ function buildReserveTierContributions(
     tierTotals.set(lot.tier, existing);
   }
 
-  if (Math.abs(faceSum - reserve.amount) > RESERVE_LOT_SUM_TOLERANCE) {
+  if (Math.abs(faceSum - reserve.amount) > reserveLotSumTolerance(reserve.amount)) {
     pushWarning(
       warnings,
       "reserve-lot-sum-mismatch",
@@ -1211,19 +1322,6 @@ function buildReserveTierContributions(
   }
 
   return [...tierTotals.values()];
-}
-
-function normalizePositionLots(position: PositionRecord): Lot[] {
-  if (Array.isArray(position.lots) && position.lots.length > 0) {
-    return position.lots;
-  }
-  if (
-    typeof position.quantity === "number" &&
-    typeof position.averageCost === "number"
-  ) {
-    return [{ quantity: position.quantity, cost: position.averageCost, tier: "c1" }];
-  }
-  return [];
 }
 
 function groupTierLines(
@@ -1569,20 +1667,10 @@ function validatePositions(value: unknown): ParseResult | undefined {
       );
     }
 
-    if (position.lots !== undefined) {
-      const lotsError = validateLots(position.lots, itemPath);
-      if (lotsError) {
-        return lotsError;
-      }
-    } else {
-      for (const field of ["quantity", "averageCost"] as const) {
-        if (typeof position[field] !== "number") {
-          return schemaError(
-            `${itemPath}.${field}`,
-            `${itemPath}.${field} must be a number.`,
-          );
-        }
-      }
+    // `lots` is the only cost-carrier; a Position must carry at least one Lot.
+    const lotsError = validateLots(position.lots, itemPath);
+    if (lotsError) {
+      return lotsError;
     }
   }
 

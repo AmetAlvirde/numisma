@@ -1,0 +1,78 @@
+{
+  "fund": {
+    "id": "cash-genealogy-fund",
+    "name": "Cash Genealogy Fund",
+    "baseCurrency": "USD"
+  },
+  "review": {
+    "asOf": "2026-06-26",
+    "usdMxn": 20
+  },
+  "portfolios": [{ "id": "core", "name": "Core" }],
+  "accounts": [
+    { "id": "xtb-usd", "name": "USD Cash", "platform": "XTB", "currency": "USD" },
+    { "id": "bitso-mxn", "name": "MXN Cash", "platform": "BITSO", "currency": "MXN" }
+  ],
+  "instruments": [],
+  "reserves": [
+    {
+      "id": "tiered-usd",
+      "portfolioId": "core",
+      "tempo": "Reserve",
+      "executionMode": "live",
+      "accountId": "xtb-usd",
+      "currency": "USD",
+      "amount": 1000,
+      "lots": [
+        { "quantity": 600, "tier": "c1" },
+        { "quantity": 400, "tier": "c2" }
+      ]
+    },
+    {
+      "id": "tiered-mxn",
+      "portfolioId": "core",
+      "tempo": "Reserve",
+      "executionMode": "live",
+      "accountId": "bitso-mxn",
+      "currency": "MXN",
+      "amount": 2000,
+      "lots": [{ "quantity": 2000, "tier": "c1" }]
+    },
+    {
+      "id": "blended-usd",
+      "portfolioId": "core",
+      "tempo": "Reserve",
+      "executionMode": "live",
+      "accountId": "xtb-usd",
+      "currency": "USD",
+      "amount": 500
+    },
+    {
+      "id": "mismatch-usd",
+      "portfolioId": "core",
+      "tempo": "Reserve",
+      "executionMode": "live",
+      "accountId": "xtb-usd",
+      "currency": "USD",
+      "amount": 800,
+      "lots": [
+        { "quantity": 500, "tier": "c1" },
+        { "quantity": 250, "tier": "c2" }
+      ]
+    },
+    {
+      "id": "invalid-qty-usd",
+      "portfolioId": "core",
+      "tempo": "Reserve",
+      "executionMode": "live",
+      "accountId": "xtb-usd",
+      "currency": "USD",
+      "amount": 300,
+      "lots": [
+        { "quantity": -100, "tier": "c1" },
+        { "quantity": 400, "tier": "c2" }
+      ]
+    }
+  ],
+  "positions": []
+}

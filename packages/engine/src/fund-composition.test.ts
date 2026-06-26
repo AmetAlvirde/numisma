@@ -6,6 +6,7 @@ import {
   parseFundReview,
   validationSeverityByCode,
   type FundReviewData,
+  type PositionLot,
 } from "./index.js";
 import { describe, expect, it } from "vitest";
 
@@ -318,8 +319,7 @@ describe("@numisma/engine buildCompositionReport", () => {
       accountId: "missing-account",
       instrumentId: "missing-instrument",
       direction: "long",
-      quantity: 5,
-      averageCost: 10,
+      lots: [{ quantity: 5, cost: 10, tier: "c1" }],
       markPrice: 20,
       currency: "USD",
     });
@@ -383,8 +383,7 @@ describe("@numisma/engine buildCompositionReport", () => {
         accountId: "xtb-usd",
         instrumentId: "aapl-usd",
         direction: "long",
-        quantity: 1,
-        averageCost: 100,
+        lots: [{ quantity: 1, cost: 100, tier: "c1" }],
         markPrice: 110,
         currency: "EUR" as FundReviewData["positions"][number]["currency"],
       },
@@ -396,8 +395,7 @@ describe("@numisma/engine buildCompositionReport", () => {
         accountId: "xtb-usd",
         instrumentId: "aapl-usd",
         direction: "flat" as FundReviewData["positions"][number]["direction"],
-        quantity: 1,
-        averageCost: 100,
+        lots: [{ quantity: 1, cost: 100, tier: "c1" }],
         markPrice: 110,
         currency: "USD",
       },
@@ -409,8 +407,7 @@ describe("@numisma/engine buildCompositionReport", () => {
         accountId: "xtb-usd",
         instrumentId: "aapl-usd",
         direction: "long",
-        quantity: 1,
-        averageCost: 100,
+        lots: [{ quantity: 1, cost: 100, tier: "c1" }],
         markPrice: Number.NaN,
         currency: "USD",
       },
@@ -442,8 +439,7 @@ describe("@numisma/engine buildCompositionReport", () => {
       accountId: "binance-usd",
       instrumentId: "btc-usd",
       direction: "short",
-      quantity: 1,
-      averageCost: 150,
+      lots: [{ quantity: 1, cost: 150, tier: "c1" }],
       markPrice: 100,
       currency: "USD",
     });
@@ -576,6 +572,76 @@ describe("@numisma/engine buildCompositionReport", () => {
     ]);
   });
 
+  it("keeps an untiered Position (single c1 Lot) byte-identical to the flat-amount path", () => {
+    // Dropping the {quantity, averageCost} shim must not change output: the shim
+    // mapped a flat amount to exactly one c1 Lot, so a single-c1-Lot Position must
+    // produce the market value, cost basis, and P&L the flat path produced on main.
+    const quantity = 2;
+    const cost = 100;
+    const markPrice = 150;
+    const report = buildCompositionReport(
+      parseFixture(singlePositionReview([{ quantity, cost, tier: "c1" }], markPrice)),
+    );
+
+    const marketValue = quantity * markPrice; // 300
+    const costBasis = quantity * cost; // 200
+    expect(report.totals.fundValueUsd).toBe(marketValue);
+    expect(report.dashboard.summary.totalUnrealizedPnlUsd).toBe(marketValue - costBasis);
+
+    const instrument = sectionRows(report, "instruments")[0];
+    expect(instrument).toMatchObject({
+      usdValue: marketValue,
+      costBasisUsd: costBasis,
+      unrealizedPnlUsd: marketValue - costBasis,
+    });
+    // The lone c1 tier line equals the whole untiered Position.
+    expect(sectionRows(report, "tiers")).toEqual([
+      {
+        id: "tier:c1",
+        kind: "tier",
+        label: "c1",
+        usdValue: marketValue,
+        percentOfFund: 100,
+        costBasisUsd: costBasis,
+        unrealizedPnlUsd: marketValue - costBasis,
+      },
+    ]);
+  });
+
+  it("preserves aggregate numbers when a Position is tiered (split into Lots)", () => {
+    // Splitting one Lot into several with the same total quantity and cost keeps
+    // every non-tier rollup byte-identical; only the tier section changes.
+    const markPrice = 150;
+    const single = buildCompositionReport(
+      parseFixture(singlePositionReview([{ quantity: 4, cost: 100, tier: "c1" }], markPrice)),
+    );
+    const tiered = buildCompositionReport(
+      parseFixture(
+        singlePositionReview(
+          [
+            { quantity: 1, cost: 100, tier: "c1" },
+            { quantity: 3, cost: 100, tier: "c2" },
+          ],
+          markPrice,
+        ),
+      ),
+    );
+
+    for (const section of ["portfolios", "tempos", "accounts", "instruments"] as const) {
+      expect(sectionRows(tiered, section)).toEqual(sectionRows(single, section));
+    }
+    expect(tiered.totals.fundValueUsd).toBe(single.totals.fundValueUsd);
+    expect(tiered.dashboard.summary.totalUnrealizedPnlUsd).toBe(
+      single.dashboard.summary.totalUnrealizedPnlUsd,
+    );
+    // The single Position has one c1 tier line; the tiered Position splits into two.
+    expect(sectionRows(single, "tiers").map((row) => row.id)).toEqual(["tier:c1"]);
+    expect(sectionRows(tiered, "tiers").map((row) => row.id).sort()).toEqual([
+      "tier:c1",
+      "tier:c2",
+    ]);
+  });
+
   it("attributes tiered cash Reserves into the Capital Tier rollup, untiered cash stays out", () => {
     // A cash Lot is degenerate: value == cost, Price P&L == 0. Two tiered
     // Reserves (USD + MXN) contribute to the tier rollup; an untiered Reserve
@@ -678,8 +744,9 @@ describe("@numisma/engine buildCompositionReport", () => {
           executionMode: "live",
           accountId: "xtb-usd",
           currency: "USD",
-          amount: 579.88,
-          // Approximate source split: sums to 580.00, 0.12 over the balance.
+          amount: 560,
+          // Lots sum to 580, $20 over the $560 balance — well beyond the hybrid
+          // band (max($0.01, 0.1% × 560) = $0.56): real misallocation, not rounding.
           lots: [
             { quantity: 453, tier: "c1" },
             { quantity: 127, tier: "c2" },
@@ -703,11 +770,74 @@ describe("@numisma/engine buildCompositionReport", () => {
     expect(validationSeverityByCode["reserve-lot-sum-mismatch"]).toBe("warning");
 
     // amount stays authoritative for fund value; the split is taken as-given.
-    expect(report.totals.fundValueUsd).toBe(579.88);
+    expect(report.totals.fundValueUsd).toBe(560);
     expect(sectionRows(report, "tiers").map((row) => row.usdValue)).toEqual([453, 127]);
   });
 
-  it("treats Reserve Lot sums within a cent of amount as reconciling (no warning)", () => {
+  it("reconciles Reserve Lot sums on a hybrid max($0.01, 0.1%) tolerance", () => {
+    // One reserve per band edge, all live, so a single report exercises the
+    // whole hybrid tolerance: floor on tiny balances, relative band on large
+    // ones, and a warning only beyond the band.
+    const reserve = (
+      id: string,
+      amount: number,
+      lots: Array<{ quantity: number; tier: "c1" | "c2" | "c3" }>,
+    ) => ({
+      id,
+      portfolioId: "core",
+      tempo: "Reserve",
+      executionMode: "live" as const,
+      accountId: "xtb-usd",
+      currency: "USD" as const,
+      amount,
+      lots,
+    });
+
+    const data = parseFixture({
+      fund: { id: "cash-fund", name: "Cash Fund", baseCurrency: "USD" },
+      review: { asOf: "2026-06-25", usdMxn: 20 },
+      portfolios: [{ id: "core", name: "Core" }],
+      accounts: [
+        { id: "xtb-usd", name: "Broker", platform: "XTB", currency: "USD" },
+      ],
+      instruments: [],
+      reserves: [
+        // Tiny balance: 0.1% × 5 = $0.005 < the $0.01 floor, so the floor governs.
+        // Gap $0.008 sits under the floor — no warning.
+        reserve("floor-ok", 5, [
+          { quantity: 3, tier: "c1" },
+          { quantity: 2.008, tier: "c2" },
+        ]),
+        // Same tiny balance, gap $0.02 clears the $0.01 floor — warning.
+        reserve("floor-warn", 5, [
+          { quantity: 3, tier: "c1" },
+          { quantity: 2.02, tier: "c2" },
+        ]),
+        // Large balance: 0.1% × 1,000,000 = $1,000 band. Gap $500 would trip the
+        // old flat $0.01, but is forgiven by the relative band — no warning.
+        reserve("relative-ok", 1_000_000, [
+          { quantity: 600_000, tier: "c1" },
+          { quantity: 400_500, tier: "c2" },
+        ]),
+        // Same large balance, gap $1,500 clears the $1,000 band — warning.
+        reserve("relative-warn", 1_000_000, [
+          { quantity: 600_000, tier: "c1" },
+          { quantity: 401_500, tier: "c2" },
+        ]),
+      ],
+      positions: [],
+    });
+
+    const report = buildCompositionReport(data);
+
+    const mismatches = report.warnings
+      .filter((warning) => warning.code === "reserve-lot-sum-mismatch")
+      .map((warning) => warning.recordId)
+      .sort();
+    expect(mismatches).toEqual(["floor-warn", "relative-warn"]);
+  });
+
+  it("warns and keeps a Reserve untiered when a Lot quantity is invalid", () => {
     const data = parseFixture({
       fund: { id: "cash-fund", name: "Cash Fund", baseCurrency: "USD" },
       review: { asOf: "2026-06-25", usdMxn: 20 },
@@ -718,24 +848,165 @@ describe("@numisma/engine buildCompositionReport", () => {
       instruments: [],
       reserves: [
         {
-          id: "rounded-usd",
+          id: "negative-qty",
           portfolioId: "core",
           tempo: "Reserve",
           executionMode: "live",
           accountId: "xtb-usd",
           currency: "USD",
-          amount: 3763.48682758,
+          amount: 300,
+          // A negative quantity slipped past schema typing: the Reserve stays
+          // untiered (no NaN in the rollup) but the drop is surfaced, not silent.
           lots: [
-            { quantity: 968.5, tier: "c1" },
-            { quantity: 2794.99, tier: "c2" },
+            { quantity: -100, tier: "c1" },
+            { quantity: 400, tier: "c2" },
           ],
+        },
+        {
+          id: "tiered-usd",
+          portfolioId: "core",
+          tempo: "Reserve",
+          executionMode: "live",
+          accountId: "xtb-usd",
+          currency: "USD",
+          amount: 200,
+          lots: [{ quantity: 200, tier: "c1" }],
         },
       ],
       positions: [],
     });
 
     const report = buildCompositionReport(data);
-    expect(report.warnings).toEqual([]);
+
+    const invalid = report.warnings.filter(
+      (warning) => warning.code === "invalid-reserve-lot-quantity",
+    );
+    expect(invalid).toHaveLength(1);
+    expect(invalid[0]).toMatchObject({
+      code: "invalid-reserve-lot-quantity",
+      severity: "warning",
+      recordId: "negative-qty",
+    });
+    expect(validationSeverityByCode["invalid-reserve-lot-quantity"]).toBe("warning");
+
+    // amount stays authoritative for the fund even though the Reserve is untiered.
+    expect(report.totals.fundValueUsd).toBe(500);
+    // Only the valid Reserve reaches the tier rollup; the invalid one is dropped.
+    expect(sectionRows(report, "tiers")).toEqual([
+      {
+        id: "tier:c1",
+        kind: "tier",
+        label: "c1",
+        usdValue: 200,
+        percentOfFund: 40,
+        costBasisUsd: 200,
+      },
+    ]);
+  });
+
+  it("preserves aggregate numbers when a Reserve is tiered (split into Lots)", () => {
+    const baseReserve = {
+      id: "cash-core",
+      portfolioId: "core",
+      tempo: "Reserve",
+      executionMode: "live" as const,
+      accountId: "xtb-usd",
+      currency: "USD" as const,
+      amount: 1000,
+    };
+    const fixture = {
+      fund: { id: "cash-fund", name: "Cash Fund", baseCurrency: "USD" },
+      review: { asOf: "2026-06-25", usdMxn: 20 },
+      portfolios: [{ id: "core", name: "Core" }],
+      accounts: [
+        { id: "xtb-usd", name: "Broker", platform: "XTB", currency: "USD" },
+      ],
+      instruments: [],
+      positions: [],
+    };
+
+    const untiered = buildCompositionReport(
+      parseFixture({ ...fixture, reserves: [baseReserve] }),
+    );
+    const tiered = buildCompositionReport(
+      parseFixture({
+        ...fixture,
+        reserves: [
+          {
+            ...baseReserve,
+            lots: [
+              { quantity: 700, tier: "c1" },
+              { quantity: 300, tier: "c2" },
+            ],
+          },
+        ],
+      }),
+    );
+
+    // Every non-tier rollup is byte-identical; only the tier section changes.
+    for (const section of ["portfolios", "tempos", "accounts", "instruments"] as const) {
+      expect(sectionRows(tiered, section)).toEqual(sectionRows(untiered, section));
+    }
+    expect(tiered.totals.fundValueUsd).toBe(untiered.totals.fundValueUsd);
+    expect(tiered.dashboard.summary.totalUnrealizedPnlUsd).toBe(
+      untiered.dashboard.summary.totalUnrealizedPnlUsd,
+    );
+    expect(tiered.warnings).toEqual([]);
+
+    // Untiered Reserve contributes nothing to the tier rollup; tiering splits it.
+    expect(sectionRows(untiered, "tiers")).toEqual([]);
+    expect(sectionRows(tiered, "tiers").map((row) => row.id)).toEqual([
+      "tier:c1",
+      "tier:c2",
+    ]);
+  });
+
+  it("rolls the tracked cash-genealogy fixture up end-to-end", () => {
+    const report = buildCompositionReport(loadCashGenealogyFixture());
+
+    // Fund = 1000 + (2000 MXN / 20) + 500 + 800 + 300; cash carries no P&L.
+    expect(report.totals.fundValueUsd).toBe(2700);
+    expect(report.dashboard.summary.totalUnrealizedPnlUsd).toBe(0);
+
+    // Both reserve anomalies surface as warnings; nothing is silently dropped.
+    expect(
+      report.warnings.map(({ code, recordId }) => ({ code, recordId })).sort(
+        (a, b) => a.recordId!.localeCompare(b.recordId!),
+      ),
+    ).toEqual([
+      { code: "invalid-reserve-lot-quantity", recordId: "invalid-qty-usd" },
+      { code: "reserve-lot-sum-mismatch", recordId: "mismatch-usd" },
+    ]);
+
+    // Tier rollup: c1 = 600 + 100 (MXN) + 500 (mismatch, taken as-given);
+    // c2 = 400 + 250 (mismatch). Blended and invalid-quantity reserves stay out.
+    expect(sectionRows(report, "tiers")).toEqual([
+      {
+        id: "tier:c1",
+        kind: "tier",
+        label: "c1",
+        usdValue: 1200,
+        percentOfFund: 44.444444444444,
+        costBasisUsd: 1200,
+      },
+      {
+        id: "tier:c2",
+        kind: "tier",
+        label: "c2",
+        usdValue: 650,
+        percentOfFund: 24.074074074074,
+        costBasisUsd: 650,
+      },
+    ]);
+
+    // Honest partial attribution: the tier total sits below 100% of the fund by
+    // the untraced remainder (blended + invalid + the mismatch gap), never normalized.
+    const tierTotal = sectionRows(report, "tiers").reduce(
+      (sum, row) => sum + row.usdValue,
+      0,
+    );
+    expect(tierTotal).toBe(1850);
+    expect(tierTotal).toBeLessThan(report.totals.fundValueUsd);
   });
 
   it("derives a sorted price journey with Price P&L from the Close series", () => {
@@ -770,13 +1041,100 @@ describe("@numisma/engine buildCompositionReport", () => {
     expect(report.priceJourneys).toEqual([]);
   });
 
+  it("surfaces skipped-close for a Close referencing an unknown Instrument while valid anchors still render", () => {
+    const report = buildCompositionReport(
+      parseFixture(
+        priceJourneyReview({
+          closes: [
+            { instrumentId: "btc-usd", asOf: "2026-05-08", price: 100 },
+            { instrumentId: "btc-usd", asOf: "2026-05-15", price: 110 },
+            { instrumentId: "ghost-usd", asOf: "2026-05-15", price: 5 },
+          ],
+        }),
+      ),
+    );
+
+    const skipped = report.warnings.filter((w) => w.code === "skipped-close");
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0]?.recordId).toBe("ghost-usd");
+    expect(skipped[0]?.severity).toBe("warning");
+
+    // The unknown anchor is dropped, but its valid siblings still render.
+    const btc = report.priceJourneys.find((j) => j.instrumentId === "btc-usd");
+    expect(btc?.points.map((p) => p.asOf)).toEqual(["2026-05-08", "2026-05-15"]);
+  });
+
+  it("surfaces skipped-close for invalid Close scalars and still builds the journey from the remaining valid anchors", () => {
+    const report = buildCompositionReport(
+      parseFixture(
+        priceJourneyReview({
+          closes: [
+            { instrumentId: "btc-usd", asOf: "2026-05-08", price: 100 },
+            { instrumentId: "btc-usd", asOf: "2026-05-15", price: -1 }, // invalid price
+            { instrumentId: "btc-usd", asOf: "not-a-date", price: 130 }, // invalid date
+            { instrumentId: "btc-usd", asOf: "2026-05-22", price: 120 },
+          ],
+        }),
+      ),
+    );
+
+    const skipped = report.warnings.filter((w) => w.code === "skipped-close");
+    expect(skipped).toHaveLength(2);
+    expect(skipped.every((w) => w.recordId === "btc-usd")).toBe(true);
+
+    // A dropped/invalid anchor does not block the journey: it renders from the
+    // two valid anchors that remain.
+    const btc = report.priceJourneys.find((j) => j.instrumentId === "btc-usd");
+    expect(btc?.points.map((p) => p.asOf)).toEqual(["2026-05-08", "2026-05-22"]);
+    expect(btc?.firstPrice).toBe(100);
+    expect(btc?.latestPrice).toBe(120);
+    expect(btc?.changeAbs).toBe(20);
+  });
+
+  it("fires markprice-close-mismatch per-position when markPrice diverges from the latest Close beyond tolerance, without altering valuation", () => {
+    const report = buildCompositionReport(
+      parseFixture(
+        priceJourneyReview({
+          markPrice: 210,
+          closes: [{ instrumentId: "aapl-usd", asOf: "2026-05-29", price: 200 }],
+        }),
+      ),
+    );
+
+    const mismatch = report.warnings.filter(
+      (w) => w.code === "markprice-close-mismatch",
+    );
+    expect(mismatch).toHaveLength(1);
+    expect(mismatch[0]?.recordId).toBe("aapl-core");
+    expect(mismatch[0]?.severity).toBe("warning");
+
+    // markPrice (210) stays the authoritative P&L input; the Close (200) is
+    // display-only and never drives valuation: one unit ⇒ fund value 210.
+    expect(report.totals.fundValueUsd).toBe(210);
+  });
+
+  it("does not fire markprice-close-mismatch when markPrice and the latest Close agree within tolerance", () => {
+    const report = buildCompositionReport(
+      parseFixture(
+        priceJourneyReview({
+          markPrice: 200.5,
+          closes: [{ instrumentId: "aapl-usd", asOf: "2026-05-29", price: 200 }],
+        }),
+      ),
+    );
+
+    expect(
+      report.warnings.filter((w) => w.code === "markprice-close-mismatch"),
+    ).toHaveLength(0);
+  });
+
   it("pins the sanitized realistic fixture as the stable canonical answer", () => {
     const report = buildCompositionReport(loadSanitizedRealisticFixture());
 
     expect(canonicalSnapshot(report)).toEqual({
       totals: {
         baseCurrency: "USD",
-        fundValueUsd: 10340,
+        fundValueUsd: 10859.930675909878,
         usdMxn: 17.31,
       },
       excluded: {
@@ -786,8 +1144,8 @@ describe("@numisma/engine buildCompositionReport", () => {
       },
       warnings: [{ code: "missing-instrument", recordId: "sol-binance-invalid" }],
       summary: {
-        fundValueUsd: 10340,
-        totalUnrealizedPnlUsd: 399,
+        fundValueUsd: 10859.93,
+        totalUnrealizedPnlUsd: 453.65,
         largestPortfolio: "portfolio:core",
         largestTempo: "tempo:Capital",
         largestAccount: "account:xtb-usd",
@@ -805,195 +1163,198 @@ describe("@numisma/engine buildCompositionReport", () => {
           {
             id: "portfolio:core",
             usdValue: 6220,
-            percentOfFund: 60.154739,
+            percentOfFund: 57.274767,
             costBasisUsd: 5040,
             unrealizedPnlUsd: 260,
           },
           {
             id: "portfolio:tactical",
-            usdValue: 4120,
-            percentOfFund: 39.845261,
-            costBasisUsd: 3061,
-            unrealizedPnlUsd: 139,
+            usdValue: 4639.93,
+            percentOfFund: 42.725233,
+            costBasisUsd: 3526.28,
+            unrealizedPnlUsd: 193.65,
           },
         ],
         tempos: [
           {
             id: "tempo:Capital",
             usdValue: 3090,
-            percentOfFund: 29.883946,
+            percentOfFund: 28.45322,
             costBasisUsd: 3016,
             unrealizedPnlUsd: 74,
           },
           {
             id: "tempo:Wealth",
             usdValue: 2950,
-            percentOfFund: 28.529981,
+            percentOfFund: 27.164078,
             costBasisUsd: 2696,
             unrealizedPnlUsd: 254,
           },
           {
             id: "tempo:Reserve",
             usdValue: 1840,
-            percentOfFund: 17.794971,
-            costBasisUsd: undefined,
-            unrealizedPnlUsd: undefined,
+            percentOfFund: 16.943018,
           },
           {
             id: "tempo:Liquid",
             usdValue: 1150,
-            percentOfFund: 11.121857,
+            percentOfFund: 10.589386,
             costBasisUsd: 1077.5,
             unrealizedPnlUsd: 72.5,
           },
           {
-            id: "tempo:Pulse",
-            usdValue: 750,
-            percentOfFund: 7.253385,
-            costBasisUsd: 784.5,
-            unrealizedPnlUsd: -34.5,
+            id: "tempo:Foresight",
+            usdValue: 1079.93,
+            percentOfFund: 9.944177,
+            costBasisUsd: 992.28,
+            unrealizedPnlUsd: 87.65,
           },
           {
-            id: "tempo:Foresight",
-            usdValue: 560,
-            percentOfFund: 5.415861,
-            costBasisUsd: 527,
-            unrealizedPnlUsd: 33,
+            id: "tempo:Pulse",
+            usdValue: 750,
+            percentOfFund: 6.906121,
+            costBasisUsd: 784.5,
+            unrealizedPnlUsd: -34.5,
           },
         ],
         accounts: [
           {
             id: "account:xtb-usd",
             usdValue: 2270,
-            percentOfFund: 21.953578,
+            percentOfFund: 20.902528,
             costBasisUsd: 1510,
             unrealizedPnlUsd: 140,
           },
           {
             id: "account:t1-usd",
             usdValue: 2100,
-            percentOfFund: 20.309478,
+            percentOfFund: 19.33714,
             costBasisUsd: 1896,
             unrealizedPnlUsd: 204,
           },
           {
             id: "account:binance-usd",
             usdValue: 1710,
-            percentOfFund: 16.537718,
+            percentOfFund: 15.745957,
             costBasisUsd: 1289.5,
             unrealizedPnlUsd: 60.5,
           },
           {
             id: "account:bingx-usd",
             usdValue: 1270,
-            percentOfFund: 12.282398,
+            percentOfFund: 11.694366,
             costBasisUsd: 932.5,
             unrealizedPnlUsd: 17.5,
           },
           {
             id: "account:gbm-usd",
             usdValue: 950,
-            percentOfFund: 9.187621,
+            percentOfFund: 8.747754,
             costBasisUsd: 982,
             unrealizedPnlUsd: -32,
           },
           {
             id: "account:t2-usd",
             usdValue: 900,
-            percentOfFund: 8.704062,
+            percentOfFund: 8.287346,
             costBasisUsd: 882,
             unrealizedPnlUsd: 18,
           },
           {
+            id: "account:bitso-mxn",
+            usdValue: 819.93,
+            percentOfFund: 7.550054,
+            costBasisUsd: 465.28,
+            unrealizedPnlUsd: 54.65,
+          },
+          {
             id: "account:bitget-usd",
             usdValue: 540,
-            percentOfFund: 5.222437,
+            percentOfFund: 4.972407,
             costBasisUsd: 312,
             unrealizedPnlUsd: -12,
           },
           {
             id: "account:bitso-usd",
             usdValue: 300,
-            percentOfFund: 2.901354,
+            percentOfFund: 2.762449,
             costBasisUsd: 297,
             unrealizedPnlUsd: 3,
-          },
-          {
-            id: "account:bitso-mxn",
-            usdValue: 300,
-            percentOfFund: 2.901354,
-            costBasisUsd: undefined,
-            unrealizedPnlUsd: undefined,
           },
         ],
         instruments: [
           {
             id: "instrument:btc-usd",
             usdValue: 3500,
-            percentOfFund: 33.84913,
+            percentOfFund: 32.228567,
             costBasisUsd: 3373,
             unrealizedPnlUsd: 127,
           },
           {
             id: "instrument:eth-usd",
             usdValue: 2400,
-            percentOfFund: 23.210832,
+            percentOfFund: 22.099589,
             costBasisUsd: 2236,
             unrealizedPnlUsd: 164,
           },
           {
             id: "instrument:reserve",
             usdValue: 1840,
-            percentOfFund: 17.794971,
-            costBasisUsd: undefined,
-            unrealizedPnlUsd: undefined,
+            percentOfFund: 16.943018,
           },
           {
             id: "instrument:aapl-usd",
             usdValue: 850,
-            percentOfFund: 8.220503,
+            percentOfFund: 7.826938,
             costBasisUsd: 800,
             unrealizedPnlUsd: 50,
           },
           {
+            id: "instrument:cemex-mxn",
+            usdValue: 519.93,
+            percentOfFund: 4.787606,
+            costBasisUsd: 465.28,
+            unrealizedPnlUsd: 54.65,
+          },
+          {
             id: "instrument:googl-usd",
             usdValue: 510,
-            percentOfFund: 4.932302,
+            percentOfFund: 4.696163,
             costBasisUsd: 480,
             unrealizedPnlUsd: 30,
           },
           {
             id: "instrument:rivn-usd",
             usdValue: 310,
-            percentOfFund: 2.998066,
+            percentOfFund: 2.85453,
             costBasisUsd: 260,
             unrealizedPnlUsd: 50,
           },
           {
             id: "instrument:tsla-usd",
             usdValue: 260,
-            percentOfFund: 2.514507,
+            percentOfFund: 2.394122,
             costBasisUsd: 230,
             unrealizedPnlUsd: 30,
           },
           {
             id: "instrument:intc-usd",
             usdValue: 240,
-            percentOfFund: 2.321083,
+            percentOfFund: 2.209959,
             costBasisUsd: 310,
             unrealizedPnlUsd: -70,
           },
           {
             id: "instrument:sbux-usd",
             usdValue: 230,
-            percentOfFund: 2.224371,
+            percentOfFund: 2.117877,
             costBasisUsd: 220,
             unrealizedPnlUsd: 10,
           },
           {
             id: "instrument:nke-usd",
             usdValue: 200,
-            percentOfFund: 1.934236,
+            percentOfFund: 1.841632,
             costBasisUsd: 192,
             unrealizedPnlUsd: 8,
           },
@@ -1002,16 +1363,23 @@ describe("@numisma/engine buildCompositionReport", () => {
           {
             id: "tier:c1",
             usdValue: 8100,
-            percentOfFund: 78.336557,
+            percentOfFund: 74.586111,
             costBasisUsd: 7717,
             unrealizedPnlUsd: 383,
           },
           {
             id: "tier:c2",
-            usdValue: 400,
-            percentOfFund: 3.868472,
-            costBasisUsd: 384,
-            unrealizedPnlUsd: 16,
+            usdValue: 746.62,
+            percentOfFund: 6.875002,
+            costBasisUsd: 696.5,
+            unrealizedPnlUsd: 50.12,
+          },
+          {
+            id: "tier:c3",
+            usdValue: 173.31,
+            percentOfFund: 1.595869,
+            costBasisUsd: 152.78,
+            unrealizedPnlUsd: 20.53,
           },
         ],
       },
@@ -1037,6 +1405,17 @@ function loadSanitizedRealisticFixture(): FundReviewData {
     JSON.parse(
       readFileSync(
         new URL("../tests/fixtures/sanitized-realistic-fund-review.json", import.meta.url),
+        "utf8",
+      ),
+    ),
+  );
+}
+
+function loadCashGenealogyFixture(): FundReviewData {
+  return parseFixture(
+    JSON.parse(
+      readFileSync(
+        new URL("../tests/fixtures/sanitized-cash-genealogy-review.json", import.meta.url),
         "utf8",
       ),
     ),
@@ -1090,6 +1469,63 @@ function sectionRows(
   sectionId: "portfolios" | "tempos" | "accounts" | "instruments" | "tiers",
 ) {
   return report.dashboard.sections.find((section) => section.id === sectionId)?.rows ?? [];
+}
+
+function singlePositionReview(lots: PositionLot[], markPrice: number) {
+  return {
+    fund: { id: "single-fund", name: "Single Fund", baseCurrency: "USD" },
+    review: { asOf: "2026-06-25", usdMxn: 20 },
+    portfolios: [{ id: "core", name: "Core" }],
+    accounts: [{ id: "xtb-usd", name: "Broker", platform: "XTB", currency: "USD" }],
+    instruments: [{ id: "aapl-usd", name: "Apple", symbol: "AAPL", currency: "USD" }],
+    reserves: [],
+    positions: [
+      {
+        id: "aapl-core",
+        portfolioId: "core",
+        tempo: "Capital",
+        executionMode: "live",
+        accountId: "xtb-usd",
+        instrumentId: "aapl-usd",
+        direction: "long",
+        markPrice,
+        currency: "USD",
+        lots,
+      },
+    ],
+  };
+}
+
+function priceJourneyReview(opts: {
+  markPrice?: number;
+  closes: Array<{ instrumentId: string; asOf: string; price: number }>;
+}) {
+  return {
+    fund: { id: "pj-fund", name: "Price Journey Fund", baseCurrency: "USD" },
+    review: { asOf: "2026-06-25", usdMxn: 20 },
+    portfolios: [{ id: "core", name: "Core" }],
+    accounts: [{ id: "xtb-usd", name: "Broker", platform: "XTB", currency: "USD" }],
+    instruments: [
+      { id: "aapl-usd", name: "Apple", symbol: "AAPL", currency: "USD" },
+      { id: "btc-usd", name: "Bitcoin", symbol: "BTC", currency: "USD" },
+    ],
+    reserves: [],
+    positions: [
+      {
+        id: "aapl-core",
+        portfolioId: "core",
+        tempo: "Capital",
+        executionMode: "live",
+        accountId: "xtb-usd",
+        instrumentId: "aapl-usd",
+        direction: "long",
+        markPrice: opts.markPrice ?? 200,
+        currency: "USD",
+        lots: [{ quantity: 1, cost: 100, tier: "c1" }],
+      },
+    ],
+    closes: opts.closes,
+  };
 }
 
 function makeCanonicalFixture() {
@@ -1194,8 +1630,7 @@ function makeCanonicalFixture() {
         accountId: "xtb-usd",
         instrumentId: "aapl-usd",
         direction: "long",
-        quantity: 2,
-        averageCost: 100,
+        lots: [{ quantity: 2, cost: 100, tier: "c1" }],
         markPrice: 150,
         currency: "USD",
       },
@@ -1207,8 +1642,7 @@ function makeCanonicalFixture() {
         accountId: "binance-usd",
         instrumentId: "btc-usd",
         direction: "long",
-        quantity: 1,
-        averageCost: 100,
+        lots: [{ quantity: 1, cost: 100, tier: "c1" }],
         markPrice: 150,
         currency: "USD",
       },
@@ -1220,8 +1654,7 @@ function makeCanonicalFixture() {
         accountId: "bitso-mxn",
         instrumentId: "cemex-mxn",
         direction: "long",
-        quantity: 100,
-        averageCost: 20,
+        lots: [{ quantity: 100, cost: 20, tier: "c1" }],
         markPrice: 10,
         currency: "MXN",
       },
@@ -1233,8 +1666,7 @@ function makeCanonicalFixture() {
         accountId: "binance-usd",
         instrumentId: "btc-usd",
         direction: "long",
-        quantity: 1,
-        averageCost: 100,
+        lots: [{ quantity: 1, cost: 100, tier: "c1" }],
         markPrice: 100,
         currency: "USD",
       },
@@ -1246,8 +1678,7 @@ function makeCanonicalFixture() {
         accountId: "xtb-usd",
         instrumentId: "aapl-usd",
         direction: "long",
-        quantity: 1,
-        averageCost: 100,
+        lots: [{ quantity: 1, cost: 100, tier: "c1" }],
         markPrice: Number.NaN,
         currency: "USD",
       },
