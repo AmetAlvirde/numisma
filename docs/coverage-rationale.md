@@ -60,57 +60,71 @@ state the pipeline already excludes, so they are documented rather than tested.
   branches above it *are* tested, the last one skipped only when running as
   root — see `review-file.test.ts`.)
 
-## 3. Low-value presentation branches (deferred with #72)
+**`packages/engine/src/compose.ts`**
 
-**`packages/engine/src/format.ts`** (99.3% lines) — display-string branches in
-the CLI report that carry no logic, reachable only by hand-building zero-state
-`CompositionReport`s:
+- `buildCanonicalState` Reserve `portfolioLabel` fallback
+  `portfolios.get(reserve.portfolioId)?.name ?? reserve.portfolioId` (~L329) and
+  the Position `portfolioLabel` fallback (~L480) — both run only after
+  `validateCapitalBase` has already excluded any record whose `portfolioId` is
+  missing, so `portfolios.get(...)` always resolves and the optional-chain /
+  `?? id` miss is unreachable.
+- `accountLabel` `account ? … : fallback` false branch (~L736) — same reason:
+  `validateCapitalBase` excludes any record with a missing `accountId`, so every
+  record that reaches `accountLabel` has a resolved Account.
 
-- `formatRowFocus` `if (!row) return "No live records"` (~L128) — an undefined
-  summary focus (empty section).
-- `formatDataSafety` `shortDeferred > 0` ternary and the `warnings.length > 0 ?
-  … : "no warnings"` strings (~L141-142, L150, L173).
+**`packages/engine/src/format.ts`**
 
-These are pure presentation. They share the display layer with the renderer work
-in **#72** and are folded into that issue rather than tested here.
+- `sectionRows` `?.rows ?? []` miss (~L150) — the five composition sections are
+  always present in the report, so `.find(...)` never returns undefined and the
+  `?? []` fallback is unreachable from `formatCompositionReport`.
+
+**`packages/tui/src/dashboard.ts`**
+
+- `emptyDetailMessage` Tempo branch (~L345-346) and Account branches
+  (~L348-350) — `emptyDetailMessage` is reached only when a drill-down's detail
+  body is empty, and only a Portfolio drill-down can be empty (it filters to
+  Positions, so a Portfolio holding only Reserves yields no rows). A Tempo row
+  exists only because a line carries that Tempo, and an Account row only because
+  a line carries that Account, so their drill-downs are never empty and these
+  messages never render. The Portfolio branch (~L342-343) *is* tested
+  (`dashboard.test.ts`).
+
+## 3. Low-value presentation branches
 
 **`packages/engine/src/price-journey.ts`** (100% lines) — the journeys sort
 comparator's `|| a.label.localeCompare(b.label)` tie-break (~L104 branch) runs
 only when two journeys have equal point counts. A tie-break ordering detail; not
 worth a crafted multi-journey fixture this increment.
 
-## 4. Real, reachable behavior — not yet tested (tracked in #72)
+## 4. Real, reachable behavior — closed by #72
 
-This is the honest part: the following are **not** defensive and **not**
-low-value. They are shippable behavior that the suite does not yet exercise, so a
-regression could pass green. They are deferred to a dedicated increment, not
-excused. See **[#72](https://github.com/AmetAlvirde/numisma/issues/72)**.
+The behavior previously parked here (compose-engine warnings/exclusions,
+drill-down filtering, and the dashboard renderer's empty-state / tier-expansion /
+title branches) was **not** defensive and **not** low-value — shippable behavior
+a regression could break while the suite stayed green. It is now unit-tested:
 
-**`packages/engine/src/compose.ts`** (94.0% lines / 90.1% branches)
+- **`packages/engine/src/compose.ts`** (100% lines) — Reserve missing-reference
+  exclusion, Position `unsupported-execution-mode`, Account/Instrument
+  `currency-mismatch`, Lot-level invalid-numeric warnings (quantity/cost/
+  `entryFx`, plus the empty-`lots` guard for non-parse callers), and
+  `detailLinesForRow` portfolio/tempo/account drill-down filtering — all in
+  `fund-composition.test.ts`. (`parseFundReview` rejects empty `lots`, so that
+  one guard is exercised through the public `buildCompositionReport` with a
+  directly-built `FundReviewData`, the same way the TUI tests do.)
+- **`packages/tui/src/dashboard.ts`** (100% branches) — empty-section "No live
+  records." rows, the Portfolio empty-detail message, typed vs untyped detail
+  columns, zero-denominator tier-table guards, and the `detailTitle` /
+  summary-focus placeholder branches — all in `dashboard.test.ts`.
+- **`packages/engine/src/format.ts`** (100% lines) — the `formatRowFocus`
+  "No live records" placeholder, the `formatDataSafety` "no warnings" string,
+  and the empty-section body — all in `fund-composition.test.ts`.
 
-- Reserve missing-reference exclusion (~L286-289).
-- Position `unsupported-execution-mode` warning + exclusion (~L342-351).
-- Position `currency-mismatch` warnings against Account and Instrument currency
-  (~L399-417).
-- Lot-level invalid-numeric warnings: empty lots, non-numeric quantity/cost,
-  invalid `entryFx` (~L429-437).
-- `detailLinesForRow` portfolio / tempo / account drill-down filtering
-  (~L530-556).
-
-**`packages/tui/src/dashboard.ts`** (94.5% lines / 86.4% branches)
-
-- Empty-section "No live records." line (~L141-143).
-- Empty-detail body message and `emptyDetailMessage` variants (~L297, L341-351).
-- Tier-expansion row rendering and `detailTitle` tempo/account branches
-  (~L336-351).
-- Summary "No live records" fallback (~L383-384).
-- Typed-row detail-table rendering branches (tempo/account/reserve) still
-  partially uncovered (~L243-258 branches).
+What remains uncovered after #72 is only the §2 defensive guards and the §3
+tie-break — each listed there with a concrete reason.
 
 ## What this number means
 
-After this pass, every Node module's *meaningful, reachable* behavior is either
-unit-tested or listed in §4 with an owning issue. §1–§3 account for what is
-deliberately not in the number. "Reliable" here means *measured and accounted
-for* — not "100% of everything," and explicitly not yet covering the §4 behavior
-or the Bun-only wiring.
+After this pass, every Node module's *meaningful, reachable* behavior is
+unit-tested; §1–§3 account, concretely, for everything still outside the number.
+"Reliable" here means *measured and accounted for* — not "100% of everything,"
+and explicitly not covering the Bun-only wiring.
