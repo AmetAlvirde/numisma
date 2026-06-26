@@ -516,6 +516,260 @@ describe("@numisma/engine buildCompositionReport", () => {
     expect(buildDashboardDetail(data, report, "instrument:reserve")).toBeUndefined();
   });
 
+  it("attributes per-tier P&L from Lots and converts cost basis at entry FX", () => {
+    // Two tiers of one instrument with DIFFERENT costs (50 vs 80) prove the
+    // model is a per-Lot join, not a "one cost + tier-quantity split" shortcut.
+    // The c1 Lot also carries an entry FX (25) distinct from the review FX (20),
+    // proving cost basis converts at acquisition rate while value uses review.
+    const data = parseFixture({
+      fund: { id: "fx-fund", name: "FX Fund", baseCurrency: "USD" },
+      review: { asOf: "2026-06-25", usdMxn: 20 },
+      portfolios: [{ id: "core", name: "Core" }],
+      accounts: [
+        { id: "gbm-mxn", name: "Casa de Bolsa", platform: "GBM", currency: "MXN" },
+      ],
+      instruments: [
+        { id: "cemex-mxn", name: "Cemex", symbol: "CEMEXCPO", currency: "MXN" },
+      ],
+      reserves: [],
+      positions: [
+        {
+          id: "cemex-house-money",
+          portfolioId: "core",
+          tempo: "Capital",
+          executionMode: "live",
+          accountId: "gbm-mxn",
+          instrumentId: "cemex-mxn",
+          direction: "long",
+          markPrice: 100,
+          currency: "MXN",
+          lots: [
+            { quantity: 10, cost: 50, tier: "c1", entryFx: 25 },
+            { quantity: 10, cost: 80, tier: "c2" },
+          ],
+        },
+      ],
+    });
+
+    const report = buildCompositionReport(data);
+
+    expect(report.dashboard.summary.totalUnrealizedPnlUsd).toBe(40);
+    expect(sectionRows(report, "tiers")).toEqual([
+      {
+        id: "tier:c1",
+        kind: "tier",
+        label: "c1",
+        usdValue: 50,
+        percentOfFund: 50,
+        costBasisUsd: 20,
+        unrealizedPnlUsd: 30,
+      },
+      {
+        id: "tier:c2",
+        kind: "tier",
+        label: "c2",
+        usdValue: 50,
+        percentOfFund: 50,
+        costBasisUsd: 40,
+        unrealizedPnlUsd: 10,
+      },
+    ]);
+  });
+
+  it("attributes tiered cash Reserves into the Capital Tier rollup, untiered cash stays out", () => {
+    // A cash Lot is degenerate: value == cost, Price P&L == 0. Two tiered
+    // Reserves (USD + MXN) contribute to the tier rollup; an untiered Reserve
+    // opts out, so the tier total deliberately sits below the fund total.
+    const data = parseFixture({
+      fund: { id: "cash-fund", name: "Cash Fund", baseCurrency: "USD" },
+      review: { asOf: "2026-06-25", usdMxn: 20 },
+      portfolios: [{ id: "core", name: "Core" }],
+      accounts: [
+        { id: "xtb-usd", name: "Broker", platform: "XTB", currency: "USD" },
+        { id: "bitso-mxn", name: "MXN Cash", platform: "BITSO", currency: "MXN" },
+      ],
+      instruments: [],
+      reserves: [
+        {
+          id: "tiered-usd",
+          portfolioId: "core",
+          tempo: "Reserve",
+          executionMode: "live",
+          accountId: "xtb-usd",
+          currency: "USD",
+          amount: 1000,
+          lots: [
+            { quantity: 600, tier: "c1" },
+            { quantity: 400, tier: "c2" },
+          ],
+        },
+        {
+          id: "untiered-usd",
+          portfolioId: "core",
+          tempo: "Reserve",
+          executionMode: "live",
+          accountId: "xtb-usd",
+          currency: "USD",
+          amount: 500,
+        },
+        {
+          id: "tiered-mxn",
+          portfolioId: "core",
+          tempo: "Reserve",
+          executionMode: "live",
+          accountId: "bitso-mxn",
+          currency: "MXN",
+          amount: 2000,
+          lots: [{ quantity: 2000, tier: "c1" }],
+        },
+      ],
+      positions: [],
+    });
+
+    const report = buildCompositionReport(data);
+
+    // Fund = 1000 + 500 + (2000 / 20) = 1600; cash carries no P&L.
+    expect(report.totals.fundValueUsd).toBe(1600);
+    expect(report.dashboard.summary.totalUnrealizedPnlUsd).toBe(0);
+    expect(report.warnings).toEqual([]);
+
+    expect(sectionRows(report, "tiers")).toEqual([
+      {
+        id: "tier:c1",
+        kind: "tier",
+        label: "c1",
+        usdValue: 700, // 600 USD + 2000 MXN / 20
+        percentOfFund: 43.75,
+        costBasisUsd: 700,
+      },
+      {
+        id: "tier:c2",
+        kind: "tier",
+        label: "c2",
+        usdValue: 400,
+        percentOfFund: 25,
+        costBasisUsd: 400,
+      },
+    ]);
+
+    // Untiered cash ($500) keeps the tier rollup honestly below 100% of fund.
+    const tierTotal = sectionRows(report, "tiers").reduce(
+      (sum, row) => sum + row.usdValue,
+      0,
+    );
+    expect(tierTotal).toBe(1100);
+    expect(tierTotal).toBeLessThan(report.totals.fundValueUsd);
+  });
+
+  it("warns when Reserve Lot tiers do not reconcile to amount, keeping amount authoritative", () => {
+    const data = parseFixture({
+      fund: { id: "cash-fund", name: "Cash Fund", baseCurrency: "USD" },
+      review: { asOf: "2026-06-25", usdMxn: 20 },
+      portfolios: [{ id: "core", name: "Core" }],
+      accounts: [
+        { id: "xtb-usd", name: "Broker", platform: "XTB", currency: "USD" },
+      ],
+      instruments: [],
+      reserves: [
+        {
+          id: "blended-usd",
+          portfolioId: "core",
+          tempo: "Reserve",
+          executionMode: "live",
+          accountId: "xtb-usd",
+          currency: "USD",
+          amount: 579.88,
+          // Approximate source split: sums to 580.00, 0.12 over the balance.
+          lots: [
+            { quantity: 453, tier: "c1" },
+            { quantity: 127, tier: "c2" },
+          ],
+        },
+      ],
+      positions: [],
+    });
+
+    const report = buildCompositionReport(data);
+
+    const mismatch = report.warnings.filter(
+      (warning) => warning.code === "reserve-lot-sum-mismatch",
+    );
+    expect(mismatch).toHaveLength(1);
+    expect(mismatch[0]).toMatchObject({
+      code: "reserve-lot-sum-mismatch",
+      severity: "warning",
+      recordId: "blended-usd",
+    });
+    expect(validationSeverityByCode["reserve-lot-sum-mismatch"]).toBe("warning");
+
+    // amount stays authoritative for fund value; the split is taken as-given.
+    expect(report.totals.fundValueUsd).toBe(579.88);
+    expect(sectionRows(report, "tiers").map((row) => row.usdValue)).toEqual([453, 127]);
+  });
+
+  it("treats Reserve Lot sums within a cent of amount as reconciling (no warning)", () => {
+    const data = parseFixture({
+      fund: { id: "cash-fund", name: "Cash Fund", baseCurrency: "USD" },
+      review: { asOf: "2026-06-25", usdMxn: 20 },
+      portfolios: [{ id: "core", name: "Core" }],
+      accounts: [
+        { id: "xtb-usd", name: "Broker", platform: "XTB", currency: "USD" },
+      ],
+      instruments: [],
+      reserves: [
+        {
+          id: "rounded-usd",
+          portfolioId: "core",
+          tempo: "Reserve",
+          executionMode: "live",
+          accountId: "xtb-usd",
+          currency: "USD",
+          amount: 3763.48682758,
+          lots: [
+            { quantity: 968.5, tier: "c1" },
+            { quantity: 2794.99, tier: "c2" },
+          ],
+        },
+      ],
+      positions: [],
+    });
+
+    const report = buildCompositionReport(data);
+    expect(report.warnings).toEqual([]);
+  });
+
+  it("derives a sorted price journey with Price P&L from the Close series", () => {
+    const report = buildCompositionReport(loadSanitizedRealisticFixture());
+
+    const btc = report.priceJourneys.find((journey) => journey.instrumentId === "btc-usd");
+    expect(btc).toMatchObject({
+      label: "BTC (Bitcoin)",
+      currency: "USD",
+      firstPrice: 115340,
+      latestPrice: 100000,
+      changeAbs: -15340,
+    });
+    expect(btc?.points.map((point) => point.asOf)).toEqual([
+      "2026-05-08",
+      "2026-05-15",
+      "2026-05-22",
+      "2026-05-29",
+    ]);
+    expect(btc?.changePct).toBeCloseTo(-13.30, 2);
+
+    // Instruments with fewer than two anchors are not a journey.
+    expect(report.priceJourneys.map((journey) => journey.instrumentId).sort()).toEqual([
+      "aapl-usd",
+      "btc-usd",
+      "eth-usd",
+    ]);
+  });
+
+  it("returns no price journeys when the review records no Close history", () => {
+    const report = buildCompositionReport(parseFixture(makeCanonicalFixture()));
+    expect(report.priceJourneys).toEqual([]);
+  });
+
   it("pins the sanitized realistic fixture as the stable canonical answer", () => {
     const report = buildCompositionReport(loadSanitizedRealisticFixture());
 
@@ -533,6 +787,7 @@ describe("@numisma/engine buildCompositionReport", () => {
       warnings: [{ code: "missing-instrument", recordId: "sol-binance-invalid" }],
       summary: {
         fundValueUsd: 10340,
+        totalUnrealizedPnlUsd: 399,
         largestPortfolio: "portfolio:core",
         largestTempo: "tempo:Capital",
         largestAccount: "account:xtb-usd",
@@ -743,6 +998,22 @@ describe("@numisma/engine buildCompositionReport", () => {
             unrealizedPnlUsd: 8,
           },
         ],
+        tiers: [
+          {
+            id: "tier:c1",
+            usdValue: 8100,
+            percentOfFund: 78.336557,
+            costBasisUsd: 7717,
+            unrealizedPnlUsd: 383,
+          },
+          {
+            id: "tier:c2",
+            usdValue: 400,
+            percentOfFund: 3.868472,
+            costBasisUsd: 384,
+            unrealizedPnlUsd: 16,
+          },
+        ],
       },
     });
   });
@@ -779,6 +1050,9 @@ function canonicalSnapshot(report: ReturnType<typeof buildCompositionReport>) {
     warnings: report.warnings.map(({ code, recordId }) => ({ code, recordId })),
     summary: {
       fundValueUsd: roundSnapshotNumber(report.dashboard.summary.fundValueUsd),
+      totalUnrealizedPnlUsd: roundSnapshotNumber(
+        report.dashboard.summary.totalUnrealizedPnlUsd,
+      ),
       largestPortfolio: report.dashboard.summary.largestPortfolio?.rowId,
       largestTempo: report.dashboard.summary.largestTempo?.rowId,
       largestAccount: report.dashboard.summary.largestAccount?.rowId,
@@ -813,7 +1087,7 @@ function roundSnapshotNumber(value: number, decimals = 2): number {
 
 function sectionRows(
   report: ReturnType<typeof buildCompositionReport>,
-  sectionId: "portfolios" | "tempos" | "accounts" | "instruments",
+  sectionId: "portfolios" | "tempos" | "accounts" | "instruments" | "tiers",
 ) {
   return report.dashboard.sections.find((section) => section.id === sectionId)?.rows ?? [];
 }

@@ -59,6 +59,7 @@ let currentReview:
   | undefined;
 let selectedLine = 0;
 let activeRowId: string | undefined;
+let activeRecordId: string | undefined;
 
 async function refresh(): Promise<void> {
   dashboard.content = `Reloading Fund review data...\n\nData file: ${filePath}`;
@@ -135,7 +136,7 @@ function renderDashboard(): void {
     activeRowId = undefined;
   }
 
-  const lines = buildDashboardLines(currentReview.report, detail);
+  const lines = buildDashboardLines(currentReview.report, detail, activeRecordId);
   selectedLine = normalizeSelection(lines, selectedLine);
   dashboard.content = renderStyledDashboard(
     lines,
@@ -153,7 +154,7 @@ function moveSelection(delta: 1 | -1): void {
   const detail = activeRowId
     ? buildDashboardDetail(currentReview.data, currentReview.report, activeRowId)
     : undefined;
-  const lines = buildDashboardLines(currentReview.report, detail);
+  const lines = buildDashboardLines(currentReview.report, detail, activeRecordId);
   selectedLine = findNextSelectableLine(lines, selectedLine, delta);
   renderDashboard();
 }
@@ -166,7 +167,7 @@ function activateSelection(): void {
   const detail = activeRowId
     ? buildDashboardDetail(currentReview.data, currentReview.report, activeRowId)
     : undefined;
-  const lines = buildDashboardLines(currentReview.report, detail);
+  const lines = buildDashboardLines(currentReview.report, detail, activeRecordId);
   const action = lines[selectedLine]?.action;
   if (!action) {
     return;
@@ -174,17 +175,35 @@ function activateSelection(): void {
 
   if (action.type === "collapse-detail") {
     activeRowId = undefined;
+    activeRecordId = undefined;
+    renderDashboard();
+    return;
+  }
+
+  if (action.type === "expand-record") {
+    activeRecordId = action.recordId;
+    renderDashboard();
+    return;
+  }
+
+  if (action.type === "collapse-record") {
+    activeRecordId = undefined;
     renderDashboard();
     return;
   }
 
   activeRowId = action.rowId;
+  activeRecordId = undefined;
   const nextDetail = buildDashboardDetail(
     currentReview.data,
     currentReview.report,
     activeRowId,
   );
-  const nextLines = buildDashboardLines(currentReview.report, nextDetail);
+  const nextLines = buildDashboardLines(
+    currentReview.report,
+    nextDetail,
+    activeRecordId,
+  );
   selectedLine = nextLines.findIndex(
     (line) => line.action?.type === "collapse-detail",
   );
