@@ -4,11 +4,11 @@
  *
  * This module is the leaf of the engine's internal dependency graph — it holds
  * shapes only, no behavior — so parse, compose, price-journey, and format can
- * all depend on it without cycles. The public type surface is unchanged: these
- * names are re-exported through `fund-composition.ts` and `index.ts` exactly as
- * before. `NamedRecord` and `CapitalRecordBase` are exported here only so the
- * sibling modules can reference them; they are deliberately not re-exported
- * through the public barrel and remain internal to the package.
+ * all depend on it without cycles. The public type surface is the curated set
+ * re-exported through `index.ts`. `NamedRecord` and `CapitalRecordBase` are
+ * exported here only so the sibling modules can reference them; they are
+ * deliberately not re-exported through `index.ts` and remain internal to the
+ * package.
  */
 
 export type Currency = "USD" | "MXN";
