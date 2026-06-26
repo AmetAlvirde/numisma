@@ -28,11 +28,24 @@ export interface PositionLot extends Lot {
 }
 
 /**
- * Reserve Lot face sums within this many record-currency units of `amount` are
- * treated as reconciling (absorbs cent-level rounding in the source); larger
- * gaps emit `reserve-lot-sum-mismatch`. `amount` always stays authoritative.
+ * Reserve Lot face sums are reconciled against `amount` with a hybrid tolerance:
+ * `max(absolute floor, relative fraction × amount)`. The floor absorbs cent-level
+ * rounding on small balances; the relative term scales the forgiveness with the
+ * balance so a hand-rounded provenance split on a large reserve does not trip the
+ * warning, while real misallocation (beyond the band) still emits
+ * `reserve-lot-sum-mismatch`. `amount` always stays authoritative. Both terms are
+ * named and tunable here.
  */
-const RESERVE_LOT_SUM_TOLERANCE = 0.01;
+const RESERVE_LOT_SUM_ABS_TOLERANCE = 0.01;
+const RESERVE_LOT_SUM_REL_TOLERANCE = 0.001; // 0.1% of amount
+
+/** Hybrid reconciliation tolerance for a reserve of the given face `amount`. */
+function reserveLotSumTolerance(amount: number): number {
+  return Math.max(
+    RESERVE_LOT_SUM_ABS_TOLERANCE,
+    RESERVE_LOT_SUM_REL_TOLERANCE * Math.abs(amount),
+  );
+}
 
 export interface FundReviewData {
   fund: {
@@ -193,6 +206,7 @@ export type WarningCode =
   | "invalid-amount"
   | "invalid-position-number"
   | "reserve-lot-sum-mismatch"
+  | "invalid-reserve-lot-quantity"
   | "non-positive-fund-value";
 
 export type ValidationCode =
@@ -218,6 +232,7 @@ export const validationSeverityByCode: Record<ValidationCode, ValidationSeverity
   "invalid-amount": "warning",
   "invalid-position-number": "warning",
   "reserve-lot-sum-mismatch": "warning",
+  "invalid-reserve-lot-quantity": "warning",
   "non-positive-fund-value": "warning",
   "short-deferred": "warning",
 };
@@ -1180,7 +1195,14 @@ function buildReserveTierContributions(
 
   // A bad scalar slipped past schema typing leaves the reserve untiered rather
   // than poisoning the rollup with NaN; `amount` still counts toward the fund.
+  // The drop is surfaced, never silent.
   if (lots.some((lot) => !isNonNegativeNumber(lot.quantity))) {
+    pushWarning(
+      warnings,
+      "invalid-reserve-lot-quantity",
+      `Reserve ${reserve.id} has a Lot with a negative or non-finite quantity; the Reserve stays untiered and amount stays authoritative.`,
+      reserve.id,
+    );
     return undefined;
   }
 
@@ -1200,7 +1222,7 @@ function buildReserveTierContributions(
     tierTotals.set(lot.tier, existing);
   }
 
-  if (Math.abs(faceSum - reserve.amount) > RESERVE_LOT_SUM_TOLERANCE) {
+  if (Math.abs(faceSum - reserve.amount) > reserveLotSumTolerance(reserve.amount)) {
     pushWarning(
       warnings,
       "reserve-lot-sum-mismatch",
