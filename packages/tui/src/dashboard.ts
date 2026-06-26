@@ -1,5 +1,6 @@
 import {
   type CompositionReport,
+  type Currency,
   type DashboardDetail,
   type DashboardRowKind,
   type LoadFailedOutcome,
@@ -40,6 +41,10 @@ export function buildDashboardLines(
       selectable: false,
     },
     {
+      content: `Unrealized P&L: ${formatUsd(report.dashboard.summary.totalUnrealizedPnlUsd)}`,
+      selectable: false,
+    },
+    {
       content: `Largest Portfolio: ${formatRowFocus(report.dashboard.summary.largestPortfolio)}`,
       selectable: false,
     },
@@ -70,6 +75,10 @@ export function buildDashboardLines(
       selectable: false,
     },
     {
+      content: `Unrealized P&L: ${formatUsd(report.dashboard.summary.totalUnrealizedPnlUsd)}`,
+      selectable: false,
+    },
+    {
       content: `Manual FX: 1 USD = ${report.totals.usdMxn.toFixed(4)} MXN`,
       selectable: false,
     },
@@ -92,19 +101,19 @@ export function buildDashboardLines(
   ];
 
   for (const section of report.dashboard.sections) {
+    const showsPnl = section.id === "instruments" || section.id === "tiers";
     lines.push(
       { content: "", selectable: false },
       { content: section.title, selectable: false },
       { content: "-".repeat(section.title.length), selectable: false },
       {
-        content:
-          section.id === "instruments"
-            ? `${pad("Name", 28)} ${padLeft("USD Value", 14)} ${padLeft("Fund %", 8)} ${padLeft("Cost", 14)} ${padLeft("Unrl P&L", 14)}`
-            : `${pad("Name", 28)} ${padLeft("USD Value", 14)} ${padLeft("Fund %", 8)}`,
+        content: showsPnl
+          ? `${pad("Name", 28)} ${padLeft("USD Value", 14)} ${padLeft("Fund %", 8)} ${padLeft("Cost", 14)} ${padLeft("Unrl P&L", 14)}`
+          : `${pad("Name", 28)} ${padLeft("USD Value", 14)} ${padLeft("Fund %", 8)}`,
         selectable: false,
       },
       {
-        content: "-".repeat(section.id === "instruments" ? 82 : 53),
+        content: "-".repeat(showsPnl ? 82 : 53),
         selectable: false,
       },
     );
@@ -118,12 +127,12 @@ export function buildDashboardLines(
       const selectable = isDetailSelectable(row.kind);
       const rowLine: DashboardLine = selectable
         ? {
-            content: `${formatSectionRow(row, section.id === "instruments")}  [enter details]`,
+            content: `${formatSectionRow(row, showsPnl)}  [enter details]`,
             selectable: true,
             action: { type: "open-detail", rowId: row.id },
           }
         : {
-            content: formatSectionRow(row, section.id === "instruments"),
+            content: formatSectionRow(row, showsPnl),
             selectable: false,
           };
       lines.push(rowLine);
@@ -131,6 +140,25 @@ export function buildDashboardLines(
       if (detail?.rowId === row.id) {
         lines.push(...buildDetailLines(detail));
       }
+    }
+  }
+
+  lines.push(
+    { content: "", selectable: false },
+    { content: "Weekly Price Journey", selectable: false },
+    { content: "-".repeat("Weekly Price Journey".length), selectable: false },
+  );
+  if (report.priceJourneys.length === 0) {
+    lines.push({ content: "No Close history recorded.", selectable: false });
+  } else {
+    for (const journey of report.priceJourneys) {
+      const series = journey.points
+        .map((point) => `${point.asOf} ${formatPrice(point.price, journey.currency)}`)
+        .join(" -> ");
+      lines.push({
+        content: `${pad(journey.label, 28)} ${series}  (${formatSignedPercent(journey.changePct)})`,
+        selectable: false,
+      });
     }
   }
 
@@ -311,6 +339,18 @@ function formatUsd(value: number): string {
 
 function formatMaybeUsd(value: number | undefined): string {
   return value === undefined ? "-" : formatUsd(value);
+}
+
+function formatPrice(value: number, currency: Currency): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+  }).format(value);
+}
+
+function formatSignedPercent(value: number): string {
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(1)}%`;
 }
 
 function formatPercent(value: number): string {

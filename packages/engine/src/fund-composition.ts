@@ -1,6 +1,20 @@
 export type Currency = "USD" | "MXN";
 export type ExecutionMode = "live" | "paper" | "back-test" | "forward-test";
 export type Direction = "long" | "short";
+export type CapitalTier = "c1" | "c2" | "c3";
+
+/**
+ * A Lot preserves Capital Tier attribution inside a Position. It binds
+ * `(quantity, cost, tier, entryFx)` together so per-tier P&L stays correct even
+ * when two tiers of the same instrument were acquired at different costs.
+ */
+export interface Lot {
+  quantity: number;
+  cost: number;
+  tier: CapitalTier;
+  /** MXN-per-USD rate at acquisition; cost basis converts at this rate. */
+  entryFx?: number;
+}
 
 export interface FundReviewData {
   fund: {
@@ -17,6 +31,18 @@ export interface FundReviewData {
   instruments: Array<NamedRecord & { symbol: string; currency: Currency }>;
   reserves: ReserveRecord[];
   positions: PositionRecord[];
+  /** Periodic per-instrument price snapshots; the spine of the price journey. */
+  closes?: Close[];
+}
+
+/**
+ * Close — an immutable periodic price snapshot for one instrument at one anchor.
+ * A series of Closes per instrument yields the weekly valuation history.
+ */
+export interface Close {
+  instrumentId: string;
+  asOf: string;
+  price: number;
 }
 
 interface NamedRecord {
@@ -40,9 +66,15 @@ export interface ReserveRecord extends CapitalRecordBase {
 export interface PositionRecord extends CapitalRecordBase {
   instrumentId: string;
   direction: Direction;
-  quantity: number;
-  averageCost: number;
   markPrice: number;
+  /** Lot-grained cost + Capital Tier attribution. Canonical going forward. */
+  lots?: Lot[];
+  /**
+   * Prototype back-compat: single-tier shorthand. When `lots` is absent these
+   * normalize to one `c1` Lot. The reliable increment drops this shim.
+   */
+  quantity?: number;
+  averageCost?: number;
 }
 
 export interface Ok {
@@ -174,12 +206,18 @@ export interface Warning {
   recordId?: string;
 }
 
-export type DashboardRowKind = "portfolio" | "tempo" | "account" | "instrument";
+export type DashboardRowKind =
+  | "portfolio"
+  | "tempo"
+  | "account"
+  | "instrument"
+  | "tier";
 export type DashboardSectionId =
   | "portfolios"
   | "tempos"
   | "accounts"
-  | "instruments";
+  | "instruments"
+  | "tiers";
 
 export interface CompositionRow {
   id: string;
@@ -204,6 +242,7 @@ export interface DashboardSummary {
   asOf: string;
   fundValueUsd: number;
   usdMxn: number;
+  totalUnrealizedPnlUsd: number;
   largestPortfolio?: DashboardFocus;
   largestTempo?: DashboardFocus;
   largestAccount?: DashboardFocus;
@@ -228,6 +267,22 @@ export interface DashboardModel {
   sections: DashboardSection[];
 }
 
+export interface PriceJourneyPoint {
+  asOf: string;
+  price: number;
+}
+
+export interface PriceJourney {
+  instrumentId: string;
+  label: string;
+  currency: Currency;
+  points: PriceJourneyPoint[];
+  firstPrice: number;
+  latestPrice: number;
+  changeAbs: number;
+  changePct: number;
+}
+
 export interface CompositionReport {
   totals: {
     baseCurrency: "USD";
@@ -235,6 +290,7 @@ export interface CompositionReport {
     usdMxn: number;
   };
   dashboard: DashboardModel;
+  priceJourneys: PriceJourney[];
   warnings: Warning[];
   excluded: {
     nonLive: number;
@@ -277,6 +333,14 @@ interface CanonicalLine {
   usdValue: number;
   costBasisUsd?: number;
   unrealizedPnlUsd?: number;
+  tierContributions?: TierContribution[];
+}
+
+interface TierContribution {
+  tier: CapitalTier;
+  usdValue: number;
+  costBasisUsd: number;
+  unrealizedPnlUsd: number;
 }
 
 interface BuildCompositionReportOptions {
@@ -398,6 +462,13 @@ export function parseFundReview(input: unknown): ParseResult {
     return positionError;
   }
 
+  if (value.closes !== undefined) {
+    const closesError = validateCloses(value.closes);
+    if (closesError) {
+      return closesError;
+    }
+  }
+
   const duplicateCapitalIdError = validateCapitalRecordIds(
     value.reserves,
     value.positions,
@@ -455,6 +526,12 @@ export function buildCompositionReport(
     (line) => line.instrumentLabel,
     fundValueUsd,
   );
+  const tierRows = groupTierLines(canonicalLines, fundValueUsd);
+  const totalUnrealizedPnlUsd = canonicalLines.reduce(
+    (sum, line) => sum + (line.unrealizedPnlUsd ?? 0),
+    0,
+  );
+  const priceJourneys = buildPriceJourneys(data);
 
   return {
     totals: {
@@ -468,6 +545,7 @@ export function buildCompositionReport(
         asOf: data.review.asOf,
         fundValueUsd,
         usdMxn: data.review.usdMxn,
+        totalUnrealizedPnlUsd,
         ...optionalSummaryFocus("largestPortfolio", toFocus(portfolioRows[0])),
         ...optionalSummaryFocus("largestTempo", toFocus(tempoRows[0])),
         ...optionalSummaryFocus("largestAccount", toFocus(accountRows[0])),
@@ -504,12 +582,63 @@ export function buildCompositionReport(
           title: "Instrument Composition",
           rows: instrumentRows,
         },
+        {
+          id: "tiers",
+          title: "Capital Tier Composition",
+          rows: tierRows,
+        },
       ],
     },
+    priceJourneys,
     warnings,
     excluded,
     load: options.load ?? { status: "loaded" },
   };
+}
+
+function buildPriceJourneys(data: FundReviewData): PriceJourney[] {
+  if (!Array.isArray(data.closes) || data.closes.length === 0) {
+    return [];
+  }
+
+  const instruments = indexById(data.instruments, "instrument");
+  const byInstrument = new Map<string, PriceJourneyPoint[]>();
+  for (const close of data.closes) {
+    // Prototype shortcut: silently skip Closes referencing unknown instruments
+    // or carrying invalid scalars, rather than emitting a warning vocabulary.
+    const instrument = instruments.get(close.instrumentId);
+    if (!instrument) continue;
+    if (!isIsoDate(close.asOf) || !isNonNegativeNumber(close.price)) continue;
+    const points = byInstrument.get(close.instrumentId) ?? [];
+    points.push({ asOf: close.asOf, price: close.price });
+    byInstrument.set(close.instrumentId, points);
+  }
+
+  const journeys: PriceJourney[] = [];
+  for (const [instrumentId, points] of byInstrument) {
+    if (points.length < 2) continue; // a single anchor is not a journey
+    const sorted = [...points].sort((a, b) => a.asOf.localeCompare(b.asOf));
+    const firstPrice = sorted[0]!.price;
+    const latestPrice = sorted[sorted.length - 1]!.price;
+    const instrument = instruments.get(instrumentId)!;
+    journeys.push({
+      instrumentId,
+      label: `${instrument.symbol} (${instrument.name})`,
+      currency: instrument.currency,
+      points: sorted,
+      firstPrice,
+      latestPrice,
+      changeAbs: latestPrice - firstPrice,
+      changePct:
+        firstPrice === 0
+          ? 0
+          : roundNumber(((latestPrice - firstPrice) / firstPrice) * 100, 12),
+    });
+  }
+
+  return journeys.sort(
+    (a, b) => b.points.length - a.points.length || a.label.localeCompare(b.label),
+  );
 }
 
 export function buildDashboardDetail(
@@ -518,7 +647,7 @@ export function buildDashboardDetail(
   rowId: string,
 ): DashboardDetail | undefined {
   const row = findDashboardRow(report, rowId);
-  if (!row || row.kind === "instrument") {
+  if (!row || row.kind === "instrument" || row.kind === "tier") {
     return undefined;
   }
 
@@ -549,6 +678,7 @@ export function formatCompositionReport(report: CompositionReport): string {
     "",
     "Canonical Summary",
     `Fund value: ${formatUsd(report.totals.fundValueUsd)}`,
+    `Unrealized P&L: ${formatUsd(report.dashboard.summary.totalUnrealizedPnlUsd)}`,
     `Manual FX: 1 USD = ${report.totals.usdMxn.toFixed(4)} MXN`,
     `Mode filter: live only; ${report.excluded.nonLive} non-live record(s) excluded`,
     `Record safety: ${report.excluded.invalid} invalid record(s) excluded`,
@@ -569,6 +699,14 @@ export function formatCompositionReport(report: CompositionReport): string {
       sectionRows(report, "instruments"),
       true,
     ),
+    "",
+    formatRows(
+      "Capital Tier Composition",
+      sectionRows(report, "tiers"),
+      true,
+    ),
+    "",
+    formatPriceJourneys(report.priceJourneys),
   ];
 
   if (report.warnings.length > 0) {
@@ -590,6 +728,7 @@ function formatWeeklyReviewFocus(report: CompositionReport): string {
     "Weekly Review Focus",
     "-------------------",
     `Fund now: ${formatUsd(summary.fundValueUsd)} in live canonical records`,
+    `Unrealized P&L: ${formatUsd(summary.totalUnrealizedPnlUsd)}`,
     `Largest Portfolio: ${formatRowFocus(summary.largestPortfolio)}`,
     `Largest Tempo: ${formatRowFocus(summary.largestTempo)}`,
     `Largest Account: ${formatRowFocus(summary.largestAccount)}`,
@@ -772,25 +911,56 @@ function buildCanonicalState(data: FundReviewData): CanonicalState {
       continue;
     }
 
-    const invalidNumericFields = [
-      ["quantity", position.quantity],
-      ["averageCost", position.averageCost],
-      ["markPrice", position.markPrice],
-    ].filter(([, value]) => !isNonNegativeNumber(value));
+    const lots = normalizePositionLots(position);
+    const invalidNumericFields: string[] = [];
+    if (!isNonNegativeNumber(position.markPrice)) {
+      invalidNumericFields.push("markPrice");
+    }
+    if (lots.length === 0) {
+      invalidNumericFields.push("lots");
+    }
+    for (const lot of lots) {
+      if (!isNonNegativeNumber(lot.quantity)) invalidNumericFields.push("quantity");
+      if (!isNonNegativeNumber(lot.cost)) invalidNumericFields.push("cost");
+      if (lot.entryFx !== undefined && !isPositiveNumber(lot.entryFx)) {
+        invalidNumericFields.push("entryFx");
+      }
+    }
     if (invalidNumericFields.length > 0) {
       pushWarning(
         warnings,
         "invalid-position-number",
-        `Position ${position.id} has invalid ${invalidNumericFields.map(([field]) => field).join(", ")} and was excluded.`,
+        `Position ${position.id} has invalid ${[...new Set(invalidNumericFields)].join(", ")} and was excluded.`,
         position.id,
       );
       excluded.invalid += 1;
       continue;
     }
 
-    const marketValue = position.quantity * position.markPrice;
-    const costBasis = position.quantity * position.averageCost;
-    const unrealizedPnl = (position.markPrice - position.averageCost) * position.quantity;
+    // Market value converts at the current review FX; each Lot's cost basis
+    // converts at its own entry FX (falling back to the review FX). P&L is the
+    // per-Lot join of (quantity, cost, tier, entryFx) against one instrument
+    // markPrice, then aggregated by Capital Tier.
+    const reviewFx = data.review.usdMxn;
+    let marketValueUsd = 0;
+    let costBasisUsd = 0;
+    const tierTotals = new Map<CapitalTier, TierContribution>();
+    for (const lot of lots) {
+      const lotMarketUsd = toUsd(lot.quantity * position.markPrice, position.currency, reviewFx);
+      const lotCostUsd = toUsd(lot.quantity * lot.cost, position.currency, lot.entryFx ?? reviewFx);
+      marketValueUsd += lotMarketUsd;
+      costBasisUsd += lotCostUsd;
+      const existing = tierTotals.get(lot.tier) ?? {
+        tier: lot.tier,
+        usdValue: 0,
+        costBasisUsd: 0,
+        unrealizedPnlUsd: 0,
+      };
+      existing.usdValue += lotMarketUsd;
+      existing.costBasisUsd += lotCostUsd;
+      existing.unrealizedPnlUsd += lotMarketUsd - lotCostUsd;
+      tierTotals.set(lot.tier, existing);
+    }
 
     canonicalLines.push({
       recordId: position.id,
@@ -804,13 +974,10 @@ function buildCanonicalState(data: FundReviewData): CanonicalState {
       accountLabel: accountLabel(account, position.accountId),
       instrumentId: position.instrumentId,
       instrumentLabel: `${instrument!.symbol} (${instrument!.name})`,
-      usdValue: toUsd(marketValue, position.currency, data.review.usdMxn),
-      costBasisUsd: toUsd(costBasis, position.currency, data.review.usdMxn),
-      unrealizedPnlUsd: toUsd(
-        unrealizedPnl,
-        position.currency,
-        data.review.usdMxn,
-      ),
+      usdValue: marketValueUsd,
+      costBasisUsd,
+      unrealizedPnlUsd: marketValueUsd - costBasisUsd,
+      tierContributions: [...tierTotals.values()],
     });
   }
 
@@ -961,6 +1128,66 @@ function groupLines(
     );
 }
 
+function normalizePositionLots(position: PositionRecord): Lot[] {
+  if (Array.isArray(position.lots) && position.lots.length > 0) {
+    return position.lots;
+  }
+  if (
+    typeof position.quantity === "number" &&
+    typeof position.averageCost === "number"
+  ) {
+    return [{ quantity: position.quantity, cost: position.averageCost, tier: "c1" }];
+  }
+  return [];
+}
+
+function groupTierLines(
+  lines: CanonicalLine[],
+  fundValueUsd: number,
+): CompositionRow[] {
+  const rows = new Map<string, GroupAccumulator>();
+
+  for (const line of lines) {
+    if (!line.tierContributions) continue;
+    for (const contribution of line.tierContributions) {
+      const id = `tier:${contribution.tier}`;
+      const existing = rows.get(id) ?? {
+        id,
+        label: contribution.tier,
+        usdValue: 0,
+        costBasisUsd: 0,
+        unrealizedPnlUsd: 0,
+      };
+      existing.usdValue += contribution.usdValue;
+      existing.costBasisUsd += contribution.costBasisUsd;
+      existing.unrealizedPnlUsd += contribution.unrealizedPnlUsd;
+      rows.set(id, existing);
+    }
+  }
+
+  return [...rows.values()]
+    .map((row) => {
+      const result: CompositionRow = {
+        id: row.id,
+        kind: "tier",
+        label: row.label,
+        usdValue: row.usdValue,
+        percentOfFund: percentOfFund(row.usdValue, fundValueUsd),
+      };
+      if (row.costBasisUsd !== 0) {
+        result.costBasisUsd = row.costBasisUsd;
+      }
+      if (row.unrealizedPnlUsd !== 0) {
+        result.unrealizedPnlUsd = row.unrealizedPnlUsd;
+      }
+      return result;
+    })
+    .sort(
+      (a, b) =>
+        Math.abs(b.usdValue) - Math.abs(a.usdValue) || a.label.localeCompare(b.label),
+    );
+}
+
 function formatRows(
   title: string,
   rows: CompositionRow[],
@@ -982,6 +1209,34 @@ function formatRows(
     "-".repeat(header.length),
     ...(body.length > 0 ? body : ["No live records."]),
   ].join("\n");
+}
+
+function formatPriceJourneys(journeys: PriceJourney[]): string {
+  const title = "Weekly Price Journey";
+  if (journeys.length === 0) {
+    return [title, "-".repeat(title.length), "No Close history recorded."].join("\n");
+  }
+
+  const body = journeys.map((journey) => {
+    const series = journey.points
+      .map((point) => `${point.asOf} ${formatPrice(point.price, journey.currency)}`)
+      .join(" -> ");
+    return `${pad(journey.label, 28)} ${series}  (${formatSignedPercent(journey.changePct)})`;
+  });
+
+  return [title, "-".repeat(title.length), ...body].join("\n");
+}
+
+function formatPrice(value: number, currency: Currency): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+  }).format(value);
+}
+
+function formatSignedPercent(value: number): string {
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(1)}%`;
 }
 
 function divider(): string {
@@ -1215,13 +1470,97 @@ function validatePositions(value: unknown): ParseResult | undefined {
       return directionError;
     }
 
-    for (const field of ["quantity", "averageCost", "markPrice"] as const) {
-      if (typeof position[field] !== "number") {
+    if (typeof position.markPrice !== "number") {
+      return schemaError(
+        `${itemPath}.markPrice`,
+        `${itemPath}.markPrice must be a number.`,
+      );
+    }
+
+    if (position.lots !== undefined) {
+      const lotsError = validateLots(position.lots, itemPath);
+      if (lotsError) {
+        return lotsError;
+      }
+    } else {
+      for (const field of ["quantity", "averageCost"] as const) {
+        if (typeof position[field] !== "number") {
+          return schemaError(
+            `${itemPath}.${field}`,
+            `${itemPath}.${field} must be a number.`,
+          );
+        }
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function validateCloses(value: unknown): ParseResult | undefined {
+  if (!Array.isArray(value)) {
+    return schemaError("closes", "closes must be an array when present.");
+  }
+
+  for (const [index, close] of value.entries()) {
+    const itemPath = `closes[${index}]`;
+    if (!isRecord(close)) {
+      return schemaError(itemPath, `${itemPath} must be an object.`);
+    }
+
+    const instrumentIdError = requireNonEmptyString(
+      close.instrumentId,
+      `${itemPath}.instrumentId`,
+    );
+    if (instrumentIdError) {
+      return instrumentIdError;
+    }
+
+    const asOfError = requireNonEmptyString(close.asOf, `${itemPath}.asOf`);
+    if (asOfError) {
+      return asOfError;
+    }
+
+    if (typeof close.price !== "number") {
+      return schemaError(`${itemPath}.price`, `${itemPath}.price must be a number.`);
+    }
+  }
+
+  return undefined;
+}
+
+function validateLots(value: unknown, path: string): ParseResult | undefined {
+  if (!Array.isArray(value) || value.length === 0) {
+    return schemaError(`${path}.lots`, `${path}.lots must be a non-empty array.`);
+  }
+
+  for (const [index, lot] of value.entries()) {
+    const lotPath = `${path}.lots[${index}]`;
+    if (!isRecord(lot)) {
+      return schemaError(lotPath, `${lotPath} must be an object.`);
+    }
+
+    for (const field of ["quantity", "cost"] as const) {
+      if (typeof lot[field] !== "number") {
         return schemaError(
-          `${itemPath}.${field}`,
-          `${itemPath}.${field} must be a number.`,
+          `${lotPath}.${field}`,
+          `${lotPath}.${field} must be a number.`,
         );
       }
+    }
+
+    if (lot.tier !== "c1" && lot.tier !== "c2" && lot.tier !== "c3") {
+      return schemaError(
+        `${lotPath}.tier`,
+        `${lotPath}.tier must be one of c1, c2, c3.`,
+      );
+    }
+
+    if (lot.entryFx !== undefined && typeof lot.entryFx !== "number") {
+      return schemaError(
+        `${lotPath}.entryFx`,
+        `${lotPath}.entryFx must be a number when present.`,
+      );
     }
   }
 
