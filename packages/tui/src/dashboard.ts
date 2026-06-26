@@ -7,6 +7,14 @@ import {
   type LoadFailedOutcome,
   type LoadOutcome,
   type TierContribution,
+  divider,
+  formatMaybeUsd,
+  formatPercent,
+  formatPrice,
+  formatSignedPercent,
+  formatUsd,
+  pad,
+  padLeft,
 } from "@numisma/engine";
 
 export type DashboardAction =
@@ -395,53 +403,12 @@ function isDetailSelectable(kind: DashboardRowKind): boolean {
   return kind === "portfolio" || kind === "tempo" || kind === "account";
 }
 
-function divider(): string {
-  return "=".repeat(36);
-}
-
-function formatUsd(value: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-  }).format(value);
-}
-
 function formatUsdCompact(value: number): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
     maximumFractionDigits: 0,
   }).format(value);
-}
-
-function formatMaybeUsd(value: number | undefined): string {
-  return value === undefined ? "-" : formatUsd(value);
-}
-
-function formatPrice(value: number, currency: Currency): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency,
-  }).format(value);
-}
-
-function formatSignedPercent(value: number): string {
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${value.toFixed(1)}%`;
-}
-
-function formatPercent(value: number): string {
-  return `${value.toFixed(1)}%`;
-}
-
-function pad(value: string, width: number): string {
-  return value.length > width
-    ? `${value.slice(0, width - 1)}~`
-    : value.padEnd(width);
-}
-
-function padLeft(value: string, width: number): string {
-  return value.length > width ? value.slice(0, width) : value.padStart(width);
 }
 
 function formatLoadTime(value: string): string {
