@@ -268,6 +268,11 @@ export async function loadFoldedReview(
  * sibling temp file, then `rename` over the log. rename(2) within a directory is
  * atomic, so a crash mid-write leaves the prior log intact — a reader never sees a
  * half-written or truncated final line.
+ *
+ * Despite the name this is O(n) in the existing log, not an O(1) `appendFile`: it
+ * reads and rewrites the whole image each ingest. That is the deliberate price of
+ * the rename-based crash-atomicity above — a partial `appendFile` could leave a
+ * torn final line. Fine at this log's scale; revisit only if the log grows large.
  */
 async function appendEvents(logPath: string, events: PortfolioEvent[]): Promise<void> {
   await mkdir(dirname(logPath), { recursive: true });

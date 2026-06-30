@@ -4,7 +4,7 @@
 // pure Node IO + engine calls, so the surfaced ingest report, the as-of / source
 // wiring, and the fail-loud contract are pinned here in the regular suite; the
 // render itself is exercised by `pnpm smoke:startup` under Bun.
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { resolveEventStorePaths, type EventStorePaths } from "./event-store.js";
@@ -81,7 +81,8 @@ function openBtc() {
 
 const createdDirs: string[] = [];
 
-afterEach(() => {
+afterEach(async () => {
+  await Promise.all(createdDirs.map((dir) => rm(dir, { recursive: true, force: true })));
   createdDirs.length = 0;
 });
 

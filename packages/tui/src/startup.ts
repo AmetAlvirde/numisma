@@ -56,6 +56,16 @@ export function formatIngestReport(report: IngestReport): string {
  * Throws on a malformed `--as-of` or a fail-loud ingest rejection so the host can
  * exit non-zero with the durable log left unchanged — the report is emitted only
  * after a successful ingest, so a rejected startup surfaces the error, not a count.
+ *
+ * Note: `parseAsOfArg` validates only the `YYYY-MM-DD` shape. The semantic guard
+ * (an `asOf` earlier than `genesis.review.asOf`) lives in the engine fold and is
+ * reached lazily through the `loadData` thunk, not here — deliberately, so this
+ * seam stays pure orchestration and does not duplicate the engine's genesis read
+ * (ADR-001). The consequence is surface-dependent and intentional: `pnpm spine` /
+ * `report` await the fold inside their own try/catch and exit non-zero, while the
+ * app path (`pnpm dev`) emits the ingest report, enters the alternate screen, then
+ * renders mount-app's load-failure panel rather than exiting — graceful degradation
+ * once the dashboard owns the terminal, not a missed fail-loud case.
  */
 export async function prepareStartup(
   paths: EventStorePaths,
