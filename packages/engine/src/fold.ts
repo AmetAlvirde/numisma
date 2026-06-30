@@ -16,10 +16,17 @@
  *   - PriceMarked — sets the latest mark for an instrument (and optional FX) and
  *     appends a Close to the price journey.
  *
+ * The ingest boundary is two gates: `parseEvent` validates one event's structure
+ * in isolation, then `crossReferenceEvent` validates it against the known world —
+ * the genesis seed ids plus everything the durable log has already introduced — so
+ * an event referencing an instrument/position the seed never knew, or an open whose
+ * id collides with an existing record, fails loud instead of folding into a silent
+ * no-op or a broken read model. A `PriceMarked` is additionally magnitude-guarded
+ * against the instrument's last known close to catch currency-unit / fat-finger
+ * entry. Per ADR-001 this is pure validation LOGIC; loading the genesis ids off disk
+ * and orchestrating the inbox loop are access-surface concerns in `@numisma/tui`.
+ *
  * SHORTCUTS (visible, prototype-only):
- *   - Events are validated structurally but not cross-referenced against genesis
- *     ids (e.g. a PositionClosed for an unknown id is a silent no-op). Closing
- *     this is the ingest-boundary slice.
  *   - Decision fields are validated on ingest but NOT carried into the read
  *     model (FundReviewData has no decision slot yet); they are dropped after
  *     the open. Persisting them is reliable-conversion work.
@@ -285,6 +292,208 @@ function parseLots(input: unknown): { kind: "ok"; value: PositionLot[] } | Event
     lots.push(lot);
   }
   return { kind: "ok", value: lots };
+}
+
+/**
+ * The deviation past which a `PriceMarked` is treated as an implausible fat-finger
+ * / currency-unit mistake (e.g. an MXN-denominated price entered as USD) rather
+ * than a real move, and rejected at ingest. Relative: `|new / lastClose - 1|`. A
+ * tunable constant, NOT itself ADR-worthy (ADR-003 records the decision to guard
+ * magnitude at ingest; this is the dial). 0.5 = ±50% from the instrument's last
+ * known close — wide enough to pass any plausible weekly move, narrow enough to
+ * catch a ~20× FX-unit slip.
+ */
+export const PRICE_MARK_MAGNITUDE_THRESHOLD = 0.5;
+
+/**
+ * The known world an event is cross-referenced against: every id the genesis seed
+ * and the durable log have introduced, plus the last known close per instrument
+ * for the magnitude guard. Built from genesis (and optionally the existing log) by
+ * {@link buildEventReference}; extended in-place by {@link applyEventToReference}
+ * as a batch is accepted, so an event opened earlier in the same inbox can be
+ * referenced by a later one. Per ADR-001 the TUI owns loading these ids off disk;
+ * this engine code owns the validation logic that consumes them.
+ */
+export interface EventReference {
+  positionIds: Set<string>;
+  reserveIds: Set<string>;
+  portfolioIds: Set<string>;
+  accountIds: Set<string>;
+  instrumentIds: Set<string>;
+  /** Latest known close per instrument: the magnitude guard's comparison point. */
+  lastClose: Map<string, { price: number; asOf: string }>;
+}
+
+/**
+ * Build the cross-reference world from the immutable genesis seed and, optionally,
+ * the events already in the durable log. The last-close seed mirrors the fold: a
+ * genesis-held instrument's `markPrice` at the genesis date is its t0 close, any
+ * genesis-provided closes win, and prior log events advance it. Pure.
+ */
+export function buildEventReference(
+  genesis: FundReviewData,
+  priorEvents: PortfolioEvent[] = [],
+): EventReference {
+  const reference: EventReference = {
+    positionIds: new Set(genesis.positions.map((position) => position.id)),
+    reserveIds: new Set(genesis.reserves.map((reserve) => reserve.id)),
+    portfolioIds: new Set(genesis.portfolios.map((portfolio) => portfolio.id)),
+    accountIds: new Set(genesis.accounts.map((account) => account.id)),
+    instrumentIds: new Set(genesis.instruments.map((instrument) => instrument.id)),
+    lastClose: new Map(),
+  };
+
+  // Seed last-close at the genesis date from each held instrument's markPrice, then
+  // let any genesis-provided Close (its own asOf) override when at least as recent.
+  for (const position of genesis.positions) {
+    noteClose(reference, position.instrumentId, position.markPrice, genesis.review.asOf);
+  }
+  for (const close of genesis.closes ?? []) {
+    noteClose(reference, close.instrumentId, close.price, close.asOf);
+  }
+
+  for (const event of priorEvents) {
+    applyEventToReference(reference, event);
+  }
+  return reference;
+}
+
+/**
+ * Fold one already-accepted event into the reference so subsequent events in the
+ * same batch see its effects: an open introduces its position id (and an entry
+ * close for a mid-stream instrument), a mark advances the last close. Mutates in
+ * place. A close leaves the id known — it existed, and the domain's close-and-
+ * reopen rule mints a fresh id rather than reusing the retired one.
+ */
+export function applyEventToReference(reference: EventReference, event: PortfolioEvent): void {
+  switch (event.type) {
+    case "PositionOpened":
+      reference.positionIds.add(event.position.id);
+      noteClose(
+        reference,
+        event.position.instrumentId,
+        weightedAverageCost(event.position.lots),
+        event.asOf,
+      );
+      break;
+    case "PriceMarked":
+      noteClose(reference, event.instrumentId, event.price, event.asOf);
+      break;
+    case "PositionClosed":
+      break;
+  }
+}
+
+function noteClose(
+  reference: EventReference,
+  instrumentId: string,
+  price: number,
+  asOf: string,
+): void {
+  const current = reference.lastClose.get(instrumentId);
+  if (!current || asOf >= current.asOf) {
+    reference.lastClose.set(instrumentId, { price, asOf });
+  }
+}
+
+/**
+ * Second ingest gate (after {@link parseEvent}): validate a structurally-sound
+ * event against the known world. Rejects an open whose id collides with an
+ * existing position/reserve or that cites an unknown portfolio/account/instrument;
+ * a close/mark for an id the seed and log never introduced; and a mark deviating
+ * beyond {@link PRICE_MARK_MAGNITUDE_THRESHOLD} from the instrument's last close.
+ * Pure: it reads `reference` but never mutates it. On success returns the event
+ * unchanged so callers can chain `parseEvent` → `crossReferenceEvent`.
+ */
+export function crossReferenceEvent(
+  event: PortfolioEvent,
+  reference: EventReference,
+  options?: { magnitudeThreshold?: number },
+): EventParseResult {
+  switch (event.type) {
+    case "PositionOpened":
+      return crossReferenceOpen(event, reference);
+    case "PositionClosed":
+      if (!reference.positionIds.has(event.positionId)) {
+        return eventError(
+          "positionId",
+          `PositionClosed references position id '${event.positionId}', which neither ` +
+            `the genesis seed nor the log contains.`,
+        );
+      }
+      return { kind: "ok", value: event };
+    case "PriceMarked":
+      return crossReferenceMark(event, reference, options?.magnitudeThreshold);
+  }
+}
+
+function crossReferenceOpen(
+  event: PositionOpenedEvent,
+  reference: EventReference,
+): EventParseResult {
+  const { position } = event;
+  if (reference.positionIds.has(position.id)) {
+    return eventError(
+      "position.id",
+      `PositionOpened id '${position.id}' collides with an existing position id.`,
+    );
+  }
+  if (reference.reserveIds.has(position.id)) {
+    return eventError(
+      "position.id",
+      `PositionOpened id '${position.id}' collides with an existing reserve id.`,
+    );
+  }
+  if (!reference.portfolioIds.has(position.portfolioId)) {
+    return eventError(
+      "position.portfolioId",
+      `PositionOpened references portfolio id '${position.portfolioId}', which the ` +
+        `genesis seed does not contain.`,
+    );
+  }
+  if (!reference.accountIds.has(position.accountId)) {
+    return eventError(
+      "position.accountId",
+      `PositionOpened references account id '${position.accountId}', which the ` +
+        `genesis seed does not contain.`,
+    );
+  }
+  if (!reference.instrumentIds.has(position.instrumentId)) {
+    return eventError(
+      "position.instrumentId",
+      `PositionOpened references instrument id '${position.instrumentId}', which the ` +
+        `genesis seed does not contain.`,
+    );
+  }
+  return { kind: "ok", value: event };
+}
+
+function crossReferenceMark(
+  event: PriceMarkedEvent,
+  reference: EventReference,
+  threshold = PRICE_MARK_MAGNITUDE_THRESHOLD,
+): EventParseResult {
+  if (!reference.instrumentIds.has(event.instrumentId)) {
+    return eventError(
+      "instrumentId",
+      `PriceMarked references instrument id '${event.instrumentId}', which the ` +
+        `genesis seed does not contain.`,
+    );
+  }
+  const last = reference.lastClose.get(event.instrumentId);
+  if (last !== undefined) {
+    const deviation = Math.abs(event.price / last.price - 1);
+    if (deviation > threshold) {
+      return eventError(
+        "price",
+        `PriceMarked price ${event.price} deviates ` +
+          `${(deviation * 100).toFixed(1)}% from instrument '${event.instrumentId}'` +
+          ` last close ${last.price}, beyond the ${(threshold * 100).toFixed(0)}% ` +
+          `sanity threshold.`,
+      );
+    }
+  }
+  return { kind: "ok", value: event };
 }
 
 /**
