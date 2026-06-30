@@ -1,3 +1,11 @@
+// LEGACY on the app path (ADR-003 slice 4). This loads the single hand-edited
+// `fund-review.local.json` snapshot — the prototype's only datastore. Both app
+// surfaces now derive "the current portfolio" from the FOLD over genesis + event
+// log (`loadFoldedReview` in `event-store.ts`), establishing one source of truth;
+// `report.ts` no longer imports this. The loader and its tests are preserved (the
+// snapshot is still a valid `FundReviewData` and the integrity boundary it exercises
+// is the same `parseFundReview` gate the genesis seed uses), but nothing on the app
+// path reads it. Retire it outright only if `pnpm report` is ever dropped.
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseFundReview, type FundReviewData } from "@numisma/engine";

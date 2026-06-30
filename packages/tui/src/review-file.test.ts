@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -10,8 +10,11 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 
 const originalReviewFile = process.env.NUMISMA_FUND_REVIEW_FILE;
+const createdDirs: string[] = [];
 
-afterEach(() => {
+afterEach(async () => {
+  await Promise.all(createdDirs.map((dir) => rm(dir, { recursive: true, force: true })));
+  createdDirs.length = 0;
   if (originalReviewFile === undefined) {
     delete process.env.NUMISMA_FUND_REVIEW_FILE;
     return;
@@ -106,6 +109,7 @@ describe("@numisma/tui review file loading", () => {
 
   it("surfaces directory paths with an engine-agnostic error", async () => {
     const directoryPath = await mkdtemp(resolve(tmpdir(), "numisma-review-dir-"));
+    createdDirs.push(directoryPath);
     await mkdir(resolve(directoryPath, "nested"));
 
     await expect(loadFundReview(directoryPath)).rejects.toThrowError(
@@ -156,6 +160,7 @@ describe("@numisma/tui review file loading", () => {
 
 async function writeReviewFile(contents: string): Promise<string> {
   const dir = await mkdtemp(resolve(tmpdir(), "numisma-review-load-"));
+  createdDirs.push(dir);
   const filePath = resolve(dir, "review.json");
   await writeFile(filePath, contents, "utf8");
   return filePath;

@@ -10,7 +10,10 @@
   "scripts": {
     "dev": "bun packages/tui/src/app.ts",
     "report": "tsx packages/tui/src/report.ts",
+    "spine": "tsx packages/tui/src/spine.ts",
+    "spine:reset": "tsx packages/tui/src/spine-reset.ts",
     "smoke:tui": "bun packages/tui/src/smoke-openTui.ts",
+    "smoke:startup": "bun packages/tui/src/smoke-startup-openTui.ts",
     "typecheck": "pnpm --filter @numisma/engine run typecheck && pnpm --filter @numisma/tui run typecheck",
     "test": "vitest run",
     "coverage": "vitest run --coverage"
