@@ -5,10 +5,17 @@
 // rejection leaves the durable log byte-for-byte unchanged and the inbox in place
 // so the user can fix it. A small explicit genesis fixture makes the cross-
 // reference cases legible.
-import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdir, mkdtemp, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { ingestInbox, resolveEventStorePaths, type EventStorePaths } from "./event-store.js";
+import {
+  ingestInbox,
+  loadEventLog,
+  loadFoldedReview,
+  quarantineLogPath,
+  resolveEventStorePaths,
+  type EventStorePaths,
+} from "./event-store.js";
 import { afterEach, describe, expect, it } from "vitest";
 
 const GENESIS_AS_OF = "2026-06-01";
@@ -226,5 +233,131 @@ describe("ingestInbox — fail-loud rejection leaves the log unchanged and inbox
 
     expect(await readFile(paths.log, "utf8")).toBe(logBefore);
     expect(await readOrUndefined(paths.log)).not.toContain("open-btc");
+  });
+});
+
+// Durability hardening (ADR-003 slice 3): atomic append, log-line quarantine, and
+// a wall-clock-stamped, non-overwriting archive that no-ops on a zero-new re-drop.
+const FIXED_INGEST_MOMENT = new Date("2026-06-29T14:03:22.123Z");
+const FIXED_STAMP = "2026-06-29T14-03-22-123Z";
+const fixedClock = () => FIXED_INGEST_MOMENT;
+
+async function writeInbox(paths: EventStorePaths, items: unknown): Promise<void> {
+  await mkdir(dirname(paths.inbox), { recursive: true });
+  await writeFile(paths.inbox, JSON.stringify(items), "utf8");
+}
+
+describe("appendEvents — atomic append (temp + rename)", () => {
+  it("appends without leaving a temp file and keeps every line valid JSON", async () => {
+    // Existing log with NO trailing newline exercises the separator path too.
+    const paths = await makeStore({
+      inbox: [openBtc()],
+      log: JSON.stringify(markAapl(165, "pre-mark")),
+    });
+
+    await ingestInbox(paths, { now: fixedClock });
+
+    const content = await readFile(paths.log, "utf8");
+    expect(content.endsWith("\n")).toBe(true);
+    const lines = content.split("\n").filter((line) => line.length > 0);
+    expect(lines).toHaveLength(2);
+    for (const line of lines) {
+      expect(() => JSON.parse(line)).not.toThrow();
+    }
+    // The temp image is renamed away, never left behind.
+    expect(await exists(`${paths.log}.tmp`)).toBe(false);
+  });
+});
+
+describe("loadEventLog — log-line quarantine", () => {
+  it("quarantines one corrupt line, loads the rest, and surfaces the bad line", async () => {
+    const good = JSON.stringify(openBtc());
+    const later = JSON.stringify(markAapl(160));
+    const log = `${good}\nthis is not json\n${later}\n`;
+    const paths = await makeStore({ log });
+
+    const { events, quarantined } = await loadEventLog(paths.log);
+
+    expect(events.map((event) => event.id)).toEqual(["open-btc", "mark-aapl"]);
+    expect(quarantined).toHaveLength(1);
+    expect(quarantined[0]).toMatchObject({ lineNumber: 2, line: "this is not json" });
+    // The bad line is durably surfaced to the side lane for the user to fix.
+    const lane = await readFile(quarantineLogPath(paths.log), "utf8");
+    expect(lane).toContain("this is not json");
+  });
+
+  it("does not abort startup: the fold still renders with a corrupt line present", async () => {
+    const log = `${JSON.stringify(openBtc())}\n{ broken\n`;
+    const paths = await makeStore({ log });
+
+    const data = await loadFoldedReview(paths);
+
+    // The good event folded through (the corrupt line was skipped, not fatal).
+    expect(data.positions.some((position) => position.id === "btc-core")).toBe(true);
+  });
+
+  it("self-heals: a clean log removes a stale quarantine lane", async () => {
+    const paths = await makeStore({ log: `${JSON.stringify(openBtc())}\n` });
+    await writeFile(quarantineLogPath(paths.log), "stale\n", "utf8");
+
+    const { quarantined } = await loadEventLog(paths.log);
+
+    expect(quarantined).toHaveLength(0);
+    expect(await exists(quarantineLogPath(paths.log))).toBe(false);
+  });
+});
+
+describe("ingestInbox — wall-clock-stamped, non-overwriting archive", () => {
+  it("stamps the archive with the ingest moment", async () => {
+    const paths = await makeStore({ inbox: [openBtc()] });
+
+    const report = await ingestInbox(paths, { now: fixedClock });
+
+    expect(report.archivedTo).toContain(FIXED_STAMP);
+  });
+
+  it("never clobbers a prior archive when two batches share an instant", async () => {
+    const paths = await makeStore({ inbox: [openBtc()] });
+    const first = await ingestInbox(paths, { now: fixedClock });
+
+    await writeInbox(paths, [markAapl(160)]);
+    const second = await ingestInbox(paths, { now: fixedClock });
+
+    expect(second.archivedTo).not.toBe(first.archivedTo);
+    const archives = await readdir(paths.ingestedDir);
+    expect(archives).toHaveLength(2);
+    // The first archive's content is preserved, not overwritten by the second.
+    const firstArchive = JSON.parse(await readFile(first.archivedTo!, "utf8"));
+    expect(firstArchive[0].id).toBe("open-btc");
+  });
+
+  it("no-ops on a zero-new re-drop: archives nothing and leaves the inbox", async () => {
+    const existingLog = `${JSON.stringify(markAapl(160))}\n`;
+    const paths = await makeStore({ inbox: [markAapl(160)], log: existingLog });
+
+    const report = await ingestInbox(paths, { now: fixedClock });
+
+    expect(report).toEqual({ newCount: 0, duplicateCount: 1 });
+    expect(report.archivedTo).toBeUndefined();
+    // Nothing archived (the archive dir was never even created) and the durable log
+    // is unchanged.
+    expect(await exists(paths.ingestedDir)).toBe(false);
+    expect(await readFile(paths.log, "utf8")).toBe(existingLog);
+    expect(await exists(paths.inbox)).toBe(true);
+  });
+});
+
+describe("ingestInbox — restart survival", () => {
+  it("re-renders identical state from genesis + log with the inbox absent", async () => {
+    const paths = await makeStore({ inbox: [openBtc(), markAapl(160)] });
+    await ingestInbox(paths, { now: fixedClock });
+    // Inbox consumed; only genesis + log remain.
+    expect(await exists(paths.inbox)).toBe(false);
+
+    const first = await loadFoldedReview(paths);
+    const second = await loadFoldedReview(paths);
+
+    expect(second).toEqual(first);
+    expect(first.positions.some((position) => position.id === "btc-core")).toBe(true);
   });
 });

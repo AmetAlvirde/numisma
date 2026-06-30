@@ -8,17 +8,18 @@
  *   - data/genesis.json          immutable t0 seed (a FundReviewData shape)
  *   - data/events.jsonl          append-only log, one JSON event per line
  *   - data/inbox/transactions.json  disposable write channel (array of events)
- *   - data/ingested/<asOf>.json  archive of a consumed inbox
+ *   - data/ingested/<wall-clock>.json  archive of a consumed inbox
+ *   - data/events.jsonl.quarantine  the lane for surfaced corrupt log lines
  *
- * SHORTCUTS (visible, prototype-only):
- *   - Archive filename is the genesis review date (no wall clock in tests); a
- *     real ingest would stamp the actual ingest moment and avoid collisions.
- *   - A malformed inbox or log line throws / is reported; there is no partial
- *     recovery or quarantine lane yet.
- *   - Append is a plain file append, not atomic/locked — fine for single-user
- *     local-first, hardened during reliable conversion.
+ * DURABILITY (reliable conversion, ADR-003 slice 3):
+ *   - Archives are stamped with the wall-clock ingest moment and refuse to clobber
+ *     a prior archive; a zero-new re-drop archives nothing.
+ *   - A corrupt log line is quarantined to a side lane and surfaced; the rest of
+ *     the log still loads and startup proceeds.
+ *   - Append is atomic (write a full next image to a sibling temp file, then
+ *     rename over the log) so an interrupted write cannot truncate a line.
  */
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import {
   applyEventToReference,
@@ -44,7 +45,26 @@ export interface IngestReport {
   archivedTo?: string;
 }
 
+/** A log line that failed to parse, diverted to the quarantine lane on read. */
+export interface QuarantinedLine {
+  lineNumber: number;
+  line: string;
+  reason: string;
+}
+
+/** The result of reading the append-only log: the good events plus any corrupt
+ * lines that were quarantined rather than aborting the load. */
+export interface EventLogLoad {
+  events: PortfolioEvent[];
+  quarantined: QuarantinedLine[];
+}
+
 const DATA_DIR = "data";
+
+/** The quarantine lane sits beside the log it shadows. */
+export function quarantineLogPath(logPath: string): string {
+  return `${logPath}.quarantine`;
+}
 
 export function resolveEventStorePaths(dataDir = DATA_DIR): EventStorePaths {
   const base = resolve(dataDir);
@@ -91,37 +111,68 @@ export async function loadGenesis(genesisPath: string): Promise<FundReviewData> 
   return parsed.value;
 }
 
-/** Read the append-only log, validating each line into a typed event. */
-export async function loadEventLog(logPath: string): Promise<PortfolioEvent[]> {
+/**
+ * Read the append-only log, validating each line into a typed event. A line that
+ * fails to parse is diverted to the quarantine lane (returned, and surfaced to a
+ * durable `events.jsonl.quarantine` sidecar) instead of aborting the load, so a
+ * single corrupt line degrades gracefully rather than bricking startup. The rest
+ * of the log still loads. The log file itself is never mutated on read.
+ */
+export async function loadEventLog(logPath: string): Promise<EventLogLoad> {
   const raw = await readOptional(logPath);
-  if (raw === undefined) {
-    return [];
-  }
   const events: PortfolioEvent[] = [];
-  for (const [index, line] of raw.split("\n").entries()) {
-    const trimmed = line.trim();
-    if (!trimmed) {
-      continue;
+  const quarantined: QuarantinedLine[] = [];
+  if (raw !== undefined) {
+    for (const [index, line] of raw.split("\n").entries()) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        continue;
+      }
+      const parsed = parseLogLine(trimmed);
+      if (parsed.ok) {
+        events.push(parsed.event);
+      } else {
+        quarantined.push({ lineNumber: index + 1, line: trimmed, reason: parsed.reason });
+      }
     }
-    events.push(parseLogLine(trimmed, logPath, index + 1));
   }
-  return events;
+  await surfaceQuarantine(logPath, quarantined);
+  return { events, quarantined };
 }
 
-function parseLogLine(line: string, logPath: string, lineNumber: number): PortfolioEvent {
+type ParsedLine =
+  | { ok: true; event: PortfolioEvent }
+  | { ok: false; reason: string };
+
+function parseLogLine(line: string): ParsedLine {
   let json: unknown;
   try {
     json = JSON.parse(line);
   } catch {
-    throw new Error(`Corrupt event log: line ${lineNumber} of ${logPath} is not valid JSON.`);
+    return { ok: false, reason: "not valid JSON" };
   }
   const result = parseEvent(json);
   if (result.kind !== "ok") {
-    throw new Error(
-      `Corrupt event log: line ${lineNumber} of ${logPath} (${result.path}: ${result.message}).`,
-    );
+    return { ok: false, reason: `${result.path}: ${result.message}` };
   }
-  return result.value;
+  return { ok: true, event: result.value };
+}
+
+/**
+ * Write the corrupt lines to the quarantine lane (one JSON record per line) so the
+ * bad input is durably surfaced for the user to fix; remove a stale lane when the
+ * log reads clean, so a fixed log self-heals. Idempotent: the lane reflects exactly
+ * the current read, so repeated reads in one startup converge on the same content.
+ */
+async function surfaceQuarantine(logPath: string, quarantined: QuarantinedLine[]): Promise<void> {
+  const lanePath = quarantineLogPath(logPath);
+  if (quarantined.length === 0) {
+    await rm(lanePath, { force: true });
+    return;
+  }
+  await mkdir(dirname(logPath), { recursive: true });
+  const body = `${quarantined.map((entry) => JSON.stringify(entry)).join("\n")}\n`;
+  await writeFile(lanePath, body, "utf8");
 }
 
 /**
@@ -138,7 +189,10 @@ function parseLogLine(line: string, logPath: string, lineNumber: number): Portfo
  * to fix. Per ADR-001 this orchestration (loading the genesis seed off disk,
  * driving the loop) lives here; the validation logic it calls lives in the engine.
  */
-export async function ingestInbox(paths: EventStorePaths): Promise<IngestReport> {
+export async function ingestInbox(
+  paths: EventStorePaths,
+  options: { now?: () => Date } = {},
+): Promise<IngestReport> {
   const raw = await readOptional(paths.inbox);
   if (raw === undefined) {
     return { newCount: 0, duplicateCount: 0 };
@@ -155,7 +209,7 @@ export async function ingestInbox(paths: EventStorePaths): Promise<IngestReport>
   }
 
   const genesis = await loadGenesis(paths.genesis);
-  const existing = await loadEventLog(paths.log);
+  const { events: existing } = await loadEventLog(paths.log);
   const seen = new Set(existing.map((event) => event.id));
   // The known world is genesis + the durable log; accepted batch events extend it
   // in order, so a position opened earlier in this inbox can be referenced later.
@@ -185,11 +239,16 @@ export async function ingestInbox(paths: EventStorePaths): Promise<IngestReport>
     toAppend.push(result.value);
   }
 
-  if (toAppend.length > 0) {
-    await appendEvents(paths.log, toAppend);
+  // No-op archive on a zero-new re-drop: archive nothing and leave the inbox (and
+  // any prior archive) untouched, honoring the "never overwritten" promise. Only a
+  // batch that actually extends the log consumes and archives the inbox.
+  if (toAppend.length === 0) {
+    return { newCount: 0, duplicateCount };
   }
-  const latestDate = toAppend.reduce<string>((latest, event) => (event.asOf > latest ? event.asOf : latest), "");
-  const archivedTo = await archiveInbox(paths, latestDate || "ingested");
+
+  await appendEvents(paths.log, toAppend);
+  const now = options.now ?? (() => new Date());
+  const archivedTo = await archiveInbox(paths, now());
 
   return { newCount: toAppend.length, duplicateCount, archivedTo };
 }
@@ -200,23 +259,56 @@ export async function loadFoldedReview(
   asOf?: string,
 ): Promise<FundReviewData> {
   const genesis = await loadGenesis(paths.genesis);
-  const events = await loadEventLog(paths.log);
+  const { events } = await loadEventLog(paths.log);
   return foldEvents(genesis, events, asOf);
 }
 
+/**
+ * Append events atomically: build the full next image of the log, write it to a
+ * sibling temp file, then `rename` over the log. rename(2) within a directory is
+ * atomic, so a crash mid-write leaves the prior log intact — a reader never sees a
+ * half-written or truncated final line.
+ */
 async function appendEvents(logPath: string, events: PortfolioEvent[]): Promise<void> {
   await mkdir(dirname(logPath), { recursive: true });
   const lines = events.map((event) => JSON.stringify(event)).join("\n");
   const existing = await readOptional(logPath);
   const prefix = existing && existing.length > 0 && !existing.endsWith("\n") ? "\n" : "";
-  await writeFile(logPath, `${existing ?? ""}${prefix}${lines}\n`, "utf8");
+  const next = `${existing ?? ""}${prefix}${lines}\n`;
+  const tempPath = `${logPath}.tmp`;
+  await writeFile(tempPath, next, "utf8");
+  await rename(tempPath, logPath);
 }
 
-async function archiveInbox(paths: EventStorePaths, stamp: string): Promise<string> {
+/**
+ * Move the consumed inbox into the archive under a wall-clock-stamped name. The
+ * stamp refuses to clobber a prior archive: if the name is already taken (two
+ * same-instant batches), it probes a disambiguated `<stamp>-<n>.json` so the
+ * consumed inbox is preserved, never overwritten.
+ */
+async function archiveInbox(paths: EventStorePaths, now: Date): Promise<string> {
   await mkdir(paths.ingestedDir, { recursive: true });
-  const archivedTo = join(paths.ingestedDir, `${stamp}.json`);
+  const stamp = wallClockStamp(now);
+  let archivedTo = join(paths.ingestedDir, `${stamp}.json`);
+  for (let suffix = 1; await pathExists(archivedTo); suffix += 1) {
+    archivedTo = join(paths.ingestedDir, `${stamp}-${suffix}.json`);
+  }
   await rename(paths.inbox, archivedTo);
   return archivedTo;
+}
+
+/** A filesystem-safe ISO stamp, e.g. `2026-06-29T14-03-22-123Z`. */
+function wallClockStamp(now: Date): string {
+  return now.toISOString().replace(/[:.]/g, "-");
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await stat(filePath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function readOptional(filePath: string): Promise<string | undefined> {
