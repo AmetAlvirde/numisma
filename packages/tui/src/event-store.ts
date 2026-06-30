@@ -21,6 +21,9 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import {
+  applyEventToReference,
+  buildEventReference,
+  crossReferenceEvent,
   foldEvents,
   parseEvent,
   parseFundReview,
@@ -122,10 +125,18 @@ function parseLogLine(line: string, logPath: string, lineNumber: number): Portfo
 }
 
 /**
- * Ingest the inbox if present: dedup each transaction by stable `id` against the
- * existing log, append the new ones, then archive the consumed inbox. Returns
- * the new/duplicate counts the TUI surfaces ("Success, N new, M duplicate"). A
- * missing inbox is the normal case and reports zero.
+ * Ingest the inbox if present: structurally validate (`parseEvent`) and
+ * cross-reference (`crossReferenceEvent`) each transaction against the loaded
+ * genesis ids and the existing log, dedup by stable `id`, append the new ones,
+ * then archive the consumed inbox. Returns the new/duplicate counts the TUI
+ * surfaces ("Success, N new, M duplicate"). A missing inbox is the normal case
+ * and reports zero.
+ *
+ * Fail-loud, all-or-nothing: any structural, cross-reference, or magnitude
+ * rejection throws BEFORE the single append/archive at the tail, so the durable
+ * log is left byte-for-byte unchanged and the inbox stays in place for the user
+ * to fix. Per ADR-001 this orchestration (loading the genesis seed off disk,
+ * driving the loop) lives here; the validation logic it calls lives in the engine.
  */
 export async function ingestInbox(paths: EventStorePaths): Promise<IngestReport> {
   const raw = await readOptional(paths.inbox);
@@ -143,8 +154,12 @@ export async function ingestInbox(paths: EventStorePaths): Promise<IngestReport>
     throw new Error(`Inbox ${paths.inbox} must be a JSON array of transactions.`);
   }
 
+  const genesis = await loadGenesis(paths.genesis);
   const existing = await loadEventLog(paths.log);
   const seen = new Set(existing.map((event) => event.id));
+  // The known world is genesis + the durable log; accepted batch events extend it
+  // in order, so a position opened earlier in this inbox can be referenced later.
+  const reference = buildEventReference(genesis, existing);
 
   const toAppend: PortfolioEvent[] = [];
   let duplicateCount = 0;
@@ -159,7 +174,14 @@ export async function ingestInbox(paths: EventStorePaths): Promise<IngestReport>
       duplicateCount += 1;
       continue;
     }
+    const crossRef = crossReferenceEvent(result.value, reference);
+    if (crossRef.kind !== "ok") {
+      throw new Error(
+        `Inbox transaction [${index}] failed cross-reference (${crossRef.path}: ${crossRef.message}).`,
+      );
+    }
     seen.add(result.value.id);
+    applyEventToReference(reference, result.value);
     toAppend.push(result.value);
   }
 

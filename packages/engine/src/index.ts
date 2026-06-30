@@ -67,8 +67,16 @@ export type {
   EventOk,
   EventError,
   EventParseResult,
+  EventReference,
 } from "./fold.js";
-export { parseEvent, foldEvents } from "./fold.js";
+export {
+  parseEvent,
+  foldEvents,
+  buildEventReference,
+  applyEventToReference,
+  crossReferenceEvent,
+  PRICE_MARK_MAGNITUDE_THRESHOLD,
+} from "./fold.js";
 
 // Shared formatters (the engine's one source of truth for the cents-precision /
 // padding conventions, consumed by the TUI) + the CLI composition renderer.
