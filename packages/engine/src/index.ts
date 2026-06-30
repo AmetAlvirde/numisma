@@ -55,6 +55,29 @@ export { validationSeverityByCode } from "./contracts.js";
 export { parseFundReview } from "./parse.js";
 export { buildCompositionReport, buildDashboardDetail } from "./compose.js";
 
+// PROTOTYPE (mvi 2026-06-29-portfolio-persistence): the event-sourcing spine —
+// pure event validation + the fold to the existing FundReviewData read model.
+export type {
+  PortfolioEventType,
+  PositionDecision,
+  PositionOpenedEvent,
+  PositionClosedEvent,
+  PriceMarkedEvent,
+  PortfolioEvent,
+  EventOk,
+  EventError,
+  EventParseResult,
+  EventReference,
+} from "./fold.js";
+export {
+  parseEvent,
+  foldEvents,
+  buildEventReference,
+  applyEventToReference,
+  crossReferenceEvent,
+  PRICE_MARK_MAGNITUDE_THRESHOLD,
+} from "./fold.js";
+
 // Shared formatters (the engine's one source of truth for the cents-precision /
 // padding conventions, consumed by the TUI) + the CLI composition renderer.
 export {
