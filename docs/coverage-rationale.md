@@ -22,10 +22,13 @@ dishonest.
 
 | File | Why excluded | What guards it instead |
 | --- | --- | --- |
-| `packages/tui/src/app.ts` | Self-executing Bun entry: top-level `await`, openTUI renderer construction, `process.exit` startup glue. Never runs under Node's `vitest run`. | `pnpm dev` (manual) + the keypress smoke for the wiring it delegates to. |
+| `packages/tui/src/app.ts` | Self-executing Bun entry: top-level `await`, `prepareStartup`, openTUI renderer construction, `process.exit` startup glue. Never runs under Node's `vitest run`. | `pnpm dev` (manual) + the startup/keypress smokes for the wiring it delegates to; `prepareStartup` itself is unit-tested (`startup.test.ts`). |
 | `packages/tui/src/mount-app.ts` | Bun-only openTUI wiring (`@opentui/core` import, keypress subscription, `requestRender`). Never runs under Node. | `pnpm smoke:tui` drives real `j`/`k`/`enter` through it on the real openTUI test renderer. |
-| `packages/tui/src/smoke-openTui.ts` | The Bun smoke harness itself. | It *is* the test; running it (`pnpm smoke:tui`) is the assertion. |
-| `packages/tui/src/report.ts` | A 22-line `tsx` CLI script: a top-level `try/catch` orchestrating already-tested functions (`resolveFundReviewFilePath`, `loadFundReview`, `buildCompositionReport`, `formatCompositionReport`). Same category as the script entries above — no unit to assert beyond a `process.stdout.write`. | Its constituent functions are unit-tested directly (`review-file.test.ts`, `fund-composition.test.ts`). |
+| `packages/tui/src/smoke-openTui.ts` | The keypress Bun smoke harness itself. | It *is* the test; running it (`pnpm smoke:tui`) is the assertion. |
+| `packages/tui/src/smoke-startup-openTui.ts` | The startup Bun smoke harness itself: drives `prepareStartup` + `mountApp` through the real openTUI renderer against an on-disk store. | It *is* the test; running it (`pnpm smoke:startup`) is the assertion. |
+| `packages/tui/src/report.ts` | A `tsx` CLI script: a top-level `try/catch` that folds genesis + log (`loadFoldedReview`) and renders the already-tested composition report. No unit to assert beyond a `process.stdout.write`. | Its constituent functions are unit-tested directly (`event-store.test.ts`, `report-fold.test.ts`, `fund-composition.test.ts`). |
+| `packages/tui/src/spine.ts` | The `tsx` Node tracer (`pnpm spine`): a top-level `try/catch` orchestrating already-tested `ingestInbox` / `loadFoldedReview` / `buildCompositionReport` / `formatCompositionReport`. Same script category — no unit to assert. | Its constituent functions are unit-tested (`event-store.test.ts`, `report-fold.test.ts`); the end-to-end path is also driven by `pnpm spine` / `pnpm smoke:startup`. |
+| `packages/tui/src/spine-reset.ts` | A `tsx` dev iteration helper (`pnpm spine:reset`): clear the log, restore the most recent archived inbox. A throwaway utility, not product behavior — no unit to assert. | Manual: it exists to re-run `pnpm spine` against an edited inbox. |
 
 ## 2. Defensive / unreachable guards (kept on purpose, cannot be tested honestly)
 
@@ -122,9 +125,38 @@ a regression could break while the suite stayed green. It is now unit-tested:
 What remains uncovered after #72 is only the §2 defensive guards and the §3
 tie-break — each listed there with a concrete reason.
 
+## 5. Event-sourcing spine (ADR-003) — newly added, ~94% lines
+
+`fold.ts` (engine) and `event-store.ts` (TUI) are the persistence spine added in
+the portfolio-history increment. Both sit at ~94% lines, and the remainder is
+**real, reachable behavior that is partially — not yet exhaustively — covered**.
+It is listed here honestly, not dressed up as unreachable; closing it is a
+follow-up, tracked against the spine's reliable-conversion work.
+
+- **`packages/engine/src/fold.ts`** (94% lines) — the covered core is the fold
+  itself and the ingest cross-reference (`event-ingest.test.ts`, `fold.test.ts`).
+  Uncovered: several **per-field `parseEvent` rejection branches** (e.g. the
+  individual `position.*` non-empty-string / `executionMode` / `direction` /
+  `currency` errors and the per-lot shape errors) — the validator is exercised,
+  but not every individual malformed-field fixture exists yet; plus two real
+  branches — a `PriceMarked` carrying `usdMxn` updating the fold's FX, and the
+  zero-`totalQuantity` guard in the weighted-average helper.
+- **`packages/tui/src/event-store.ts`** (94% lines) — the covered core is the
+  validated ingest boundary, dedup, atomic append, archive, and quarantine
+  (`event-store.test.ts`). Uncovered: the inbox **invalid-JSON** and
+  **non-array** rejection throws, the `--as-of=<date>` (equals-form) arg variant
+  (the space-separated form is tested), the genesis-validation-failure throw (a
+  corrupt `genesis.json`, defensive), and the `readOptional` non-`ENOENT` rethrow
+  (an unexpected fs error the call path does not otherwise produce — defensive).
+
+`startup.ts` is at 100% (`startup.test.ts`).
+
 ## What this number means
 
 After this pass, every Node module's *meaningful, reachable* behavior is
-unit-tested; §1–§3 account, concretely, for everything still outside the number.
-"Reliable" here means *measured and accounted for* — not "100% of everything,"
-and explicitly not covering the Bun-only wiring.
+unit-tested, with the explicit exception of the §5 event-sourcing spine
+remainder — real behavior that is partially covered and flagged as such, not
+hidden. §1–§3 account, concretely, for everything else outside the number, and §5
+names what the spine still leaves open. "Reliable" here means *measured and
+accounted for* — not "100% of everything," and explicitly not covering the
+Bun-only wiring.
