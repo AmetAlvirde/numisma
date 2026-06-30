@@ -361,3 +361,49 @@ describe("ingestInbox — restart survival", () => {
     expect(first.positions.some((position) => position.id === "btc-core")).toBe(true);
   });
 });
+
+// Decision round-trip (MF4, ADR-003 slice 4). The open-gate enforces the five
+// decision fields at ingest; this locks that the decision context is durably
+// RETAINED, not validate-then-discarded — captured-and-logged. A PositionOpened
+// written to the log reloads with all five fields intact and is RE-VALIDATED on
+// read (parseEvent runs per line on load), and a log line missing any field fails
+// to load (it is quarantined, not silently accepted). The decision is not yet in
+// the fold's read model — surfacing it is the named next increment; logged durably
+// is this slice's contract.
+describe("decision round-trip — durable retention of the five decision fields (MF4)", () => {
+  it("reloads a logged PositionOpened with all five decision fields intact", async () => {
+    const paths = await makeStore({ inbox: [openBtc()] });
+    await ingestInbox(paths);
+
+    const { events, quarantined } = await loadEventLog(paths.log);
+
+    expect(quarantined).toHaveLength(0);
+    const reopened = events.find((event) => event.type === "PositionOpened");
+    expect(reopened).toBeDefined();
+    // Intact and re-validated on read (loadEventLog re-runs parseEvent per line).
+    expect(reopened && "decision" in reopened ? reopened.decision : undefined).toEqual(DECISION);
+  });
+
+  it("persists the decision durably to events.jsonl on disk", async () => {
+    const paths = await makeStore({ inbox: [openBtc()] });
+    await ingestInbox(paths);
+
+    // Read the raw durable log, not the in-memory event: the decision is on disk.
+    const logged = JSON.parse((await readFile(paths.log, "utf8")).trim().split("\n")[0]!);
+    expect(logged.decision).toEqual(DECISION);
+  });
+
+  it("fails to load a log line missing any decision field (quarantined, not accepted)", async () => {
+    const open = openBtc();
+    const { strategy: _omitted, ...incompleteDecision } = open.decision;
+    const badLine = JSON.stringify({ ...open, decision: incompleteDecision });
+    const paths = await makeStore({ log: `${badLine}\n` });
+
+    const { events, quarantined } = await loadEventLog(paths.log);
+
+    // The missing-field open never becomes an event; it is surfaced for the user to fix.
+    expect(events).toHaveLength(0);
+    expect(quarantined).toHaveLength(1);
+    expect(quarantined[0]?.reason).toMatch(/decision\.strategy/);
+  });
+});
