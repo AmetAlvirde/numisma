@@ -18,10 +18,8 @@
  *
  * SHORTCUTS (visible, prototype-only):
  *   - Events are validated structurally but not cross-referenced against genesis
- *     ids (e.g. a PositionClosed for an unknown id is a silent no-op).
- *   - markPrice for a freshly opened Position with no PriceMarked yet falls back
- *     to its volume-weighted average cost, so entry P&L reads as 0 ("frozen at
- *     entry" until the first PriceMarked).
+ *     ids (e.g. a PositionClosed for an unknown id is a silent no-op). Closing
+ *     this is the ingest-boundary slice.
  *   - Decision fields are validated on ingest but NOT carried into the read
  *     model (FundReviewData has no decision slot yet); they are dropped after
  *     the open. Persisting them is reliable-conversion work.
@@ -298,12 +296,41 @@ function parseLots(input: unknown): { kind: "ok"; value: PositionLot[] } | Event
  *
  * Events apply in (asOf, then log order) — a stable sort keeps same-day events
  * in the order they were appended to the log.
+ *
+ * As-of-before-genesis is guarded, not silently degenerate: the genesis seed is
+ * t0, the start of recorded history, so an `asOf` strictly before
+ * `genesis.review.asOf` has no honest answer (folding it would relabel the full
+ * genesis composition with a date on which it did not yet exist). Such a request
+ * throws rather than returning a misleading snapshot. `asOf === genesis.review.asOf`
+ * is valid — it is the genesis state itself.
+ *
+ * FX-at-entry P&L: a freshly opened Position with no PriceMarked yet takes its
+ * volume-weighted average cost as `markPrice`. That "freezes" it at entry in
+ * native units, but the resulting P&L is only 0 when cost and value convert at
+ * the same FX (USD, or a lot whose `entryFx` equals `review.usdMxn`). When a
+ * lot's `entryFx` differs from the review FX, cost basis converts at entry FX
+ * and market value at review FX, so the frozen-at-entry P&L is a pure
+ * FX-translation gain/loss — not 0. The fold preserves `entryFx` per lot so
+ * `buildCompositionReport` attributes that correctly (ADR-002).
+ *
+ * The returned read model shares no mutable state with `genesis`: the seed's
+ * `fund`/`portfolios`/`accounts`/`instruments`/`reserves` sub-objects are deep-
+ * cloned, so a consumer mutating the fold output can never reach back into the
+ * immutable seed.
  */
 export function foldEvents(
   genesis: FundReviewData,
   events: PortfolioEvent[],
   asOf?: string,
 ): FundReviewData {
+  if (asOf !== undefined && asOf < genesis.review.asOf) {
+    throw new Error(
+      `Cannot fold as-of ${asOf}: it precedes the genesis seed date ` +
+        `${genesis.review.asOf}. Genesis is the start of recorded history; ` +
+        `there is no portfolio state before it.`,
+    );
+  }
+
   const positions = new Map<string, PositionRecord>(
     genesis.positions.map((position) => [position.id, structuredClone(position)]),
   );
@@ -383,9 +410,17 @@ export function foldEvents(
     }
   }
 
+  // Deep-clone the shared genesis sub-objects so the fold output is fully
+  // independent of the immutable seed: `positions` and `closes` are already
+  // freshly built above, but `fund`/`portfolios`/`accounts`/`instruments`/
+  // `reserves` would otherwise be shared by reference via the seed.
   return {
-    ...genesis,
+    fund: structuredClone(genesis.fund),
     review: { asOf: asOf ?? latestAsOf, usdMxn },
+    portfolios: structuredClone(genesis.portfolios),
+    accounts: structuredClone(genesis.accounts),
+    instruments: structuredClone(genesis.instruments),
+    reserves: structuredClone(genesis.reserves),
     positions: [...positions.values()],
     closes,
   };
