@@ -5,7 +5,7 @@
 // rejection leaves the durable log byte-for-byte unchanged and the inbox in place
 // so the user can fix it. A small explicit genesis fixture makes the cross-
 // reference cases legible.
-import { mkdir, mkdtemp, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -92,7 +92,8 @@ function markAapl(price: number, id = "mark-aapl") {
 
 const createdDirs: string[] = [];
 
-afterEach(() => {
+afterEach(async () => {
+  await Promise.all(createdDirs.map((dir) => rm(dir, { recursive: true, force: true })));
   createdDirs.length = 0;
 });
 

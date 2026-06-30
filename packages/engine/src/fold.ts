@@ -553,6 +553,12 @@ export function foldEvents(
   // The anchor is the genesis `markPrice`, NOT cost: that keeps it coherent with
   // the authoritative valuation, so no synthetic `markprice-close-mismatch` fires.
   // Genesis-provided closes win — we only fill instruments that have none.
+  //
+  // First-position-wins here: if two genesis positions ever shared an instrument
+  // with different `markPrice`, this seeds the t0 anchor from the FIRST while the
+  // magnitude guard's `buildEventReference`/`noteClose` keeps the LAST (equal-asOf
+  // overwrite), so the fold anchor and the guard seed could diverge. Unreachable
+  // today (one position per instrument); revisit this tie-break if that changes.
   const seededInstruments = new Set(closes.map((close) => close.instrumentId));
   for (const position of genesis.positions) {
     if (!seededInstruments.has(position.instrumentId)) {

@@ -10,7 +10,7 @@
 //      cannot disagree.
 // report.ts is a thin script (resolve paths → parseAsOfArg → loadFoldedReview →
 // buildCompositionReport); this exercises that exact pipeline at the function level.
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { buildCompositionReport } from "@numisma/engine";
@@ -88,7 +88,8 @@ function openBtc() {
 
 const createdDirs: string[] = [];
 
-afterEach(() => {
+afterEach(async () => {
+  await Promise.all(createdDirs.map((dir) => rm(dir, { recursive: true, force: true })));
   createdDirs.length = 0;
 });
 
