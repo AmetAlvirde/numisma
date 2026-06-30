@@ -1,7 +1,24 @@
-import { loadFundReview, resolveFundReviewFilePath } from "./review-file.js";
 import { mountApp } from "./mount-app.js";
+import {
+  ingestInbox,
+  loadFoldedReview,
+  parseAsOfArg,
+  resolveEventStorePaths,
+  type EventStorePaths,
+} from "./event-store.js";
 
-const filePath = resolveStartupFundReviewFilePath();
+// PROTOTYPE (mvi 2026-06-29-portfolio-persistence): the real TUI surface now
+// renders the FOLD over the event log, not a single hand-edited snapshot. On
+// startup it ingests any dropped inbox, then folds genesis + log to `--as-of`
+// (or current state). SHORTCUT: the ingest report is written to stderr before
+// the alternate screen takes over (no in-TUI banner yet); `r` reloads = re-fold
+// (the same data file evolves only when a new inbox is dropped + restarted).
+const paths = resolveStartupEventStorePaths();
+const asOf = resolveStartupAsOf();
+const sourcePath = asOf ? `${paths.log} as-of ${asOf}` : paths.log;
+
+await runStartupIngest(paths);
+
 const core = await loadOpenTuiCore();
 const renderer = await core.createCliRenderer({
   exitOnCtrlC: true,
@@ -13,15 +30,31 @@ const renderer = await core.createCliRenderer({
 
 await mountApp(renderer, {
   core,
-  loadData: () => loadFundReview(filePath),
-  sourcePath: filePath,
+  loadData: () => loadFoldedReview(paths, asOf),
+  sourcePath,
 });
 
 renderer.start();
 
-function resolveStartupFundReviewFilePath(): string {
+function resolveStartupEventStorePaths(): EventStorePaths {
+  return resolveEventStorePaths();
+}
+
+function resolveStartupAsOf(): string | undefined {
   try {
-    return resolveFundReviewFilePath(process.argv);
+    return parseAsOfArg(process.argv);
+  } catch (error) {
+    failStartup(error);
+  }
+}
+
+async function runStartupIngest(storePaths: EventStorePaths): Promise<void> {
+  try {
+    const report = await ingestInbox(storePaths);
+    process.stderr.write(
+      `Numisma: ${report.newCount} new transaction(s) ingested, ` +
+        `${report.duplicateCount} duplicate(s) skipped.\n`,
+    );
   } catch (error) {
     failStartup(error);
   }
