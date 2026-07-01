@@ -24,9 +24,11 @@ blanket `export *`). The public surface is:
 | `buildDashboardDetail`                                                                                            | function  | Drill a dashboard row down into its contributing records.                                                                                                               |
 | `parseEvent`                                                                                                      | function  | Structurally validate one untrusted log line / inbox entry into a typed `PortfolioEvent` or an `EventError`.                                                            |
 | `foldEvents`                                                                                                      | function  | Fold a genesis `FundReviewData` + ordered events into the read model, optionally as of a date (an `asOf` before genesis fails loud).                                     |
+| `applyReserveDelta`, `reserveDeltasForOpen`, `reserveDeltasForClose`                                              | functions | The fold's reserve-mutation helpers — the cash leg that rides atomically on each trade leg (funding on open, settlement on close).                                       |
+| `migrateLegacyEvent`, `EVENT_SCHEMA_VERSION`                                                                      | function, value | The durable-log versioning contract (ADR-003 amendment): the current schema-version marker and the one-shot, operator-supplied migration from a legacy log line.  |
 | `buildEventReference`, `applyEventToReference`, `crossReferenceEvent`                                             | functions | The ingest cross-reference: a reference of known ids + last Closes from genesis, advanced per event, that rejects unknown-id / colliding-id / implausible-magnitude events. |
-| `PRICE_MARK_MAGNITUDE_THRESHOLD`                                                                                  | value     | The tunable deviation threshold the `PriceMarked` magnitude guard uses (catches currency-unit / fat-finger marks).                                                       |
-| `formatCompositionReport`                                                                                         | function  | Render the CLI text report from a `CompositionReport`.                                                                                                                  |
+| `PRICE_MARK_MAGNITUDE_THRESHOLD`, `SETTLEMENT_MAGNITUDE_THRESHOLD`                                                | values    | The tunable deviation thresholds the `PriceMarked` and settlement magnitude guards use (catch currency-unit / fat-finger marks and implausible cash settlements).       |
+| `formatCompositionReport`, `formatReserveReconciliation`                                                          | functions | Render the CLI composition report, and the reserve-reconciliation view, from a `CompositionReport`.                                                                     |
 | `formatUsd`, `formatMaybeUsd`, `formatPrice`, `formatSignedPercent`, `formatPercent`, `pad`, `padLeft`, `divider` | functions | The shared formatters — the **one** source of truth for the "USD to cents" / padding / precision conventions. The TUI imports these rather than keeping private copies. |
 | `validationSeverityByCode`                                                                                        | value     | Maps each validation code to its severity.                                                                                                                              |
 | domain & event types, read models                                                                                 | types     | `FundReviewData`, `CompositionReport`, `DashboardDetail`, `Warning`, `ParseResult`, the event union (`PortfolioEvent`, `PositionOpenedEvent`, …), `EventParseResult`, `EventReference`, … |
@@ -47,22 +49,29 @@ imports the shared kernel rather than re-copying cross-concern helpers.
 | `contracts.ts`     | types only                                       | Domain types, read models, `ParseResult`/`Warning` unions, and the assurance vocabulary. The leaf of the dependency graph (shapes, no behavior).                                                                                       |
 | `internal.ts`      | internal                                         | The shared kernel: cross-concern helpers (`toUsd`, `percentOfFund`, `roundNumber`, `indexById`, `pushWarning`, `schemaError`, `requireNonEmptyString`, `isIsoDate`, and the `is*` type guards). Defined exactly once; not re-exported. |
 | `parse.ts`         | `parseFundReview`                                | `parseFundReview` plus every `validate*` / `require*` / guard that validates the review file.                                                                                                                                          |
-| `compose.ts`       | `buildCompositionReport`, `buildDashboardDetail` | Canonical-state construction, grouping, Capital-Tier rollup, and dashboard detail drill-down. The canonical-state types (`CanonicalLine`, `GroupAccumulator`) stay internal.                                                           |
-| `price-journey.ts` | internal                                         | `buildPriceJourneys`, `latestCloseByInstrument`, and the markPrice/Close coherence tolerance. Consumed by `compose.ts`; not on the public surface.                                                                                     |
-| `fold.ts`          | event verbs + `foldEvents` + the cross-reference | The event-sourcing spine (ADR-003): the `PortfolioEvent` union, `parseEvent`, the genesis-bound fold to `FundReviewData`, and the ingest cross-reference (`buildEventReference` / `applyEventToReference` / `crossReferenceEvent` + the magnitude guard). |
-| `format.ts`        | formatters + `formatCompositionReport`           | The shared formatters (exported) and the CLI composition renderer.                                                                                                                                                                     |
+| `compose/canonical.ts` | internal                                     | Canonical-state construction, grouping, and Capital-Tier rollup. `buildCanonicalState` feeds both the report and the drill-down; the canonical-state types (`CanonicalLine`, `GroupAccumulator`) stay internal.                          |
+| `compose/report.ts`    | `buildCompositionReport`                     | The `CompositionReport` read model, built over the canonical state.                                                                    |
+| `compose/detail.ts`    | `buildDashboardDetail`                        | Dashboard detail drill-down, built over the canonical state.                                                                           |
+| `price-journey.ts`     | internal                                     | `buildPriceJourneys`, `latestCloseByInstrument`, and the markPrice/Close coherence tolerance. Consumed by `compose/canonical.ts`; not on the public surface.                                                                            |
+| `events/types.ts`      | event types                                  | The `PortfolioEvent` union and its members, the cash-leg shapes (`OpenFunding`, `CloseSettlement`), and the event result types (`EventParseResult`, `EventError`, …).                                                                   |
+| `events/parse.ts`      | `parseEvent`, `migrateLegacyEvent`, `EVENT_SCHEMA_VERSION` | Structural validation of one untrusted line into a typed event, plus the durable-log version marker and the one-shot legacy migration (ADR-003 amendment).                                                       |
+| `events/fold.ts`       | `foldEvents` + reserve-delta helpers         | The genesis-bound fold to `FundReviewData`. Reserves are mutated by the fold via `applyReserveDelta` / `reserveDeltasForOpen` / `reserveDeltasForClose` (the cash leg) while the fold stays a pure projection.                          |
+| `events/crossref.ts`   | the ingest cross-reference + magnitude guards | `buildEventReference` / `applyEventToReference` / `crossReferenceEvent` over known ids + last Closes, plus the `PRICE_MARK_MAGNITUDE_THRESHOLD` and `SETTLEMENT_MAGNITUDE_THRESHOLD` guards.                                             |
+| `format.ts`            | formatters + `formatCompositionReport` + `formatReserveReconciliation` | The shared formatters (exported), the CLI composition renderer, and the reserve-reconciliation renderer.                                     |
 
 Dependency direction: `contracts.ts` → (`internal.ts`, `price-journey.ts`) →
-`parse.ts` / `compose.ts` / `fold.ts` / `format.ts` → `index.ts`. `fold.ts`
-reuses `parseFundReview` (to re-validate genesis) and the composition read model;
-`contracts.ts` depends on nothing else in the package, so there are no cycles.
+`parse.ts` / `compose/*` / `events/*` / `format.ts` → `index.ts`. The event
+modules reuse `parseFundReview` (to re-validate genesis) and the composition read
+model; `contracts.ts` depends on nothing else in the package, so there are no
+cycles.
 
-> Note: the behavioral suite spans `fund-composition.test.ts` (the composition
-> read model — predates the module split and still lives under its original name),
-> `fold.test.ts` and `event-ingest.test.ts` (the event-sourcing spine),
-> `parse-validation.test.ts`, and `engine-internals.test.ts`. Splitting
-> `fund-composition.test.ts` to mirror the new modules is deferred until
-> navigation cost demands it.
+> Note: the behavioral suite is split to mirror the modules —
+> `fund-composition-{parse,tiers,warnings,dashboard}.test.ts` over a shared
+> `fund-composition.fixtures.ts`, with a `fund-composition.test.ts` remainder for
+> the `buildCompositionReport` core; `cash-settlement.test.ts` and
+> `cash-settlement-scenarios.test.ts` over `cash-settlement.fixtures.ts` (the cash
+> leg); `fold.test.ts` and `event-ingest.test.ts` (the event-sourcing spine);
+> `parse-validation.test.ts`; and `engine-internals.test.ts`.
 
 ## Conventions
 

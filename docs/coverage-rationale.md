@@ -63,21 +63,21 @@ state the pipeline already excludes, so they are documented rather than tested.
   branches above it *are* tested, the last one skipped only when running as
   root — see `review-file.test.ts`.)
 
-**`packages/engine/src/compose.ts`**
+**`packages/engine/src/compose/canonical.ts`**
 
 - `buildCanonicalState` Reserve `portfolioLabel` fallback
-  `portfolios.get(reserve.portfolioId)?.name ?? reserve.portfolioId` (~L329) and
-  the Position `portfolioLabel` fallback (~L480) — both run only after
+  `portfolios.get(reserve.portfolioId)?.name ?? reserve.portfolioId` (~L176) and
+  the Position `portfolioLabel` fallback (~L339) — both run only after
   `validateCapitalBase` has already excluded any record whose `portfolioId` is
   missing, so `portfolios.get(...)` always resolves and the optional-chain /
   `?? id` miss is unreachable.
-- `accountLabel` `account ? … : fallback` false branch (~L736) — same reason:
+- `accountLabel` `account ? … : fallback` false branch (~L436) — same reason:
   `validateCapitalBase` excludes any record with a missing `accountId`, so every
   record that reaches `accountLabel` has a resolved Account.
 
 **`packages/engine/src/format.ts`**
 
-- `sectionRows` `?.rows ?? []` miss (~L150) — the five composition sections are
+- `sectionRows` `?.rows ?? []` miss (~L153) — the five composition sections are
   always present in the report, so `.find(...)` never returns undefined and the
   `?? []` fallback is unreachable from `formatCompositionReport`.
 
@@ -106,41 +106,45 @@ drill-down filtering, and the dashboard renderer's empty-state / tier-expansion 
 title branches) was **not** defensive and **not** low-value — shippable behavior
 a regression could break while the suite stayed green. It is now unit-tested:
 
-- **`packages/engine/src/compose.ts`** (100% lines) — Reserve missing-reference
-  exclusion, Position `unsupported-execution-mode`, Account/Instrument
-  `currency-mismatch`, Lot-level invalid-numeric warnings (quantity/cost/
-  `entryFx`, plus the empty-`lots` guard for non-parse callers), and
-  `detailLinesForRow` portfolio/tempo/account drill-down filtering — all in
-  `fund-composition.test.ts`. (`parseFundReview` rejects empty `lots`, so that
-  one guard is exercised through the public `buildCompositionReport` with a
-  directly-built `FundReviewData`, the same way the TUI tests do.)
+- **`packages/engine/src/compose/canonical.ts`** (100% lines) — Reserve
+  missing-reference exclusion, Position `unsupported-execution-mode`,
+  Account/Instrument `currency-mismatch`, Lot-level invalid-numeric warnings
+  (quantity/cost/`entryFx`, plus the empty-`lots` guard for non-parse callers),
+  and `detailLinesForRow` portfolio/tempo/account drill-down filtering — across
+  the `fund-composition-*.test.ts` suite (`fund-composition-warnings.test.ts`,
+  `fund-composition-dashboard.test.ts`). (`parseFundReview` rejects empty `lots`,
+  so that one guard is exercised through the public `buildCompositionReport` with
+  a directly-built `FundReviewData`, the same way the TUI tests do.)
 - **`packages/tui/src/dashboard.ts`** (100% branches) — empty-section "No live
   records." rows, the Portfolio empty-detail message, typed vs untyped detail
   columns, zero-denominator tier-table guards, and the `detailTitle` /
   summary-focus placeholder branches — all in `dashboard.test.ts`.
 - **`packages/engine/src/format.ts`** (100% lines) — the `formatRowFocus`
   "No live records" placeholder, the `formatDataSafety` "no warnings" string,
-  and the empty-section body — all in `fund-composition.test.ts`.
+  and the empty-section body — across the `fund-composition-*.test.ts` suite.
 
 What remains uncovered after #72 is only the §2 defensive guards and the §3
 tie-break — each listed there with a concrete reason.
 
 ## 5. Event-sourcing spine (ADR-003) — newly added, ~94% lines
 
-`fold.ts` (engine) and `event-store.ts` (TUI) are the persistence spine added in
-the portfolio-history increment. Both sit at ~94% lines, and the remainder is
+The engine event modules (`events/*.ts`) and `event-store.ts` (TUI) are the
+persistence spine added in the portfolio-history increment. Both sit at ~94%
+lines, and the remainder is
 **real, reachable behavior that is partially — not yet exhaustively — covered**.
 It is listed here honestly, not dressed up as unreachable; closing it is a
 follow-up, tracked against the spine's reliable-conversion work.
 
-- **`packages/engine/src/fold.ts`** (94% lines) — the covered core is the fold
-  itself and the ingest cross-reference (`event-ingest.test.ts`, `fold.test.ts`).
-  Uncovered: several **per-field `parseEvent` rejection branches** (e.g. the
-  individual `position.*` non-empty-string / `executionMode` / `direction` /
-  `currency` errors and the per-lot shape errors) — the validator is exercised,
-  but not every individual malformed-field fixture exists yet; plus two real
-  branches — a `PriceMarked` carrying `usdMxn` updating the fold's FX, and the
-  zero-`totalQuantity` guard in the weighted-average helper.
+- **`packages/engine/src/events/*.ts`** (94% lines) — the covered core is the
+  fold itself (`events/fold.ts`) and the ingest cross-reference
+  (`events/crossref.ts`), exercised by `event-ingest.test.ts` and `fold.test.ts`.
+  Uncovered: several **per-field `parseEvent` rejection branches** in
+  `events/parse.ts` (e.g. the individual `position.*` non-empty-string /
+  `executionMode` / `direction` / `currency` errors and the per-lot shape errors)
+  — the validator is exercised, but not every individual malformed-field fixture
+  exists yet; plus two real branches in `events/fold.ts` — a `PriceMarked`
+  carrying `usdMxn` updating the fold's FX (~L223), and the zero-`totalQuantity`
+  guard in the weighted-average helper (~L281).
 - **`packages/tui/src/event-store.ts`** (94% lines) — the covered core is the
   validated ingest boundary, dedup, atomic append, archive, and quarantine
   (`event-store.test.ts`). Uncovered: the inbox **invalid-JSON** and
