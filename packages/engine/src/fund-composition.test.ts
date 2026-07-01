@@ -465,6 +465,37 @@ describe("@numisma/engine buildCompositionReport", () => {
     expect(formatted).toContain("Data safety: 2 non-live excluded; 2 invalid excluded; warnings shown below");
   });
 
+  it("reconciles each live Reserve's native balance and USD value in insertion order (C3)", () => {
+    const report = buildCompositionReport(parseFixture(makeCanonicalFixture()));
+
+    // Only the two live, valid reserves appear — the paper reserve and the
+    // CAD (unsupported-currency) reserve are excluded, exactly as they are from the
+    // composition. Native `balance` is the venue figure (250 USD, 5000 MXN); the
+    // USD value converts MXN at the review FX (5000 / 20 = 250). Insertion order,
+    // never re-sorted by value.
+    expect(report.reserveReconciliation).toEqual([
+      {
+        reserveId: "reserve-usd-live",
+        venueLabel: "XTB: Main Broker",
+        currency: "USD",
+        balance: 250,
+        usdValue: 250,
+      },
+      {
+        reserveId: "reserve-mxn-live",
+        venueLabel: "BITSO: MXN Reserve",
+        currency: "MXN",
+        balance: 5000,
+        usdValue: 250,
+      },
+    ]);
+
+    // The MXN reserve renders its native MX$ balance next to its USD value, so the
+    // operator eyeballs the venue's own figure, not just the base-currency total.
+    const formatted = formatCompositionReport(report);
+    expect(formatted).toMatch(/reserve-mxn-live\b.*BITSO: MXN Reserve.*MX\$5,000\.00.*\$250\.00/);
+  });
+
   it("builds dashboard detail rows from the canonical engine model", () => {
     const data = parseFixture(makeCanonicalFixture());
     const report = buildCompositionReport(data);
