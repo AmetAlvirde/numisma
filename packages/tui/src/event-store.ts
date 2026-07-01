@@ -25,11 +25,14 @@ import {
   applyEventToReference,
   buildEventReference,
   crossReferenceEvent,
+  EVENT_SCHEMA_VERSION,
   foldEvents,
+  migrateLegacyEvent,
   parseEvent,
   parseFundReview,
   type FundReviewData,
   type PortfolioEvent,
+  type SuppliedCashLeg,
 } from "@numisma/engine";
 
 export interface EventStorePaths {
@@ -140,6 +143,33 @@ export async function loadEventLog(logPath: string): Promise<EventLogLoad> {
   return { events, quarantined };
 }
 
+/**
+ * Fail loud when the durable log holds any line that would not load. A dropped
+ * material event (a legacy-shape open/close, or any unparseable line) silently
+ * skews the fold — a plausible-but-wrong NAV, the exact drift class this MVI
+ * eliminates — so the fold/ingest paths refuse to run on a partial log rather than
+ * degrade gracefully. The quarantine sidecar has already been written by
+ * {@link loadEventLog}, so the operator can see every offending line and reason; a
+ * legacy open/close is additionally pointed at the one-shot migration. This is the
+ * ADR-003 amendment's migration/versioning contract enforced at the read boundary
+ * (it reverses the prototype's "a corrupt line degrades gracefully" behavior).
+ * `foldEvents` itself stays a pure projection — the loud stop lives here, not in the
+ * fold.
+ */
+function assertLogFullyLoaded(load: EventLogLoad, logPath: string): void {
+  if (load.quarantined.length === 0) {
+    return;
+  }
+  const detail = load.quarantined
+    .map((entry) => `  line ${entry.lineNumber}: ${entry.reason}`)
+    .join("\n");
+  throw new Error(
+    `Durable log ${logPath} has ${load.quarantined.length} unloadable line(s); refusing to ` +
+      `fold a partial log (it would silently skew NAV). Fix or migrate them, then retry. ` +
+      `Details also written to ${quarantineLogPath(logPath)}:\n${detail}`,
+  );
+}
+
 type ParsedLine =
   | { ok: true; event: PortfolioEvent }
   | { ok: false; reason: string };
@@ -209,7 +239,9 @@ export async function ingestInbox(
   }
 
   const genesis = await loadGenesis(paths.genesis);
-  const { events: existing } = await loadEventLog(paths.log);
+  const existingLoad = await loadEventLog(paths.log);
+  assertLogFullyLoaded(existingLoad, paths.log);
+  const existing = existingLoad.events;
   const seen = new Set(existing.map((event) => event.id));
   // The known world is genesis + the durable log; accepted batch events extend it
   // in order, so a position opened earlier in this inbox can be referenced later.
@@ -259,8 +291,127 @@ export async function loadFoldedReview(
   asOf?: string,
 ): Promise<FundReviewData> {
   const genesis = await loadGenesis(paths.genesis);
-  const { events } = await loadEventLog(paths.log);
-  return foldEvents(genesis, events, asOf);
+  const load = await loadEventLog(paths.log);
+  assertLogFullyLoaded(load, paths.log);
+  return foldEvents(genesis, load.events, asOf);
+}
+
+export interface MigrationReport {
+  /** Legacy open/close records upgraded with a supplied cash leg. */
+  migratedCount: number;
+  /** Already-loadable records re-written unchanged (now schemaVersion-stamped). */
+  unchangedCount: number;
+  outputPath: string;
+}
+
+/**
+ * The ONE-SHOT durable-log migration ADR-003's amendment sanctions: rewrite every
+ * legacy (pre-cash-leg / v1) open/close in the log to the v2 cash-leg shape using an
+ * operator-supplied `cashLegs` map (keyed by the event's stable `id`), leaving
+ * already-loadable records unchanged (re-serialized with the schemaVersion marker).
+ * Honest and fail-loud, never lossy:
+ *
+ *   - A line that is not valid JSON, or that fails to parse for a reason other than
+ *     a missing cash leg, aborts the whole migration (nothing is written).
+ *   - A legacy open/close with NO supplied cash leg aborts, listing every id that
+ *     still needs one — the operator, not the code, holds the settling Reserve and
+ *     the proceeds/funding split.
+ *   - The fully-migrated sequence is cross-referenced in order against genesis, so a
+ *     supplied leg that overdraws a Reserve or is a fat-finger magnitude fails loud
+ *     BEFORE anything touches disk.
+ *
+ * The rewrite is atomic (temp + rename), like {@link appendEvents}. This is a
+ * deliberate one-time reconstruction, NOT a runtime append path — append-only still
+ * holds going forward. Idempotent: re-running a clean log migrates nothing.
+ */
+export async function migrateLegacyLog(
+  paths: EventStorePaths,
+  cashLegs: Map<string, SuppliedCashLeg>,
+): Promise<MigrationReport> {
+  const raw = await readOptional(paths.log);
+  if (raw === undefined) {
+    return { migratedCount: 0, unchangedCount: 0, outputPath: paths.log };
+  }
+
+  const genesis = await loadGenesis(paths.genesis);
+  const reference = buildEventReference(genesis);
+  const migrated: PortfolioEvent[] = [];
+  const unresolved: string[] = [];
+  let migratedCount = 0;
+
+  const lines = raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  for (const [index, line] of lines.entries()) {
+    const lineNumber = index + 1;
+    let json: unknown;
+    try {
+      json = JSON.parse(line);
+    } catch {
+      throw new Error(
+        `Migration aborted: line ${lineNumber} is not valid JSON; only structurally-parseable records can be migrated.`,
+      );
+    }
+
+    const parsed = parseEvent(json);
+    let event: PortfolioEvent;
+    if (parsed.kind === "ok") {
+      event = parsed.value;
+    } else {
+      const object = typeof json === "object" && json !== null ? (json as Record<string, unknown>) : undefined;
+      const id = typeof object?.id === "string" ? object.id : undefined;
+      const type = typeof object?.type === "string" ? object.type : undefined;
+      const isLegacyTrade = type === "PositionOpened" || type === "PositionClosed";
+      if (!isLegacyTrade || id === undefined) {
+        throw new Error(
+          `Migration aborted: line ${lineNumber} failed to parse and is not a migratable legacy ` +
+            `open/close (${parsed.path}: ${parsed.message}).`,
+        );
+      }
+      const cashLeg = cashLegs.get(id);
+      if (!cashLeg) {
+        const leg = type === "PositionOpened" ? "funding" : "settlement";
+        unresolved.push(`  line ${lineNumber}: ${type} id '${id}' — supply a ${leg} leg`);
+        continue;
+      }
+      const remigrated = migrateLegacyEvent(json, cashLeg);
+      if (remigrated.kind !== "ok") {
+        throw new Error(
+          `Migration aborted: supplied cash leg for line ${lineNumber} (id '${id}') is invalid ` +
+            `(${remigrated.path}: ${remigrated.message}).`,
+        );
+      }
+      event = remigrated.value;
+      migratedCount += 1;
+    }
+
+    const crossRef = crossReferenceEvent(event, reference);
+    if (crossRef.kind !== "ok") {
+      throw new Error(
+        `Migration aborted: line ${lineNumber} fails cross-reference after migration ` +
+          `(${crossRef.path}: ${crossRef.message}).`,
+      );
+    }
+    applyEventToReference(reference, event);
+    migrated.push(event);
+  }
+
+  if (unresolved.length > 0) {
+    throw new Error(
+      `Migration aborted: ${unresolved.length} legacy record(s) have no supplied cash leg. ` +
+        `Supply one per id (keyed by event id) and retry:\n${unresolved.join("\n")}`,
+    );
+  }
+
+  await mkdir(dirname(paths.log), { recursive: true });
+  const body = `${migrated.map((event) => serializeEvent(event)).join("\n")}\n`;
+  const tempPath = `${paths.log}.tmp`;
+  await writeFile(tempPath, body, "utf8");
+  await rename(tempPath, paths.log);
+
+  return { migratedCount, unchangedCount: migrated.length - migratedCount, outputPath: paths.log };
 }
 
 /**
@@ -276,7 +427,7 @@ export async function loadFoldedReview(
  */
 async function appendEvents(logPath: string, events: PortfolioEvent[]): Promise<void> {
   await mkdir(dirname(logPath), { recursive: true });
-  const lines = events.map((event) => JSON.stringify(event)).join("\n");
+  const lines = events.map((event) => serializeEvent(event)).join("\n");
   const existing = await readOptional(logPath);
   const prefix = existing && existing.length > 0 && !existing.endsWith("\n") ? "\n" : "";
   const next = `${existing ?? ""}${prefix}${lines}\n`;
@@ -300,6 +451,17 @@ async function archiveInbox(paths: EventStorePaths, now: Date): Promise<string> 
   }
   await rename(paths.inbox, archivedTo);
   return archivedTo;
+}
+
+/**
+ * Serialize one event to a durable-log line, stamped with the current
+ * {@link EVENT_SCHEMA_VERSION}. The marker is a storage-layer field (parse strips
+ * it), written first so a line's version is eyeball-visible; every line the app or
+ * the one-shot migration writes carries it, making the record shape explicit and
+ * future migrations version-targetable (ADR-003 amendment).
+ */
+function serializeEvent(event: PortfolioEvent): string {
+  return JSON.stringify({ schemaVersion: EVENT_SCHEMA_VERSION, ...event });
 }
 
 /** A filesystem-safe ISO stamp, e.g. `2026-06-29T14-03-22-123Z`. */
