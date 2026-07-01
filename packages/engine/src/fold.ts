@@ -686,9 +686,13 @@ export interface EventReference {
    * `tiers` is null for an untiered Reserve — only its `amount` is checked. Updated
    * in-place by {@link applyEventToReference} as a batch is accepted, mirroring the
    * fold's {@link applyReserveDelta}, so a deposit earlier in the inbox funds a
-   * later withdraw.
+   * later withdraw. `currency` is the Reserve's own denomination, read by the
+   * same-currency Transfer guard (a cross-currency move is FX, not a Transfer).
    */
-  reserveBalances: Map<string, { amount: number; tiers: Map<CapitalTier, number> | null }>;
+  reserveBalances: Map<
+    string,
+    { amount: number; tiers: Map<CapitalTier, number> | null; currency: Currency }
+  >;
   /**
    * Closed/open position lots the settlement-magnitude gate reads to compute a
    * close's expected proceeds (quantity × last close) and the Tier mix proceeds
@@ -722,6 +726,7 @@ export function buildEventReference(
           tiers: reserve.lots
             ? new Map(reserve.lots.map((lot) => [lot.tier, lot.quantity]))
             : null,
+          currency: reserve.currency,
         },
       ]),
     ),
@@ -970,10 +975,26 @@ function crossReferenceWithdraw(event: WithdrawEvent, reference: EventReference)
 }
 
 function crossReferenceTransfer(event: TransferEvent, reference: EventReference): EventParseResult {
-  if (!reference.reserveBalances.has(event.toReserveId)) {
+  const to = reference.reserveBalances.get(event.toReserveId);
+  if (!to) {
     return eventError(
       "toReserveId",
       `Transfer targets reserve id '${event.toReserveId}', which the genesis seed does not contain.`,
+    );
+  }
+  // Same-currency invariant (M2): a Transfer moves the raw `amount` reserve-to-reserve
+  // with no FX conversion, so a cross-currency move would silently distort NAV — the
+  // exact bug class this MVI eliminates. Reject it loud here, before the log. (An FX
+  // conversion is modeled as Withdraw + Deposit at the executed rate, not a Transfer.)
+  // Guarded on `from` existing so a missing source still surfaces as checkDebit's
+  // existence error below rather than being masked here.
+  const from = reference.reserveBalances.get(event.fromReserveId);
+  if (from && from.currency !== to.currency) {
+    return eventError(
+      "toReserveId",
+      `Transfer moves ${from.currency} from reserve '${event.fromReserveId}' into ` +
+        `${to.currency} reserve '${event.toReserveId}'; a Transfer must be same-currency. ` +
+        `Model an FX conversion as a Withdraw + Deposit at the executed rate.`,
     );
   }
   const error = checkDebit(reference, event.fromReserveId, event.tier, event.amount, "fromReserveId");

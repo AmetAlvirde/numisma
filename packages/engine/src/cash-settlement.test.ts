@@ -303,6 +303,67 @@ describe("cash leg — ingest gates reject a non-conserving event before the log
   });
 });
 
+describe("cash leg — a Transfer must be same-currency (M2)", () => {
+  /** genesis() plus a peso Reserve, so a Transfer can straddle currencies. A
+   * Transfer moves the raw `amount` with no FX conversion, so a USD↔MXN move
+   * would silently distort NAV — the guard rejects it at the cross-ref gate. */
+  function genesisWithPesoReserve(): FundReviewData {
+    const base = genesis();
+    return {
+      ...base,
+      accounts: [
+        ...base.accounts,
+        { id: "venue-mx", name: "Venue MX", platform: "GBM", currency: "MXN" },
+      ],
+      reserves: [
+        ...base.reserves,
+        {
+          id: "peso",
+          portfolioId: "core",
+          tempo: "Reserve",
+          executionMode: "live",
+          accountId: "venue-mx",
+          currency: "MXN",
+          amount: 30000,
+        },
+      ],
+    };
+  }
+
+  it("rejects a cross-currency Transfer loud, before the log (T2)", () => {
+    const reference = buildEventReference(genesisWithPesoReserve());
+    const crossCurrency: PortfolioEvent = {
+      id: "xfer-usd-to-mxn",
+      asOf: "2026-06-02",
+      type: "Transfer",
+      fromReserveId: "tiered", // USD
+      toReserveId: "peso", // MXN
+      amount: 100,
+      tier: "c1",
+    };
+    const result = crossReferenceEvent(crossCurrency, reference);
+    expect(result.kind).toBe("event-error");
+    if (result.kind === "event-error") {
+      expect(result.path).toBe("toReserveId");
+      expect(result.message).toMatch(/same-currency/);
+    }
+  });
+
+  it("accepts a same-currency Transfer at the cross-ref gate", () => {
+    const reference = buildEventReference(genesisWithPesoReserve());
+    const sameCurrency: PortfolioEvent = {
+      id: "xfer-usd-to-usd",
+      asOf: "2026-06-02",
+      type: "Transfer",
+      fromReserveId: "tiered", // USD
+      toReserveId: "untiered", // USD
+      amount: 100,
+      tier: "c1",
+    };
+    expect(crossReferenceEvent(sameCurrency, reference).kind).toBe("ok");
+  });
+});
+
 describe("the seam — applyReserveDelta is the one place the invariant lives", () => {
   it("mints a missing Tier lot on a credit and keeps amount authoritative", () => {
     const reserve: ReserveRecord = {
