@@ -1,0 +1,94 @@
+{
+  "fund": { "id": "accumulus", "name": "Accumulus", "baseCurrency": "USD" },
+  "review": { "asOf": "2026-06-26", "usdMxn": 20 },
+  "portfolios": [
+    { "id": "core", "name": "Core" },
+    { "id": "tactical", "name": "Tactical" }
+  ],
+  "accounts": [
+    { "id": "bitget-usdt", "name": "Bitget USDT", "platform": "BITGET", "currency": "USD" },
+    { "id": "xtb-usd", "name": "XTB USD", "platform": "XTB", "currency": "USD" },
+    { "id": "bitso-mxn", "name": "Bitso MXN", "platform": "BITSO", "currency": "MXN" }
+  ],
+  "instruments": [
+    { "id": "gram-usd", "name": "Gram", "symbol": "GRAM", "currency": "USD" },
+    { "id": "render-usd", "name": "Render", "symbol": "RENDER", "currency": "USD" },
+    { "id": "btc-usd", "name": "Bitcoin", "symbol": "BTC", "currency": "USD" }
+  ],
+  "reserves": [
+    {
+      "id": "pulse-bitget-usdt",
+      "portfolioId": "tactical",
+      "tempo": "Reserve",
+      "executionMode": "live",
+      "accountId": "bitget-usdt",
+      "currency": "USD",
+      "amount": 1000,
+      "lots": [
+        { "quantity": 700, "tier": "c1" },
+        { "quantity": 200, "tier": "c2" },
+        { "quantity": 100, "tier": "c3" }
+      ]
+    },
+    {
+      "id": "reserve-xtb-usd-core",
+      "portfolioId": "core",
+      "tempo": "Reserve",
+      "executionMode": "live",
+      "accountId": "xtb-usd",
+      "currency": "USD",
+      "amount": 620
+    },
+    {
+      "id": "reserve-bitso-mxn-core",
+      "portfolioId": "core",
+      "tempo": "Reserve",
+      "executionMode": "live",
+      "accountId": "bitso-mxn",
+      "currency": "MXN",
+      "amount": 5000,
+      "lots": [{ "quantity": 5000, "tier": "c1" }]
+    }
+  ],
+  "positions": [
+    {
+      "id": "gram-bitget-pulse",
+      "portfolioId": "tactical",
+      "tempo": "Pulse",
+      "executionMode": "live",
+      "accountId": "bitget-usdt",
+      "instrumentId": "gram-usd",
+      "direction": "long",
+      "markPrice": 0.04,
+      "currency": "USD",
+      "lots": [
+        { "quantity": 2000, "cost": 0.04, "tier": "c1" },
+        { "quantity": 1000, "cost": 0.04, "tier": "c2" }
+      ]
+    },
+    {
+      "id": "render-bitget-pulse",
+      "portfolioId": "tactical",
+      "tempo": "Pulse",
+      "executionMode": "live",
+      "accountId": "bitget-usdt",
+      "instrumentId": "render-usd",
+      "direction": "long",
+      "markPrice": 5,
+      "currency": "USD",
+      "lots": [{ "quantity": 20, "cost": 6, "tier": "c1" }]
+    },
+    {
+      "id": "btc-xtb-wealth",
+      "portfolioId": "core",
+      "tempo": "Wealth",
+      "executionMode": "live",
+      "accountId": "xtb-usd",
+      "instrumentId": "btc-usd",
+      "direction": "long",
+      "markPrice": 100000,
+      "currency": "USD",
+      "lots": [{ "quantity": 0.01, "cost": 95000, "tier": "c1" }]
+    }
+  ]
+}
