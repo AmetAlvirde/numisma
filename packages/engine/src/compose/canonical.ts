@@ -1,26 +1,21 @@
-// Compose concern: turns parsed `FundReviewData` into the canonical line set and
-// the `CompositionReport` read model — canonical-state construction, grouping,
-// Capital-Tier rollup, and dashboard detail drill-down. Cross-concern helpers
-// come from the internal kernel; the latest-Close anchor and markPrice/Close
-// tolerance come from the price-journey module. Neither is re-copied here.
+// Compose concern — canonical state. The shared foundation both public builders
+// (`./report.ts` and `./detail.ts`) stand on: it validates and admits each live
+// Reserve and Position from parsed `FundReviewData` into one flat `CanonicalLine`
+// set, collecting warnings, exclusion tallies, and reserve reconciliation along the
+// way. Cross-concern helpers come from the internal kernel; the latest-Close anchor
+// and markPrice/Close tolerance come from the price-journey module.
 import type {
   CapitalRecordBase,
   CapitalTier,
   CompositionReport,
-  CompositionRow,
-  DashboardDetail,
-  DashboardFocus,
-  DashboardRowKind,
-  DashboardSummary,
   DetailRecordKind,
   FundReviewData,
-  LoadOutcome,
   NamedRecord,
   ReserveRecord,
   ReserveReconciliationLine,
   TierContribution,
   Warning,
-} from "./contracts.js";
+} from "../contracts.js";
 import {
   indexById,
   isDirection,
@@ -28,15 +23,13 @@ import {
   isNonNegativeNumber,
   isPositiveNumber,
   isSupportedCurrency,
-  percentOfFund,
   pushWarning,
   toUsd,
-} from "./internal.js";
+} from "../internal.js";
 import {
-  buildPriceJourneys,
   latestCloseByInstrument,
   markPriceCloseTolerance,
-} from "./price-journey.js";
+} from "../price-journey.js";
 
 /**
  * Reserve Lot face sums are reconciled against `amount` with a hybrid tolerance:
@@ -58,7 +51,7 @@ function reserveLotSumTolerance(amount: number): number {
   );
 }
 
-interface CanonicalLine {
+export interface CanonicalLine {
   recordId: string;
   recordKind: DetailRecordKind;
   recordLabel: string;
@@ -76,171 +69,14 @@ interface CanonicalLine {
   tierContributions?: TierContribution[];
 }
 
-interface BuildCompositionReportOptions {
-  load?: LoadOutcome;
-}
-
-interface GroupAccumulator {
-  id: string;
-  label: string;
-  usdValue: number;
-  costBasisUsd: number;
-  unrealizedPnlUsd: number;
-}
-
-interface CanonicalState {
+export interface CanonicalState {
   canonicalLines: CanonicalLine[];
   warnings: Warning[];
   excluded: CompositionReport["excluded"];
   reserveReconciliation: ReserveReconciliationLine[];
 }
 
-export function buildCompositionReport(
-  data: FundReviewData,
-  options: BuildCompositionReportOptions = {},
-): CompositionReport {
-  const { canonicalLines, warnings, excluded, reserveReconciliation } =
-    buildCanonicalState(data);
-
-  const fundValueUsd = canonicalLines.reduce((sum, line) => sum + line.usdValue, 0);
-  if (fundValueUsd <= 0) {
-    pushWarning(
-      warnings,
-      "non-positive-fund-value",
-      "Canonical live Fund value is not positive; percent-of-Fund values may be misleading.",
-    );
-  }
-
-  const portfolioRows = groupLines(
-    canonicalLines,
-    "portfolio",
-    (line) => line.portfolioId,
-    (line) => line.portfolioLabel,
-    fundValueUsd,
-  );
-  const tempoRows = groupLines(
-    canonicalLines,
-    "tempo",
-    (line) => line.tempoId,
-    (line) => line.tempoLabel,
-    fundValueUsd,
-  );
-  const accountRows = groupLines(
-    canonicalLines,
-    "account",
-    (line) => line.accountId,
-    (line) => line.accountLabel,
-    fundValueUsd,
-  );
-  const instrumentRows = groupLines(
-    canonicalLines,
-    "instrument",
-    (line) => line.instrumentId,
-    (line) => line.instrumentLabel,
-    fundValueUsd,
-  );
-  const tierRows = groupTierLines(canonicalLines, fundValueUsd);
-  const totalUnrealizedPnlUsd = canonicalLines.reduce(
-    (sum, line) => sum + (line.unrealizedPnlUsd ?? 0),
-    0,
-  );
-  const priceJourneys = buildPriceJourneys(data, warnings);
-
-  return {
-    totals: {
-      baseCurrency: "USD",
-      fundValueUsd,
-      usdMxn: data.review.usdMxn,
-    },
-    dashboard: {
-      summary: {
-        fundName: data.fund.name,
-        asOf: data.review.asOf,
-        fundValueUsd,
-        usdMxn: data.review.usdMxn,
-        totalUnrealizedPnlUsd,
-        ...optionalSummaryFocus("largestPortfolio", toFocus(portfolioRows[0])),
-        ...optionalSummaryFocus("largestTempo", toFocus(tempoRows[0])),
-        ...optionalSummaryFocus("largestAccount", toFocus(accountRows[0])),
-        ...optionalSummaryFocus("largestInstrument", toFocus(instrumentRows[0])),
-        ...optionalSummaryFocus(
-          "reserve",
-          toFocus(tempoRows.find((row) => row.id === "tempo:Reserve")),
-        ),
-        dataSafety: {
-          nonLiveExcluded: excluded.nonLive,
-          invalidExcluded: excluded.invalid,
-          shortDeferredExcluded: excluded.shortDeferred,
-          hasWarnings: warnings.length > 0,
-        },
-      },
-      sections: [
-        {
-          id: "portfolios",
-          title: "Portfolio Composition",
-          rows: portfolioRows,
-        },
-        {
-          id: "tempos",
-          title: "Tempo Composition",
-          rows: tempoRows,
-        },
-        {
-          id: "accounts",
-          title: "Account Composition",
-          rows: accountRows,
-        },
-        {
-          id: "instruments",
-          title: "Instrument Composition",
-          rows: instrumentRows,
-        },
-        {
-          id: "tiers",
-          title: "Capital Tier Composition",
-          rows: tierRows,
-        },
-      ],
-    },
-    priceJourneys,
-    reserveReconciliation,
-    warnings,
-    excluded,
-    load: options.load ?? { status: "loaded" },
-  };
-}
-
-export function buildDashboardDetail(
-  data: FundReviewData,
-  report: CompositionReport,
-  rowId: string,
-): DashboardDetail | undefined {
-  const row = findDashboardRow(report, rowId);
-  if (!row || row.kind === "instrument" || row.kind === "tier") {
-    return undefined;
-  }
-
-  const { canonicalLines } = buildCanonicalState(data);
-  return {
-    rowId: row.id,
-    kind: row.kind,
-    label: row.label,
-    rows: detailLinesForRow(canonicalLines, row).map((line) => ({
-      recordId: line.recordId,
-      kind: line.recordKind,
-      recordLabel: line.recordLabel,
-      portfolioLabel: line.portfolioLabel,
-      tempoLabel: line.tempoLabel,
-      accountLabel: line.accountLabel,
-      usdValue: line.usdValue,
-      ...(line.tierContributions
-        ? { tierContributions: line.tierContributions }
-        : {}),
-    })),
-  };
-}
-
-function buildCanonicalState(data: FundReviewData): CanonicalState {
+export function buildCanonicalState(data: FundReviewData): CanonicalState {
   const warnings: Warning[] = [];
   const portfolios = indexById(data.portfolios, "portfolio");
   const accounts = indexById(data.accounts, "account");
@@ -542,119 +378,6 @@ function buildCanonicalState(data: FundReviewData): CanonicalState {
   };
 }
 
-function findDashboardRow(
-  report: CompositionReport,
-  rowId: string,
-): CompositionRow | undefined {
-  for (const section of report.dashboard.sections) {
-    const row = section.rows.find((candidate) => candidate.id === rowId);
-    if (row) {
-      return row;
-    }
-  }
-  return undefined;
-}
-
-function detailLinesForRow(
-  canonicalLines: CanonicalLine[],
-  row: CompositionRow,
-): CanonicalLine[] {
-  const rawId = row.id.slice(row.id.indexOf(":") + 1);
-
-  if (row.kind === "portfolio") {
-    return canonicalLines.filter(
-      (line) => line.recordKind === "position" && line.portfolioId === rawId,
-    );
-  }
-
-  if (row.kind === "tempo") {
-    return canonicalLines.filter((line) => line.tempoId === rawId);
-  }
-
-  const accountLines = canonicalLines.filter((line) => line.accountId === rawId);
-  if (accountLines.some((line) => line.recordKind === "reserve")) {
-    return accountLines;
-  }
-
-  return accountLines.filter((line) => line.recordKind === "position");
-}
-
-function toFocus(row: CompositionRow | undefined): DashboardFocus | undefined {
-  if (!row) return undefined;
-  return {
-    rowId: row.id,
-    kind: row.kind,
-    label: row.label,
-    usdValue: row.usdValue,
-    percentOfFund: row.percentOfFund,
-  };
-}
-
-function optionalSummaryFocus<
-  Key extends
-    | "largestPortfolio"
-    | "largestTempo"
-    | "largestAccount"
-    | "largestInstrument"
-    | "reserve",
->(
-  key: Key,
-  value: DashboardSummary[Key],
-): Pick<DashboardSummary, Key> | Record<string, never> {
-  return value === undefined ? {} : ({ [key]: value } as Pick<DashboardSummary, Key>);
-}
-
-function groupLines(
-  lines: CanonicalLine[],
-  kind: DashboardRowKind,
-  idSelector: (line: CanonicalLine) => string,
-  labelSelector: (line: CanonicalLine) => string,
-  fundValueUsd: number,
-): CompositionRow[] {
-  const rows = new Map<string, GroupAccumulator>();
-
-  for (const line of lines) {
-    const rawId = idSelector(line);
-    const label = labelSelector(line);
-    const id = `${kind}:${rawId}`;
-    const existing = rows.get(id) ?? {
-      id,
-      label,
-      usdValue: 0,
-      costBasisUsd: 0,
-      unrealizedPnlUsd: 0,
-    };
-    existing.usdValue += line.usdValue;
-    existing.costBasisUsd += line.costBasisUsd ?? 0;
-    existing.unrealizedPnlUsd += line.unrealizedPnlUsd ?? 0;
-    rows.set(id, existing);
-  }
-
-  return [...rows.values()]
-    .map((row) => {
-      const result: CompositionRow = {
-        id: row.id,
-        kind,
-        label: row.label,
-        usdValue: row.usdValue,
-        percentOfFund: percentOfFund(row.usdValue, fundValueUsd),
-      };
-
-      if (row.costBasisUsd !== 0) {
-        result.costBasisUsd = row.costBasisUsd;
-      }
-      if (row.unrealizedPnlUsd !== 0) {
-        result.unrealizedPnlUsd = row.unrealizedPnlUsd;
-      }
-
-      return result;
-    })
-    .sort(
-      (a, b) =>
-        Math.abs(b.usdValue) - Math.abs(a.usdValue) || a.label.localeCompare(b.label),
-    );
-}
-
 function buildReserveTierContributions(
   reserve: ReserveRecord,
   reviewFx: number,
@@ -704,53 +427,6 @@ function buildReserveTierContributions(
   }
 
   return [...tierTotals.values()];
-}
-
-function groupTierLines(
-  lines: CanonicalLine[],
-  fundValueUsd: number,
-): CompositionRow[] {
-  const rows = new Map<string, GroupAccumulator>();
-
-  for (const line of lines) {
-    if (!line.tierContributions) continue;
-    for (const contribution of line.tierContributions) {
-      const id = `tier:${contribution.tier}`;
-      const existing = rows.get(id) ?? {
-        id,
-        label: contribution.tier,
-        usdValue: 0,
-        costBasisUsd: 0,
-        unrealizedPnlUsd: 0,
-      };
-      existing.usdValue += contribution.usdValue;
-      existing.costBasisUsd += contribution.costBasisUsd;
-      existing.unrealizedPnlUsd += contribution.unrealizedPnlUsd;
-      rows.set(id, existing);
-    }
-  }
-
-  return [...rows.values()]
-    .map((row) => {
-      const result: CompositionRow = {
-        id: row.id,
-        kind: "tier",
-        label: row.label,
-        usdValue: row.usdValue,
-        percentOfFund: percentOfFund(row.usdValue, fundValueUsd),
-      };
-      if (row.costBasisUsd !== 0) {
-        result.costBasisUsd = row.costBasisUsd;
-      }
-      if (row.unrealizedPnlUsd !== 0) {
-        result.unrealizedPnlUsd = row.unrealizedPnlUsd;
-      }
-      return result;
-    })
-    .sort(
-      (a, b) =>
-        Math.abs(b.usdValue) - Math.abs(a.usdValue) || a.label.localeCompare(b.label),
-    );
 }
 
 function accountLabel(

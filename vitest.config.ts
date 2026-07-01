@@ -14,6 +14,9 @@ export default defineConfig({
       include: ["packages/*/src/**/*.ts"],
       exclude: [
         "**/*.test.ts",
+        // Test-only shared fixtures/helpers extracted from split test files:
+        // exercised by the tests that import them, not product code to measure.
+        "**/*.fixtures.ts",
         "**/*.d.ts",
         // Thin script entries: top-level orchestration over already-tested
         // functions, no unit to assert. See docs/coverage-rationale.md.
