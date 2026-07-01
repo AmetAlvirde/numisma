@@ -11,6 +11,7 @@ import {
   formatMaybeUsd,
   formatPercent,
   formatPrice,
+  formatReserveReconciliation,
   formatSignedPercent,
   formatUsd,
   pad,
@@ -166,6 +167,14 @@ export function buildDashboardLines(
         );
       }
     }
+  }
+
+  // Reserve Reconciliation (PRD #82 C3): render the shared engine formatter so the
+  // TUI and CLI report show byte-identical post-fold balances — the two surfaces
+  // read the SAME folded reserves and cannot diverge.
+  lines.push({ content: "", selectable: false });
+  for (const line of formatReserveReconciliation(report.reserveReconciliation).split("\n")) {
+    lines.push({ content: line, selectable: false });
   }
 
   lines.push(

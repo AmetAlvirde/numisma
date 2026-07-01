@@ -44,6 +44,7 @@ export type {
   PriceJourneyPoint,
   PriceJourney,
   CompositionReport,
+  ReserveReconciliationLine,
   DetailRecordKind,
   DashboardDetailRow,
   DashboardDetail,
@@ -103,4 +104,5 @@ export {
   padLeft,
   divider,
   formatCompositionReport,
+  formatReserveReconciliation,
 } from "./format.js";
