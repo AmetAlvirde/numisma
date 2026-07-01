@@ -17,6 +17,7 @@ import type {
   LoadOutcome,
   NamedRecord,
   ReserveRecord,
+  ReserveReconciliationLine,
   TierContribution,
   Warning,
 } from "./contracts.js";
@@ -91,13 +92,15 @@ interface CanonicalState {
   canonicalLines: CanonicalLine[];
   warnings: Warning[];
   excluded: CompositionReport["excluded"];
+  reserveReconciliation: ReserveReconciliationLine[];
 }
 
 export function buildCompositionReport(
   data: FundReviewData,
   options: BuildCompositionReportOptions = {},
 ): CompositionReport {
-  const { canonicalLines, warnings, excluded } = buildCanonicalState(data);
+  const { canonicalLines, warnings, excluded, reserveReconciliation } =
+    buildCanonicalState(data);
 
   const fundValueUsd = canonicalLines.reduce((sum, line) => sum + line.usdValue, 0);
   if (fundValueUsd <= 0) {
@@ -200,6 +203,7 @@ export function buildCompositionReport(
       ],
     },
     priceJourneys,
+    reserveReconciliation,
     warnings,
     excluded,
     load: options.load ?? { status: "loaded" },
@@ -243,6 +247,11 @@ function buildCanonicalState(data: FundReviewData): CanonicalState {
   const instruments = indexById(data.instruments, "instrument");
   const latestCloses = latestCloseByInstrument(data.closes);
   const canonicalLines: CanonicalLine[] = [];
+  // Reconciliation lines are collected as each live Reserve is admitted below, so
+  // they inherit `data.reserves` insertion order (never re-sorted like the
+  // value-ranked composition sections). This is the FOLDED reserves array the fold
+  // mutated (C2) — the report can never eyeball a stale genesis balance.
+  const reserveReconciliation: ReserveReconciliationLine[] = [];
   const excluded = {
     nonLive: 0,
     invalid: 0,
@@ -321,6 +330,8 @@ function buildCanonicalState(data: FundReviewData): CanonicalState {
       warnings,
     );
 
+    const reserveUsdValue = toUsd(reserve.amount, reserve.currency, data.review.usdMxn);
+
     canonicalLines.push({
       recordId: reserve.id,
       recordKind: "reserve",
@@ -333,8 +344,20 @@ function buildCanonicalState(data: FundReviewData): CanonicalState {
       accountLabel: accountLabel(reserveAccount, reserve.accountId),
       instrumentId: "reserve",
       instrumentLabel: "Reserve",
-      usdValue: toUsd(reserve.amount, reserve.currency, data.review.usdMxn),
+      usdValue: reserveUsdValue,
       ...(tierContributions ? { tierContributions } : {}),
+    });
+
+    // The reconciliation line reports the folded NATIVE balance (`reserve.amount`,
+    // what the venue shows) alongside its USD value, so the operator can compare
+    // each venue's real figure against the ledger after the fold applied every cash
+    // leg.
+    reserveReconciliation.push({
+      reserveId: reserve.id,
+      venueLabel: accountLabel(reserveAccount, reserve.accountId),
+      currency: reserve.currency,
+      balance: reserve.amount,
+      usdValue: reserveUsdValue,
     });
   }
 
@@ -515,6 +538,7 @@ function buildCanonicalState(data: FundReviewData): CanonicalState {
     canonicalLines,
     warnings,
     excluded,
+    reserveReconciliation,
   };
 }
 

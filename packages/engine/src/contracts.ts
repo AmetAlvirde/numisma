@@ -318,6 +318,22 @@ export interface PriceJourney {
   changePct: number;
 }
 
+/**
+ * One post-fold Reserve balance, rendered so the operator can eyeball it against
+ * the real venue. `balance` is the folded NATIVE amount — what the venue itself
+ * shows (a USD/USDT or MXN figure), authoritative after every cash leg the fold
+ * applied; `usdValue` is that same balance in the Fund's base currency. Lines are
+ * emitted in genesis Reserve insertion order and never re-sorted, so the column
+ * lines up row-for-row with the operator's list of venues.
+ */
+export interface ReserveReconciliationLine {
+  reserveId: string;
+  venueLabel: string;
+  currency: Currency;
+  balance: number;
+  usdValue: number;
+}
+
 export interface CompositionReport {
   totals: {
     baseCurrency: "USD";
@@ -326,6 +342,12 @@ export interface CompositionReport {
   };
   dashboard: DashboardModel;
   priceJourneys: PriceJourney[];
+  /**
+   * Post-fold Reserve balances for eyeball-vs-venue checking (PRD #82 C3). Reads
+   * the FOLDED reserves — the ones the cash legs mutated — never the stale genesis
+   * balances (C2). Insertion order preserved.
+   */
+  reserveReconciliation: ReserveReconciliationLine[];
   warnings: Warning[];
   excluded: {
     nonLive: number;

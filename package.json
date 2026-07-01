@@ -12,6 +12,7 @@
     "report": "tsx packages/tui/src/report.ts",
     "spine": "tsx packages/tui/src/spine.ts",
     "spine:reset": "tsx packages/tui/src/spine-reset.ts",
+    "migrate:log": "tsx packages/tui/src/migrate-legacy-log.ts",
     "smoke:tui": "bun packages/tui/src/smoke-openTui.ts",
     "smoke:startup": "bun packages/tui/src/smoke-startup-openTui.ts",
     "typecheck": "pnpm --filter @numisma/engine run typecheck && pnpm --filter @numisma/tui run typecheck",

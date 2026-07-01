@@ -44,6 +44,7 @@ export type {
   PriceJourneyPoint,
   PriceJourney,
   CompositionReport,
+  ReserveReconciliationLine,
   DetailRecordKind,
   DashboardDetailRow,
   DashboardDetail,
@@ -60,22 +61,35 @@ export { buildCompositionReport, buildDashboardDetail } from "./compose.js";
 export type {
   PortfolioEventType,
   PositionDecision,
+  OpenFunding,
+  CloseSettlement,
   PositionOpenedEvent,
   PositionClosedEvent,
   PriceMarkedEvent,
+  DepositEvent,
+  WithdrawEvent,
+  TransferEvent,
   PortfolioEvent,
+  TierDelta,
   EventOk,
   EventError,
   EventParseResult,
   EventReference,
+  SuppliedCashLeg,
 } from "./fold.js";
 export {
   parseEvent,
+  migrateLegacyEvent,
+  EVENT_SCHEMA_VERSION,
   foldEvents,
   buildEventReference,
   applyEventToReference,
   crossReferenceEvent,
+  applyReserveDelta,
+  reserveDeltasForOpen,
+  reserveDeltasForClose,
   PRICE_MARK_MAGNITUDE_THRESHOLD,
+  SETTLEMENT_MAGNITUDE_THRESHOLD,
 } from "./fold.js";
 
 // Shared formatters (the engine's one source of truth for the cents-precision /
@@ -90,4 +104,5 @@ export {
   padLeft,
   divider,
   formatCompositionReport,
+  formatReserveReconciliation,
 } from "./format.js";
