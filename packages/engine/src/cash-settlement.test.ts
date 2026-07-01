@@ -13,11 +13,13 @@ import {
   foldEvents,
   migrateLegacyEvent,
   parseEvent,
+  parseFundReview,
   reserveDeltasForClose,
   type FundReviewData,
   type PortfolioEvent,
   type ReserveRecord,
 } from "./index.js";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const AS_OF = "2026-06-01";
@@ -485,5 +487,175 @@ describe("durable-log versioning — a legacy open/close fails loud with a migra
   it("migrateLegacyEvent rejects a leg that does not match the record's verb", () => {
     const result = migrateLegacyEvent(legacyClose, { funding: { reserveId: "tiered", amount: 200 } });
     expect(result.kind).toBe("event-error");
+  });
+});
+
+/**
+ * A real-SHAPED (not synthetic-toy) fixture: multi-portfolio, multi-venue,
+ * multi-currency, with a three-tier BITGET USDT settlement Reserve and a
+ * genuinely mixed-tier alt Pulse to close — the structure of the real
+ * GRAM/RENDER-into-Bitget drift this MVI fixes, but with SYNTHETIC balances (no
+ * real amounts/venues enter the repo). Real balances stay out; only the shape is
+ * real. The prototype only ever proved the mixed-tier proceeds split on a
+ * synthetic toy + the one real drift that happened to be pure-c1; this fixture is
+ * what moves the mixed-tier path from prototype to reliable.
+ */
+function realShapedGenesis(): FundReviewData {
+  const parsed = parseFundReview(
+    JSON.parse(
+      readFileSync(
+        new URL(
+          "../tests/fixtures/sanitized-mixed-tier-close-review.json",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    ),
+  );
+  if (parsed.kind !== "ok") {
+    throw new Error(`mixed-tier fixture must parse, got ${parsed.kind}`);
+  }
+  return parsed.value;
+}
+
+// T4 (D2) + T5: lock proportional proceeds-tiering + loss-absorption on a
+// real-shaped mixed-tier close, and lock the fee-residual-folded-into-the-split
+// semantics as intended. gram-bitget-pulse cost basis: c1 2000×0.04 = 80,
+// c2 1000×0.04 = 40 → total 120, weights 2/3 c1 and 1/3 c2. It settles into the
+// three-tier pulse-bitget-usdt Reserve, so the per-Tier credit is observable
+// (unlike an untiered USDT reserve that only moves `amount`).
+describe("cash leg — mixed-tier close on a real-shaped fixture (T4)", () => {
+  it("splits proceeds proportionally across the closed Tier mix; loss falls per Tier; aggregate exact", () => {
+    // Proceeds 108 (net of fees) < basis 120 → a realized loss of 12. Split by the
+    // 2/3 : 1/3 cost-basis weights: c1 gets 72 (lost 8), c2 gets 36 (lost 4). c3 is
+    // not in the position, so it is untouched — coherent lineage, no laundering.
+    const close: PortfolioEvent = {
+      id: "close-gram",
+      asOf: "2026-06-27",
+      type: "PositionClosed",
+      positionId: "gram-bitget-pulse",
+      settlement: { reserveId: "pulse-bitget-usdt", proceeds: 108 },
+    };
+
+    // It is a genuinely ingestable event: the settlement-magnitude gate accepts it
+    // (3000 units × last close 0.04 → expected 120; 108 is −10%, inside ±50%).
+    const reference = buildEventReference(realShapedGenesis());
+    expect(crossReferenceEvent(close, reference).kind).toBe("ok");
+
+    const data = foldEvents(realShapedGenesis(), [close]);
+    const reserve = reserveById(data, "pulse-bitget-usdt");
+
+    // Aggregate exact: authoritative `amount` moves by exactly the proceeds.
+    expect(reserve.amount).toBeCloseTo(1108, 6); // 1000 + 108
+
+    // Per-Tier coherent: each risked Tier is credited its proportional share, and
+    // the sum of the Tier credits equals the proceeds exactly (no drift).
+    expect(tierQty(reserve, "c1")).toBeCloseTo(772, 6); // 700 + 72
+    expect(tierQty(reserve, "c2")).toBeCloseTo(236, 6); // 200 + 36
+    expect(tierQty(reserve, "c3")).toBeCloseTo(100, 6); // untouched — not in the position
+    const creditedToTiers =
+      tierQty(reserve, "c1") - 700 + (tierQty(reserve, "c2") - 200) + (tierQty(reserve, "c3") - 100);
+    expect(creditedToTiers).toBeCloseTo(108, 6);
+
+    // Loss-absorption: the 12 loss is borne per Tier in proportion to what each
+    // risked (c1 lost 8 of its 80 basis, c2 lost 4 of its 40) — not dumped on one.
+    expect(80 - (tierQty(reserve, "c1") - 700)).toBeCloseTo(8, 6);
+    expect(40 - (tierQty(reserve, "c2") - 200)).toBeCloseTo(4, 6);
+
+    expect(data.positions.some((position) => position.id === "gram-bitget-pulse")).toBe(false);
+    // Untouched holdings survive the fold unchanged (real-shaped structure intact).
+    expect(data.positions.some((position) => position.id === "render-bitget-pulse")).toBe(true);
+    expect(data.positions.some((position) => position.id === "btc-xtb-wealth")).toBe(true);
+  });
+
+  it("folds the fee-residual into the proportional split rather than a separate line (T5)", () => {
+    // Fee-residual semantics: fees are netted INTO `proceeds` before the split, so
+    // the fee shrinks each Tier's credit in proportion — it is never carved out as
+    // its own reserve line/Tier. Contrast the same close at gross (120) vs net
+    // (108) proceeds: the 12 fee is absorbed as 8 on c1 and 4 on c2 (the 2/3 : 1/3
+    // weights), and NO extra Tier appears.
+    const gramLots = [
+      { quantity: 2000, cost: 0.04, tier: "c1" as const },
+      { quantity: 1000, cost: 0.04, tier: "c2" as const },
+    ];
+    const grossDeltas = reserveDeltasForClose(gramLots, 120); // no fee
+    const netDeltas = reserveDeltasForClose(gramLots, 108); // 12 fee netted in
+
+    const byTier = (deltas: { tier: string; amount: number }[], tier: string) =>
+      deltas.find((delta) => delta.tier === tier)?.amount ?? 0;
+
+    // The fee is spread across exactly the position's Tiers, by the same weights.
+    expect(byTier(grossDeltas, "c1") - byTier(netDeltas, "c1")).toBeCloseTo(8, 6);
+    expect(byTier(grossDeltas, "c2") - byTier(netDeltas, "c2")).toBeCloseTo(4, 6);
+
+    // No separate "fee" line: the split carries only the Tiers the position risked.
+    expect(netDeltas.map((delta) => delta.tier).sort()).toEqual(["c1", "c2"]);
+
+    // And on the folded Reserve, the fee mints no extra lot — c3 stays exactly as
+    // it was; the residual lives entirely inside the c1/c2 proportional credits.
+    const close: PortfolioEvent = {
+      id: "close-gram-net",
+      asOf: "2026-06-27",
+      type: "PositionClosed",
+      positionId: "gram-bitget-pulse",
+      settlement: { reserveId: "pulse-bitget-usdt", proceeds: 108 },
+    };
+    const reserve = reserveById(foldEvents(realShapedGenesis(), [close]), "pulse-bitget-usdt");
+    expect(reserve.lots?.map((lot) => lot.tier).sort()).toEqual(["c1", "c2", "c3"]);
+    expect(tierQty(reserve, "c3")).toBeCloseTo(100, 6);
+  });
+});
+
+// T3 (D1): the deliberate settlement-magnitude gate-skip. The proceeds gate
+// compares against expected = closed quantity × the instrument's last known
+// close. When the instrument has no meaningful prior mark (`lastClose` absent, or
+// a markPrice-0 sentinel → expected <= 0) there is no baseline, so the gate is
+// SKIPPED and any proceeds is accepted. This is a scoped deferral (D1), not an
+// oversight: it is only safe while every closeable instrument is guaranteed a
+// prior mark. Locked here so the skip can't silently change behavior, and so the
+// day that always-marked invariant weakens, this test is where the exposure shows.
+describe("cash leg — un-marked-instrument close skips the settlement-magnitude gate (T3/D1)", () => {
+  /** genesis() with the alt instrument left un-marked (markPrice 0) — expected
+   * proceeds collapses to 0, so the magnitude gate has no baseline to check. */
+  function genesisUnmarked(): FundReviewData {
+    const base = genesis();
+    return {
+      ...base,
+      positions: base.positions.map((position) => ({ ...position, markPrice: 0 })),
+    };
+  }
+
+  it("accepts wildly-off proceeds on an un-marked instrument (gate skipped, D1)", () => {
+    const reference = buildEventReference(genesisUnmarked());
+    // 40× the ~800 a marked close would expect: on a MARKED instrument the gate
+    // rejects this (see the fat-finger test above); with no prior mark it sails
+    // through, un-sanity-checked. That is the deliberate, scoped gate-skip.
+    const wildlyOff: PortfolioEvent = {
+      id: "close-unmarked",
+      asOf: "2026-06-02",
+      type: "PositionClosed",
+      positionId: "alt-pos",
+      settlement: { reserveId: "tiered", proceeds: 32000 },
+    };
+    expect(crossReferenceEvent(wildlyOff, reference).kind).toBe("ok");
+  });
+
+  it("contrast: the SAME proceeds are rejected once the instrument carries a mark", () => {
+    // Same event, same amount — the only difference is the marked genesis. This is
+    // what makes the skip explicit: the gate's protection is contingent entirely on
+    // the prior mark, exactly the always-marked invariant D1 is scoped to.
+    const reference = buildEventReference(genesis());
+    const wildlyOff: PortfolioEvent = {
+      id: "close-marked",
+      asOf: "2026-06-02",
+      type: "PositionClosed",
+      positionId: "alt-pos",
+      settlement: { reserveId: "tiered", proceeds: 32000 },
+    };
+    const result = crossReferenceEvent(wildlyOff, reference);
+    expect(result.kind).toBe("event-error");
+    if (result.kind === "event-error") {
+      expect(result.path).toBe("settlement.proceeds");
+    }
   });
 });
