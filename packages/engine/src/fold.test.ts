@@ -77,12 +77,34 @@ function opened(
   id: string,
   asOf: string,
   position: PositionOpenedEvent["position"],
+  funding?: PositionOpenedEvent["funding"],
 ): PositionOpenedEvent {
-  return { id, asOf, type: "PositionOpened", position, decision: DECISION };
+  const cost = position.lots.reduce((sum, lot) => sum + lot.quantity * lot.cost, 0);
+  return {
+    id,
+    asOf,
+    type: "PositionOpened",
+    position,
+    decision: DECISION,
+    // Default funds from a reserve the bare genesis does not hold, so the cash leg
+    // no-ops and these position-focused tests keep asserting only the asset leg.
+    funding: funding ?? { reserveId: "no-such-reserve", amount: cost },
+  };
 }
 
-function closed(id: string, asOf: string, positionId: string): PositionClosedEvent {
-  return { id, asOf, type: "PositionClosed", positionId };
+function closed(
+  id: string,
+  asOf: string,
+  positionId: string,
+  settlement?: PositionClosedEvent["settlement"],
+): PositionClosedEvent {
+  return {
+    id,
+    asOf,
+    type: "PositionClosed",
+    positionId,
+    settlement: settlement ?? { reserveId: "no-such-reserve", proceeds: 1 },
+  };
 }
 
 function marked(

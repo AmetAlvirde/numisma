@@ -83,6 +83,7 @@ function openBtc() {
       lots: [{ quantity: 1, cost: 100, tier: "c1" }],
     },
     decision: DECISION,
+    funding: { reserveId: "cash-core", amount: 100 },
   };
 }
 
