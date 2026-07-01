@@ -6,6 +6,7 @@
 // real data — the close→credit path is additionally proven on the real GRAM/RENDER
 // drift by `pnpm spine` (see the prototype note).
 import {
+  applyEventToReference,
   applyReserveDelta,
   buildEventReference,
   crossReferenceEvent,
@@ -657,5 +658,110 @@ describe("cash leg — un-marked-instrument close skips the settlement-magnitude
     if (result.kind === "event-error") {
       expect(result.path).toBe("settlement.proceeds");
     }
+  });
+});
+
+// Slice #87 (guard against mirror divergence). The cross-ref shadow
+// `applyDeltasToBalance` deliberately re-implements the seam's per-Tier delta
+// arithmetic so the sufficiency gate sees the balances the fold WILL produce.
+// Two encodings of the same math now coexist: the fold mutates a `ReserveRecord`
+// (authoritative `amount` + a lots array), the shadow mutates the cross-ref
+// balance (`amount` + a Tier→quantity Map). The delta COMPUTATION is already
+// shared (`reserveDeltasForOpen/Close` → `TierDelta[]`); the risk is the two
+// APPLICATION encodings drifting. This batch equivalence check is the guard —
+// fold a representative batch of all six verbs (a mixed-Tier close, an untiered
+// amount-only move, and a mid-stream open+close among them) and assert, reserve
+// by reserve, that the shadow's running balances equal the folded reserves. It
+// fails loud the day one encoding is changed to disagree with the other.
+describe("cash leg — the cross-ref shadow tracks the fold exactly (slice #87)", () => {
+  const TIERS = ["c1", "c2", "c3"] as const;
+
+  /** A representative batch touching every verb, in ascending-asOf order so the
+   * fold's (asOf, then original order) sort is a no-op relative to input order.
+   * The shadow applies in input order, so equal ordering keeps the two encodings
+   * comparing the same sequence. */
+  function batch(): PortfolioEvent[] {
+    return [
+      { id: "dep-tiered", asOf: "2026-06-02", type: "Deposit", reserveId: "tiered", amount: 250, tier: "c1" },
+      {
+        id: "open-btc",
+        asOf: "2026-06-03",
+        type: "PositionOpened",
+        position: {
+          id: "btc-pos",
+          portfolioId: "core",
+          tempo: "Liquid",
+          executionMode: "live",
+          accountId: "venue",
+          instrumentId: "btc-usd",
+          direction: "long",
+          currency: "USD",
+          // Mixed Tiers so the open debit splits across c1/c2 (weights 2:1).
+          lots: [
+            { quantity: 1, cost: 200, tier: "c1" },
+            { quantity: 1, cost: 100, tier: "c2" },
+          ],
+        },
+        decision: DECISION,
+        funding: { reserveId: "tiered", amount: 300 },
+      },
+      { id: "wd-tiered", asOf: "2026-06-04", type: "Withdraw", reserveId: "tiered", amount: 100, tier: "c2" },
+      {
+        id: "xfer-tiered-untiered",
+        asOf: "2026-06-05",
+        type: "Transfer",
+        fromReserveId: "tiered",
+        toReserveId: "untiered",
+        amount: 150,
+        tier: "c1",
+      },
+      // Mixed-Tier close of a genesis position (proceeds split c1 25% / c2 75%).
+      { id: "close-alt", asOf: "2026-06-06", type: "PositionClosed", positionId: "alt-pos", settlement: { reserveId: "tiered", proceeds: 360 } },
+      // Untiered credit: moves `amount` only, mints no Tier — the null-tiers path.
+      { id: "dep-untiered", asOf: "2026-06-07", type: "Deposit", reserveId: "untiered", amount: 100, tier: "c3" },
+      // Close a position opened earlier in the SAME batch (both encodings must
+      // have learned btc-pos' lots mid-stream to settle it).
+      { id: "close-btc", asOf: "2026-06-08", type: "PositionClosed", positionId: "btc-pos", settlement: { reserveId: "tiered", proceeds: 300 } },
+    ];
+  }
+
+  it("every folded reserve equals the shadow's running balance, per amount and per Tier", () => {
+    const events = batch();
+
+    // The fold's encoding: mutate a `ReserveRecord` (amount + lots array).
+    const folded = foldEvents(genesis(), events);
+
+    // The shadow's encoding: advance the cross-ref balances exactly as the
+    // sufficiency gate does across a batch (amount + Tier Map).
+    const reference = buildEventReference(genesis());
+    for (const event of events) {
+      applyEventToReference(reference, event);
+    }
+
+    // Sanity: the batch actually moved cash, so the guard is not vacuous.
+    expect(reserveById(folded, "tiered").amount).not.toBe(1500);
+
+    for (const reserve of folded.reserves) {
+      const shadow = reference.reserveBalances.get(reserve.id);
+      expect(shadow).toBeDefined();
+      if (!shadow) continue;
+
+      // Authoritative `amount` agrees (float tolerance for the proportional splits).
+      expect(shadow.amount).toBeCloseTo(reserve.amount, 6);
+
+      if (reserve.lots) {
+        // Tiered reserve: the shadow is tiered too, and every Tier's quantity agrees.
+        expect(shadow.tiers).not.toBeNull();
+        for (const tier of TIERS) {
+          expect(shadow.tiers?.get(tier) ?? 0).toBeCloseTo(tierQty(reserve, tier), 6);
+        }
+      } else {
+        // Untiered reserve: the shadow tracks `amount` only (no Tier map) — matching.
+        expect(shadow.tiers).toBeNull();
+      }
+    }
+
+    // The reverse: the shadow holds no reserve the fold dropped (same reserve set).
+    expect(reference.reserveBalances.size).toBe(folded.reserves.length);
   });
 });
