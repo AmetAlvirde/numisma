@@ -9,7 +9,10 @@ import {
   applyReserveDelta,
   buildEventReference,
   crossReferenceEvent,
+  EVENT_SCHEMA_VERSION,
   foldEvents,
+  migrateLegacyEvent,
+  parseEvent,
   reserveDeltasForClose,
   type FundReviewData,
   type PortfolioEvent,
@@ -330,5 +333,96 @@ describe("the seam — applyReserveDelta is the one place the invariant lives", 
     applyReserveDelta(reserve, [{ tier: "c1", amount: -40 }]);
     expect(reserve.amount).toBe(60);
     expect(reserve.lots).toBeUndefined();
+  });
+});
+
+// T1 (M1 / ADR-003 amendment): the durable-log migration/versioning contract. A
+// legacy (pre-cash-leg / v1) open/close must fail loud with a defined migration
+// path — never a silent quarantine that skews the fold — and the one-shot
+// `migrateLegacyEvent` grafts an operator-supplied cash leg through the same v2 gate.
+describe("durable-log versioning — a legacy open/close fails loud with a migration path", () => {
+  /** A v1-shape close: a real record written before the cash leg existed. */
+  const legacyClose = {
+    id: "legacy-close-alt",
+    asOf: "2026-06-03",
+    type: "PositionClosed",
+    positionId: "alt-pos",
+  };
+  /** A v1-shape open: no funding leg. */
+  const legacyOpen = {
+    id: "legacy-open-btc",
+    asOf: "2026-06-02",
+    type: "PositionOpened",
+    position: {
+      id: "btc-pos",
+      portfolioId: "core",
+      tempo: "Liquid",
+      executionMode: "live",
+      accountId: "venue",
+      instrumentId: "btc-usd",
+      direction: "long",
+      currency: "USD",
+      lots: [{ quantity: 1, cost: 200, tier: "c1" }],
+    },
+    decision: DECISION,
+  };
+
+  it("parseEvent rejects a legacy close (no settlement) and points at the migration", () => {
+    const result = parseEvent(legacyClose);
+    expect(result.kind).toBe("event-error");
+    if (result.kind === "event-error") {
+      expect(result.path).toBe("settlement");
+      expect(result.message).toMatch(/migrate/i);
+    }
+  });
+
+  it("parseEvent rejects a legacy open (no funding) and points at the migration", () => {
+    const result = parseEvent(legacyOpen);
+    expect(result.kind).toBe("event-error");
+    if (result.kind === "event-error") {
+      expect(result.path).toBe("funding");
+      expect(result.message).toMatch(/migrate/i);
+    }
+  });
+
+  it("parseEvent refuses a record tagged newer than this build supports", () => {
+    const future = { ...legacyClose, schemaVersion: EVENT_SCHEMA_VERSION + 1, settlement: { reserveId: "tiered", proceeds: 360 } };
+    const result = parseEvent(future);
+    expect(result.kind).toBe("event-error");
+    if (result.kind === "event-error") {
+      expect(result.path).toBe("schemaVersion");
+      expect(result.message).toMatch(/newer than this build/i);
+    }
+  });
+
+  it("accepts a current-version record carrying the schemaVersion marker", () => {
+    const v2 = { ...legacyClose, schemaVersion: EVENT_SCHEMA_VERSION, settlement: { reserveId: "tiered", proceeds: 360 } };
+    expect(parseEvent(v2).kind).toBe("ok");
+  });
+
+  it("migrateLegacyEvent grafts a supplied settlement onto a legacy close → a valid v2 event", () => {
+    // alt-pos: qty 20 × last close (genesis markPrice) 40 → expected ≈ 800; 600 is
+    // within the ±50% settlement-magnitude band, so the cross-ref gate accepts it.
+    const result = migrateLegacyEvent(legacyClose, { settlement: { reserveId: "tiered", proceeds: 600 } });
+    expect(result.kind).toBe("ok");
+    if (result.kind === "ok" && result.value.type === "PositionClosed") {
+      expect(result.value.settlement).toEqual({ reserveId: "tiered", proceeds: 600 });
+      // The migrated event then passes the same cross-ref gate every event faces.
+      const reference = buildEventReference(genesis());
+      expect(crossReferenceEvent(result.value, reference).kind).toBe("ok");
+    }
+  });
+
+  it("migrateLegacyEvent grafts a supplied funding onto a legacy open → a valid v2 event", () => {
+    const result = migrateLegacyEvent(legacyOpen, { funding: { reserveId: "tiered", amount: 200 } });
+    expect(result.kind).toBe("ok");
+    if (result.kind === "ok" && result.value.type === "PositionOpened") {
+      expect(result.value.funding).toEqual({ reserveId: "tiered", amount: 200 });
+    }
+  });
+
+  it("migrateLegacyEvent rejects a leg that does not match the record's verb", () => {
+    const result = migrateLegacyEvent(legacyClose, { funding: { reserveId: "tiered", amount: 200 } });
+    expect(result.kind).toBe("event-error");
   });
 });

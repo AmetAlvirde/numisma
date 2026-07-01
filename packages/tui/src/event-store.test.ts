@@ -12,10 +12,12 @@ import {
   ingestInbox,
   loadEventLog,
   loadFoldedReview,
+  migrateLegacyLog,
   quarantineLogPath,
   resolveEventStorePaths,
   type EventStorePaths,
 } from "./event-store.js";
+import type { SuppliedCashLeg } from "@numisma/engine";
 import { afterEach, describe, expect, it } from "vitest";
 
 const GENESIS_AS_OF = "2026-06-01";
@@ -288,14 +290,18 @@ describe("loadEventLog — log-line quarantine", () => {
     expect(lane).toContain("this is not json");
   });
 
-  it("does not abort startup: the fold still renders with a corrupt line present", async () => {
+  it("fails loud on the fold path when any line is unloadable (never a partial fold)", async () => {
+    // ADR-003 amendment (M1): the fold/ingest read no longer degrades gracefully —
+    // a dropped line would silently skew NAV, so loadFoldedReview refuses to fold a
+    // partial log. The quarantine side lane is still surfaced for diagnostics.
     const log = `${JSON.stringify(openBtc())}\n{ broken\n`;
     const paths = await makeStore({ log });
 
-    const data = await loadFoldedReview(paths);
+    await expect(loadFoldedReview(paths)).rejects.toThrow(/unloadable line/i);
 
-    // The good event folded through (the corrupt line was skipped, not fatal).
-    expect(data.positions.some((position) => position.id === "btc-core")).toBe(true);
+    // The bad line is still surfaced to the side lane for the operator to fix.
+    const lane = await readFile(quarantineLogPath(paths.log), "utf8");
+    expect(lane).toContain("{ broken");
   });
 
   it("self-heals: a clean log removes a stale quarantine lane", async () => {
@@ -407,5 +413,83 @@ describe("decision round-trip — durable retention of the five decision fields 
     expect(events).toHaveLength(0);
     expect(quarantined).toHaveLength(1);
     expect(quarantined[0]?.reason).toMatch(/decision\.strategy/);
+  });
+});
+
+// T1 (M1 / C1 / ADR-003 amendment): a durable log written before the cash leg
+// existed. A legacy-shape close fails loud on load (never a silent quarantine that
+// skews the fold), and the one-shot `migrateLegacyLog` upgrades it in place with an
+// operator-supplied settlement — fail-loud and lossless. `aapl-core` is the genesis
+// position closed here (markPrice 150 × qty 2 → expected ≈ 300 for the magnitude
+// gate); `cash-core` is the settling reserve. Fixtures synthetic.
+describe("durable-log migration — legacy-shape events fail loud, then migrate deterministically", () => {
+  /** A v1-shape close of the genesis position: no settlement cash leg. */
+  const legacyClose = {
+    id: "legacy-close-aapl",
+    asOf: "2026-06-07",
+    type: "PositionClosed",
+    positionId: "aapl-core",
+  };
+
+  it("loadFoldedReview fails loud on a legacy close, never folding without it", async () => {
+    const paths = await makeStore({ log: `${JSON.stringify(legacyClose)}\n` });
+
+    // The whole load stops loud — the position is NOT silently left open with the
+    // cash credited nowhere (the exact plausible-but-wrong NAV M1 eliminates).
+    await expect(loadFoldedReview(paths)).rejects.toThrow(/unloadable line/i);
+    const lane = await readFile(quarantineLogPath(paths.log), "utf8");
+    expect(lane).toMatch(/migrate/i);
+  });
+
+  it("ingestInbox fails loud when the existing log holds a legacy line, log unchanged", async () => {
+    const log = `${JSON.stringify(legacyClose)}\n`;
+    const paths = await makeStore({ log, inbox: [markAapl(160)] });
+
+    await expect(ingestInbox(paths)).rejects.toThrow(/unloadable line/i);
+
+    // Fail-loud is all-or-nothing: the durable log is left byte-for-byte unchanged.
+    expect(await readFile(paths.log, "utf8")).toBe(log);
+    expect(await exists(paths.inbox)).toBe(true);
+  });
+
+  it("migrateLegacyLog upgrades the legacy close in place; the log then folds cleanly", async () => {
+    const paths = await makeStore({ log: `${JSON.stringify(legacyClose)}\n` });
+    const cashLegs = new Map<string, SuppliedCashLeg>([
+      ["legacy-close-aapl", { settlement: { reserveId: "cash-core", proceeds: 290 } }],
+    ]);
+
+    const report = await migrateLegacyLog(paths, cashLegs);
+    expect(report.migratedCount).toBe(1);
+
+    // The rewritten line is v2-shaped and schemaVersion-stamped.
+    const logged = JSON.parse((await readFile(paths.log, "utf8")).trim().split("\n")[0]!);
+    expect(logged.schemaVersion).toBe(2);
+    expect(logged.settlement).toEqual({ reserveId: "cash-core", proceeds: 290 });
+
+    // And the fold now succeeds: the position is retired, the proceeds credited.
+    const data = await loadFoldedReview(paths);
+    expect(data.positions.some((position) => position.id === "aapl-core")).toBe(false);
+    expect(data.reserves.find((reserve) => reserve.id === "cash-core")?.amount).toBe(1290);
+  });
+
+  it("migrateLegacyLog fails loud (writes nothing) when a legacy record has no supplied leg", async () => {
+    const log = `${JSON.stringify(legacyClose)}\n`;
+    const paths = await makeStore({ log });
+
+    await expect(migrateLegacyLog(paths, new Map())).rejects.toThrow(/legacy-close-aapl/);
+    // Nothing written: the log is untouched.
+    expect(await readFile(paths.log, "utf8")).toBe(log);
+  });
+
+  it("migrateLegacyLog fails loud when a supplied settlement is non-conserving (magnitude gate)", async () => {
+    const log = `${JSON.stringify(legacyClose)}\n`;
+    const paths = await makeStore({ log });
+    const cashLegs = new Map<string, SuppliedCashLeg>([
+      // ~26× the expected ≈ 300 → the settlement-magnitude gate rejects it.
+      ["legacy-close-aapl", { settlement: { reserveId: "cash-core", proceeds: 8000 } }],
+    ]);
+
+    await expect(migrateLegacyLog(paths, cashLegs)).rejects.toThrow(/cross-reference/i);
+    expect(await readFile(paths.log, "utf8")).toBe(log);
   });
 });

@@ -188,6 +188,61 @@ const REQUIRED_DECISION_FIELDS: Array<keyof PositionDecision> = [
 ];
 
 /**
+ * The durable-log record schema version this build writes and understands.
+ *
+ *   - v1 — the pre-cash-leg 3-verb shape: `PositionOpened`/`PositionClosed` with NO
+ *     cash leg, plus `PriceMarked`.
+ *   - v2 — this increment: the mandatory `funding`/`settlement` cash leg riding
+ *     atomically on the trade leg, plus the `Deposit`/`Withdraw`/`Transfer` verbs.
+ *
+ * New and migrated records are stamped with this on write (a storage-layer marker;
+ * it is NOT carried into the domain event). Parse is version-AWARE: a record tagged
+ * NEWER than this build refuses to load — a forward-compatibility guard so a future
+ * shape is never silently misread by an old binary — and a legacy (v1) open/close
+ * missing its cash leg fails loud with a pointer to the one-shot migration rather
+ * than being silently dropped from the fold. See the ADR-003 amendment (durable-log
+ * migration/versioning contract).
+ */
+export const EVENT_SCHEMA_VERSION = 2;
+
+/**
+ * Forward-compatibility guard on the optional `schemaVersion` marker. An absent
+ * marker is fine (legacy records and freshly authored inbox events carry none — the
+ * per-verb shape gates decide their fate); a marker newer than this build
+ * understands fails loud rather than risking a misread of a shape written by a newer
+ * Numisma. Returns null when the marker is acceptable or absent.
+ */
+function checkSchemaVersion(value: unknown): EventError | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    return eventError("schemaVersion", "schemaVersion, when present, must be a positive integer.");
+  }
+  if (value > EVENT_SCHEMA_VERSION) {
+    return eventError(
+      "schemaVersion",
+      `record schemaVersion ${value} is newer than this build supports (${EVENT_SCHEMA_VERSION}); ` +
+        `upgrade Numisma to read it rather than risk misreading a newer record shape.`,
+    );
+  }
+  return null;
+}
+
+/**
+ * The loud remedy appended to a legacy open/close parse failure. The cash leg is not
+ * in the old record and cannot be reconstructed by code (the settling Reserve and
+ * the proceeds/funding split are the operator's real-world facts), so the honest
+ * behavior is to fail loud and point at the one-shot migration — never to default a
+ * fabricated cash movement, which would reintroduce the exact NAV drift this MVI
+ * eliminates. See the ADR-003 amendment.
+ */
+const LEGACY_CASH_LEG_REMEDY =
+  " If this is a legacy (pre-cash-leg / schemaVersion 1) record, migrate it with the " +
+  "one-shot log migration (`migrateLegacyEvent`, supplying the real cash leg) — the cash " +
+  "leg cannot be reconstructed automatically; see the ADR-003 amendment.";
+
+/**
  * Validate one untrusted event record into a typed {@link PortfolioEvent} or an
  * {@link EventError}. Pure: no IO, no cross-event state. The fold trusts only
  * what this gate returns.
@@ -195,6 +250,11 @@ const REQUIRED_DECISION_FIELDS: Array<keyof PositionDecision> = [
 export function parseEvent(input: unknown): EventParseResult {
   if (!isRecord(input)) {
     return eventError("$", "Event must be a JSON object.");
+  }
+
+  const versionError = checkSchemaVersion(input.schemaVersion);
+  if (versionError) {
+    return versionError;
   }
 
   const idError = requireNonEmptyString(input.id, "id");
@@ -223,6 +283,39 @@ export function parseEvent(input: unknown): EventParseResult {
     default:
       return eventError("type", `Unsupported event type: ${String(input.type)}`);
   }
+}
+
+/**
+ * The cash leg an operator supplies to migrate one legacy (v1) open/close record to
+ * the v2 cash-leg shape: a funding leg for an open, a settlement leg for a close.
+ */
+export type SuppliedCashLeg = { funding: OpenFunding } | { settlement: CloseSettlement };
+
+/**
+ * One-shot migration of a single legacy (pre-cash-leg / v1) open or close record to
+ * the v2 shape by grafting an operator-supplied cash leg onto it, then re-validating
+ * through {@link parseEvent}. Pure and honest: it does NOT invent the cash leg (the
+ * settling Reserve and the proceeds/funding split are real-world facts only the
+ * operator holds); it grafts what is supplied and lets the same v2 gate that guards
+ * every event decide the result. A record that is not a legacy open/close, or whose
+ * supplied leg does not match its verb, is rejected loud. This is the codified
+ * one-shot reconstruction ADR-003's amendment sanctions — NOT a runtime append path.
+ */
+export function migrateLegacyEvent(record: unknown, cashLeg: SuppliedCashLeg): EventParseResult {
+  if (!isRecord(record)) {
+    return eventError("$", "Legacy record must be a JSON object.");
+  }
+  if (record.type === "PositionOpened" && "funding" in cashLeg) {
+    return parseEvent({ ...record, funding: cashLeg.funding });
+  }
+  if (record.type === "PositionClosed" && "settlement" in cashLeg) {
+    return parseEvent({ ...record, settlement: cashLeg.settlement });
+  }
+  return eventError(
+    "type",
+    "migrateLegacyEvent expects a legacy PositionOpened paired with a funding leg, " +
+      "or a legacy PositionClosed paired with a settlement leg.",
+  );
 }
 
 /** Narrow an untrusted value to a {@link CapitalTier} at the given path. */
@@ -341,7 +434,10 @@ function parsePositionOpened(
   // Reserve and the cash debited, so a buy can never silently skip the debit.
   const funding = input.funding;
   if (!isRecord(funding)) {
-    return eventError("funding", "PositionOpened requires a funding object.");
+    return eventError(
+      "funding",
+      `PositionOpened is missing its required funding cash leg.${LEGACY_CASH_LEG_REMEDY}`,
+    );
   }
   const fundingReserveError = requireNonEmptyString(funding.reserveId, "funding.reserveId");
   if (fundingReserveError) {
@@ -386,7 +482,10 @@ function parsePositionClosed(
   // retired the asset but credited the cash nowhere) becomes structurally impossible.
   const settlement = input.settlement;
   if (!isRecord(settlement)) {
-    return eventError("settlement", "PositionClosed requires a settlement object.");
+    return eventError(
+      "settlement",
+      `PositionClosed is missing its required settlement cash leg.${LEGACY_CASH_LEG_REMEDY}`,
+    );
   }
   const settlementReserveError = requireNonEmptyString(settlement.reserveId, "settlement.reserveId");
   if (settlementReserveError) {

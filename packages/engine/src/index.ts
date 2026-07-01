@@ -74,9 +74,12 @@ export type {
   EventError,
   EventParseResult,
   EventReference,
+  SuppliedCashLeg,
 } from "./fold.js";
 export {
   parseEvent,
+  migrateLegacyEvent,
+  EVENT_SCHEMA_VERSION,
   foldEvents,
   buildEventReference,
   applyEventToReference,
