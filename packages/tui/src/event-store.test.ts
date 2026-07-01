@@ -83,6 +83,7 @@ function openBtc(id = "open-btc") {
       lots: [{ quantity: 1, cost: 100, tier: "c1" }],
     },
     decision: DECISION,
+    funding: { reserveId: "cash-core", amount: 100 },
   };
 }
 
@@ -158,7 +159,7 @@ describe("ingestInbox — accepts valid cross-referenced events", () => {
   });
 
   it("accepts a close that references a position opened earlier in the same batch", async () => {
-    const close = { id: "close-btc", asOf: "2026-06-07", type: "PositionClosed", positionId: "btc-core" };
+    const close = { id: "close-btc", asOf: "2026-06-07", type: "PositionClosed", positionId: "btc-core", settlement: { reserveId: "cash-core", proceeds: 100 } };
     const paths = await makeStore({ inbox: [openBtc(), close] });
 
     await expect(ingestInbox(paths)).resolves.toMatchObject({ newCount: 2 });
@@ -191,7 +192,7 @@ describe("ingestInbox — fail-loud rejection leaves the log unchanged and inbox
   }
 
   it("rejects a PositionClosed for an unknown id (MF1)", async () => {
-    const close = { id: "x", asOf: "2026-06-07", type: "PositionClosed", positionId: "ghost" };
+    const close = { id: "x", asOf: "2026-06-07", type: "PositionClosed", positionId: "ghost", settlement: { reserveId: "cash-core", proceeds: 100 } };
     await expectRejectedUnchanged([close], /cross-reference.*positionId/);
   });
 

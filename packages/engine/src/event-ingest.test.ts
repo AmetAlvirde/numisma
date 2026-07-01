@@ -81,6 +81,7 @@ function openedInput(overrides: Record<string, unknown> = {}) {
       lots: [{ quantity: 1, cost: 100, tier: "c1" }],
     },
     decision: { ...VALID_DECISION },
+    funding: { reserveId: "cash-core", amount: 100 },
     ...overrides,
   };
 }
@@ -91,6 +92,9 @@ function closedInput(overrides: Record<string, unknown> = {}) {
     asOf: "2026-06-10",
     type: "PositionClosed",
     positionId: "aapl-core",
+    // aapl-core is 2 lots @ last close 150 → expected ~300; proceeds at expected
+    // so the default sails through the settlement-magnitude gate.
+    settlement: { reserveId: "cash-core", proceeds: 300 },
     ...overrides,
   };
 }
@@ -324,9 +328,9 @@ describe("crossReferenceEvent — unknown reference (MF1)", () => {
   it("accepts a PositionClosed for an id introduced earlier in the same batch", () => {
     const reference = buildEventReference(genesis());
     applyEventToReference(reference, asEvent(openedInput())); // opens btc-core
-    expect(crossReferenceEvent(asEvent(closedInput({ positionId: "btc-core" })), reference).kind).toBe(
-      "ok",
-    );
+    // btc-core is 1 lot @ entry/last close 100 → expected ~100; settle at it.
+    const close = closedInput({ positionId: "btc-core", settlement: { reserveId: "cash-core", proceeds: 100 } });
+    expect(crossReferenceEvent(asEvent(close), reference).kind).toBe("ok");
   });
 });
 
