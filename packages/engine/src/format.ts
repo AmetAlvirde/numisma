@@ -10,6 +10,7 @@ import type {
   DashboardFocus,
   DashboardSectionId,
   PriceJourney,
+  ReserveReconciliationLine,
 } from "./contracts.js";
 
 export function formatUsd(value: number): string {
@@ -92,6 +93,8 @@ export function formatCompositionReport(report: CompositionReport): string {
       true,
     ),
     "",
+    formatReserveReconciliation(report.reserveReconciliation),
+    "",
     formatPriceJourneys(report.priceJourneys),
   ];
 
@@ -171,6 +174,31 @@ function formatRows(
     header,
     "-".repeat(header.length),
     ...(body.length > 0 ? body : ["No live records."]),
+  ].join("\n");
+}
+
+/**
+ * Post-fold Reserve balances (PRD #82 C3): one line per live Reserve, in genesis
+ * insertion order (never re-sorted), showing the folded NATIVE balance the venue
+ * reports next to its USD value. The operator reads this straight down against the
+ * real venue balances to confirm the fold conserved every cash leg.
+ */
+export function formatReserveReconciliation(
+  lines: ReserveReconciliationLine[],
+): string {
+  const title = "Reserve Reconciliation";
+  const header = `${pad("Reserve", 28)} ${pad("Venue", 24)} ${padLeft("Balance", 16)} ${padLeft("USD Value", 14)}`;
+  const body = lines.map((line) =>
+    `${pad(line.reserveId, 28)} ${pad(line.venueLabel, 24)} ${padLeft(formatPrice(line.balance, line.currency), 16)} ${padLeft(formatUsd(line.usdValue), 14)}`,
+  );
+
+  return [
+    title,
+    "-".repeat(title.length),
+    "Post-fold balances to eyeball against the real venues.",
+    header,
+    "-".repeat(header.length),
+    ...(body.length > 0 ? body : ["No live Reserves."]),
   ].join("\n");
 }
 

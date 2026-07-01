@@ -32,12 +32,14 @@
  *     the open. Persisting them is reliable-conversion work.
  */
 import type {
+  CapitalTier,
   Currency,
   Direction,
   ExecutionMode,
   FundReviewData,
   PositionLot,
   PositionRecord,
+  ReserveRecord,
   Close,
 } from "./contracts.js";
 import {
@@ -53,7 +55,10 @@ import {
 export type PortfolioEventType =
   | "PositionOpened"
   | "PositionClosed"
-  | "PriceMarked";
+  | "PriceMarked"
+  | "Deposit"
+  | "Withdraw"
+  | "Transfer";
 
 /** The five decision fields a Position cannot open without (product coherence). */
 export interface PositionDecision {
@@ -71,6 +76,26 @@ interface BaseEvent {
   type: PortfolioEventType;
 }
 
+/**
+ * The cash leg of an open: the Reserve that funded the buy, and the actual cash
+ * debited (net of fees). The debit is split across the funded Tiers in proportion
+ * to the position lots' own cost-basis weights (cash carries its provenance).
+ */
+export interface OpenFunding {
+  reserveId: string;
+  amount: number;
+}
+
+/**
+ * The cash leg of a close: the Reserve that received the sale, and the actual cash
+ * received (net of fees). Proceeds inherit the closed position's Tier mix
+ * proportionally — the realized gain/loss falls on the same Tier it was risked on.
+ */
+export interface CloseSettlement {
+  reserveId: string;
+  proceeds: number;
+}
+
 export interface PositionOpenedEvent extends BaseEvent {
   type: "PositionOpened";
   position: {
@@ -85,11 +110,44 @@ export interface PositionOpenedEvent extends BaseEvent {
     lots: PositionLot[];
   };
   decision: PositionDecision;
+  /** Cash leg: debit this Reserve. The asset leg cannot be opened without it. */
+  funding: OpenFunding;
 }
 
 export interface PositionClosedEvent extends BaseEvent {
   type: "PositionClosed";
   positionId: string;
+  /** Cash leg: credit this Reserve. The asset leg cannot be retired without it. */
+  settlement: CloseSettlement;
+}
+
+/** External capital arriving into a Reserve, classified at arrival by `tier`. */
+export interface DepositEvent extends BaseEvent {
+  type: "Deposit";
+  reserveId: string;
+  amount: number;
+  tier: CapitalTier;
+}
+
+/** Capital leaving a Reserve to the outside world, drawn from the named `tier`. */
+export interface WithdrawEvent extends BaseEvent {
+  type: "Withdraw";
+  reserveId: string;
+  amount: number;
+  tier: CapitalTier;
+}
+
+/**
+ * Same-currency cash moved between two venue Reserves. One atomic event conserves
+ * NAV; `tier` rides across so moving cash cannot launder its provenance. FX
+ * conversions are modeled as Withdraw + Deposit at the executed rate, not Transfer.
+ */
+export interface TransferEvent extends BaseEvent {
+  type: "Transfer";
+  fromReserveId: string;
+  toReserveId: string;
+  amount: number;
+  tier: CapitalTier;
 }
 
 export interface PriceMarkedEvent extends BaseEvent {
@@ -103,7 +161,10 @@ export interface PriceMarkedEvent extends BaseEvent {
 export type PortfolioEvent =
   | PositionOpenedEvent
   | PositionClosedEvent
-  | PriceMarkedEvent;
+  | PriceMarkedEvent
+  | DepositEvent
+  | WithdrawEvent
+  | TransferEvent;
 
 export interface EventOk {
   kind: "ok";
@@ -127,6 +188,61 @@ const REQUIRED_DECISION_FIELDS: Array<keyof PositionDecision> = [
 ];
 
 /**
+ * The durable-log record schema version this build writes and understands.
+ *
+ *   - v1 — the pre-cash-leg 3-verb shape: `PositionOpened`/`PositionClosed` with NO
+ *     cash leg, plus `PriceMarked`.
+ *   - v2 — this increment: the mandatory `funding`/`settlement` cash leg riding
+ *     atomically on the trade leg, plus the `Deposit`/`Withdraw`/`Transfer` verbs.
+ *
+ * New and migrated records are stamped with this on write (a storage-layer marker;
+ * it is NOT carried into the domain event). Parse is version-AWARE: a record tagged
+ * NEWER than this build refuses to load — a forward-compatibility guard so a future
+ * shape is never silently misread by an old binary — and a legacy (v1) open/close
+ * missing its cash leg fails loud with a pointer to the one-shot migration rather
+ * than being silently dropped from the fold. See the ADR-003 amendment (durable-log
+ * migration/versioning contract).
+ */
+export const EVENT_SCHEMA_VERSION = 2;
+
+/**
+ * Forward-compatibility guard on the optional `schemaVersion` marker. An absent
+ * marker is fine (legacy records and freshly authored inbox events carry none — the
+ * per-verb shape gates decide their fate); a marker newer than this build
+ * understands fails loud rather than risking a misread of a shape written by a newer
+ * Numisma. Returns null when the marker is acceptable or absent.
+ */
+function checkSchemaVersion(value: unknown): EventError | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    return eventError("schemaVersion", "schemaVersion, when present, must be a positive integer.");
+  }
+  if (value > EVENT_SCHEMA_VERSION) {
+    return eventError(
+      "schemaVersion",
+      `record schemaVersion ${value} is newer than this build supports (${EVENT_SCHEMA_VERSION}); ` +
+        `upgrade Numisma to read it rather than risk misreading a newer record shape.`,
+    );
+  }
+  return null;
+}
+
+/**
+ * The loud remedy appended to a legacy open/close parse failure. The cash leg is not
+ * in the old record and cannot be reconstructed by code (the settling Reserve and
+ * the proceeds/funding split are the operator's real-world facts), so the honest
+ * behavior is to fail loud and point at the one-shot migration — never to default a
+ * fabricated cash movement, which would reintroduce the exact NAV drift this MVI
+ * eliminates. See the ADR-003 amendment.
+ */
+const LEGACY_CASH_LEG_REMEDY =
+  " If this is a legacy (pre-cash-leg / schemaVersion 1) record, migrate it with the " +
+  "one-shot log migration (`migrateLegacyEvent`, supplying the real cash leg) — the cash " +
+  "leg cannot be reconstructed automatically; see the ADR-003 amendment.";
+
+/**
  * Validate one untrusted event record into a typed {@link PortfolioEvent} or an
  * {@link EventError}. Pure: no IO, no cross-event state. The fold trusts only
  * what this gate returns.
@@ -134,6 +250,11 @@ const REQUIRED_DECISION_FIELDS: Array<keyof PositionDecision> = [
 export function parseEvent(input: unknown): EventParseResult {
   if (!isRecord(input)) {
     return eventError("$", "Event must be a JSON object.");
+  }
+
+  const versionError = checkSchemaVersion(input.schemaVersion);
+  if (versionError) {
+    return versionError;
   }
 
   const idError = requireNonEmptyString(input.id, "id");
@@ -153,9 +274,115 @@ export function parseEvent(input: unknown): EventParseResult {
       return parsePositionClosed(input, id, asOf);
     case "PriceMarked":
       return parsePriceMarked(input, id, asOf);
+    case "Deposit":
+      return parseReserveMove(input, id, asOf, "Deposit");
+    case "Withdraw":
+      return parseReserveMove(input, id, asOf, "Withdraw");
+    case "Transfer":
+      return parseTransfer(input, id, asOf);
     default:
       return eventError("type", `Unsupported event type: ${String(input.type)}`);
   }
+}
+
+/**
+ * The cash leg an operator supplies to migrate one legacy (v1) open/close record to
+ * the v2 cash-leg shape: a funding leg for an open, a settlement leg for a close.
+ */
+export type SuppliedCashLeg = { funding: OpenFunding } | { settlement: CloseSettlement };
+
+/**
+ * One-shot migration of a single legacy (pre-cash-leg / v1) open or close record to
+ * the v2 shape by grafting an operator-supplied cash leg onto it, then re-validating
+ * through {@link parseEvent}. Pure and honest: it does NOT invent the cash leg (the
+ * settling Reserve and the proceeds/funding split are real-world facts only the
+ * operator holds); it grafts what is supplied and lets the same v2 gate that guards
+ * every event decide the result. A record that is not a legacy open/close, or whose
+ * supplied leg does not match its verb, is rejected loud. This is the codified
+ * one-shot reconstruction ADR-003's amendment sanctions — NOT a runtime append path.
+ */
+export function migrateLegacyEvent(record: unknown, cashLeg: SuppliedCashLeg): EventParseResult {
+  if (!isRecord(record)) {
+    return eventError("$", "Legacy record must be a JSON object.");
+  }
+  if (record.type === "PositionOpened" && "funding" in cashLeg) {
+    return parseEvent({ ...record, funding: cashLeg.funding });
+  }
+  if (record.type === "PositionClosed" && "settlement" in cashLeg) {
+    return parseEvent({ ...record, settlement: cashLeg.settlement });
+  }
+  return eventError(
+    "type",
+    "migrateLegacyEvent expects a legacy PositionOpened paired with a funding leg, " +
+      "or a legacy PositionClosed paired with a settlement leg.",
+  );
+}
+
+/** Narrow an untrusted value to a {@link CapitalTier} at the given path. */
+function parseTier(value: unknown, path: string): { tier: CapitalTier } | EventError {
+  if (value !== "c1" && value !== "c2" && value !== "c3") {
+    return eventError(path, "tier must be c1, c2, or c3.");
+  }
+  return { tier: value };
+}
+
+/** Deposit and Withdraw share the same `{ reserveId, amount, tier }` cash shape. */
+function parseReserveMove(
+  input: Record<string, unknown>,
+  id: string,
+  asOf: string,
+  type: "Deposit" | "Withdraw",
+): EventParseResult {
+  const reserveError = requireNonEmptyString(input.reserveId, "reserveId");
+  if (reserveError) {
+    return eventError("reserveId", reserveError.message);
+  }
+  if (!isPositiveNumber(input.amount)) {
+    return eventError("amount", `${type} amount must be a positive number.`);
+  }
+  const tier = parseTier(input.tier, "tier");
+  if ("kind" in tier) {
+    return tier;
+  }
+  return {
+    kind: "ok",
+    value: { id, asOf, type, reserveId: input.reserveId as string, amount: input.amount, tier: tier.tier },
+  };
+}
+
+function parseTransfer(
+  input: Record<string, unknown>,
+  id: string,
+  asOf: string,
+): EventParseResult {
+  for (const field of ["fromReserveId", "toReserveId"] as const) {
+    const error = requireNonEmptyString(input[field], field);
+    if (error) {
+      return eventError(field, error.message);
+    }
+  }
+  if (input.fromReserveId === input.toReserveId) {
+    return eventError("toReserveId", "Transfer fromReserveId and toReserveId must differ.");
+  }
+  if (!isPositiveNumber(input.amount)) {
+    return eventError("amount", "Transfer amount must be a positive number.");
+  }
+  const tier = parseTier(input.tier, "tier");
+  if ("kind" in tier) {
+    return tier;
+  }
+  return {
+    kind: "ok",
+    value: {
+      id,
+      asOf,
+      type: "Transfer",
+      fromReserveId: input.fromReserveId as string,
+      toReserveId: input.toReserveId as string,
+      amount: input.amount,
+      tier: tier.tier,
+    },
+  };
 }
 
 function parsePositionOpened(
@@ -203,6 +430,23 @@ function parsePositionOpened(
     decisionValues[field] = (decision[field] as string).trim();
   }
 
+  // Cash leg (atomic): an open cannot be recorded without naming the funding
+  // Reserve and the cash debited, so a buy can never silently skip the debit.
+  const funding = input.funding;
+  if (!isRecord(funding)) {
+    return eventError(
+      "funding",
+      `PositionOpened is missing its required funding cash leg.${LEGACY_CASH_LEG_REMEDY}`,
+    );
+  }
+  const fundingReserveError = requireNonEmptyString(funding.reserveId, "funding.reserveId");
+  if (fundingReserveError) {
+    return eventError("funding.reserveId", fundingReserveError.message);
+  }
+  if (!isPositiveNumber(funding.amount)) {
+    return eventError("funding.amount", "funding.amount must be a positive number.");
+  }
+
   const value: PositionOpenedEvent = {
     id,
     asOf,
@@ -219,6 +463,7 @@ function parsePositionOpened(
       lots: lots.value,
     },
     decision: decisionValues,
+    funding: { reserveId: funding.reserveId as string, amount: funding.amount },
   };
   return { kind: "ok", value };
 }
@@ -232,9 +477,32 @@ function parsePositionClosed(
   if (error) {
     return eventError("positionId", error.message);
   }
+  // Cash leg (atomic): a close cannot be recorded without naming the settlement
+  // Reserve and the proceeds received — the bug this increment fixes (a close that
+  // retired the asset but credited the cash nowhere) becomes structurally impossible.
+  const settlement = input.settlement;
+  if (!isRecord(settlement)) {
+    return eventError(
+      "settlement",
+      `PositionClosed is missing its required settlement cash leg.${LEGACY_CASH_LEG_REMEDY}`,
+    );
+  }
+  const settlementReserveError = requireNonEmptyString(settlement.reserveId, "settlement.reserveId");
+  if (settlementReserveError) {
+    return eventError("settlement.reserveId", settlementReserveError.message);
+  }
+  if (!isPositiveNumber(settlement.proceeds)) {
+    return eventError("settlement.proceeds", "settlement.proceeds must be a positive number.");
+  }
   return {
     kind: "ok",
-    value: { id, asOf, type: "PositionClosed", positionId: input.positionId as string },
+    value: {
+      id,
+      asOf,
+      type: "PositionClosed",
+      positionId: input.positionId as string,
+      settlement: { reserveId: settlement.reserveId as string, proceeds: settlement.proceeds },
+    },
   };
 }
 
@@ -306,6 +574,96 @@ function parseLots(input: unknown): { kind: "ok"; value: PositionLot[] } | Event
 export const PRICE_MARK_MAGNITUDE_THRESHOLD = 0.5;
 
 /**
+ * The deviation past which a close's `settlement.proceeds` is treated as an
+ * implausible entry (order-of-magnitude typo, sign/unit slip) rather than a real
+ * fill, and rejected at ingest. The proceeds analog of
+ * {@link PRICE_MARK_MAGNITUDE_THRESHOLD}: relative to expected ≈ closed quantity ×
+ * the instrument's last close. Reuses the same ±50% dial for now (an AAR open
+ * question — real fills vs mark may want a wider band); kept a SEPARATE constant so
+ * the two can diverge without a code change to either guard.
+ */
+export const SETTLEMENT_MAGNITUDE_THRESHOLD = 0.5;
+
+/**
+ * A signed change to one Capital Tier's slice of a Reserve. Positive = cash in,
+ * negative = cash out. The atomic unit every cash move decomposes into, so the
+ * zero-drift invariant (amount stays authoritative, lots track provenance) lives
+ * in one place — {@link applyReserveDelta}.
+ */
+export interface TierDelta {
+  tier: CapitalTier;
+  amount: number;
+}
+
+const TIERS: CapitalTier[] = ["c1", "c2", "c3"];
+
+/** Cost-basis weight of each Tier in a position's lots (the provenance the cash
+ * leg inherits). Returns signed `amount` per present Tier summing exactly to
+ * `total`, with any float residual folded into the last Tier so the reserve's
+ * authoritative `amount` lands exact. */
+function tierWeightedDeltas(lots: PositionLot[], total: number, sign: 1 | -1): TierDelta[] {
+  const costByTier = new Map<CapitalTier, number>();
+  let totalCost = 0;
+  for (const lot of lots) {
+    const cost = lot.quantity * lot.cost;
+    costByTier.set(lot.tier, (costByTier.get(lot.tier) ?? 0) + cost);
+    totalCost += cost;
+  }
+  const present = TIERS.filter((tier) => costByTier.has(tier));
+  if (present.length === 0 || totalCost === 0) {
+    // Degenerate (zero-cost lots): attribute everything to the first lot's Tier.
+    return [{ tier: lots[0]?.tier ?? "c1", amount: sign * total }];
+  }
+  const deltas: TierDelta[] = [];
+  let allocated = 0;
+  present.forEach((tier, index) => {
+    const isLast = index === present.length - 1;
+    const share = isLast ? total - allocated : (total * (costByTier.get(tier) ?? 0)) / totalCost;
+    allocated += share;
+    deltas.push({ tier, amount: sign * share });
+  });
+  return deltas;
+}
+
+/** Open → debit the funding Reserve by the cash leaving, split across the
+ * position lots' own Tiers (each Tier pays for what it bought). */
+export function reserveDeltasForOpen(lots: PositionLot[], amount: number): TierDelta[] {
+  return tierWeightedDeltas(lots, amount, -1);
+}
+
+/** Close → credit the settlement Reserve with the proceeds, split across the
+ * closed position's Tier mix (realized gain/loss falls on the same Tier). */
+export function reserveDeltasForClose(lots: PositionLot[], proceeds: number): TierDelta[] {
+  return tierWeightedDeltas(lots, proceeds, 1);
+}
+
+/**
+ * THE SEAM. Apply signed per-Tier deltas to one Reserve, in place. `amount` is
+ * always authoritative (moves by the delta sum); when the Reserve carries cash
+ * Lots they track provenance per Tier (a credit grows or mints a Tier lot, a debit
+ * shrinks it). An untiered Reserve (no Lots, e.g. `reserve-binance-usdt`) just moves
+ * its `amount`. Deposit/Withdraw/Transfer and both trade legs are all thin callers,
+ * so the zero-drift rule lives here once.
+ */
+export function applyReserveDelta(reserve: ReserveRecord, deltas: TierDelta[]): void {
+  const sum = deltas.reduce((total, delta) => total + delta.amount, 0);
+  reserve.amount += sum;
+  if (!reserve.lots) {
+    return; // Untiered: amount is the whole truth.
+  }
+  for (const delta of deltas) {
+    const lot = reserve.lots.find((candidate) => candidate.tier === delta.tier);
+    if (lot) {
+      lot.quantity += delta.amount;
+    } else if (delta.amount > 0) {
+      reserve.lots.push({ quantity: delta.amount, tier: delta.tier });
+    }
+    // A debit against an absent Tier is caught at the cross-ref sufficiency gate
+    // before the fold ever runs, so a missing-Tier debit is unreachable here.
+  }
+}
+
+/**
  * The known world an event is cross-referenced against: every id the genesis seed
  * and the durable log have introduced, plus the last known close per instrument
  * for the magnitude guard. Built from genesis (and optionally the existing log) by
@@ -322,6 +680,25 @@ export interface EventReference {
   instrumentIds: Set<string>;
   /** Latest known close per instrument: the magnitude guard's comparison point. */
   lastClose: Map<string, { price: number; asOf: string }>;
+  /**
+   * Running Reserve balances the cross-ref sufficiency gate checks a debit
+   * against (a withdraw/transfer/open-funding can't exceed available, per Tier).
+   * `tiers` is null for an untiered Reserve — only its `amount` is checked. Updated
+   * in-place by {@link applyEventToReference} as a batch is accepted, mirroring the
+   * fold's {@link applyReserveDelta}, so a deposit earlier in the inbox funds a
+   * later withdraw. `currency` is the Reserve's own denomination, read by the
+   * same-currency Transfer guard (a cross-currency move is FX, not a Transfer).
+   */
+  reserveBalances: Map<
+    string,
+    { amount: number; tiers: Map<CapitalTier, number> | null; currency: Currency }
+  >;
+  /**
+   * Closed/open position lots the settlement-magnitude gate reads to compute a
+   * close's expected proceeds (quantity × last close) and the Tier mix proceeds
+   * inherit. Mirrors `lastClose` existing solely to feed the PriceMarked guard.
+   */
+  positionLots: Map<string, { instrumentId: string; lots: PositionLot[] }>;
 }
 
 /**
@@ -341,6 +718,24 @@ export function buildEventReference(
     accountIds: new Set(genesis.accounts.map((account) => account.id)),
     instrumentIds: new Set(genesis.instruments.map((instrument) => instrument.id)),
     lastClose: new Map(),
+    reserveBalances: new Map(
+      genesis.reserves.map((reserve) => [
+        reserve.id,
+        {
+          amount: reserve.amount,
+          tiers: reserve.lots
+            ? new Map(reserve.lots.map((lot) => [lot.tier, lot.quantity]))
+            : null,
+          currency: reserve.currency,
+        },
+      ]),
+    ),
+    positionLots: new Map(
+      genesis.positions.map((position) => [
+        position.id,
+        { instrumentId: position.instrumentId, lots: position.lots },
+      ]),
+    ),
   };
 
   // Seed last-close at the genesis date from each held instrument's markPrice, then
@@ -369,18 +764,76 @@ export function applyEventToReference(reference: EventReference, event: Portfoli
   switch (event.type) {
     case "PositionOpened":
       reference.positionIds.add(event.position.id);
+      reference.positionLots.set(event.position.id, {
+        instrumentId: event.position.instrumentId,
+        lots: event.position.lots,
+      });
       noteClose(
         reference,
         event.position.instrumentId,
         weightedAverageCost(event.position.lots),
         event.asOf,
       );
+      applyDeltasToBalance(
+        reference,
+        event.funding.reserveId,
+        reserveDeltasForOpen(event.position.lots, event.funding.amount),
+      );
       break;
     case "PriceMarked":
       noteClose(reference, event.instrumentId, event.price, event.asOf);
       break;
-    case "PositionClosed":
+    case "PositionClosed": {
+      const closed = reference.positionLots.get(event.positionId);
+      if (closed) {
+        applyDeltasToBalance(
+          reference,
+          event.settlement.reserveId,
+          reserveDeltasForClose(closed.lots, event.settlement.proceeds),
+        );
+      }
       break;
+    }
+    case "Deposit":
+      applyDeltasToBalance(reference, event.reserveId, [
+        { tier: event.tier, amount: event.amount },
+      ]);
+      break;
+    case "Withdraw":
+      applyDeltasToBalance(reference, event.reserveId, [
+        { tier: event.tier, amount: -event.amount },
+      ]);
+      break;
+    case "Transfer":
+      applyDeltasToBalance(reference, event.fromReserveId, [
+        { tier: event.tier, amount: -event.amount },
+      ]);
+      applyDeltasToBalance(reference, event.toReserveId, [
+        { tier: event.tier, amount: event.amount },
+      ]);
+      break;
+  }
+}
+
+/**
+ * Mirror {@link applyReserveDelta} on the cross-ref reserve-balance shadow, so the
+ * sufficiency gate sees the same running balances the fold will produce. Untiered
+ * reserves track only `amount`.
+ */
+function applyDeltasToBalance(
+  reference: EventReference,
+  reserveId: string,
+  deltas: TierDelta[],
+): void {
+  const balance = reference.reserveBalances.get(reserveId);
+  if (!balance) {
+    return; // Unknown reserve — the existence gate rejects before this runs.
+  }
+  for (const delta of deltas) {
+    balance.amount += delta.amount;
+    if (balance.tiers) {
+      balance.tiers.set(delta.tier, (balance.tiers.get(delta.tier) ?? 0) + delta.amount);
+    }
   }
 }
 
@@ -408,23 +861,147 @@ function noteClose(
 export function crossReferenceEvent(
   event: PortfolioEvent,
   reference: EventReference,
-  options?: { magnitudeThreshold?: number },
+  options?: { magnitudeThreshold?: number; settlementThreshold?: number },
 ): EventParseResult {
   switch (event.type) {
     case "PositionOpened":
       return crossReferenceOpen(event, reference);
     case "PositionClosed":
-      if (!reference.positionIds.has(event.positionId)) {
-        return eventError(
-          "positionId",
-          `PositionClosed references position id '${event.positionId}', which neither ` +
-            `the genesis seed nor the log contains.`,
-        );
-      }
-      return { kind: "ok", value: event };
+      return crossReferenceClose(event, reference, options?.settlementThreshold);
     case "PriceMarked":
       return crossReferenceMark(event, reference, options?.magnitudeThreshold);
+    case "Deposit":
+      return crossReferenceDeposit(event, reference);
+    case "Withdraw":
+      return crossReferenceWithdraw(event, reference);
+    case "Transfer":
+      return crossReferenceTransfer(event, reference);
   }
+}
+
+/**
+ * Reserve existence + per-Tier sufficiency for a debit. Returns null on success.
+ * `amount` here is the cash leaving; an untiered reserve is checked against its
+ * total balance, a tiered one against the named Tier's available quantity. Fails
+ * loud rather than letting a debit drive a balance silently negative.
+ */
+function checkDebit(
+  reference: EventReference,
+  reserveId: string,
+  tier: CapitalTier,
+  amount: number,
+  path: string,
+): EventError | null {
+  const balance = reference.reserveBalances.get(reserveId);
+  if (!balance) {
+    return eventError(
+      path,
+      `references reserve id '${reserveId}', which neither the genesis seed nor the log contains.`,
+    );
+  }
+  const available = balance.tiers ? balance.tiers.get(tier) ?? 0 : balance.amount;
+  // Tolerance absorbs float dust from prior proportional splits; a real overdraft
+  // is far larger than this.
+  if (amount > available + 1e-6) {
+    return eventError(
+      path,
+      `debits ${amount} from reserve '${reserveId}'${
+        balance.tiers ? ` tier ${tier}` : ""
+      }, which holds only ${available}.`,
+    );
+  }
+  return null;
+}
+
+function crossReferenceClose(
+  event: PositionClosedEvent,
+  reference: EventReference,
+  threshold = SETTLEMENT_MAGNITUDE_THRESHOLD,
+): EventParseResult {
+  if (!reference.positionIds.has(event.positionId)) {
+    return eventError(
+      "positionId",
+      `PositionClosed references position id '${event.positionId}', which neither ` +
+        `the genesis seed nor the log contains.`,
+    );
+  }
+  if (!reference.reserveBalances.has(event.settlement.reserveId)) {
+    return eventError(
+      "settlement.reserveId",
+      `PositionClosed settles into reserve id '${event.settlement.reserveId}', which neither ` +
+        `the genesis seed nor the log contains.`,
+    );
+  }
+  // Settlement-magnitude gate: the proceeds analog of the PriceMarked guard.
+  // Expected ≈ closed quantity × the instrument's last known close; a gross
+  // deviation (order-of-magnitude typo, sign/unit slip) is rejected at ingest.
+  const closed = reference.positionLots.get(event.positionId);
+  const last = closed ? reference.lastClose.get(closed.instrumentId) : undefined;
+  if (closed && last !== undefined) {
+    const quantity = closed.lots.reduce((sum, lot) => sum + lot.quantity, 0);
+    const expected = quantity * last.price;
+    if (expected > 0) {
+      const deviation = Math.abs(event.settlement.proceeds / expected - 1);
+      if (deviation > threshold) {
+        return eventError(
+          "settlement.proceeds",
+          `PositionClosed proceeds ${event.settlement.proceeds} deviate ` +
+            `${(deviation * 100).toFixed(1)}% from expected ${expected.toFixed(2)} ` +
+            `(${quantity} × last close ${last.price} for '${closed.instrumentId}'), beyond ` +
+            `the ${(threshold * 100).toFixed(0)}% settlement sanity threshold.`,
+        );
+      }
+    }
+  }
+  return { kind: "ok", value: event };
+}
+
+function crossReferenceDeposit(event: DepositEvent, reference: EventReference): EventParseResult {
+  if (!reference.reserveBalances.has(event.reserveId)) {
+    return eventError(
+      "reserveId",
+      `Deposit references reserve id '${event.reserveId}', which the genesis seed does not contain.`,
+    );
+  }
+  return { kind: "ok", value: event };
+}
+
+function crossReferenceWithdraw(event: WithdrawEvent, reference: EventReference): EventParseResult {
+  const error = checkDebit(reference, event.reserveId, event.tier, event.amount, "amount");
+  if (error) {
+    return { ...error, message: `Withdraw ${error.message}` };
+  }
+  return { kind: "ok", value: event };
+}
+
+function crossReferenceTransfer(event: TransferEvent, reference: EventReference): EventParseResult {
+  const to = reference.reserveBalances.get(event.toReserveId);
+  if (!to) {
+    return eventError(
+      "toReserveId",
+      `Transfer targets reserve id '${event.toReserveId}', which the genesis seed does not contain.`,
+    );
+  }
+  // Same-currency invariant (M2): a Transfer moves the raw `amount` reserve-to-reserve
+  // with no FX conversion, so a cross-currency move would silently distort NAV — the
+  // exact bug class this MVI eliminates. Reject it loud here, before the log. (An FX
+  // conversion is modeled as Withdraw + Deposit at the executed rate, not a Transfer.)
+  // Guarded on `from` existing so a missing source still surfaces as checkDebit's
+  // existence error below rather than being masked here.
+  const from = reference.reserveBalances.get(event.fromReserveId);
+  if (from && from.currency !== to.currency) {
+    return eventError(
+      "toReserveId",
+      `Transfer moves ${from.currency} from reserve '${event.fromReserveId}' into ` +
+        `${to.currency} reserve '${event.toReserveId}'; a Transfer must be same-currency. ` +
+        `Model an FX conversion as a Withdraw + Deposit at the executed rate.`,
+    );
+  }
+  const error = checkDebit(reference, event.fromReserveId, event.tier, event.amount, "fromReserveId");
+  if (error) {
+    return { ...error, message: `Transfer ${error.message}` };
+  }
+  return { kind: "ok", value: event };
 }
 
 function crossReferenceOpen(
@@ -464,6 +1041,27 @@ function crossReferenceOpen(
       `PositionOpened references instrument id '${position.instrumentId}', which the ` +
         `genesis seed does not contain.`,
     );
+  }
+  // Cash leg: the funding reserve must exist and hold enough, per Tier, to cover
+  // the debit — so an open cannot drive a reserve silently negative.
+  if (!reference.reserveBalances.has(event.funding.reserveId)) {
+    return eventError(
+      "funding.reserveId",
+      `PositionOpened funds from reserve id '${event.funding.reserveId}', which the ` +
+        `genesis seed does not contain.`,
+    );
+  }
+  for (const delta of reserveDeltasForOpen(position.lots, event.funding.amount)) {
+    const error = checkDebit(
+      reference,
+      event.funding.reserveId,
+      delta.tier,
+      -delta.amount,
+      "funding.amount",
+    );
+    if (error) {
+      return { ...error, message: `PositionOpened ${error.message}` };
+    }
   }
   return { kind: "ok", value: event };
 }
@@ -543,6 +1141,12 @@ export function foldEvents(
   const positions = new Map<string, PositionRecord>(
     genesis.positions.map((position) => [position.id, structuredClone(position)]),
   );
+  // Reserves are now mutated by the cash leg of every capital move (the seam
+  // `applyReserveDelta`), so they are folded into a mutable working copy here
+  // rather than cloned untouched at the tail.
+  const reserves = new Map<string, ReserveRecord>(
+    genesis.reserves.map((reserve) => [reserve.id, structuredClone(reserve)]),
+  );
   const closes: Close[] = (genesis.closes ?? []).map((close) => ({ ...close }));
   const latestMark = new Map<string, number>();
   let usdMxn = genesis.review.usdMxn;
@@ -602,17 +1206,41 @@ export function foldEvents(
           seededInstruments.add(position.instrumentId);
           closes.push({ instrumentId: position.instrumentId, asOf: event.asOf, price: entryPrice });
         }
+        // Cash leg: debit the funding reserve. Sufficiency was proven at ingest.
+        applyToReserve(reserves, event.funding.reserveId, reserveDeltasForOpen(position.lots, event.funding.amount));
         break;
       }
-      case "PositionClosed":
+      case "PositionClosed": {
+        const closing = positions.get(event.positionId);
+        // Cash leg: credit the settlement reserve with proceeds, tiered by the
+        // closed position's mix, BEFORE retiring the asset leg. Honest-by-
+        // construction: the asset cannot be removed without recording the cash.
+        if (closing) {
+          applyToReserve(
+            reserves,
+            event.settlement.reserveId,
+            reserveDeltasForClose(closing.lots, event.settlement.proceeds),
+          );
+        }
         positions.delete(event.positionId);
         break;
+      }
       case "PriceMarked":
         latestMark.set(event.instrumentId, event.price);
         closes.push({ instrumentId: event.instrumentId, asOf: event.asOf, price: event.price });
         if (event.usdMxn !== undefined) {
           usdMxn = event.usdMxn;
         }
+        break;
+      case "Deposit":
+        applyToReserve(reserves, event.reserveId, [{ tier: event.tier, amount: event.amount }]);
+        break;
+      case "Withdraw":
+        applyToReserve(reserves, event.reserveId, [{ tier: event.tier, amount: -event.amount }]);
+        break;
+      case "Transfer":
+        applyToReserve(reserves, event.fromReserveId, [{ tier: event.tier, amount: -event.amount }]);
+        applyToReserve(reserves, event.toReserveId, [{ tier: event.tier, amount: event.amount }]);
         break;
     }
   }
@@ -626,19 +1254,34 @@ export function foldEvents(
   }
 
   // Deep-clone the shared genesis sub-objects so the fold output is fully
-  // independent of the immutable seed: `positions` and `closes` are already
-  // freshly built above, but `fund`/`portfolios`/`accounts`/`instruments`/
-  // `reserves` would otherwise be shared by reference via the seed.
+  // independent of the immutable seed: `positions`, `closes`, and `reserves` are
+  // already freshly built above (reserves cloned per-record then mutated by the
+  // cash legs), but `fund`/`portfolios`/`accounts`/`instruments` would otherwise be
+  // shared by reference via the seed.
   return {
     fund: structuredClone(genesis.fund),
     review: { asOf: asOf ?? latestAsOf, usdMxn },
     portfolios: structuredClone(genesis.portfolios),
     accounts: structuredClone(genesis.accounts),
     instruments: structuredClone(genesis.instruments),
-    reserves: structuredClone(genesis.reserves),
+    reserves: [...reserves.values()],
     positions: [...positions.values()],
     closes,
   };
+}
+
+/** Apply per-Tier deltas to a folded reserve by id via the seam, if it exists.
+ * A missing reserve is a no-op here — the cross-ref existence gate rejects an
+ * unknown reserve before the fold ever runs. */
+function applyToReserve(
+  reserves: Map<string, ReserveRecord>,
+  reserveId: string,
+  deltas: TierDelta[],
+): void {
+  const reserve = reserves.get(reserveId);
+  if (reserve) {
+    applyReserveDelta(reserve, deltas);
+  }
 }
 
 function weightedAverageCost(lots: PositionLot[]): number {

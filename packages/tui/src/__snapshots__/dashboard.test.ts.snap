@@ -92,6 +92,17 @@ c1                                $8,100.00    74.6%      $7,717.00        $383.
 c2                                  $746.62     6.9%        $696.50         $50.12
 c3                                  $173.31     1.6%        $152.78         $20.53
 
+Reserve Reconciliation
+----------------------
+Post-fold balances to eyeball against the real venues.
+Reserve                      Venue                             Balance      USD Value
+-------------------------------------------------------------------------------------
+reserve-xtb-usd-core         XTB: Main Broker                  $620.00        $620.00
+reserve-bitso-mxn-core       BITSO: MXN Reserve            MX$5,193.00        $300.00
+reserve-binance-usd-tactical BINANCE: Primary Exchan~          $360.00        $360.00
+reserve-bingx-usd-tactical   BINGX: Swing Exchange             $320.00        $320.00
+reserve-bitget-usd-tactical  BITGET: Pulse Exchange            $240.00        $240.00
+
 Weekly Price Journey
 --------------------
 BTC (Bitcoin)                2026-05-08 $115,340.00 -> 2026-05-15 $108,900.00 -> 2026-05-22 $104,200.00 -> 2026-05-29 $100,000.00  (-13.3%)
