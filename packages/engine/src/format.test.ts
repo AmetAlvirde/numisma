@@ -180,9 +180,9 @@ describe("@numisma/engine formatInvalidationWatch", () => {
     expect(formatInvalidationWatch(populatedWatch())).toMatchInlineSnapshot(`
       "Invalidation Watch
       ------------------
-      btc-pos              BTC        mark 65000 below 60000  OK
-      eth-pos              ETH        mark 2400 below 2500  ⚠ THESIS INVALIDATED
-      sol-pos              SOL        mark 210 above 200  ⚠ THESIS INVALIDATED"
+      btc-pos              BTC        mark $65,000.00 below $60,000.00  OK
+      eth-pos              ETH        mark $2,400.00 below $2,500.00  ⚠ THESIS INVALIDATED
+      sol-pos              SOL        mark $210.00 above $200.00  ⚠ THESIS INVALIDATED"
     `);
   });
 });

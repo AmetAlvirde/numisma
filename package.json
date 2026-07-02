@@ -10,7 +10,6 @@
   "scripts": {
     "dev": "bun packages/tui/src/app.ts",
     "report": "tsx packages/tui/src/report.ts",
-    "demo:realized-pnl": "tsx packages/tui/src/prototype-realized-pnl-demo.ts",
     "spine": "tsx packages/tui/src/spine.ts",
     "spine:reset": "tsx packages/tui/src/spine-reset.ts",
     "migrate:log": "tsx packages/tui/src/migrate-legacy-log.ts",

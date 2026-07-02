@@ -8,6 +8,10 @@ import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const SRC_DIR = dirname(fileURLToPath(import.meta.url));
+// Also scan the sibling TUI package's source: a realized-P&L prototype demo lived
+// there (packages/tui/src), so the marker could reach main via either package.
+const TUI_SRC_DIR = join(SRC_DIR, "..", "..", "tui", "src");
+const SCAN_DIRS = [SRC_DIR, TUI_SRC_DIR];
 const MARKER = "2026-07-01" + "-realized-pnl";
 const SELF = "de-prototype.test.ts";
 
@@ -24,9 +28,9 @@ function tsFiles(dir: string): string[] {
   return out;
 }
 
-describe("de-prototype: realized-P&L marker is stripped from engine source", () => {
-  it("leaves no realized-P&L prototype marker anywhere under engine/src", () => {
-    const offenders = tsFiles(SRC_DIR).filter((file) =>
+describe("de-prototype: realized-P&L marker is stripped from engine + TUI source", () => {
+  it("leaves no realized-P&L prototype marker anywhere under engine/src or tui/src", () => {
+    const offenders = SCAN_DIRS.flatMap(tsFiles).filter((file) =>
       readFileSync(file, "utf8").includes(MARKER),
     );
     expect(offenders).toEqual([]);
