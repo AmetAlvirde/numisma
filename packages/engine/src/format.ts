@@ -58,7 +58,10 @@ export function divider(): string {
   return "=".repeat(36);
 }
 
-export function formatCompositionReport(report: CompositionReport): string {
+export function formatCompositionReport(
+  report: CompositionReport,
+  profitSplit?: ProfitSplit,
+): string {
   const sections = [
     `Numisma Fund Composition Prototype`,
     divider(),
@@ -112,6 +115,15 @@ export function formatCompositionReport(report: CompositionReport): string {
   const watch = formatInvalidationWatch(report.invalidationWatch);
   if (watch) {
     sections.push("", watch);
+  }
+  // The profit-split obligation block: descriptive-only, derived at read time from the
+  // closed book + the as-of policy. Empty-guarded (undefined split / no policy / no
+  // closes render ""), so a report composed without a policy — every pre-existing #90
+  // caller passes no `profitSplit` — is byte-for-byte unchanged. This is the conscious
+  // first wiring (PRD #96 C1): the first populated render is a reviewed snapshot lock.
+  const profitSplitBlock = formatProfitSplit(profitSplit);
+  if (profitSplitBlock) {
+    sections.push("", profitSplitBlock);
   }
 
   if (report.warnings.length > 0) {
@@ -191,8 +203,13 @@ export function formatInvalidationWatch(rows: InvalidationWatchRow[]): string {
 
 /**
  * PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). Render the descriptive-only
- * profit-split block: cumulative net realized, the split obligation on its basis,
- * unallocated profit, and the Reserve's actual % of NAV vs target. EMPTY-GUARDED —
+ * profit-split block: the basis, the exact cumulative net realized (with its peak on
+ * the high-water-mark basis), the split OBLIGATION on that basis, and the RESERVE
+ * tempo's actual % of NAV vs its target.
+ *
+ * OBLIGATION-ONLY (PRD #96 R1): absent an explicit routing signal, the block prints
+ * ONLY the honestly computable obligation plus the RESERVE %-vs-target line — no
+ * inferred "routed into sink" flow and no "unallocated profit" line. EMPTY-GUARDED —
  * returns "" for an undefined split (no policy / no closes), so blanking the block
  * leaves NAV and the rest of the report byte-for-byte unchanged.
  */
@@ -210,8 +227,6 @@ export function formatProfitSplit(split: ProfitSplit | undefined): string {
     `Cumulative net realized: ${formatUsd(split.cumulativeNetRealizedUsd)}` +
       (split.basis === "highWaterMark" ? `  (peak ${formatUsd(split.peakCumulativeUsd)})` : ""),
     `Split obligation to Reserve: ${formatUsd(split.obligationUsd)}`,
-    `Routed into sink so far: ${formatUsd(split.routedFlowUsd)}`,
-    `Unallocated profit: ${formatUsd(split.unallocatedUsd)}`,
     `Reserve is ${formatPercent(split.reservePctOfNav)} of NAV vs ${formatPercent(split.reserveTargetPct)} target (${overUnder}).`,
   ].join("\n");
 }

@@ -12,8 +12,7 @@
  * obligation is layered on top faithfully as-of. Nothing here is added to NAV —
  * blanking this block leaves NAV unchanged (extends #90's descriptive-only lock).
  */
-import type { ClosedPositionRecord, FundReviewData, ReserveRecord } from "../contracts.js";
-import { toUsd } from "../internal.js";
+import type { FundReviewData } from "../contracts.js";
 
 /**
  * Loss behavior of the split obligation. `highWaterMark` (default): the obligation
@@ -27,8 +26,9 @@ export type SplitBasis = "highWaterMark" | "perClose";
 /**
  * The fund's profit-split policy. `split` is the x/y routing ratio (this fund:
  * wealth 60 / reserve 40 — configurable, never hardcoded outside the sidecar
- * default). `routingReserveId` is the profit-sink Reserve routing is INFERRED against
- * (no Transfer purpose-tag). `reserveTargetPct` is the Reserve's target share of NAV.
+ * default). `routingReserveId` names the RESERVE-tempo profit sink (the target of the
+ * deferred routing fast-follow; v1 is obligation-only and does not infer flow into it).
+ * `reserveTargetPct` is the Reserve's target share of NAV.
  */
 export interface ProfitPolicy {
   split: { wealth: number; reserve: number };
@@ -69,17 +69,9 @@ export interface ProfitSplit {
   peakCumulativeUsd: number;
   /** The split obligation to the Reserve on the chosen basis, USD. */
   obligationUsd: number;
-  /** Cash already routed into the sink Reserve (net inflow since genesis), USD. */
-  routedFlowUsd: number;
-  /** Obligation not yet covered by routed flow, USD (never negative). */
-  unallocatedUsd: number;
   /** The Reserve's actual % of total NAV (from the dashboard's Reserve focus). */
   reservePctOfNav: number;
   reserveTargetPct: number;
-}
-
-function reserveUsd(reserve: ReserveRecord | undefined, usdMxn: number): number {
-  return reserve ? toUsd(reserve.amount, reserve.currency, usdMxn) : 0;
 }
 
 /**
@@ -89,15 +81,20 @@ function reserveUsd(reserve: ReserveRecord | undefined, usdMxn: number): number 
  *
  * The obligation is computed on the EXACT cumulative TOTAL realized (not the
  * approximate per-tier split — it inherits #90's per-tier caveat honestly).
- * `routedFlowUsd` is INFERRED by the destination Reserve: its net USD inflow since
- * genesis (folded balance − genesis balance). That is the descriptive approximation
- * this prototype makes — every dollar in the sink counts as routed profit — rather
- * than tagging a Transfer purpose.
+ *
+ * OBLIGATION-ONLY (PRD #96 R1): the view carries only the honestly computable
+ * obligation plus the RESERVE %-of-NAV-vs-target context. It deliberately does NOT
+ * infer a routed-flow / unallocated balance from the sink Reserve's inflow — that
+ * destination inference is discarded, not shipped; the running "unallocated until
+ * routed" balance is a deferred fast-follow requiring an explicit routing signal.
+ *
+ * `_genesis` is retained positionally for call-site compatibility (the routed-flow
+ * inference that once needed the genesis Reserve balance is gone).
  */
 export function composeProfitSplit(
   data: FundReviewData,
   policy: ProfitPolicy | undefined,
-  genesis: FundReviewData,
+  _genesis: FundReviewData,
   reservePctOfNav: number,
 ): ProfitSplit | undefined {
   const rows = data.closedPositions ?? [];
@@ -134,24 +131,12 @@ export function composeProfitSplit(
   const basisAmount = policy.splitBasis === "perClose" ? winningSum : Math.max(0, peak);
   const obligationUsd = splitFractionReserve * basisAmount;
 
-  const routedFlowUsd =
-    reserveUsd(
-      data.reserves.find((reserve) => reserve.id === policy.routingReserveId),
-      data.review.usdMxn,
-    ) -
-    reserveUsd(
-      genesis.reserves.find((reserve) => reserve.id === policy.routingReserveId),
-      genesis.review.usdMxn,
-    );
-
   return {
     basis: policy.splitBasis,
     splitFractionReserve,
     cumulativeNetRealizedUsd: cumulative,
     peakCumulativeUsd: peak,
     obligationUsd,
-    routedFlowUsd,
-    unallocatedUsd: Math.max(0, obligationUsd - routedFlowUsd),
     reservePctOfNav,
     reserveTargetPct: policy.reserveTargetPct,
   };
