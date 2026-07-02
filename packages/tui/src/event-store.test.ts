@@ -93,6 +93,37 @@ function markAapl(price: number, id = "mark-aapl") {
   return { id, asOf: "2026-06-06", type: "PriceMarked", instrumentId: "aapl-usd", price };
 }
 
+/** An InvalidationMarked on the genesis-open aapl-core position. */
+function markInvalidation(
+  overrides: {
+    id?: string;
+    asOf?: string;
+    positionId?: string;
+    price?: number;
+    direction?: "below" | "above";
+  } = {},
+) {
+  return {
+    id: overrides.id ?? "mark-inval",
+    asOf: overrides.asOf ?? "2026-06-08",
+    type: "InvalidationMarked",
+    positionId: overrides.positionId ?? "aapl-core",
+    price: overrides.price ?? 120,
+    direction: overrides.direction ?? "below",
+  };
+}
+
+/** A conserving close of the genesis-open aapl-core (2 lots × last close 150 ≈ 300). */
+function closeAapl(id = "close-aapl") {
+  return {
+    id,
+    asOf: "2026-06-07",
+    type: "PositionClosed",
+    positionId: "aapl-core",
+    settlement: { reserveId: "cash-core", proceeds: 300 },
+  };
+}
+
 const createdDirs: string[] = [];
 
 afterEach(async () => {
@@ -491,5 +522,71 @@ describe("durable-log migration — legacy-shape events fail loud, then migrate 
 
     await expect(migrateLegacyLog(paths, cashLegs)).rejects.toThrow(/cross-reference/i);
     expect(await readFile(paths.log, "utf8")).toBe(log);
+  });
+});
+
+// T2 + R4 (PRD #90, ADR-003 realized-P&L amendment). The 7th verb proven through
+// the REAL durable path the in-memory prototype deliberately avoids: parse →
+// crossref → persist → reload → fold. `event-store.ts` is unchanged — it dispatches
+// generically, so an InvalidationMarked round-trips with zero access-surface change.
+// R4 decision LOCKED here: a post-close mark is REJECTED at ingest (fail-loud),
+// never accepted as a silent no-op.
+describe("InvalidationMarked round-trip through event-store (T2 / R4)", () => {
+  it("accepts a valid mark, persists it schemaVersion-stamped, reloads, and folds latest-wins", async () => {
+    const paths = await makeStore({
+      inbox: [
+        markInvalidation({ id: "inval-1", asOf: "2026-06-08", price: 120 }),
+        markInvalidation({ id: "inval-2", asOf: "2026-06-09", price: 115 }),
+      ],
+    });
+
+    const report = await ingestInbox(paths);
+    expect(report).toMatchObject({ newCount: 2, duplicateCount: 0 });
+
+    // Persisted durably, schemaVersion-stamped, and reloads via the read path unchanged.
+    const logged = (await readFile(paths.log, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    expect(logged[0]).toMatchObject({ schemaVersion: 2, type: "InvalidationMarked", positionId: "aapl-core", price: 120, direction: "below" });
+    const { events, quarantined } = await loadEventLog(paths.log);
+    expect(quarantined).toHaveLength(0);
+    expect(events.map((event) => event.id)).toEqual(["inval-1", "inval-2"]);
+
+    // Folds latest-wins onto the still-open position: the newer mark (115) wins.
+    const data = await loadFoldedReview(paths);
+    const aapl = data.positions.find((position) => position.id === "aapl-core");
+    expect(aapl?.invalidation).toEqual({ price: 115, direction: "below" });
+  });
+
+  it("fails loud on a dangling-id mark, leaving the log unchanged and inbox in place", async () => {
+    const existingLog = `${JSON.stringify(markAapl(160))}\n`;
+    const paths = await makeStore({ inbox: [markInvalidation({ positionId: "ghost" })], log: existingLog });
+
+    await expect(ingestInbox(paths)).rejects.toThrow(/cross-reference.*positionId/);
+
+    expect(await readFile(paths.log, "utf8")).toBe(existingLog);
+    expect(await exists(paths.inbox)).toBe(true);
+  });
+
+  it("rejects a post-close mark at ingest (R4 fail-loud, not a silent no-op)", async () => {
+    // One batch: close aapl-core, then try to mark its invalidation. The close
+    // retires the id; the follow-on mark must fail loud, and all-or-nothing leaves
+    // the durable log byte-for-byte unchanged (the close is not appended either).
+    const paths = await makeStore({ inbox: [closeAapl(), markInvalidation({ id: "post-close-mark", positionId: "aapl-core" })] });
+
+    await expect(ingestInbox(paths)).rejects.toThrow(/already closed/);
+
+    expect(await readOrUndefined(paths.log)).toBeUndefined();
+    expect(await exists(paths.inbox)).toBe(true);
+  });
+
+  it("rejects a mark whose target was closed in a PRIOR durable log line (R4 across reload)", async () => {
+    // The close lives in the already-persisted log; a fresh inbox mark on the retired
+    // id must still fail loud — the closed-flag is rebuilt from the log on reload.
+    const existingLog = `${JSON.stringify(closeAapl())}\n`;
+    const paths = await makeStore({ inbox: [markInvalidation({ positionId: "aapl-core" })], log: existingLog });
+
+    await expect(ingestInbox(paths)).rejects.toThrow(/already closed/);
+
+    expect(await readFile(paths.log, "utf8")).toBe(existingLog);
+    expect(await exists(paths.inbox)).toBe(true);
   });
 });

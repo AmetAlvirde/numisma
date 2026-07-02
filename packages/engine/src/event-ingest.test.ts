@@ -110,6 +110,18 @@ function markedInput(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function invalidationInput(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "e-invalidation",
+    asOf: "2026-06-08",
+    type: "InvalidationMarked",
+    positionId: "aapl-core",
+    price: 120,
+    direction: "below",
+    ...overrides,
+  };
+}
+
 /** Assert a result is an event-error and return it for path/message checks. */
 function expectRejected(result: ReturnType<typeof parseEvent>): EventError {
   expect(result.kind).toBe("event-error");
@@ -381,6 +393,40 @@ describe("crossReferenceEvent — PriceMarked magnitude guard (MF3)", () => {
     expect(
       crossReferenceEvent(asEvent(markedInput({ instrumentId: "btc-usd", price: 99999 })), reference).kind,
     ).toBe("ok");
+  });
+});
+
+describe("crossReferenceEvent — InvalidationMarked reference + post-close gate (R4)", () => {
+  it("accepts a valid mark on a known open position", () => {
+    expect(
+      crossReferenceEvent(asEvent(invalidationInput()), buildEventReference(genesis())).kind,
+    ).toBe("ok");
+  });
+
+  it("accepts a mark on a position opened earlier in the same batch", () => {
+    const reference = buildEventReference(genesis());
+    applyEventToReference(reference, asEvent(openedInput())); // opens btc-core
+    expect(
+      crossReferenceEvent(asEvent(invalidationInput({ positionId: "btc-core" })), reference).kind,
+    ).toBe("ok");
+  });
+
+  it("rejects a dangling-id mark (unknown position) fail-loud", () => {
+    const error = expectRejected(
+      crossReferenceEvent(asEvent(invalidationInput({ positionId: "ghost" })), buildEventReference(genesis())),
+    );
+    expect(error.path).toBe("positionId");
+    expect(error.message).toMatch(/neither the genesis seed nor the log contains/);
+  });
+
+  it("rejects a post-close mark and names the closed case distinctly (R4)", () => {
+    const reference = buildEventReference(genesis());
+    applyEventToReference(reference, asEvent(closedInput())); // retires aapl-core
+    const error = expectRejected(
+      crossReferenceEvent(asEvent(invalidationInput({ positionId: "aapl-core" })), reference),
+    );
+    expect(error.path).toBe("positionId");
+    expect(error.message).toMatch(/already closed/);
   });
 });
 
