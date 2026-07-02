@@ -15,6 +15,7 @@ import type {
   DepositEvent,
   EventError,
   EventParseResult,
+  InvalidationMarkedEvent,
   PortfolioEvent,
   PositionClosedEvent,
   PositionOpenedEvent,
@@ -197,6 +198,10 @@ export function applyEventToReference(reference: EventReference, event: Portfoli
         { tier: event.tier, amount: event.amount },
       ]);
       break;
+    case "InvalidationMarked":
+      // No id or balance effect: the position id already exists and no cash moves.
+      // The level is a compose-time concern (breach derivation), not a reference one.
+      break;
   }
 }
 
@@ -261,7 +266,29 @@ export function crossReferenceEvent(
       return crossReferenceWithdraw(event, reference);
     case "Transfer":
       return crossReferenceTransfer(event, reference);
+    case "InvalidationMarked":
+      return crossReferenceInvalidation(event, reference);
   }
+}
+
+/**
+ * PROTOTYPE (mvi 2026-07-01-realized-pnl). An `InvalidationMarked` must reference a
+ * position the seed or log introduced — marking a level on an unknown id is a
+ * dangling reference. Latest-wins revision needs no magnitude guard here (the mark
+ * is a thesis level, not a valuation); breach is derived at compose.
+ */
+function crossReferenceInvalidation(
+  event: InvalidationMarkedEvent,
+  reference: EventReference,
+): EventParseResult {
+  if (!reference.positionIds.has(event.positionId)) {
+    return eventError(
+      "positionId",
+      `InvalidationMarked references position id '${event.positionId}', which neither ` +
+        `the genesis seed nor the log contains.`,
+    );
+  }
+  return { kind: "ok", value: event };
 }
 
 /**

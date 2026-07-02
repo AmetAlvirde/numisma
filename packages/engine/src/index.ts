@@ -49,6 +49,13 @@ export type {
   DashboardDetailRow,
   DashboardDetail,
   TierContribution,
+  // PROTOTYPE (mvi 2026-07-01-realized-pnl): realized closed book + invalidation.
+  ClosedPositionRecord,
+  RealizedTierAttribution,
+  InvalidationLevel,
+  ClosedBook,
+  RealizedRollupRow,
+  InvalidationWatchRow,
 } from "./contracts.js";
 export { validationSeverityByCode } from "./contracts.js";
 
@@ -70,6 +77,8 @@ export type {
   DepositEvent,
   WithdrawEvent,
   TransferEvent,
+  InvalidationMarkedEvent,
+  InvalidationDirection,
   PortfolioEvent,
   TierDelta,
   EventOk,
@@ -106,4 +115,6 @@ export {
   divider,
   formatCompositionReport,
   formatReserveReconciliation,
+  formatClosedBook,
+  formatInvalidationWatch,
 } from "./format.js";
