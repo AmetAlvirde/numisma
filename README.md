@@ -3,11 +3,20 @@
 Numisma builds a canonical Fund composition read model and renders it for review
 — both as a one-shot text report and as an interactive terminal dashboard. The
 durable source of truth is an append-only **event log** of material actions —
-seven verbs (`PositionOpened` / `PositionClosed` / `PriceMarked` / `Deposit` /
-`Withdraw` / `Transfer` / `InvalidationMarked`) layered on an immutable
-**genesis seed**; current state and any as-of view are a pure **fold** of the log
-into the read model
-([ADR-003](./context/adr/ADR-003-event-log-genesis-fold-persistence.md)).
+nine verbs (`PositionOpened` / `PositionClosed` / `PositionTrimmed` /
+`PositionAddedTo` / `PriceMarked` / `Deposit` / `Withdraw` / `Transfer` /
+`InvalidationMarked`) layered on an immutable **genesis seed**; current state and
+any as-of view are a pure **fold** of the log into the read model
+([ADR-003](./context/adr/ADR-003-event-log-genesis-fold-persistence.md), amended
+for the trim/add verbs). The two new position verbs move an already-open
+Position: **`PositionTrimmed`** partially takes profit — it names
+`removals: [{tier, quantity}]` plus an atomic `settlement` cash leg, removes
+pro-rata within each named Tier, and emits a **partial** `ClosedPositionRecord`
+(`partial: true`) that shares the surviving Position's id (the Position always
+survives; a full-retirement trim is rejected — use `PositionClosed`).
+**`PositionAddedTo`** scales in — it appends a new lot with its own entry FX and
+Tier (never weighted-average merged) funded by a `funding` debit, and produces no
+realized P&L.
 
 Beyond live composition, the fold also emits two descriptive review sections. The
 **closed book** (realized-P&L blotter) records each closed Position's realized
@@ -17,6 +26,20 @@ already sits in a Reserve from the close's cash leg, so it is never re-added to
 NAV. The **invalidation watch** lists open Positions against the latest
 `InvalidationMarked` level and `direction` (`below`/`above`), flagging any whose
 mark has crossed it.
+
+On top of the closed book sits a derived, **descriptive-only profit-split
+obligation** (`composeProfitSplit`). It computes the fund's split obligation on
+the exact cumulative total realized (default **60/40** high-water-mark, no
+clawback; a `perClose` basis is selectable to prove the behavior is
+configuration), and renders **obligation-only** — the obligation plus a RESERVE
+%-of-NAV-vs-10%-target line, with no routed-flow / unallocated balance (a deferred
+fast-follow). It is empty-guarded and, like the closed book, is never fed into
+NAV. The split policy lives in a **preferences sidecar**
+(`data/preferences.jsonl`) — append-only, validated on load, and decoupled from
+the event log; the engine-pure `pickPolicyAsOf(prefs, asOf)` selects the policy in
+effect at any as-of date, while the sidecar's file IO stays in the TUI
+([ADR-001](./context/adr/ADR-001-package-boundary-and-runtime-split.md),
+[ADR-004](./context/adr/ADR-004-preferences-sidecar.md)).
 
 ## Architecture
 
