@@ -182,7 +182,7 @@ export function formatInvalidationWatch(rows: InvalidationWatchRow[]): string {
     const status = row.breached ? "⚠ THESIS INVALIDATED" : "OK";
     return (
       `${pad(row.positionId, 20)} ${pad(row.instrumentId, 10)} ` +
-      `mark ${row.markPrice} ${row.direction} ${row.level}  ${status}`
+      `mark ${formatPrice(row.markPrice, "USD")} ${row.direction} ${formatPrice(row.level, "USD")}  ${status}`
     );
   });
   return [title, "-".repeat(title.length), ...body].join("\n");
