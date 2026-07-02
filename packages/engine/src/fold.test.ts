@@ -170,6 +170,71 @@ describe("foldEvents — fold output is a contract-valid FundReviewData", () => 
   });
 });
 
+describe("foldEvents — PositionAddedTo refreshes the entry-VWAC fallback mark", () => {
+  it("a scale-in on a not-yet-marked position values the fresh lot at the new blended VWAC (no fabricated unrealized P&L)", () => {
+    const folded = foldEvents(emptyGenesis(), [
+      opened("open-1", "2026-06-02", {
+        id: "scale-core",
+        portfolioId: "tactical",
+        tempo: "Liquid",
+        executionMode: "live",
+        accountId: "binance-usd",
+        instrumentId: "btc-usd",
+        direction: "long",
+        currency: "USD",
+        lots: [{ quantity: 10, cost: 100, tier: "c1" }],
+      }),
+      // Scale in at a HIGHER cost with NO PriceMarked for the instrument yet.
+      {
+        id: "add-1",
+        asOf: "2026-06-03",
+        type: "PositionAddedTo",
+        positionId: "scale-core",
+        lot: { quantity: 10, cost: 200, tier: "c1" },
+        funding: { reserveId: "no-such-reserve", amount: 2000 },
+      },
+    ]);
+
+    // The fallback mark tracks the new blended VWAC ((10×100 + 10×200) / 20 = 150), NOT
+    // the stale open-time average of 100.
+    expect(positionById(folded, "scale-core")?.markPrice).toBe(150);
+
+    // Observable consequence: 20 units at 150 == cost basis 3000, so the position is
+    // ~0 unrealized — a scale-in with no price move is flat, not a fabricated -1000 loss
+    // (the pre-fix bug valued the fresh lot against the old 100).
+    const report = buildCompositionReport(folded);
+    expect(report.dashboard.summary.totalUnrealizedPnlUsd).toBeCloseTo(0, 6);
+  });
+
+  it("a scale-in on a position carrying a REAL mark leaves that mark untouched", () => {
+    const folded = foldEvents(emptyGenesis(), [
+      opened("open-2", "2026-06-02", {
+        id: "marked-core",
+        portfolioId: "tactical",
+        tempo: "Liquid",
+        executionMode: "live",
+        accountId: "binance-usd",
+        instrumentId: "btc-usd",
+        direction: "long",
+        currency: "USD",
+        lots: [{ quantity: 10, cost: 100, tier: "c1" }],
+      }),
+      marked("mk-1", "2026-06-03", "btc-usd", 130),
+      {
+        id: "add-2",
+        asOf: "2026-06-04",
+        type: "PositionAddedTo",
+        positionId: "marked-core",
+        lot: { quantity: 10, cost: 200, tier: "c1" },
+        funding: { reserveId: "no-such-reserve", amount: 2000 },
+      },
+    ]);
+
+    // A real PriceMarked (130) wins over any VWAC fallback — the add never blends it away.
+    expect(positionById(folded, "marked-core")?.markPrice).toBe(130);
+  });
+});
+
 describe("foldEvents — as-of windows", () => {
   const events: PortfolioEvent[] = [
     marked("m1", "2026-06-05", "aapl-usd", 160),

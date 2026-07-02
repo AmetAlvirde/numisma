@@ -105,14 +105,14 @@ export function composeProfitSplit(
   const denominator = policy.split.wealth + policy.split.reserve;
   const splitFractionReserve = denominator === 0 ? 0 : policy.split.reserve / denominator;
 
-  // Order the closed book by close date (then a stable tie-break) so the running
-  // cumulative — and its high-water mark — replay in the order profit was realized.
+  // Order the closed book by close date so the running cumulative — and its high-water
+  // mark — replay in the order profit was realized. Same-day closes keep their INPUT
+  // order (the fold pushes rows in realization/event order): a `localeCompare` tie-break
+  // on positionId would make the peak — and thus the HWM obligation — depend on id
+  // spelling rather than on when profit was realized. `sort` is stable, so returning 0
+  // for equal dates preserves that realization order.
   const ordered = [...rows].sort((a, b) =>
-    a.closedAsOf < b.closedAsOf
-      ? -1
-      : a.closedAsOf > b.closedAsOf
-        ? 1
-        : a.positionId.localeCompare(b.positionId),
+    a.closedAsOf < b.closedAsOf ? -1 : a.closedAsOf > b.closedAsOf ? 1 : 0,
   );
 
   let cumulative = 0;
