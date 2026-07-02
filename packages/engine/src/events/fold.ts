@@ -59,7 +59,14 @@ export function reserveDeltasForOpen(lots: PositionLot[], amount: number): TierD
 }
 
 /** Close → credit the settlement Reserve with the proceeds, split across the
- * closed position's Tier mix (realized gain/loss falls on the same Tier). */
+ * closed position's Tier mix (realized gain/loss falls on the same Tier).
+ *
+ * The split weights by **native** cost (`quantity * cost`), not USD cost. For lots
+ * that share one entry FX — every real close today (pure-c1 / USDT `entryFx=1`) —
+ * native and USD weights are proportionally identical, so the split is exact. When
+ * `buildClosedPosition` reuses this helper to apportion proceeds against USD cost
+ * basis, that native-vs-USD basis mismatch is the source of the documented
+ * mixed-`entryFx` per-tier caveat; see that helper's note. Totals stay exact. */
 export function reserveDeltasForClose(lots: PositionLot[], proceeds: number): TierDelta[] {
   return tierWeightedDeltas(lots, proceeds, 1);
 }
@@ -304,6 +311,16 @@ export function foldEvents(
  * basis Tier mix (`reserveDeltasForClose`), cost basis is grouped by the same Tiers,
  * and realized per Tier is the difference — so the gain/loss falls on the Tier it was
  * risked on. Pure.
+ *
+ * MIXED-`entryFx` PER-TIER CAVEAT (documented, not fixed — see PRD #90 "Out of
+ * Scope"). Cost basis below is grouped by Tier in **USD** (each lot at its own
+ * `entryFx`), but proceeds are apportioned by `reserveDeltasForClose`, which weights
+ * by **native** cost. When a position's lots share one entry FX (all real closes
+ * today — pure-c1 / USDT `entryFx=1`) the two bases are proportionally identical and
+ * the per-Tier split is exact. When lots carry *different* entry FX the per-Tier
+ * split can drift a few cents between Tiers, but `realizedPnlUsd` and every rollup
+ * TOTAL stay exact (the drift only moves cents across Tiers, never off the total).
+ * A basis-consistent per-Tier fix is deliberately out of boundary here.
  */
 function buildClosedPosition(
   closing: PositionRecord,
@@ -323,7 +340,10 @@ function buildClosedPosition(
     costBasisUsd += lotCostUsd;
   }
 
-  // Proceeds apportioned across the same Tier mix the cash leg credited (USD).
+  // Proceeds (USD) apportioned across the same Tier mix the cash leg credited.
+  // The apportionment weights by NATIVE cost (see `reserveDeltasForClose`), which
+  // differs from the USD-cost grouping above only when lots carry mixed entry FX —
+  // the documented per-Tier caveat in this function's doc comment. Totals stay exact.
   const proceedsByTier = new Map<CapitalTier, number>();
   for (const delta of reserveDeltasForClose(closing.lots, proceedsUsd)) {
     proceedsByTier.set(delta.tier, (proceedsByTier.get(delta.tier) ?? 0) + delta.amount);
