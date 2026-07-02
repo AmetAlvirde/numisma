@@ -152,6 +152,11 @@ export function foldEvents(
   );
   const closes: Close[] = (genesis.closes ?? []).map((close) => ({ ...close }));
   const latestMark = new Map<string, number>();
+  // Positions OPENED in this fold whose `markPrice` is still the entry volume-weighted
+  // average cost (the "no PriceMarked yet ⇒ value at VWAC" fallback), NOT a real mark.
+  // Genesis positions carry a real standing seed mark and are deliberately excluded, so
+  // a scale-in never clobbers their mark. A later PriceMarked supersedes the fallback.
+  const entryWacFallback = new Set<string>();
   // Closed book + latest invalidation level per position.
   const closedPositions: ClosedPositionRecord[] = [];
   const latestInvalidation = new Map<string, InvalidationLevel>();
@@ -210,6 +215,8 @@ export function foldEvents(
           openedAsOf: event.asOf,
           strategy: event.decision.strategy,
         });
+        // markPrice above is the entry-VWAC fallback until a real PriceMarked lands.
+        entryWacFallback.add(position.id);
         // Drop an entry-price anchor (coherent with the fallback markPrice) so an
         // instrument first held mid-stream also has a baseline for its journey.
         if (!seededInstruments.has(position.instrumentId)) {
@@ -238,10 +245,83 @@ export function foldEvents(
           const settlementCurrency =
             reserves.get(event.settlement.reserveId)?.currency ?? closing.currency;
           closedPositions.push(
-            buildClosedPosition(closing, event.asOf, event.settlement.proceeds, settlementCurrency, usdMxn),
+            buildClosedPosition(closing, closing.lots, event.asOf, event.settlement.proceeds, settlementCurrency, usdMxn),
           );
         }
         positions.delete(event.positionId);
+        break;
+      }
+      case "PositionTrimmed": {
+        // Position Trim: remove the named tier quantities from the OPEN position's
+        // lots (pro-rata within each tier), credit the settlement Reserve with the
+        // proceeds tiered by the REMOVED mix, and emit a PARTIAL realized closed-book
+        // row on the trimmed portion sharing the surviving position's id. Sufficiency
+        // and the full-retirement REJECT were both proven at ingest, so the position
+        // ALWAYS survives here with reduced lots (the fold never deletes on a trim).
+        //
+        // NAV honesty (R2/M2): conservation is a settle-AT-mark property, NOT an
+        // unconditional claim. When the fill lands at the mark the asset removed at
+        // mark equals the cash credited and NAV is conserved; an OFF-mark fill is a
+        // real realized gain/loss that legitimately moves NAV. The difference is
+        // surfaced on the partial row's `markVsFill` disclosure (built below from the
+        // latest mark seen so far), never hidden behind a false neutrality claim.
+        const trimming = positions.get(event.positionId);
+        if (trimming) {
+          let working = trimming.lots;
+          const removed: PositionLot[] = [];
+          for (const removal of event.removals) {
+            const split = splitTierRemoval(working, removal.tier, removal.quantity);
+            removed.push(...split.removed);
+            working = split.remaining;
+          }
+          const settlementCurrency =
+            reserves.get(event.settlement.reserveId)?.currency ?? trimming.currency;
+          // The mark the removed units are valued at for the NAV-honesty disclosure:
+          // the latest PriceMarked seen so far, else the position's standing mark.
+          const markPrice = latestMark.get(trimming.instrumentId) ?? trimming.markPrice;
+          applyToReserve(
+            reserves,
+            event.settlement.reserveId,
+            reserveDeltasForClose(removed, event.settlement.proceeds),
+          );
+          closedPositions.push(
+            buildClosedPosition(
+              trimming,
+              removed,
+              event.asOf,
+              event.settlement.proceeds,
+              settlementCurrency,
+              usdMxn,
+              true,
+              markPrice,
+            ),
+          );
+          trimming.lots = working;
+        }
+        break;
+      }
+      case "PositionAddedTo": {
+        // Append the new lot preserving its own entryFx/tier — NEVER weighted-average-
+        // merged (ADR-002) — and debit the funding Reserve. No realized P&L. Sufficiency
+        // was proven at ingest.
+        const adding = positions.get(event.positionId);
+        if (adding) {
+          adding.lots = [...adding.lots, { ...event.lot }];
+          // If this position is still on its entry-VWAC fallback (opened this fold, no
+          // real mark yet), refresh that fallback to the new blended VWAC so the scale-in
+          // preserves the "no mark ⇒ value at VWAC ⇒ entry P&L ≈ 0" invariant. Leaving
+          // the stale pre-add average would value the fresh lot against the OLD price and
+          // print a fabricated unrealized P&L. A real mark — a genesis seed mark (never
+          // in the fallback set) or any PriceMarked — is left untouched.
+          if (entryWacFallback.has(adding.id) && !latestMark.has(adding.instrumentId)) {
+            adding.markPrice = weightedAverageCost(adding.lots);
+          }
+          applyToReserve(
+            reserves,
+            event.funding.reserveId,
+            reserveDeltasForOpen([event.lot], event.funding.amount),
+          );
+        }
         break;
       }
       case "InvalidationMarked":
@@ -324,17 +404,22 @@ export function foldEvents(
  */
 function buildClosedPosition(
   closing: PositionRecord,
+  lots: PositionLot[],
   closedAsOf: string,
   proceedsNative: number,
   settlementCurrency: PositionRecord["currency"],
   reviewFx: number,
+  partial = false,
+  markPrice?: number,
 ): ClosedPositionRecord {
   const proceedsUsd = toUsd(proceedsNative, settlementCurrency, reviewFx);
 
   // Cost basis in USD, per Tier: each lot converts at its own entry FX (ADR-002).
+  // `lots` is the CLOSED subset — the whole position on a full close, or just the
+  // removed lots on a partial trim (which preserve their blended entryFx/tier).
   const costUsdByTier = new Map<CapitalTier, number>();
   let costBasisUsd = 0;
-  for (const lot of closing.lots) {
+  for (const lot of lots) {
     const lotCostUsd = toUsd(lot.quantity * lot.cost, closing.currency, lot.entryFx ?? reviewFx);
     costUsdByTier.set(lot.tier, (costUsdByTier.get(lot.tier) ?? 0) + lotCostUsd);
     costBasisUsd += lotCostUsd;
@@ -345,7 +430,7 @@ function buildClosedPosition(
   // differs from the USD-cost grouping above only when lots carry mixed entry FX —
   // the documented per-Tier caveat in this function's doc comment. Totals stay exact.
   const proceedsByTier = new Map<CapitalTier, number>();
-  for (const delta of reserveDeltasForClose(closing.lots, proceedsUsd)) {
+  for (const delta of reserveDeltasForClose(lots, proceedsUsd)) {
     proceedsByTier.set(delta.tier, (proceedsByTier.get(delta.tier) ?? 0) + delta.amount);
   }
 
@@ -364,6 +449,18 @@ function buildClosedPosition(
     });
   }
 
+  // NAV-honesty disclosure (R2/M2), partial rows only: value the removed units at the
+  // latest mark and surface the fill-vs-mark delta. `deltaUsd ≈ 0` ⇒ settle-at-mark
+  // (NAV conserved); `deltaUsd ≠ 0` ⇒ an off-mark fill that legitimately moved NAV.
+  const markVsFill =
+    partial && markPrice !== undefined
+      ? (() => {
+          const removedQuantity = lots.reduce((sum, lot) => sum + lot.quantity, 0);
+          const markValueUsd = toUsd(removedQuantity * markPrice, closing.currency, reviewFx);
+          return { markValueUsd, proceedsUsd, deltaUsd: proceedsUsd - markValueUsd };
+        })()
+      : undefined;
+
   return {
     positionId: closing.id,
     instrumentId: closing.instrumentId,
@@ -376,7 +473,52 @@ function buildClosedPosition(
     proceedsUsd,
     realizedPnlUsd: proceedsUsd - costBasisUsd,
     tierAttribution,
+    ...(partial ? { partial: true } : {}),
+    ...(markVsFill ? { markVsFill } : {}),
   };
+}
+
+/**
+ * THE PARTIAL-REMOVAL SEAM. Take `quantity` out of the lots that belong to `tier`,
+ * PRO-RATA across those lots
+ * by their own quantity — so a removal preserves each lot's blended entryFx/cost
+ * attribution rather than picking one lot arbitrarily. Returns the removed sub-lots
+ * (each a copy carrying its parent's cost/entryFx/tier) and the surviving lots
+ * (untouched lots plus the shrunk remainders). Lot order is preserved. The last
+ * in-tier lot absorbs the float residual so `Σ removed.quantity === quantity` exact,
+ * mirroring {@link tierWeightedDeltas}. Pure. The caller guarantees sufficiency
+ * (the cross-ref position-lot gate); a degenerate empty tier is a safe no-op.
+ */
+export function splitTierRemoval(
+  lots: PositionLot[],
+  tier: CapitalTier,
+  quantity: number,
+): { removed: PositionLot[]; remaining: PositionLot[] } {
+  const inTier = lots.filter((lot) => lot.tier === tier);
+  const tierTotal = inTier.reduce((sum, lot) => sum + lot.quantity, 0);
+  const removed: PositionLot[] = [];
+  const remaining: PositionLot[] = [];
+  if (tierTotal === 0) {
+    return { removed, remaining: lots.map((lot) => ({ ...lot })) };
+  }
+  let allocated = 0;
+  let seenInTier = 0;
+  for (const lot of lots) {
+    if (lot.tier !== tier) {
+      remaining.push({ ...lot });
+      continue;
+    }
+    const isLast = seenInTier === inTier.length - 1;
+    seenInTier += 1;
+    const take = isLast ? quantity - allocated : (quantity * lot.quantity) / tierTotal;
+    allocated += take;
+    removed.push({ ...lot, quantity: take });
+    const left = lot.quantity - take;
+    if (left > 1e-12) {
+      remaining.push({ ...lot, quantity: left });
+    }
+  }
+  return { removed, remaining };
 }
 
 /** Apply per-Tier deltas to a folded reserve by id via the seam, if it exists.

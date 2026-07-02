@@ -73,6 +73,9 @@ export type {
   CloseSettlement,
   PositionOpenedEvent,
   PositionClosedEvent,
+  PositionTrimmedEvent,
+  PositionAddedToEvent,
+  TierRemoval,
   PriceMarkedEvent,
   DepositEvent,
   WithdrawEvent,
@@ -93,7 +96,22 @@ export {
   applyReserveDelta,
   reserveDeltasForOpen,
   reserveDeltasForClose,
+  splitTierRemoval,
 } from "./events/fold.js";
+
+// The derived, descriptive-only profit-split layer + its preferences-sidecar policy
+// selector (decoupled from the log).
+export type {
+  SplitBasis,
+  ProfitPolicy,
+  ProfitPolicyEntry,
+  ProfitSplit,
+} from "./compose/profit-split.js";
+export {
+  pickPolicyAsOf,
+  composeProfitSplit,
+  defaultProfitPolicyEntry,
+} from "./compose/profit-split.js";
 export {
   buildEventReference,
   applyEventToReference,
@@ -117,4 +135,5 @@ export {
   formatReserveReconciliation,
   formatClosedBook,
   formatInvalidationWatch,
+  formatProfitSplit,
 } from "./format.js";

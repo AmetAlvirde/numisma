@@ -60,6 +60,44 @@ snapshots, and durable audit history.
   forward-test performance.
 - Perspectives help analysis without becoming capital containers.
 
+## Profit-Split and Position-Adjustment Decisions
+
+These user-ratified decisions govern how the Fund trims and scales Positions and
+how it derives the profit-split obligation. They are the durable source of truth;
+the engine honors them, never the reverse.
+
+- **The split ratio is a configurable trader preference, never hardcoded.** This
+  Fund's default is 60/40, routing 60 to the Wealth Tempo and 40 to the Reserve
+  Tempo. The ratio is changed by appending to the preferences sidecar
+  (`data/preferences.jsonl`), not by editing engine code — 60/40 is this Fund's
+  default, not a constant.
+- **The loss-netting basis is a configurable preference with a fixed vocabulary.**
+  `highWaterMark` is the default: the obligation accrues only on new cumulative
+  peaks, with no clawback, so a drawdown is recovered before any new obligation
+  accrues. `perClose` is selectable: the obligation accrues on the sum of winning
+  closes. Either basis computes the obligation on the **exact cumulative total
+  realized**, never an approximate per-tier split.
+- **The Reserve sink and the 10%-of-NAV target are one definition.** The 40% share
+  routes to the **Reserve Tempo**, and the dashboard's percentage-versus-target
+  line measures the whole **Reserve Tempo's share of total NAV** against a 10%
+  target. One Reserve definition serves both the routing sink and the target, so
+  they cannot drift apart.
+- **The profit-split block is obligation-only and descriptive-only.** It shows the
+  honestly computable obligation and the Reserve-versus-10% line, and nothing else
+  — no "unallocated profit" line and no inferred routed-flow. The obligation is
+  never re-added to NAV: blanking the block leaves the Fund value unchanged. The
+  running "unallocated until routed" balance is a deliberate later increment, out
+  of scope here.
+- **A full-retirement trim is rejected; the Position always survives a trim.** A
+  trim that would remove every lot fails loud at ingest and directs the trader to
+  use `PositionClosed` instead. A trim takes partial profit off named Capital Tiers
+  and leaves the Position open with reduced lots; a deliberate full exit is a
+  distinct material action.
+- **Trader policy is decoupled from the event log.** The split ratio and
+  loss-netting basis live in the time-stamped, append-only preferences sidecar with
+  a pure as-of selector, so the event log still folds standalone to the descriptive
+  book and an as-of replay shows the policy that was in effect at that date.
+
 ## Constraints
 
 - v1 is local-first.
