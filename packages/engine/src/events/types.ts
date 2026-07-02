@@ -111,9 +111,12 @@ export interface TierRemoval {
  * PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). Partially close a Position:
  * remove `removals` from the named tiers (the asset leg) and credit the atomic
  * `settlement` cash leg into a Reserve — the partial-close analog of
- * {@link PositionClosedEvent}. The position stays OPEN with reduced lots; the fold
- * emits a PARTIAL {@link ClosedPositionRecord} on the sold portion sharing the
- * surviving position's id. NAV is conserved (asset out at mark = cash in).
+ * {@link PositionClosedEvent}. The position stays OPEN with reduced lots (a
+ * full-retirement trim is rejected at ingest — use {@link PositionClosedEvent}); the
+ * fold emits a PARTIAL {@link ClosedPositionRecord} on the sold portion sharing the
+ * surviving position's id. NAV conservation is a settle-AT-mark property: when the
+ * fill lands at the mark, asset out = cash in; an off-mark fill legitimately moves
+ * NAV and is disclosed via the partial row's `markVsFill` (R2).
  */
 export interface PositionTrimmedEvent extends BaseEvent {
   type: "PositionTrimmed";
