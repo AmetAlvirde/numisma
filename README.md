@@ -2,11 +2,21 @@
 
 Numisma builds a canonical Fund composition read model and renders it for review
 — both as a one-shot text report and as an interactive terminal dashboard. The
-durable source of truth is an append-only **event log** of material actions
-(`PositionOpened` / `PositionClosed` / `PriceMarked`) layered on an immutable
+durable source of truth is an append-only **event log** of material actions —
+seven verbs (`PositionOpened` / `PositionClosed` / `PriceMarked` / `Deposit` /
+`Withdraw` / `Transfer` / `InvalidationMarked`) layered on an immutable
 **genesis seed**; current state and any as-of view are a pure **fold** of the log
 into the read model
 ([ADR-003](./context/adr/ADR-003-event-log-genesis-fold-persistence.md)).
+
+Beyond live composition, the fold also emits two descriptive review sections. The
+**closed book** (realized-P&L blotter) records each closed Position's realized
+Trading P&L — proceeds minus the lot USD cost basis, attributed per Capital Tier
+— and rolls it up by Tempo and Tier. It is **descriptive only**: realized profit
+already sits in a Reserve from the close's cash leg, so it is never re-added to
+NAV. The **invalidation watch** lists open Positions against the latest
+`InvalidationMarked` level and `direction` (`below`/`above`), flagging any whose
+mark has crossed it.
 
 ## Architecture
 
