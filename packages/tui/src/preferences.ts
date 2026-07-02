@@ -46,12 +46,21 @@ function isFiniteNonNegative(value: unknown): value is number {
 }
 
 /**
+ * Strict ISO calendar date (`YYYY-MM-DD`, no time component). The pure as-of selector
+ * (`pickPolicyAsOf`) orders and filters entries by STRING comparison, so `effectiveAt`
+ * must be lexicographically sortable-as-chronological. A `Date.parse`-able but
+ * non-ISO stamp (`01/02/2026`, `Jan 2 2026`) or a date-time (`...T00:00:00Z`) would
+ * sort wrong and silently select the wrong policy, so those are quarantined here.
+ */
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
  * Validate ONE untrusted sidecar value into a well-formed `ProfitPolicyEntry`, or
  * return `undefined` so the loader can quarantine the line. Rejects: a non-object;
- * a missing / non-string / unparseable `effectiveAt`; a `splitBasis` outside the
- * enum; a non-string `routingReserveId`; a non-finite/negative `reserveTargetPct`;
- * and any split whose parts are non-finite/negative or whose Reserve FRACTION
- * (reserve / (wealth + reserve)) does not land in [0, 1] (an invalid ratio).
+ * an `effectiveAt` that is not a strict ISO `YYYY-MM-DD` calendar date; a `splitBasis`
+ * outside the enum; a non-string `routingReserveId`; a `reserveTargetPct` that is not
+ * a finite percentage in [0, 100]; and any split whose parts are non-finite/negative
+ * or whose denominator (wealth + reserve) is not positive.
  */
 function validateProfitPolicyEntry(value: unknown): ProfitPolicyEntry | undefined {
   if (typeof value !== "object" || value === null) {
@@ -60,10 +69,7 @@ function validateProfitPolicyEntry(value: unknown): ProfitPolicyEntry | undefine
   const entry = value as Record<string, unknown>;
 
   const effectiveAt = entry.effectiveAt;
-  if (typeof effectiveAt !== "string" || effectiveAt.trim() === "") {
-    return undefined;
-  }
-  if (Number.isNaN(Date.parse(effectiveAt))) {
+  if (typeof effectiveAt !== "string" || !ISO_DATE.test(effectiveAt) || Number.isNaN(Date.parse(effectiveAt))) {
     return undefined;
   }
 
@@ -75,7 +81,9 @@ function validateProfitPolicyEntry(value: unknown): ProfitPolicyEntry | undefine
     return undefined;
   }
 
-  if (!isFiniteNonNegative(entry.reserveTargetPct)) {
+  // A NAV-share target is a percentage: finite and in [0, 100]. An absurd 150%/500%
+  // target would otherwise flow verbatim into the "vs X% target" dashboard line.
+  if (!isFiniteNonNegative(entry.reserveTargetPct) || entry.reserveTargetPct > 100) {
     return undefined;
   }
 
@@ -87,12 +95,10 @@ function validateProfitPolicyEntry(value: unknown): ProfitPolicyEntry | undefine
   if (!isFiniteNonNegative(wealth) || !isFiniteNonNegative(reserve)) {
     return undefined;
   }
-  const denominator = wealth + reserve;
-  if (denominator <= 0) {
-    return undefined;
-  }
-  const reserveFraction = reserve / denominator;
-  if (reserveFraction < 0 || reserveFraction > 1) {
+  // denominator > 0 with both parts non-negative already forces the Reserve fraction
+  // reserve / (wealth + reserve) into [0, 1]; the positive-denominator check is the
+  // only ratio guard needed (a zero split like 0/0 is the degenerate case rejected).
+  if (wealth + reserve <= 0) {
     return undefined;
   }
 

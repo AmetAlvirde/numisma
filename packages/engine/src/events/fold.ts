@@ -152,6 +152,11 @@ export function foldEvents(
   );
   const closes: Close[] = (genesis.closes ?? []).map((close) => ({ ...close }));
   const latestMark = new Map<string, number>();
+  // Positions OPENED in this fold whose `markPrice` is still the entry volume-weighted
+  // average cost (the "no PriceMarked yet ⇒ value at VWAC" fallback), NOT a real mark.
+  // Genesis positions carry a real standing seed mark and are deliberately excluded, so
+  // a scale-in never clobbers their mark. A later PriceMarked supersedes the fallback.
+  const entryWacFallback = new Set<string>();
   // Closed book + latest invalidation level per position.
   const closedPositions: ClosedPositionRecord[] = [];
   const latestInvalidation = new Map<string, InvalidationLevel>();
@@ -210,6 +215,8 @@ export function foldEvents(
           openedAsOf: event.asOf,
           strategy: event.decision.strategy,
         });
+        // markPrice above is the entry-VWAC fallback until a real PriceMarked lands.
+        entryWacFallback.add(position.id);
         // Drop an entry-price anchor (coherent with the fallback markPrice) so an
         // instrument first held mid-stream also has a baseline for its journey.
         if (!seededInstruments.has(position.instrumentId)) {
@@ -245,12 +252,12 @@ export function foldEvents(
         break;
       }
       case "PositionTrimmed": {
-        // Partial close: remove the named tier quantities from the OPEN position's
+        // Position Trim: remove the named tier quantities from the OPEN position's
         // lots (pro-rata within each tier), credit the settlement Reserve with the
-        // proceeds tiered by the REMOVED mix, and emit a PARTIAL closed-book row on
-        // the sold portion sharing the surviving position's id. Sufficiency and the
-        // full-retirement REJECT were both proven at ingest, so the position ALWAYS
-        // survives here with reduced lots (the fold never deletes on a trim).
+        // proceeds tiered by the REMOVED mix, and emit a PARTIAL realized closed-book
+        // row on the trimmed portion sharing the surviving position's id. Sufficiency
+        // and the full-retirement REJECT were both proven at ingest, so the position
+        // ALWAYS survives here with reduced lots (the fold never deletes on a trim).
         //
         // NAV honesty (R2/M2): conservation is a settle-AT-mark property, NOT an
         // unconditional claim. When the fill lands at the mark the asset removed at
@@ -300,6 +307,15 @@ export function foldEvents(
         const adding = positions.get(event.positionId);
         if (adding) {
           adding.lots = [...adding.lots, { ...event.lot }];
+          // If this position is still on its entry-VWAC fallback (opened this fold, no
+          // real mark yet), refresh that fallback to the new blended VWAC so the scale-in
+          // preserves the "no mark ⇒ value at VWAC ⇒ entry P&L ≈ 0" invariant. Leaving
+          // the stale pre-add average would value the fresh lot against the OLD price and
+          // print a fabricated unrealized P&L. A real mark — a genesis seed mark (never
+          // in the fallback set) or any PriceMarked — is left untouched.
+          if (entryWacFallback.has(adding.id) && !latestMark.has(adding.instrumentId)) {
+            adding.markPrice = weightedAverageCost(adding.lots);
+          }
           applyToReserve(
             reserves,
             event.funding.reserveId,

@@ -104,6 +104,21 @@ describe("composeProfitSplit — obligation on the exact cumulative total (T7)",
     expect(composeProfitSplit(dataWithBook(), undefined, genesis(), 12.5)).toBeUndefined();
     expect(composeProfitSplit(genesis(), HWM_POLICY, genesis(), 12.5)).toBeUndefined();
   });
+
+  it("replays same-day closes in realization (input) order — the HWM peak is not decided by positionId", () => {
+    // Both close on ONE day: realized as a +100 win THEN a -40 draw-down, so the running
+    // peak is 100. The fold pushes rows in realization order; a positionId tie-break in
+    // the sort would reorder to (a-pos -40, z-pos +100), dropping the peak to 60 and the
+    // obligation from 40 to 24 — an obligation decided by id spelling, not by economics.
+    const sameDay: ClosedPositionRecord[] = [
+      { positionId: "z-pos", instrumentId: "btc-usd", tempo: "Capital", direction: "long", closedAsOf: "2026-06-02", costBasisUsd: 100, proceedsUsd: 200, realizedPnlUsd: 100, tierAttribution: [] },
+      { positionId: "a-pos", instrumentId: "btc-usd", tempo: "Capital", direction: "long", closedAsOf: "2026-06-02", costBasisUsd: 100, proceedsUsd: 60, realizedPnlUsd: -40, tierAttribution: [] },
+    ];
+    const split = composeProfitSplit({ ...genesis(), closedPositions: sameDay }, HWM_POLICY, genesis(), 12.5);
+    expect(split?.peakCumulativeUsd).toBeCloseTo(100, 6);
+    expect(split?.cumulativeNetRealizedUsd).toBeCloseTo(60, 6);
+    expect(split?.obligationUsd).toBeCloseTo(0.4 * 100, 6);
+  });
 });
 
 describe("profit-split render — obligation-only (R1)", () => {

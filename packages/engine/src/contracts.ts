@@ -98,9 +98,9 @@ export interface ClosedPositionRecord {
   realizedPnlUsd: number;
   tierAttribution: RealizedTierAttribution[];
   /**
-   * True when this row is a PARTIAL close emitted by a `PositionTrimmed` on the
-   * removed portion — the surviving position (same `positionId`) stays open with
-   * reduced lots. Absent/false for a full `PositionClosed`. Many partials plus a
+   * True when this row is a PARTIAL realized result emitted by a `PositionTrimmed`
+   * on the removed portion — the surviving position (same `positionId`) stays open
+   * with reduced lots. Absent/false for a full `PositionClosed`. Many trims plus a
    * final close thread one lineage id: every partial row carries `partial: true`,
    * the final full close omits it.
    */

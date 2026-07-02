@@ -140,6 +140,25 @@ describe("loadPreferences — validating loader (quarantine, not throw)", () => 
     await expect(loadPreferences(path)).resolves.toEqual([]);
   });
 
+  it("quarantines a Date.parse-able but non-ISO effectiveAt (would sort wrong under string as-of)", async () => {
+    const path = await tempPath();
+    // Both parse via Date.parse but are NOT lexicographically-chronological ISO dates:
+    // a US-format date and an ISO date-TIME. `pickPolicyAsOf` compares strings, so
+    // admitting these would silently select the wrong policy — quarantine instead.
+    const usFormat = { ...entry("2026-06-05"), effectiveAt: "06/05/2026" };
+    const dateTime = { ...entry("2026-06-06"), effectiveAt: "2026-06-06T00:00:00Z" };
+    await writeFile(path, `${JSON.stringify(usFormat)}\n${JSON.stringify(dateTime)}\n`, "utf8");
+    await expect(loadPreferences(path)).resolves.toEqual([]);
+  });
+
+  it("quarantines an out-of-range reserveTargetPct (a NAV share must be a percentage in [0, 100])", async () => {
+    const path = await tempPath();
+    const overHundred = { ...entry("2026-06-05"), reserveTargetPct: 500 };
+    await writeFile(path, `${JSON.stringify(entry("2026-06-01"))}\n${JSON.stringify(overHundred)}\n`, "utf8");
+    const loaded = await loadPreferences(path);
+    expect(loaded.map((e) => e.effectiveAt)).toEqual(["2026-06-01"]);
+  });
+
   it("quarantines a wrong-shape line (missing routingReserveId / non-object)", async () => {
     const path = await tempPath();
     const noRoute = { ...entry("2026-06-05") } as Record<string, unknown>;
