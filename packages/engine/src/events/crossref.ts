@@ -64,6 +64,16 @@ export interface EventReference {
   portfolioIds: Set<string>;
   accountIds: Set<string>;
   instrumentIds: Set<string>;
+  /**
+   * Position ids the log has retired via a `PositionClosed`. A closed id stays in
+   * {@link positionIds} (it existed, and close-and-reopen mints a fresh id rather
+   * than reusing the retired one), but is additionally flagged here so the ingest
+   * gate can reject a post-close `InvalidationMarked` — a level on a retired
+   * position can never fold (breach is derived per OPEN position), so accepting it
+   * would silently drop the mark at fold. See {@link crossReferenceInvalidation}
+   * and ADR-003 (fail-loud-at-ingest).
+   */
+  closedPositionIds: Set<string>;
   /** Latest known close per instrument: the magnitude guard's comparison point. */
   lastClose: Map<string, { price: number; asOf: string }>;
   /**
@@ -103,6 +113,8 @@ export function buildEventReference(
     portfolioIds: new Set(genesis.portfolios.map((portfolio) => portfolio.id)),
     accountIds: new Set(genesis.accounts.map((account) => account.id)),
     instrumentIds: new Set(genesis.instruments.map((instrument) => instrument.id)),
+    // Genesis positions are all open; the log fills this via `PositionClosed` below.
+    closedPositionIds: new Set(),
     lastClose: new Map(),
     reserveBalances: new Map(
       genesis.reserves.map((reserve) => [
@@ -144,7 +156,9 @@ export function buildEventReference(
  * same batch see its effects: an open introduces its position id (and an entry
  * close for a mid-stream instrument), a mark advances the last close. Mutates in
  * place. A close leaves the id known — it existed, and the domain's close-and-
- * reopen rule mints a fresh id rather than reusing the retired one.
+ * reopen rule mints a fresh id rather than reusing the retired one — but records
+ * it in {@link EventReference.closedPositionIds} so the ingest gate can reject a
+ * post-close `InvalidationMarked` on it.
  */
 export function applyEventToReference(reference: EventReference, event: PortfolioEvent): void {
   switch (event.type) {
@@ -178,6 +192,8 @@ export function applyEventToReference(reference: EventReference, event: Portfoli
           reserveDeltasForClose(closed.lots, event.settlement.proceeds),
         );
       }
+      // Flag the id retired so a later post-close InvalidationMarked fails loud.
+      reference.closedPositionIds.add(event.positionId);
       break;
     }
     case "Deposit":
@@ -276,6 +292,15 @@ export function crossReferenceEvent(
  * position the seed or log introduced — marking a level on an unknown id is a
  * dangling reference. Latest-wins revision needs no magnitude guard here (the mark
  * is a thesis level, not a valuation); breach is derived at compose.
+ *
+ * POST-CLOSE MARK (ADR-003 fail-loud, PRD #90 R4). A mark on an already-closed
+ * position is rejected at ingest, not accepted as a silent no-op. The close retired
+ * the id (a fresh id is minted on reopen), breach is derived only per OPEN position,
+ * so the level could never fold to anything — accepting it would silently drop the
+ * mark at fold, the exact drift class this ledger eliminates. Rejecting keeps the
+ * 7th verb inside ADR-003's fail-loud-at-ingest posture. The distinct
+ * `positionId` message names the closed case so the operator can tell it from a
+ * genuine dangling reference.
  */
 function crossReferenceInvalidation(
   event: InvalidationMarkedEvent,
@@ -286,6 +311,14 @@ function crossReferenceInvalidation(
       "positionId",
       `InvalidationMarked references position id '${event.positionId}', which neither ` +
         `the genesis seed nor the log contains.`,
+    );
+  }
+  if (reference.closedPositionIds.has(event.positionId)) {
+    return eventError(
+      "positionId",
+      `InvalidationMarked targets position id '${event.positionId}', which is already ` +
+        `closed; a thesis level on a retired position can never be watched. Mark the ` +
+        `level before the close, or open a fresh position.`,
     );
   }
   return { kind: "ok", value: event };
