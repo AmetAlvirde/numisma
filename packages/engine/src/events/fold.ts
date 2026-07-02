@@ -145,7 +145,7 @@ export function foldEvents(
   );
   const closes: Close[] = (genesis.closes ?? []).map((close) => ({ ...close }));
   const latestMark = new Map<string, number>();
-  // Closed book + latest invalidation level per position (mvi 2026-07-01-realized-pnl).
+  // Closed book + latest invalidation level per position.
   const closedPositions: ClosedPositionRecord[] = [];
   const latestInvalidation = new Map<string, InvalidationLevel>();
   let usdMxn = genesis.review.usdMxn;
@@ -199,7 +199,7 @@ export function foldEvents(
           lots: position.lots.map((lot) => ({ ...lot })),
           markPrice: entryPrice,
           // Carry the open date + strategy so the closed book can tag open/close
-          // dates and attribute realized P&L per strategy (mvi 2026-07-01-realized-pnl).
+          // dates and attribute realized P&L per strategy.
           openedAsOf: event.asOf,
           strategy: event.decision.strategy,
         });
@@ -224,7 +224,7 @@ export function foldEvents(
             event.settlement.reserveId,
             reserveDeltasForClose(closing.lots, event.settlement.proceeds),
           );
-          // Realized P&L (mvi 2026-07-01-realized-pnl): compute proceeds − cost
+          // Realized P&L: compute proceeds − cost
           // basis, tag it, and push a finished row onto the closed book INSTEAD of
           // silently dropping the position. Descriptive only — the profit already
           // landed in the Reserve above; the blotter records how the fund got here.
@@ -266,7 +266,7 @@ export function foldEvents(
   }
 
   // Apply the latest mark per instrument, and the latest invalidation level per
-  // position, to every surviving Position (mvi 2026-07-01-realized-pnl).
+  // position, to every surviving Position.
   for (const position of positions.values()) {
     const mark = latestMark.get(position.instrumentId);
     if (mark !== undefined) {
@@ -297,7 +297,7 @@ export function foldEvents(
 }
 
 /**
- * PROTOTYPE (mvi 2026-07-01-realized-pnl). Build one closed-book row at close time.
+ * Build one closed-book row at close time.
  * Realized Trading P&L = proceeds(USD) − Σ(lot USD cost at its entryFx) — one blended
  * number, FX gain/loss baked in (ADR-002's FX-P&L deferral). The per-Tier split
  * mirrors the cash leg: proceeds are apportioned across the closed position's cost-

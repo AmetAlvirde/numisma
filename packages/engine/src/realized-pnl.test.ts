@@ -1,4 +1,4 @@
-// PROTOTYPE (mvi 2026-07-01-realized-pnl). Behavior locks for the realized-P&L
+// Behavior locks for the realized-P&L
 // closed book (#1) + invalidation watch (#4): the fold keeps a closed position as a
 // blotter row with realized = proceeds − cost basis (tier-attributed), that realized
 // is DESCRIPTIVE ONLY (never added to NAV), and an InvalidationMarked level drives a

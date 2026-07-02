@@ -272,7 +272,7 @@ export function crossReferenceEvent(
 }
 
 /**
- * PROTOTYPE (mvi 2026-07-01-realized-pnl). An `InvalidationMarked` must reference a
+ * An `InvalidationMarked` must reference a
  * position the seed or log introduced — marking a level on an unknown id is a
  * dangling reference. Latest-wins revision needs no magnitude guard here (the mark
  * is a thesis level, not a valuation); breach is derived at compose.

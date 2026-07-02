@@ -101,9 +101,9 @@ export function formatCompositionReport(report: CompositionReport): string {
     formatPriceJourneys(report.priceJourneys),
   ];
 
-  // PROTOTYPE (mvi 2026-07-01-realized-pnl): the closed-book blotter + invalidation
-  // watch. Both render nothing when empty, so a fold with no closes / no levels
-  // produces byte-for-byte the prior report (existing snapshots stay green).
+  // The closed-book blotter + invalidation watch. Both render nothing when empty,
+  // so a fold with no closes / no levels produces byte-for-byte the prior report
+  // (existing snapshots stay green).
   const blotter = formatClosedBook(report.closedBook);
   if (blotter) {
     sections.push("", blotter);
@@ -126,7 +126,7 @@ export function formatCompositionReport(report: CompositionReport): string {
 }
 
 /**
- * PROTOTYPE (mvi 2026-07-01-realized-pnl). Render the trade blotter: one row per
+ * Render the trade blotter: one row per
  * closed position with realized Trading P&L, then realized rolled up by Tempo and by
  * Tier, then the grand total — flagged descriptive-only so it is never mistaken for
  * an addition to NAV. Returns "" when the closed book is empty.
@@ -169,7 +169,7 @@ function formatRealizedRollup(title: string, rows: RealizedRollupRow[]): string 
 }
 
 /**
- * PROTOTYPE (mvi 2026-07-01-realized-pnl). Render the invalidation watch: one line
+ * Render the invalidation watch: one line
  * per OPEN position carrying a structured level, showing its latest mark vs level and
  * whether the thesis is breached. Returns "" when no position carries a level.
  */

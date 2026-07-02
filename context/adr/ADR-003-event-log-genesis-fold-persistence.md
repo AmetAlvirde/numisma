@@ -2,7 +2,7 @@
 
 _Made during: MVI — portfolio history persistence increment / 2026-06-29 prototype → reliable conversion (publication gate for PRD "Persists portfolio history as an append-only event log with as-of review")_
 _Scope: product_
-_Status: accepted (amended 2026-07-01 — see "Amendment: cash leg + durable-log migration/versioning" below)_
+_Status: accepted (amended 2026-07-01 — see "Amendment: cash leg + durable-log migration/versioning" below; amended 2026-07-02 — see "Amendment: closed-book fold output + invalidation verb" below)_
 
 The durable source of truth for portfolio history is an append-only **event log**
 of material actions (`PositionOpened` / `PositionClosed` / `PriceMarked`) layered
@@ -134,3 +134,98 @@ temp-and-rename append (added earlier in this ADR's durability slice) still hold
 Considered and rejected: **optional-with-explicit-default fields** (a defaulted cash
 leg fabricates a cash movement that never happened — silent NAV drift, the thing this
 MVI kills).
+
+## Amendment: closed-book fold output + invalidation verb
+
+_Made during: MVI — realized-P&L increment / 2026-07-01 prototype → 2026-07-02
+prototype → reliable conversion (PRD "Records realized P&L on a closed-position
+blotter and flags invalidated theses", #90) / slice "Ratifies the closed-book and
+invalidation event schema and de-prototypes the engine code" (#91)._
+
+The realized-P&L increment amends this ADR's load-bearing persisted schema and the
+fold's output shape. As with the cash-settlement amendment, these decisions become
+persisted truth on the first real write, so they are ratified before any
+`InvalidationMarked` reaches the durable log (no forced later log migration).
+
+- **6 verbs → 7.** The enumeration is now `PositionOpened` / `PositionClosed` /
+  `PriceMarked` / `Deposit` / `Withdraw` / `Transfer` / `InvalidationMarked`.
+  `InvalidationMarked { positionId, price, direction }` sets (or revises) a
+  Position's structured invalidation level, folded **latest-wins per `positionId`**
+  — modeled parallel to `PriceMarked` (latest-wins per instrument), not a field
+  locked at open. `PositionOpened` is unchanged; the prose `invalidationCondition`
+  in the opening decision stays beside the new structured level. Chosen over a
+  locked-at-open field because a thesis level is revisable and must be settable
+  independently of the open (a real trade-off: revisability + a distinct audit
+  entry vs. a single opening payload).
+- **The fold emits a third persisted read-model output: `closedPositions[]`.**
+  Instead of `positions.delete()` on close (the old behavior that threw the record
+  away), the fold builds a `ClosedPositionRecord` carrying realized Trading P&L =
+  `proceedsUsd − Σ(lot USD cost at entry FX)` — one blended number, FX gain/loss
+  baked in per ADR-002's FX-P&L deferral, attributed per Capital Tier by reusing the
+  cash-leg seam (`reserveDeltasForClose`) so the split is consistent-by-construction
+  with the Reserve credit the same close produces. This is a **third output beside
+  open positions + reserves**; the closed book is a first-class read-model artifact,
+  not a deletion. **Realized is descriptive-only** — it is never added to NAV (the
+  cash leg already booked the profit into a Reserve at close); this is a permanent
+  invariant, locked by the blank-the-closed-book test (`{ ...data, closedPositions:
+  [] }` leaves `fundValueUsd` unchanged). This is the "surprising without context"
+  test: realized shows *how the Fund got here*, never a second source of value.
+- **Three new optional `PositionRecord` read-model fields — `openedAsOf`,
+  `strategy`, `invalidation`.** `openedAsOf` / `strategy` are carried through the
+  fold (previously silently dropped) so the closed book can tag open/close dates and
+  attribute realized per strategy; `invalidation` holds the latest structured level
+  for compose-time breach derivation. All three are **optional** — genesis-held
+  positions (opened before the log existed) honestly carry no `openedAsOf` /
+  `strategy`, and `invalidation` is absent until the first mark — so existing genesis
+  seeds and folds keep validating and folding unchanged (`FundReviewData
+  .closedPositions?` is likewise optional, and the fold always emits `[]`).
+- **Ratified `direction` spelling = `below` / `above`** (chosen over `lte` / `gte`).
+  This becomes persisted-schema truth the moment an `InvalidationMarked` is written
+  to the durable log, so it is ratified here before the first persist; re-spelling
+  later would be a log migration. Semantics: `below` = a long's stop (breached when
+  the mark falls to/through the level), `above` = a short's stop (breached when the
+  mark rises to/through it). Breach is **derived per OPEN position at compose**, not
+  stored.
+
+### `EVENT_SCHEMA_VERSION` decision: `InvalidationMarked` is a v2-era additive verb (no bump)
+
+`EVENT_SCHEMA_VERSION` **stays `2`**. `InvalidationMarked` is documented as a
+**v2-era additive verb**, not a version bump to `3`. Rationale:
+
+- **The version marker in this codebase tracks persisted *record shape* /
+  migration generations, not verb-set cardinality.** The v1 → v2 bump was forced
+  because `funding` / `settlement` became **required** on existing verbs, so v1
+  open/close lines *stopped parsing* and needed the one-shot `migrateLegacyEvent`
+  transformation. `InvalidationMarked` introduces **no shape change to any existing
+  verb and needs no migration of any existing line** — every prior record parses
+  byte-for-byte identically. Bumping to `3` with no `v2 → v3` migration would make
+  the marker denote something it does not (a shape generation that never changed),
+  and would wrongly re-stamp the legacy cash-leg migration output — a v2-shape
+  record — as `v3`.
+- **No silent-misread risk either way, so no bump is needed for safety.** A new verb
+  is purely additive: an older build meeting an `InvalidationMarked` line fails loud
+  at the per-verb parse switch (unknown `type` → ingest error → the fail-loud-on-
+  partial-log read path refuses to fold), never a silent misread. The forward-compat
+  `schemaVersion` guard exists to prevent *misreads of a changed shape*; there is no
+  changed shape here for it to guard. Keeping the version at `2` therefore keeps the
+  guard honest without over-stamping: a plain `PositionOpened` a v2-era build fully
+  understands is not spuriously rejected on a version marker.
+- **Consequence for the "one version = one verb set" concern.** A given
+  `schemaVersion` no longer implies a fixed verb *cardinality* — it denotes the
+  persisted *record shape*. That is acceptable and explicit: additive verbs that
+  change no existing record shape ride within the current version; a future change
+  that alters an existing verb's required shape (as cash-settlement did) is what
+  bumps the marker and triggers a targeted migration.
+
+### Append-only and ADR-001/002, preserved
+
+The fold stays a **pure projection** and lives in `@numisma/engine`; the closed-book
+build (`buildClosedPosition`), the invalidation fold, and the compose-time breach
+derivation (`buildInvalidationWatch`) are all pure. `packages/tui/src/event-store.ts`
+is unmodified — it dispatches events generically, so the 7th verb reaches the real
+ingest/persist path with zero access-surface change. ADR-002 is respected, not
+extended: realized uses cost basis at entry FX and inherits the FX-P&L deferral
+verbatim. Considered and rejected: **realized as a field on the surviving open
+`PositionRecord`** (a closed trade is not an open holding — it must survive the
+close as its own record) and **realized additive to NAV** (double-counts the profit
+the cash leg already booked into a Reserve).

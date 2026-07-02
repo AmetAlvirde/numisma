@@ -58,7 +58,7 @@ export interface FundReviewData {
   /** Periodic per-instrument price snapshots; the spine of the price journey. */
   closes?: Close[];
   /**
-   * PROTOTYPE (mvi 2026-07-01-realized-pnl). The closed book: finished trades the
+   * The closed book: finished trades the
    * fold keeps instead of deleting, each carrying its realized Trading P&L. Absent
    * on a genesis seed and on a fold with no closes yet — the blotter renders nothing
    * when empty, so this is additive to the read model (amends ADR-003: the fold now
@@ -67,7 +67,7 @@ export interface FundReviewData {
   closedPositions?: ClosedPositionRecord[];
 }
 
-/** PROTOTYPE (mvi 2026-07-01-realized-pnl). Per-Tier slice of a closed trade's
+/** Per-Tier slice of a closed trade's
  * realized P&L: proceeds credited to this Tier minus its share of the cost basis. */
 export interface RealizedTierAttribution {
   tier: CapitalTier;
@@ -77,7 +77,7 @@ export interface RealizedTierAttribution {
 }
 
 /**
- * PROTOTYPE (mvi 2026-07-01-realized-pnl). One finished trade on the closed book —
+ * One finished trade on the closed book —
  * the blotter row the fold computes at `PositionClosed` instead of dropping the
  * position. Realized Trading P&L = `proceedsUsd − costBasisUsd` (one blended number;
  * FX gain/loss is baked in per ADR-002's FX-P&L deferral). Tagged with the closed
@@ -99,7 +99,7 @@ export interface ClosedPositionRecord {
   tierAttribution: RealizedTierAttribution[];
 }
 
-/** PROTOTYPE (mvi 2026-07-01-realized-pnl). The structured price+direction level a
+/** The structured price+direction level a
  * Position's thesis breaks on, folded from the latest `InvalidationMarked`. */
 export interface InvalidationLevel {
   price: number;
@@ -150,20 +150,20 @@ export interface PositionRecord extends CapitalRecordBase {
    */
   lots: PositionLot[];
   /**
-   * PROTOTYPE (mvi 2026-07-01-realized-pnl). The date this Position was opened in
+   * The date this Position was opened in
    * the log — carried so the closed book can tag open + close dates. Absent for a
    * genesis-held position (opened before the log existed).
    */
   openedAsOf?: string;
   /**
-   * PROTOTYPE (mvi 2026-07-01-realized-pnl). The strategy tag from the opening
+   * The strategy tag from the opening
    * decision, carried through so the closed book can attribute realized P&L per
    * strategy. Absent for a genesis-held position (no logged decision). The full
    * decision is durably logged; the fold surfaces only what the read model needs.
    */
   strategy?: string;
   /**
-   * PROTOTYPE (mvi 2026-07-01-realized-pnl). The latest structured invalidation
+   * The latest structured invalidation
    * level from `InvalidationMarked`, if any. The dashboard compares it against
    * `markPrice` to flag a breached thesis. Absent until the first mark.
    */
@@ -400,7 +400,7 @@ export interface ReserveReconciliationLine {
   usdValue: number;
 }
 
-/** PROTOTYPE (mvi 2026-07-01-realized-pnl). A realized-P&L rollup line — realized
+/** A realized-P&L rollup line — realized
  * summed over one grouping key (a Tempo or a Tier). */
 export interface RealizedRollupRow {
   key: string;
@@ -410,7 +410,7 @@ export interface RealizedRollupRow {
 }
 
 /**
- * PROTOTYPE (mvi 2026-07-01-realized-pnl). The trade blotter: every closed-book row
+ * The trade blotter: every closed-book row
  * plus realized rolled up by Tempo and by Tier, so "how much has PULSE made since
  * genesis?" is answerable. Descriptive only — the realized total is NOT added to
  * NAV (the profit already sits in a Reserve, credited by the cash leg at close).
@@ -423,7 +423,7 @@ export interface ClosedBook {
 }
 
 /**
- * PROTOTYPE (mvi 2026-07-01-realized-pnl). One OPEN position's invalidation status:
+ * One OPEN position's invalidation status:
  * its latest structured level, its latest mark, and whether the mark has breached
  * the level (thesis invalidated). Emitted only for positions that carry a level.
  */
@@ -445,13 +445,13 @@ export interface CompositionReport {
   dashboard: DashboardModel;
   priceJourneys: PriceJourney[];
   /**
-   * PROTOTYPE (mvi 2026-07-01-realized-pnl). The closed-book blotter + realized
+   * The closed-book blotter + realized
    * rollups. Empty (`rows: []`) when the fold has no closes — the renderer then
    * emits nothing, keeping the report backward-compatible.
    */
   closedBook: ClosedBook;
   /**
-   * PROTOTYPE (mvi 2026-07-01-realized-pnl). Invalidation status per OPEN position
+   * Invalidation status per OPEN position
    * that carries a structured level. Empty when none do.
    */
   invalidationWatch: InvalidationWatchRow[];

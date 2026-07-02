@@ -359,7 +359,7 @@ function parsePositionClosed(
 }
 
 /**
- * PROTOTYPE (mvi 2026-07-01-realized-pnl). Validate an `InvalidationMarked` in
+ * Validate an `InvalidationMarked` in
  * isolation: a non-empty `positionId`, a positive `price`, and a `below`/`above`
  * `direction`. Existence of the position is the cross-ref gate's job, not parse's.
  */
