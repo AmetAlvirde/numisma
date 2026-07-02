@@ -165,7 +165,7 @@ out.push(
     "3 profit split",
     !!splitHwm,
     `cum net realized ${splitHwm?.cumulativeNetRealizedUsd.toFixed(2)}, obligation(HWM) ${splitHwm?.obligationUsd.toFixed(2)}, ` +
-      `unallocated ${splitHwm?.unallocatedUsd.toFixed(2)}, Reserve ${splitHwm?.reservePctOfNav.toFixed(2)}% vs ${splitHwm?.reserveTargetPct}% target`,
+      `Reserve ${splitHwm?.reservePctOfNav.toFixed(2)}% vs ${splitHwm?.reserveTargetPct}% target`,
   ),
 );
 
