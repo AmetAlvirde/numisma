@@ -4,13 +4,17 @@
 // summary with its largest-slice foci, and the price journeys. The grouping and
 // percent-of-fund math live here; canonical-state construction does not.
 import type {
+  ClosedBook,
+  ClosedPositionRecord,
   CompositionReport,
   CompositionRow,
   DashboardFocus,
   DashboardRowKind,
   DashboardSummary,
   FundReviewData,
+  InvalidationWatchRow,
   LoadOutcome,
+  RealizedRollupRow,
 } from "../contracts.js";
 import { percentOfFund, pushWarning } from "../internal.js";
 import { buildPriceJourneys } from "../price-journey.js";
@@ -137,11 +141,89 @@ export function buildCompositionReport(
       ],
     },
     priceJourneys,
+    closedBook: buildClosedBook(data.closedPositions ?? []),
+    invalidationWatch: buildInvalidationWatch(data),
     reserveReconciliation,
     warnings,
     excluded,
     load: options.load ?? { status: "loaded" },
   };
+}
+
+/**
+ * Assemble the trade blotter from the
+ * fold's closed book: the rows as-is, plus realized rolled up by Tempo and by Tier.
+ * Descriptive only — nothing here is added to NAV.
+ */
+function buildClosedBook(rows: ClosedPositionRecord[]): ClosedBook {
+  const byTempo = rollup(rows, (row) => [{ key: row.tempo, ...row }]);
+  const byTier = rollup(rows, (row) =>
+    row.tierAttribution.map((attribution) => ({
+      key: attribution.tier,
+      costBasisUsd: attribution.costBasisUsd,
+      proceedsUsd: attribution.proceedsUsd,
+      realizedPnlUsd: attribution.realizedPnlUsd,
+    })),
+  );
+  const totalRealizedPnlUsd = rows.reduce((sum, row) => sum + row.realizedPnlUsd, 0);
+  return { rows, byTempo, byTier, totalRealizedPnlUsd };
+}
+
+/** Group closed-book contributions by a `key`, summing the three money columns.
+ * Rows sort by most-negative-or-positive realized magnitude, then key. */
+function rollup(
+  rows: ClosedPositionRecord[],
+  explode: (row: ClosedPositionRecord) => Array<{
+    key: string;
+    costBasisUsd: number;
+    proceedsUsd: number;
+    realizedPnlUsd: number;
+  }>,
+): RealizedRollupRow[] {
+  const groups = new Map<string, RealizedRollupRow>();
+  for (const row of rows) {
+    for (const part of explode(row)) {
+      const existing =
+        groups.get(part.key) ??
+        { key: part.key, realizedPnlUsd: 0, costBasisUsd: 0, proceedsUsd: 0 };
+      existing.realizedPnlUsd += part.realizedPnlUsd;
+      existing.costBasisUsd += part.costBasisUsd;
+      existing.proceedsUsd += part.proceedsUsd;
+      groups.set(part.key, existing);
+    }
+  }
+  return [...groups.values()].sort(
+    (a, b) => Math.abs(b.realizedPnlUsd) - Math.abs(a.realizedPnlUsd) || a.key.localeCompare(b.key),
+  );
+}
+
+/**
+ * Derive breach for every OPEN position
+ * carrying a structured invalidation level: a `below` level breaches when the mark
+ * falls to/through it (a long's stop), an `above` level when the mark rises
+ * to/through it (a short's stop). Positions without a level are silent.
+ */
+function buildInvalidationWatch(data: FundReviewData): InvalidationWatchRow[] {
+  const rows: InvalidationWatchRow[] = [];
+  for (const position of data.positions) {
+    const level = position.invalidation;
+    if (!level) {
+      continue;
+    }
+    const breached =
+      level.direction === "below"
+        ? position.markPrice <= level.price
+        : position.markPrice >= level.price;
+    rows.push({
+      positionId: position.id,
+      instrumentId: position.instrumentId,
+      markPrice: position.markPrice,
+      level: level.price,
+      direction: level.direction,
+      breached,
+    });
+  }
+  return rows;
 }
 
 function toFocus(row: CompositionRow | undefined): DashboardFocus | undefined {

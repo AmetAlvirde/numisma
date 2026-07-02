@@ -10,12 +10,16 @@
  */
 import type {
   CapitalTier,
+  ClosedPositionRecord,
   Close,
   FundReviewData,
+  InvalidationLevel,
   PositionLot,
   PositionRecord,
+  RealizedTierAttribution,
   ReserveRecord,
 } from "../contracts.js";
+import { toUsd } from "../internal.js";
 import type { PortfolioEvent, TierDelta } from "./types.js";
 
 const TIERS: CapitalTier[] = ["c1", "c2", "c3"];
@@ -55,7 +59,14 @@ export function reserveDeltasForOpen(lots: PositionLot[], amount: number): TierD
 }
 
 /** Close → credit the settlement Reserve with the proceeds, split across the
- * closed position's Tier mix (realized gain/loss falls on the same Tier). */
+ * closed position's Tier mix (realized gain/loss falls on the same Tier).
+ *
+ * The split weights by **native** cost (`quantity * cost`), not USD cost. For lots
+ * that share one entry FX — every real close today (pure-c1 / USDT `entryFx=1`) —
+ * native and USD weights are proportionally identical, so the split is exact. When
+ * `buildClosedPosition` reuses this helper to apportion proceeds against USD cost
+ * basis, that native-vs-USD basis mismatch is the source of the documented
+ * mixed-`entryFx` per-tier caveat; see that helper's note. Totals stay exact. */
 export function reserveDeltasForClose(lots: PositionLot[], proceeds: number): TierDelta[] {
   return tierWeightedDeltas(lots, proceeds, 1);
 }
@@ -141,6 +152,9 @@ export function foldEvents(
   );
   const closes: Close[] = (genesis.closes ?? []).map((close) => ({ ...close }));
   const latestMark = new Map<string, number>();
+  // Closed book + latest invalidation level per position.
+  const closedPositions: ClosedPositionRecord[] = [];
+  const latestInvalidation = new Map<string, InvalidationLevel>();
   let usdMxn = genesis.review.usdMxn;
   let latestAsOf = genesis.review.asOf;
 
@@ -191,6 +205,10 @@ export function foldEvents(
           direction: position.direction,
           lots: position.lots.map((lot) => ({ ...lot })),
           markPrice: entryPrice,
+          // Carry the open date + strategy so the closed book can tag open/close
+          // dates and attribute realized P&L per strategy.
+          openedAsOf: event.asOf,
+          strategy: event.decision.strategy,
         });
         // Drop an entry-price anchor (coherent with the fallback markPrice) so an
         // instrument first held mid-stream also has a baseline for its journey.
@@ -213,10 +231,27 @@ export function foldEvents(
             event.settlement.reserveId,
             reserveDeltasForClose(closing.lots, event.settlement.proceeds),
           );
+          // Realized P&L: compute proceeds − cost
+          // basis, tag it, and push a finished row onto the closed book INSTEAD of
+          // silently dropping the position. Descriptive only — the profit already
+          // landed in the Reserve above; the blotter records how the fund got here.
+          const settlementCurrency =
+            reserves.get(event.settlement.reserveId)?.currency ?? closing.currency;
+          closedPositions.push(
+            buildClosedPosition(closing, event.asOf, event.settlement.proceeds, settlementCurrency, usdMxn),
+          );
         }
         positions.delete(event.positionId);
         break;
       }
+      case "InvalidationMarked":
+        // Latest-wins per position: record the newest structured level; it is
+        // applied to the surviving position after the fold, alongside the mark.
+        latestInvalidation.set(event.positionId, {
+          price: event.price,
+          direction: event.direction,
+        });
+        break;
       case "PriceMarked":
         latestMark.set(event.instrumentId, event.price);
         closes.push({ instrumentId: event.instrumentId, asOf: event.asOf, price: event.price });
@@ -237,11 +272,16 @@ export function foldEvents(
     }
   }
 
-  // Apply the latest mark per instrument to every surviving Position.
+  // Apply the latest mark per instrument, and the latest invalidation level per
+  // position, to every surviving Position.
   for (const position of positions.values()) {
     const mark = latestMark.get(position.instrumentId);
     if (mark !== undefined) {
       position.markPrice = mark;
+    }
+    const invalidation = latestInvalidation.get(position.id);
+    if (invalidation !== undefined) {
+      position.invalidation = { ...invalidation };
     }
   }
 
@@ -259,6 +299,83 @@ export function foldEvents(
     reserves: [...reserves.values()],
     positions: [...positions.values()],
     closes,
+    closedPositions,
+  };
+}
+
+/**
+ * Build one closed-book row at close time.
+ * Realized Trading P&L = proceeds(USD) − Σ(lot USD cost at its entryFx) — one blended
+ * number, FX gain/loss baked in (ADR-002's FX-P&L deferral). The per-Tier split
+ * mirrors the cash leg: proceeds are apportioned across the closed position's cost-
+ * basis Tier mix (`reserveDeltasForClose`), cost basis is grouped by the same Tiers,
+ * and realized per Tier is the difference — so the gain/loss falls on the Tier it was
+ * risked on. Pure.
+ *
+ * MIXED-`entryFx` PER-TIER CAVEAT (documented, not fixed — see PRD #90 "Out of
+ * Scope"). Cost basis below is grouped by Tier in **USD** (each lot at its own
+ * `entryFx`), but proceeds are apportioned by `reserveDeltasForClose`, which weights
+ * by **native** cost. When a position's lots share one entry FX (all real closes
+ * today — pure-c1 / USDT `entryFx=1`) the two bases are proportionally identical and
+ * the per-Tier split is exact. When lots carry *different* entry FX the per-Tier
+ * split can drift a few cents between Tiers, but `realizedPnlUsd` and every rollup
+ * TOTAL stay exact (the drift only moves cents across Tiers, never off the total).
+ * A basis-consistent per-Tier fix is deliberately out of boundary here.
+ */
+function buildClosedPosition(
+  closing: PositionRecord,
+  closedAsOf: string,
+  proceedsNative: number,
+  settlementCurrency: PositionRecord["currency"],
+  reviewFx: number,
+): ClosedPositionRecord {
+  const proceedsUsd = toUsd(proceedsNative, settlementCurrency, reviewFx);
+
+  // Cost basis in USD, per Tier: each lot converts at its own entry FX (ADR-002).
+  const costUsdByTier = new Map<CapitalTier, number>();
+  let costBasisUsd = 0;
+  for (const lot of closing.lots) {
+    const lotCostUsd = toUsd(lot.quantity * lot.cost, closing.currency, lot.entryFx ?? reviewFx);
+    costUsdByTier.set(lot.tier, (costUsdByTier.get(lot.tier) ?? 0) + lotCostUsd);
+    costBasisUsd += lotCostUsd;
+  }
+
+  // Proceeds (USD) apportioned across the same Tier mix the cash leg credited.
+  // The apportionment weights by NATIVE cost (see `reserveDeltasForClose`), which
+  // differs from the USD-cost grouping above only when lots carry mixed entry FX —
+  // the documented per-Tier caveat in this function's doc comment. Totals stay exact.
+  const proceedsByTier = new Map<CapitalTier, number>();
+  for (const delta of reserveDeltasForClose(closing.lots, proceedsUsd)) {
+    proceedsByTier.set(delta.tier, (proceedsByTier.get(delta.tier) ?? 0) + delta.amount);
+  }
+
+  const tierAttribution: RealizedTierAttribution[] = [];
+  for (const tier of TIERS) {
+    if (!costUsdByTier.has(tier) && !proceedsByTier.has(tier)) {
+      continue;
+    }
+    const tierCost = costUsdByTier.get(tier) ?? 0;
+    const tierProceeds = proceedsByTier.get(tier) ?? 0;
+    tierAttribution.push({
+      tier,
+      costBasisUsd: tierCost,
+      proceedsUsd: tierProceeds,
+      realizedPnlUsd: tierProceeds - tierCost,
+    });
+  }
+
+  return {
+    positionId: closing.id,
+    instrumentId: closing.instrumentId,
+    tempo: closing.tempo,
+    ...(closing.strategy !== undefined ? { strategy: closing.strategy } : {}),
+    direction: closing.direction,
+    ...(closing.openedAsOf !== undefined ? { openedAsOf: closing.openedAsOf } : {}),
+    closedAsOf,
+    costBasisUsd,
+    proceedsUsd,
+    realizedPnlUsd: proceedsUsd - costBasisUsd,
+    tierAttribution,
   };
 }
 

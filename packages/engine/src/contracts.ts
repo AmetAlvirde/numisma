@@ -57,6 +57,53 @@ export interface FundReviewData {
   positions: PositionRecord[];
   /** Periodic per-instrument price snapshots; the spine of the price journey. */
   closes?: Close[];
+  /**
+   * The closed book: finished trades the
+   * fold keeps instead of deleting, each carrying its realized Trading P&L. Absent
+   * on a genesis seed and on a fold with no closes yet — the blotter renders nothing
+   * when empty, so this is additive to the read model (amends ADR-003: the fold now
+   * emits a third output beyond open positions + reserves).
+   */
+  closedPositions?: ClosedPositionRecord[];
+}
+
+/** Per-Tier slice of a closed trade's
+ * realized P&L: proceeds credited to this Tier minus its share of the cost basis. */
+export interface RealizedTierAttribution {
+  tier: CapitalTier;
+  costBasisUsd: number;
+  proceedsUsd: number;
+  realizedPnlUsd: number;
+}
+
+/**
+ * One finished trade on the closed book —
+ * the blotter row the fold computes at `PositionClosed` instead of dropping the
+ * position. Realized Trading P&L = `proceedsUsd − costBasisUsd` (one blended number;
+ * FX gain/loss is baked in per ADR-002's FX-P&L deferral). Tagged with the closed
+ * position's tempo / strategy / instrument and its open + close dates so the blotter
+ * can roll realized up by Tempo and by Tier. `strategy`/`openedAsOf` are absent for
+ * a genesis-held position closed after genesis (it has no logged open).
+ */
+export interface ClosedPositionRecord {
+  positionId: string;
+  instrumentId: string;
+  tempo: string;
+  strategy?: string;
+  direction: Direction;
+  openedAsOf?: string;
+  closedAsOf: string;
+  costBasisUsd: number;
+  proceedsUsd: number;
+  realizedPnlUsd: number;
+  tierAttribution: RealizedTierAttribution[];
+}
+
+/** The structured price+direction level a
+ * Position's thesis breaks on, folded from the latest `InvalidationMarked`. */
+export interface InvalidationLevel {
+  price: number;
+  direction: "below" | "above";
 }
 
 /**
@@ -102,6 +149,25 @@ export interface PositionRecord extends CapitalRecordBase {
    * is no flat `{ quantity, averageCost }` shorthand.
    */
   lots: PositionLot[];
+  /**
+   * The date this Position was opened in
+   * the log — carried so the closed book can tag open + close dates. Absent for a
+   * genesis-held position (opened before the log existed).
+   */
+  openedAsOf?: string;
+  /**
+   * The strategy tag from the opening
+   * decision, carried through so the closed book can attribute realized P&L per
+   * strategy. Absent for a genesis-held position (no logged decision). The full
+   * decision is durably logged; the fold surfaces only what the read model needs.
+   */
+  strategy?: string;
+  /**
+   * The latest structured invalidation
+   * level from `InvalidationMarked`, if any. The dashboard compares it against
+   * `markPrice` to flag a breached thesis. Absent until the first mark.
+   */
+  invalidation?: InvalidationLevel;
 }
 
 export interface Ok {
@@ -334,6 +400,42 @@ export interface ReserveReconciliationLine {
   usdValue: number;
 }
 
+/** A realized-P&L rollup line — realized
+ * summed over one grouping key (a Tempo or a Tier). */
+export interface RealizedRollupRow {
+  key: string;
+  realizedPnlUsd: number;
+  costBasisUsd: number;
+  proceedsUsd: number;
+}
+
+/**
+ * The trade blotter: every closed-book row
+ * plus realized rolled up by Tempo and by Tier, so "how much has PULSE made since
+ * genesis?" is answerable. Descriptive only — the realized total is NOT added to
+ * NAV (the profit already sits in a Reserve, credited by the cash leg at close).
+ */
+export interface ClosedBook {
+  rows: ClosedPositionRecord[];
+  byTempo: RealizedRollupRow[];
+  byTier: RealizedRollupRow[];
+  totalRealizedPnlUsd: number;
+}
+
+/**
+ * One OPEN position's invalidation status:
+ * its latest structured level, its latest mark, and whether the mark has breached
+ * the level (thesis invalidated). Emitted only for positions that carry a level.
+ */
+export interface InvalidationWatchRow {
+  positionId: string;
+  instrumentId: string;
+  markPrice: number;
+  level: number;
+  direction: "below" | "above";
+  breached: boolean;
+}
+
 export interface CompositionReport {
   totals: {
     baseCurrency: "USD";
@@ -342,6 +444,17 @@ export interface CompositionReport {
   };
   dashboard: DashboardModel;
   priceJourneys: PriceJourney[];
+  /**
+   * The closed-book blotter + realized
+   * rollups. Empty (`rows: []`) when the fold has no closes — the renderer then
+   * emits nothing, keeping the report backward-compatible.
+   */
+  closedBook: ClosedBook;
+  /**
+   * Invalidation status per OPEN position
+   * that carries a structured level. Empty when none do.
+   */
+  invalidationWatch: InvalidationWatchRow[];
   /**
    * Post-fold Reserve balances for eyeball-vs-venue checking (PRD #82 C3). Reads
    * the FOLDED reserves — the ones the cash legs mutated — never the stale genesis
