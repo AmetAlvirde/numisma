@@ -97,6 +97,13 @@ export interface ClosedPositionRecord {
   proceedsUsd: number;
   realizedPnlUsd: number;
   tierAttribution: RealizedTierAttribution[];
+  /**
+   * PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). True when this row is a
+   * PARTIAL close emitted by a `PositionTrimmed` on the removed portion — the
+   * surviving position (same `positionId`) stays open with reduced lots. Absent/false
+   * for a full `PositionClosed`. Many partials + a final close thread one lineage id.
+   */
+  partial?: boolean;
 }
 
 /** The structured price+direction level a

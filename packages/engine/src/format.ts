@@ -15,6 +15,7 @@ import type {
   RealizedRollupRow,
   ReserveReconciliationLine,
 } from "./contracts.js";
+import type { ProfitSplit } from "./compose/profit-split.js";
 
 export function formatUsd(value: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -186,6 +187,33 @@ export function formatInvalidationWatch(rows: InvalidationWatchRow[]): string {
     );
   });
   return [title, "-".repeat(title.length), ...body].join("\n");
+}
+
+/**
+ * PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). Render the descriptive-only
+ * profit-split block: cumulative net realized, the split obligation on its basis,
+ * unallocated profit, and the Reserve's actual % of NAV vs target. EMPTY-GUARDED —
+ * returns "" for an undefined split (no policy / no closes), so blanking the block
+ * leaves NAV and the rest of the report byte-for-byte unchanged.
+ */
+export function formatProfitSplit(split: ProfitSplit | undefined): string {
+  if (!split) {
+    return "";
+  }
+  const title = "Profit Split — Obligation (descriptive only)";
+  const pct = (split.splitFractionReserve * 100).toFixed(0);
+  const overUnder = split.reservePctOfNav >= split.reserveTargetPct ? "at/above" : "below";
+  return [
+    title,
+    "-".repeat(title.length),
+    `Basis: ${split.basis} (Reserve share ${pct}% of gains)`,
+    `Cumulative net realized: ${formatUsd(split.cumulativeNetRealizedUsd)}` +
+      (split.basis === "highWaterMark" ? `  (peak ${formatUsd(split.peakCumulativeUsd)})` : ""),
+    `Split obligation to Reserve: ${formatUsd(split.obligationUsd)}`,
+    `Routed into sink so far: ${formatUsd(split.routedFlowUsd)}`,
+    `Unallocated profit: ${formatUsd(split.unallocatedUsd)}`,
+    `Reserve is ${formatPercent(split.reservePctOfNav)} of NAV vs ${formatPercent(split.reserveTargetPct)} target (${overUnder}).`,
+  ].join("\n");
 }
 
 function formatWeeklyReviewFocus(report: CompositionReport): string {

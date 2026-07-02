@@ -238,10 +238,60 @@ export function foldEvents(
           const settlementCurrency =
             reserves.get(event.settlement.reserveId)?.currency ?? closing.currency;
           closedPositions.push(
-            buildClosedPosition(closing, event.asOf, event.settlement.proceeds, settlementCurrency, usdMxn),
+            buildClosedPosition(closing, closing.lots, event.asOf, event.settlement.proceeds, settlementCurrency, usdMxn),
           );
         }
         positions.delete(event.positionId);
+        break;
+      }
+      case "PositionTrimmed": {
+        // Partial close: remove the named tier quantities from the OPEN position's
+        // lots (pro-rata within each tier), credit the settlement Reserve with the
+        // proceeds tiered by the REMOVED mix, and emit a PARTIAL closed-book row on
+        // the sold portion sharing the surviving position's id. The position stays
+        // open with reduced lots. Sufficiency was proven at ingest. NAV is conserved:
+        // asset removed at mark == cash credited; the realized gain was already the
+        // position's unrealized gain, now converted, not created.
+        const trimming = positions.get(event.positionId);
+        if (trimming) {
+          let working = trimming.lots;
+          const removed: PositionLot[] = [];
+          for (const removal of event.removals) {
+            const split = splitTierRemoval(working, removal.tier, removal.quantity);
+            removed.push(...split.removed);
+            working = split.remaining;
+          }
+          const settlementCurrency =
+            reserves.get(event.settlement.reserveId)?.currency ?? trimming.currency;
+          applyToReserve(
+            reserves,
+            event.settlement.reserveId,
+            reserveDeltasForClose(removed, event.settlement.proceeds),
+          );
+          closedPositions.push(
+            buildClosedPosition(trimming, removed, event.asOf, event.settlement.proceeds, settlementCurrency, usdMxn, true),
+          );
+          trimming.lots = working;
+          // A trim that removes every remaining lot fully retires the position.
+          if (working.length === 0) {
+            positions.delete(event.positionId);
+          }
+        }
+        break;
+      }
+      case "PositionAddedTo": {
+        // Append the new lot preserving its own entryFx/tier — NEVER weighted-average-
+        // merged (ADR-002) — and debit the funding Reserve. No realized P&L. Sufficiency
+        // was proven at ingest.
+        const adding = positions.get(event.positionId);
+        if (adding) {
+          adding.lots = [...adding.lots, { ...event.lot }];
+          applyToReserve(
+            reserves,
+            event.funding.reserveId,
+            reserveDeltasForOpen([event.lot], event.funding.amount),
+          );
+        }
         break;
       }
       case "InvalidationMarked":
@@ -324,17 +374,21 @@ export function foldEvents(
  */
 function buildClosedPosition(
   closing: PositionRecord,
+  lots: PositionLot[],
   closedAsOf: string,
   proceedsNative: number,
   settlementCurrency: PositionRecord["currency"],
   reviewFx: number,
+  partial = false,
 ): ClosedPositionRecord {
   const proceedsUsd = toUsd(proceedsNative, settlementCurrency, reviewFx);
 
   // Cost basis in USD, per Tier: each lot converts at its own entry FX (ADR-002).
+  // `lots` is the CLOSED subset — the whole position on a full close, or just the
+  // removed lots on a partial trim (which preserve their blended entryFx/tier).
   const costUsdByTier = new Map<CapitalTier, number>();
   let costBasisUsd = 0;
-  for (const lot of closing.lots) {
+  for (const lot of lots) {
     const lotCostUsd = toUsd(lot.quantity * lot.cost, closing.currency, lot.entryFx ?? reviewFx);
     costUsdByTier.set(lot.tier, (costUsdByTier.get(lot.tier) ?? 0) + lotCostUsd);
     costBasisUsd += lotCostUsd;
@@ -345,7 +399,7 @@ function buildClosedPosition(
   // differs from the USD-cost grouping above only when lots carry mixed entry FX —
   // the documented per-Tier caveat in this function's doc comment. Totals stay exact.
   const proceedsByTier = new Map<CapitalTier, number>();
-  for (const delta of reserveDeltasForClose(closing.lots, proceedsUsd)) {
+  for (const delta of reserveDeltasForClose(lots, proceedsUsd)) {
     proceedsByTier.set(delta.tier, (proceedsByTier.get(delta.tier) ?? 0) + delta.amount);
   }
 
@@ -376,7 +430,51 @@ function buildClosedPosition(
     proceedsUsd,
     realizedPnlUsd: proceedsUsd - costBasisUsd,
     tierAttribution,
+    ...(partial ? { partial: true } : {}),
   };
+}
+
+/**
+ * PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). THE PARTIAL-REMOVAL SEAM.
+ * Take `quantity` out of the lots that belong to `tier`, PRO-RATA across those lots
+ * by their own quantity — so a removal preserves each lot's blended entryFx/cost
+ * attribution rather than picking one lot arbitrarily. Returns the removed sub-lots
+ * (each a copy carrying its parent's cost/entryFx/tier) and the surviving lots
+ * (untouched lots plus the shrunk remainders). Lot order is preserved. The last
+ * in-tier lot absorbs the float residual so `Σ removed.quantity === quantity` exact,
+ * mirroring {@link tierWeightedDeltas}. Pure. The caller guarantees sufficiency
+ * (the cross-ref position-lot gate); a degenerate empty tier is a safe no-op.
+ */
+export function splitTierRemoval(
+  lots: PositionLot[],
+  tier: CapitalTier,
+  quantity: number,
+): { removed: PositionLot[]; remaining: PositionLot[] } {
+  const inTier = lots.filter((lot) => lot.tier === tier);
+  const tierTotal = inTier.reduce((sum, lot) => sum + lot.quantity, 0);
+  const removed: PositionLot[] = [];
+  const remaining: PositionLot[] = [];
+  if (tierTotal === 0) {
+    return { removed, remaining: lots.map((lot) => ({ ...lot })) };
+  }
+  let allocated = 0;
+  let seenInTier = 0;
+  for (const lot of lots) {
+    if (lot.tier !== tier) {
+      remaining.push({ ...lot });
+      continue;
+    }
+    const isLast = seenInTier === inTier.length - 1;
+    seenInTier += 1;
+    const take = isLast ? quantity - allocated : (quantity * lot.quantity) / tierTotal;
+    allocated += take;
+    removed.push({ ...lot, quantity: take });
+    const left = lot.quantity - take;
+    if (left > 1e-12) {
+      remaining.push({ ...lot, quantity: left });
+    }
+  }
+  return { removed, remaining };
 }
 
 /** Apply per-Tier deltas to a folded reserve by id via the seam, if it exists.

@@ -23,9 +23,12 @@ import type {
   EventError,
   EventParseResult,
   OpenFunding,
+  PositionAddedToEvent,
   PositionDecision,
   PositionOpenedEvent,
+  PositionTrimmedEvent,
   PriceMarkedEvent,
+  TierRemoval,
 } from "./types.js";
 import { eventError } from "./types.js";
 
@@ -122,6 +125,10 @@ export function parseEvent(input: unknown): EventParseResult {
       return parsePositionOpened(input, id, asOf);
     case "PositionClosed":
       return parsePositionClosed(input, id, asOf);
+    case "PositionTrimmed":
+      return parsePositionTrimmed(input, id, asOf);
+    case "PositionAddedTo":
+      return parsePositionAddedTo(input, id, asOf);
     case "PriceMarked":
       return parsePriceMarked(input, id, asOf);
     case "Deposit":
@@ -417,32 +424,135 @@ function parsePriceMarked(
   return { kind: "ok", value };
 }
 
+/** Narrow one untrusted lot record at `path` to a {@link PositionLot} or error. */
+function parseLot(raw: unknown, path: string): PositionLot | EventError {
+  if (!isRecord(raw)) {
+    return eventError(path, "Lot must be an object.");
+  }
+  if (!isPositiveNumber(raw.quantity)) {
+    return eventError(`${path}.quantity`, "Lot quantity must be positive.");
+  }
+  if (!isPositiveNumber(raw.cost)) {
+    return eventError(`${path}.cost`, "Lot cost must be positive.");
+  }
+  if (raw.tier !== "c1" && raw.tier !== "c2" && raw.tier !== "c3") {
+    return eventError(`${path}.tier`, "Lot tier must be c1, c2, or c3.");
+  }
+  const lot: PositionLot = { quantity: raw.quantity, cost: raw.cost, tier: raw.tier };
+  if (raw.entryFx !== undefined) {
+    if (!isPositiveNumber(raw.entryFx)) {
+      return eventError(`${path}.entryFx`, "Lot entryFx must be positive.");
+    }
+    lot.entryFx = raw.entryFx;
+  }
+  return lot;
+}
+
 function parseLots(input: unknown): { kind: "ok"; value: PositionLot[] } | EventError {
   if (!Array.isArray(input) || input.length === 0) {
     return eventError("position.lots", "Position requires at least one lot.");
   }
   const lots: PositionLot[] = [];
   for (const [index, raw] of input.entries()) {
-    if (!isRecord(raw)) {
-      return eventError(`position.lots[${index}]`, "Lot must be an object.");
-    }
-    if (!isPositiveNumber(raw.quantity)) {
-      return eventError(`position.lots[${index}].quantity`, "Lot quantity must be positive.");
-    }
-    if (!isPositiveNumber(raw.cost)) {
-      return eventError(`position.lots[${index}].cost`, "Lot cost must be positive.");
-    }
-    if (raw.tier !== "c1" && raw.tier !== "c2" && raw.tier !== "c3") {
-      return eventError(`position.lots[${index}].tier`, "Lot tier must be c1, c2, or c3.");
-    }
-    const lot: PositionLot = { quantity: raw.quantity, cost: raw.cost, tier: raw.tier };
-    if (raw.entryFx !== undefined) {
-      if (!isPositiveNumber(raw.entryFx)) {
-        return eventError(`position.lots[${index}].entryFx`, "Lot entryFx must be positive.");
-      }
-      lot.entryFx = raw.entryFx;
+    const lot = parseLot(raw, `position.lots[${index}]`);
+    if ("kind" in lot) {
+      return lot;
     }
     lots.push(lot);
   }
   return { kind: "ok", value: lots };
+}
+
+/**
+ * PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). Validate a `PositionTrimmed`
+ * in isolation: a non-empty `positionId`, at least one `{ tier, quantity }` removal,
+ * and the atomic settlement cash leg (same shape as a close). Existence of the
+ * position and the position-lot sufficiency gate are the cross-ref gate's job.
+ */
+function parsePositionTrimmed(
+  input: Record<string, unknown>,
+  id: string,
+  asOf: string,
+): EventParseResult {
+  const idError = requireNonEmptyString(input.positionId, "positionId");
+  if (idError) {
+    return eventError("positionId", idError.message);
+  }
+  if (!Array.isArray(input.removals) || input.removals.length === 0) {
+    return eventError("removals", "PositionTrimmed requires at least one { tier, quantity } removal.");
+  }
+  const removals: TierRemoval[] = [];
+  for (const [index, raw] of input.removals.entries()) {
+    if (!isRecord(raw)) {
+      return eventError(`removals[${index}]`, "Removal must be an object.");
+    }
+    const tier = parseTier(raw.tier, `removals[${index}].tier`);
+    if ("kind" in tier) {
+      return tier;
+    }
+    if (!isPositiveNumber(raw.quantity)) {
+      return eventError(`removals[${index}].quantity`, "Removal quantity must be a positive number.");
+    }
+    removals.push({ tier: tier.tier, quantity: raw.quantity });
+  }
+  const settlement = input.settlement;
+  if (!isRecord(settlement)) {
+    return eventError("settlement", "PositionTrimmed is missing its required settlement cash leg.");
+  }
+  const settlementReserveError = requireNonEmptyString(settlement.reserveId, "settlement.reserveId");
+  if (settlementReserveError) {
+    return eventError("settlement.reserveId", settlementReserveError.message);
+  }
+  if (!isPositiveNumber(settlement.proceeds)) {
+    return eventError("settlement.proceeds", "settlement.proceeds must be a positive number.");
+  }
+  const value: PositionTrimmedEvent = {
+    id,
+    asOf,
+    type: "PositionTrimmed",
+    positionId: input.positionId as string,
+    removals,
+    settlement: { reserveId: settlement.reserveId as string, proceeds: settlement.proceeds },
+  };
+  return { kind: "ok", value };
+}
+
+/**
+ * PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). Validate a `PositionAddedTo`
+ * in isolation: a non-empty `positionId`, one new `lot`, and the atomic funding cash
+ * leg (same shape as an open). Existence + funding sufficiency are the cross-ref job.
+ */
+function parsePositionAddedTo(
+  input: Record<string, unknown>,
+  id: string,
+  asOf: string,
+): EventParseResult {
+  const idError = requireNonEmptyString(input.positionId, "positionId");
+  if (idError) {
+    return eventError("positionId", idError.message);
+  }
+  const lot = parseLot(input.lot, "lot");
+  if ("kind" in lot) {
+    return lot;
+  }
+  const funding = input.funding;
+  if (!isRecord(funding)) {
+    return eventError("funding", "PositionAddedTo is missing its required funding cash leg.");
+  }
+  const fundingReserveError = requireNonEmptyString(funding.reserveId, "funding.reserveId");
+  if (fundingReserveError) {
+    return eventError("funding.reserveId", fundingReserveError.message);
+  }
+  if (!isPositiveNumber(funding.amount)) {
+    return eventError("funding.amount", "funding.amount must be a positive number.");
+  }
+  const value: PositionAddedToEvent = {
+    id,
+    asOf,
+    type: "PositionAddedTo",
+    positionId: input.positionId as string,
+    lot,
+    funding: { reserveId: funding.reserveId as string, amount: funding.amount },
+  };
+  return { kind: "ok", value };
 }

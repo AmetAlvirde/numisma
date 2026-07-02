@@ -18,6 +18,8 @@ import type {
 export type PortfolioEventType =
   | "PositionOpened"
   | "PositionClosed"
+  | "PositionTrimmed"
+  | "PositionAddedTo"
   | "PriceMarked"
   | "Deposit"
   | "Withdraw"
@@ -94,6 +96,47 @@ export interface PositionClosedEvent extends BaseEvent {
   settlement: CloseSettlement;
 }
 
+/**
+ * PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). One tier-directed removal
+ * on a trim: take `quantity` out of the named `tier`'s lots (pro-rata across the
+ * lots within that tier, preserving each lot's blended entryFx). Trader-directed
+ * BETWEEN tiers, pro-rata WITHIN a tier.
+ */
+export interface TierRemoval {
+  tier: CapitalTier;
+  quantity: number;
+}
+
+/**
+ * PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). Partially close a Position:
+ * remove `removals` from the named tiers (the asset leg) and credit the atomic
+ * `settlement` cash leg into a Reserve — the partial-close analog of
+ * {@link PositionClosedEvent}. The position stays OPEN with reduced lots; the fold
+ * emits a PARTIAL {@link ClosedPositionRecord} on the sold portion sharing the
+ * surviving position's id. NAV is conserved (asset out at mark = cash in).
+ */
+export interface PositionTrimmedEvent extends BaseEvent {
+  type: "PositionTrimmed";
+  positionId: string;
+  removals: TierRemoval[];
+  /** Cash leg: credit this Reserve with the proceeds of the removed portion. */
+  settlement: CloseSettlement;
+}
+
+/**
+ * PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). Add to an OPEN Position:
+ * APPEND a new {@link PositionLot} (its own entryFx/tier preserved — NEVER
+ * weighted-average-merged, ADR-002) funded atomically by the `funding` cash leg.
+ * Produces no realized P&L. NAV is conserved when funding = lot market value.
+ */
+export interface PositionAddedToEvent extends BaseEvent {
+  type: "PositionAddedTo";
+  positionId: string;
+  lot: PositionLot;
+  /** Cash leg: debit this Reserve to fund the new lot. */
+  funding: OpenFunding;
+}
+
 /** External capital arriving into a Reserve, classified at arrival by `tier`. */
 export interface DepositEvent extends BaseEvent {
   type: "Deposit";
@@ -150,6 +193,8 @@ export interface InvalidationMarkedEvent extends BaseEvent {
 export type PortfolioEvent =
   | PositionOpenedEvent
   | PositionClosedEvent
+  | PositionTrimmedEvent
+  | PositionAddedToEvent
   | PriceMarkedEvent
   | DepositEvent
   | WithdrawEvent
