@@ -225,10 +225,9 @@ export function applyEventToReference(reference: EventReference, event: Portfoli
           event.settlement.reserveId,
           reserveDeltasForClose(removed, event.settlement.proceeds),
         );
-        // A trim that empties the position retires the id (parallels a full close).
-        if (working.length === 0) {
-          reference.closedPositionIds.add(event.positionId);
-        }
+        // A trim ALWAYS leaves the position open: a full-retirement trim is rejected
+        // at the gate (`crossReferenceTrim`), so `working` is never empty here and the
+        // id is never retired — the position survives with reduced lots.
       }
       break;
     }
@@ -514,6 +513,23 @@ function crossReferenceTrim(
           `which holds only ${available}.`,
       );
     }
+  }
+  // Full-retirement REJECT (user-ratified rule): a trim whose removals would empty
+  // the position fails loud here — a trim must leave the position OPEN. The trader is
+  // pointed at `PositionClosed` instead. Enforced at the gate so the fold never
+  // reaches `positions.delete`; the position ALWAYS survives a trim. `totalHeld` and
+  // `totalRequested` are computed from the (batch-shrunk) running lots, so the check
+  // is exact even after earlier trims in the same batch. Reaching here guarantees the
+  // position holds lots (an empty tier would have tripped the sufficiency gate above).
+  const totalHeld = [...availableByTier.values()].reduce((sum, quantity) => sum + quantity, 0);
+  const totalRequested = [...requestedByTier.values()].reduce((sum, quantity) => sum + quantity, 0);
+  if (totalHeld - totalRequested <= 1e-9) {
+    return eventError(
+      "removals",
+      `PositionTrimmed would remove every lot of position '${event.positionId}' ` +
+        `(${totalRequested} of ${totalHeld} held) — a full retirement. A trim must leave the ` +
+        `position open; use PositionClosed to fully close it.`,
+    );
   }
   // Settlement-magnitude gate on the removed subset: expected ≈ Σ removed quantity ×
   // the instrument's last close; a gross deviation is a fat-finger, rejected loud.

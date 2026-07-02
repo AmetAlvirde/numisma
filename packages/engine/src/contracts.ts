@@ -104,6 +104,21 @@ export interface ClosedPositionRecord {
    * for a full `PositionClosed`. Many partials + a final close thread one lineage id.
    */
   partial?: boolean;
+  /**
+   * PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). NAV-honesty disclosure
+   * (R2/M2) on a PARTIAL trim row: the removed units valued at the latest mark
+   * (`markValueUsd`) versus the actual fill (`proceedsUsd`), and their signed
+   * `deltaUsd`. NAV conservation is a settle-AT-mark property, not an unconditional
+   * one: when the fill lands at the mark `deltaUsd ≈ 0` and NAV is conserved; when
+   * the fill lands OFF the mark the difference is a real realized gain/loss that
+   * legitimately moves NAV, surfaced here rather than hidden behind a false
+   * neutrality claim. Present only on partial rows (absent on full closes).
+   */
+  markVsFill?: {
+    markValueUsd: number;
+    proceedsUsd: number;
+    deltaUsd: number;
+  };
 }
 
 /** The structured price+direction level a

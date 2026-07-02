@@ -248,10 +248,16 @@ export function foldEvents(
         // Partial close: remove the named tier quantities from the OPEN position's
         // lots (pro-rata within each tier), credit the settlement Reserve with the
         // proceeds tiered by the REMOVED mix, and emit a PARTIAL closed-book row on
-        // the sold portion sharing the surviving position's id. The position stays
-        // open with reduced lots. Sufficiency was proven at ingest. NAV is conserved:
-        // asset removed at mark == cash credited; the realized gain was already the
-        // position's unrealized gain, now converted, not created.
+        // the sold portion sharing the surviving position's id. Sufficiency and the
+        // full-retirement REJECT were both proven at ingest, so the position ALWAYS
+        // survives here with reduced lots (the fold never deletes on a trim).
+        //
+        // NAV honesty (R2/M2): conservation is a settle-AT-mark property, NOT an
+        // unconditional claim. When the fill lands at the mark the asset removed at
+        // mark equals the cash credited and NAV is conserved; an OFF-mark fill is a
+        // real realized gain/loss that legitimately moves NAV. The difference is
+        // surfaced on the partial row's `markVsFill` disclosure (built below from the
+        // latest mark seen so far), never hidden behind a false neutrality claim.
         const trimming = positions.get(event.positionId);
         if (trimming) {
           let working = trimming.lots;
@@ -263,19 +269,27 @@ export function foldEvents(
           }
           const settlementCurrency =
             reserves.get(event.settlement.reserveId)?.currency ?? trimming.currency;
+          // The mark the removed units are valued at for the NAV-honesty disclosure:
+          // the latest PriceMarked seen so far, else the position's standing mark.
+          const markPrice = latestMark.get(trimming.instrumentId) ?? trimming.markPrice;
           applyToReserve(
             reserves,
             event.settlement.reserveId,
             reserveDeltasForClose(removed, event.settlement.proceeds),
           );
           closedPositions.push(
-            buildClosedPosition(trimming, removed, event.asOf, event.settlement.proceeds, settlementCurrency, usdMxn, true),
+            buildClosedPosition(
+              trimming,
+              removed,
+              event.asOf,
+              event.settlement.proceeds,
+              settlementCurrency,
+              usdMxn,
+              true,
+              markPrice,
+            ),
           );
           trimming.lots = working;
-          // A trim that removes every remaining lot fully retires the position.
-          if (working.length === 0) {
-            positions.delete(event.positionId);
-          }
         }
         break;
       }
@@ -380,6 +394,7 @@ function buildClosedPosition(
   settlementCurrency: PositionRecord["currency"],
   reviewFx: number,
   partial = false,
+  markPrice?: number,
 ): ClosedPositionRecord {
   const proceedsUsd = toUsd(proceedsNative, settlementCurrency, reviewFx);
 
@@ -418,6 +433,18 @@ function buildClosedPosition(
     });
   }
 
+  // NAV-honesty disclosure (R2/M2), partial rows only: value the removed units at the
+  // latest mark and surface the fill-vs-mark delta. `deltaUsd ≈ 0` ⇒ settle-at-mark
+  // (NAV conserved); `deltaUsd ≠ 0` ⇒ an off-mark fill that legitimately moved NAV.
+  const markVsFill =
+    partial && markPrice !== undefined
+      ? (() => {
+          const removedQuantity = lots.reduce((sum, lot) => sum + lot.quantity, 0);
+          const markValueUsd = toUsd(removedQuantity * markPrice, closing.currency, reviewFx);
+          return { markValueUsd, proceedsUsd, deltaUsd: proceedsUsd - markValueUsd };
+        })()
+      : undefined;
+
   return {
     positionId: closing.id,
     instrumentId: closing.instrumentId,
@@ -431,6 +458,7 @@ function buildClosedPosition(
     realizedPnlUsd: proceedsUsd - costBasisUsd,
     tierAttribution,
     ...(partial ? { partial: true } : {}),
+    ...(markVsFill ? { markVsFill } : {}),
   };
 }
 
