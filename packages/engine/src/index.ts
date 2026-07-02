@@ -49,7 +49,7 @@ export type {
   DashboardDetailRow,
   DashboardDetail,
   TierContribution,
-  // PROTOTYPE (mvi 2026-07-01-realized-pnl): realized closed book + invalidation.
+  // Realized closed book + invalidation read-model types.
   ClosedPositionRecord,
   RealizedTierAttribution,
   InvalidationLevel,

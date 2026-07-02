@@ -151,7 +151,7 @@ export function buildCompositionReport(
 }
 
 /**
- * PROTOTYPE (mvi 2026-07-01-realized-pnl). Assemble the trade blotter from the
+ * Assemble the trade blotter from the
  * fold's closed book: the rows as-is, plus realized rolled up by Tempo and by Tier.
  * Descriptive only — nothing here is added to NAV.
  */
@@ -198,7 +198,7 @@ function rollup(
 }
 
 /**
- * PROTOTYPE (mvi 2026-07-01-realized-pnl). Derive breach for every OPEN position
+ * Derive breach for every OPEN position
  * carrying a structured invalidation level: a `below` level breaches when the mark
  * falls to/through it (a long's stop), an `above` level when the mark rises
  * to/through it (a short's stop). Positions without a level are silent.

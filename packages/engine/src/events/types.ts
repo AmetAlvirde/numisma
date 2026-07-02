@@ -25,7 +25,7 @@ export type PortfolioEventType =
   | "InvalidationMarked";
 
 /**
- * PROTOTYPE (mvi 2026-07-01-realized-pnl). The side a price must cross to breach a
+ * The side a price must cross to breach a
  * Position's structured invalidation level. `below` = a long's stop (breached when
  * the mark falls to/through the level); `above` = a short's stop (breached when the
  * mark rises to/through it). The prose `invalidationCondition` on `PositionOpened`
@@ -132,7 +132,7 @@ export interface PriceMarkedEvent extends BaseEvent {
 }
 
 /**
- * PROTOTYPE (mvi 2026-07-01-realized-pnl). Sets (or revises) the structured
+ * Sets (or revises) the structured
  * invalidation level of an OPEN Position — the price + direction the thesis breaks
  * on. Latest-wins per `positionId`, exactly parallel to how `PriceMarked` is
  * latest-wins per instrument; the user can revise it after open (a later mark
