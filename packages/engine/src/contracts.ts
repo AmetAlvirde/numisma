@@ -98,15 +98,16 @@ export interface ClosedPositionRecord {
   realizedPnlUsd: number;
   tierAttribution: RealizedTierAttribution[];
   /**
-   * PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). True when this row is a
-   * PARTIAL close emitted by a `PositionTrimmed` on the removed portion — the
-   * surviving position (same `positionId`) stays open with reduced lots. Absent/false
-   * for a full `PositionClosed`. Many partials + a final close thread one lineage id.
+   * True when this row is a PARTIAL close emitted by a `PositionTrimmed` on the
+   * removed portion — the surviving position (same `positionId`) stays open with
+   * reduced lots. Absent/false for a full `PositionClosed`. Many partials plus a
+   * final close thread one lineage id: every partial row carries `partial: true`,
+   * the final full close omits it.
    */
   partial?: boolean;
   /**
-   * PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). NAV-honesty disclosure
-   * (R2/M2) on a PARTIAL trim row: the removed units valued at the latest mark
+   * NAV-honesty disclosure on a PARTIAL trim row: the removed units valued at the
+   * latest mark
    * (`markValueUsd`) versus the actual fill (`proceedsUsd`), and their signed
    * `deltaUsd`. NAV conservation is a settle-AT-mark property, not an unconditional
    * one: when the fill lands at the mark `deltaUsd ≈ 0` and NAV is conserved; when

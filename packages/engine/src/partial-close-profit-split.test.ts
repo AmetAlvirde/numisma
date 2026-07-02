@@ -1,5 +1,5 @@
-// PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). Locks the combined MVI's
-// seams: (A) PositionTrimmed partial close (pro-rata within tier, partial closed-book
+// Locks the trim/add/profit-split seams: (A) PositionTrimmed partial close (pro-rata
+// within tier, partial closed-book
 // row, NAV conserved, reserve credited); (B) PositionAddedTo lot append (never merged,
 // ADR-002); the position-lot-sufficiency ingest gate; and (C) the derived,
 // descriptive-only profit-split layer with its preferences-sidecar policy selector.

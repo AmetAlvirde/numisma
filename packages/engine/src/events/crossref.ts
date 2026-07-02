@@ -457,8 +457,8 @@ function crossReferenceClose(
 }
 
 /**
- * PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). Cross-reference a
- * `PositionTrimmed`. The settlement cash leg is a CREDIT (it can never overdraw a
+ * Cross-reference a `PositionTrimmed`. The settlement cash leg is a CREDIT (it can
+ * never overdraw a
  * Reserve), so the sufficiency concern moves to the POSITION LOTS: for each
  * `{ tier, quantity }` the position's lots in that tier must sum to ≥ quantity, else
  * fail loud (the position-lot-sufficiency gate, parallel to reserve `checkDebit`).
@@ -554,8 +554,8 @@ function crossReferenceTrim(
 }
 
 /**
- * PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). Cross-reference a
- * `PositionAddedTo`: the position must exist and be open, and the funding Reserve
+ * Cross-reference a `PositionAddedTo`: the position must exist and be open, and the
+ * funding Reserve
  * must exist and hold enough (per tier) to cover the debit — so an add cannot drive
  * a Reserve silently negative. Pure.
  */

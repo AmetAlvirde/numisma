@@ -464,8 +464,8 @@ function parseLots(input: unknown): { kind: "ok"; value: PositionLot[] } | Event
 }
 
 /**
- * PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). Validate a `PositionTrimmed`
- * in isolation: a non-empty `positionId`, at least one `{ tier, quantity }` removal,
+ * Validate a `PositionTrimmed` in isolation: a non-empty `positionId`, at least one
+ * `{ tier, quantity }` removal,
  * and the atomic settlement cash leg (same shape as a close). Existence of the
  * position and the position-lot sufficiency gate are the cross-ref gate's job.
  */
@@ -518,8 +518,8 @@ function parsePositionTrimmed(
 }
 
 /**
- * PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). Validate a `PositionAddedTo`
- * in isolation: a non-empty `positionId`, one new `lot`, and the atomic funding cash
+ * Validate a `PositionAddedTo` in isolation: a non-empty `positionId`, one new `lot`,
+ * and the atomic funding cash
  * leg (same shape as an open). Existence + funding sufficiency are the cross-ref job.
  */
 function parsePositionAddedTo(

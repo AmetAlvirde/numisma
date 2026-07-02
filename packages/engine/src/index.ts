@@ -99,8 +99,8 @@ export {
   splitTierRemoval,
 } from "./events/fold.js";
 
-// PROTOTYPE (mvi 2026-07-02-partial-close-profit-split): the derived, descriptive-only
-// profit-split layer + its preferences-sidecar policy selector (decoupled from the log).
+// The derived, descriptive-only profit-split layer + its preferences-sidecar policy
+// selector (decoupled from the log).
 export type {
   SplitBasis,
   ProfitPolicy,

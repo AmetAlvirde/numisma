@@ -1,5 +1,5 @@
-// PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). T8 — the PURE half of the
-// hardened preferences sidecar: `pickPolicyAsOf` as-of selection (latest entry with
+// The PURE half of the hardened preferences sidecar: `pickPolicyAsOf` as-of
+// selection (latest entry with
 // effectiveAt <= asOf, non-monotonic input handled deterministically, empty/undefined
 // guards) and the standalone-fold guarantee — the event log folds to the pure #90 book
 // with NO sidecar present, and the descriptive-only profit-split block stays empty so

@@ -1,5 +1,5 @@
-// PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). T8 — the RELIABLE (R4/M5)
-// half of the hardened preferences sidecar IO: the genuinely append-only writer
+// The RELIABLE half of the hardened preferences sidecar IO: the genuinely
+// append-only writer
 // preserves ALL prior entries; the validating loader QUARANTINES malformed/garbage
 // lines (bad JSON/shape, invalid ratio, bad splitBasis, unparseable effectiveAt)
 // instead of throwing through or corrupting as-of replay; blank lines are tolerated;
