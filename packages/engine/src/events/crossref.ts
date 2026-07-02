@@ -17,15 +17,22 @@ import type {
   EventParseResult,
   InvalidationMarkedEvent,
   PortfolioEvent,
+  PositionAddedToEvent,
   PositionClosedEvent,
   PositionOpenedEvent,
+  PositionTrimmedEvent,
   PriceMarkedEvent,
   TierDelta,
   TransferEvent,
   WithdrawEvent,
 } from "./types.js";
 import { eventError } from "./types.js";
-import { reserveDeltasForClose, reserveDeltasForOpen, weightedAverageCost } from "./fold.js";
+import {
+  reserveDeltasForClose,
+  reserveDeltasForOpen,
+  splitTierRemoval,
+  weightedAverageCost,
+} from "./fold.js";
 
 /**
  * The deviation past which a `PriceMarked` is treated as an implausible fat-finger
@@ -196,6 +203,51 @@ export function applyEventToReference(reference: EventReference, event: Portfoli
       reference.closedPositionIds.add(event.positionId);
       break;
     }
+    case "PositionTrimmed": {
+      // Credit the settlement reserve (tiered by the removed mix) and REDUCE the
+      // running per-tier position lots so a later trim in the same batch sees the
+      // shrunk balance — the shadow the position-lot-sufficiency gate reads.
+      const trimmed = reference.positionLots.get(event.positionId);
+      if (trimmed) {
+        let working = trimmed.lots;
+        const removed: PositionLot[] = [];
+        for (const removal of event.removals) {
+          const split = splitTierRemoval(working, removal.tier, removal.quantity);
+          removed.push(...split.removed);
+          working = split.remaining;
+        }
+        reference.positionLots.set(event.positionId, {
+          instrumentId: trimmed.instrumentId,
+          lots: working,
+        });
+        applyDeltasToBalance(
+          reference,
+          event.settlement.reserveId,
+          reserveDeltasForClose(removed, event.settlement.proceeds),
+        );
+        // A trim that empties the position retires the id (parallels a full close).
+        if (working.length === 0) {
+          reference.closedPositionIds.add(event.positionId);
+        }
+      }
+      break;
+    }
+    case "PositionAddedTo": {
+      // Append the new lot to the running position lots and debit the funding reserve.
+      const added = reference.positionLots.get(event.positionId);
+      if (added) {
+        reference.positionLots.set(event.positionId, {
+          instrumentId: added.instrumentId,
+          lots: [...added.lots, event.lot],
+        });
+      }
+      applyDeltasToBalance(
+        reference,
+        event.funding.reserveId,
+        reserveDeltasForOpen([event.lot], event.funding.amount),
+      );
+      break;
+    }
     case "Deposit":
       applyDeltasToBalance(reference, event.reserveId, [
         { tier: event.tier, amount: event.amount },
@@ -274,6 +326,10 @@ export function crossReferenceEvent(
       return crossReferenceOpen(event, reference);
     case "PositionClosed":
       return crossReferenceClose(event, reference, options?.settlementThreshold);
+    case "PositionTrimmed":
+      return crossReferenceTrim(event, reference, options?.settlementThreshold);
+    case "PositionAddedTo":
+      return crossReferenceAddedTo(event, reference);
     case "PriceMarked":
       return crossReferenceMark(event, reference, options?.magnitudeThreshold);
     case "Deposit":
@@ -396,6 +452,131 @@ function crossReferenceClose(
             `the ${(threshold * 100).toFixed(0)}% settlement sanity threshold.`,
         );
       }
+    }
+  }
+  return { kind: "ok", value: event };
+}
+
+/**
+ * PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). Cross-reference a
+ * `PositionTrimmed`. The settlement cash leg is a CREDIT (it can never overdraw a
+ * Reserve), so the sufficiency concern moves to the POSITION LOTS: for each
+ * `{ tier, quantity }` the position's lots in that tier must sum to ≥ quantity, else
+ * fail loud (the position-lot-sufficiency gate, parallel to reserve `checkDebit`).
+ * The settlement-magnitude gate is reused on the REMOVED subset (Σ removed quantity ×
+ * the instrument's last close). Pure: reads `reference`, never mutates it.
+ */
+function crossReferenceTrim(
+  event: PositionTrimmedEvent,
+  reference: EventReference,
+  threshold = SETTLEMENT_MAGNITUDE_THRESHOLD,
+): EventParseResult {
+  if (!reference.positionIds.has(event.positionId)) {
+    return eventError(
+      "positionId",
+      `PositionTrimmed references position id '${event.positionId}', which neither ` +
+        `the genesis seed nor the log contains.`,
+    );
+  }
+  if (reference.closedPositionIds.has(event.positionId)) {
+    return eventError(
+      "positionId",
+      `PositionTrimmed targets position id '${event.positionId}', which is already closed.`,
+    );
+  }
+  if (!reference.reserveBalances.has(event.settlement.reserveId)) {
+    return eventError(
+      "settlement.reserveId",
+      `PositionTrimmed settles into reserve id '${event.settlement.reserveId}', which neither ` +
+        `the genesis seed nor the log contains.`,
+    );
+  }
+  const held = reference.positionLots.get(event.positionId);
+  const availableByTier = new Map<CapitalTier, number>();
+  for (const lot of held?.lots ?? []) {
+    availableByTier.set(lot.tier, (availableByTier.get(lot.tier) ?? 0) + lot.quantity);
+  }
+  // Position-lot-sufficiency gate: aggregate the requested removal per tier (a batch
+  // may name a tier twice) and reject when it exceeds the tier's available lots.
+  const requestedByTier = new Map<CapitalTier, number>();
+  for (const removal of event.removals) {
+    requestedByTier.set(
+      removal.tier,
+      (requestedByTier.get(removal.tier) ?? 0) + removal.quantity,
+    );
+  }
+  for (const [tier, requested] of requestedByTier) {
+    const available = availableByTier.get(tier) ?? 0;
+    if (requested > available + 1e-9) {
+      return eventError(
+        "removals",
+        `PositionTrimmed removes ${requested} from position '${event.positionId}' tier ${tier}, ` +
+          `which holds only ${available}.`,
+      );
+    }
+  }
+  // Settlement-magnitude gate on the removed subset: expected ≈ Σ removed quantity ×
+  // the instrument's last close; a gross deviation is a fat-finger, rejected loud.
+  const last = held ? reference.lastClose.get(held.instrumentId) : undefined;
+  if (held && last !== undefined) {
+    const removedQuantity = event.removals.reduce((sum, removal) => sum + removal.quantity, 0);
+    const expected = removedQuantity * last.price;
+    if (expected > 0) {
+      const deviation = Math.abs(event.settlement.proceeds / expected - 1);
+      if (deviation > threshold) {
+        return eventError(
+          "settlement.proceeds",
+          `PositionTrimmed proceeds ${event.settlement.proceeds} deviate ` +
+            `${(deviation * 100).toFixed(1)}% from expected ${expected.toFixed(2)} ` +
+            `(${removedQuantity} × last close ${last.price} for '${held.instrumentId}'), beyond ` +
+            `the ${(threshold * 100).toFixed(0)}% settlement sanity threshold.`,
+        );
+      }
+    }
+  }
+  return { kind: "ok", value: event };
+}
+
+/**
+ * PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). Cross-reference a
+ * `PositionAddedTo`: the position must exist and be open, and the funding Reserve
+ * must exist and hold enough (per tier) to cover the debit — so an add cannot drive
+ * a Reserve silently negative. Pure.
+ */
+function crossReferenceAddedTo(
+  event: PositionAddedToEvent,
+  reference: EventReference,
+): EventParseResult {
+  if (!reference.positionIds.has(event.positionId)) {
+    return eventError(
+      "positionId",
+      `PositionAddedTo references position id '${event.positionId}', which neither ` +
+        `the genesis seed nor the log contains.`,
+    );
+  }
+  if (reference.closedPositionIds.has(event.positionId)) {
+    return eventError(
+      "positionId",
+      `PositionAddedTo targets position id '${event.positionId}', which is already closed.`,
+    );
+  }
+  if (!reference.reserveBalances.has(event.funding.reserveId)) {
+    return eventError(
+      "funding.reserveId",
+      `PositionAddedTo funds from reserve id '${event.funding.reserveId}', which neither ` +
+        `the genesis seed nor the log contains.`,
+    );
+  }
+  for (const delta of reserveDeltasForOpen([event.lot], event.funding.amount)) {
+    const error = checkDebit(
+      reference,
+      event.funding.reserveId,
+      delta.tier,
+      -delta.amount,
+      "funding.amount",
+    );
+    if (error) {
+      return { ...error, message: `PositionAddedTo ${error.message}` };
     }
   }
   return { kind: "ok", value: event };
