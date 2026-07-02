@@ -130,6 +130,8 @@ export function parseEvent(input: unknown): EventParseResult {
       return parseReserveMove(input, id, asOf, "Withdraw");
     case "Transfer":
       return parseTransfer(input, id, asOf);
+    case "InvalidationMarked":
+      return parseInvalidationMarked(input, id, asOf);
     default:
       return eventError("type", `Unsupported event type: ${String(input.type)}`);
   }
@@ -352,6 +354,39 @@ function parsePositionClosed(
       type: "PositionClosed",
       positionId: input.positionId as string,
       settlement: { reserveId: settlement.reserveId as string, proceeds: settlement.proceeds },
+    },
+  };
+}
+
+/**
+ * PROTOTYPE (mvi 2026-07-01-realized-pnl). Validate an `InvalidationMarked` in
+ * isolation: a non-empty `positionId`, a positive `price`, and a `below`/`above`
+ * `direction`. Existence of the position is the cross-ref gate's job, not parse's.
+ */
+function parseInvalidationMarked(
+  input: Record<string, unknown>,
+  id: string,
+  asOf: string,
+): EventParseResult {
+  const error = requireNonEmptyString(input.positionId, "positionId");
+  if (error) {
+    return eventError("positionId", error.message);
+  }
+  if (!isPositiveNumber(input.price)) {
+    return eventError("price", "InvalidationMarked price must be a positive number.");
+  }
+  if (input.direction !== "below" && input.direction !== "above") {
+    return eventError("direction", "InvalidationMarked direction must be 'below' or 'above'.");
+  }
+  return {
+    kind: "ok",
+    value: {
+      id,
+      asOf,
+      type: "InvalidationMarked",
+      positionId: input.positionId as string,
+      price: input.price,
+      direction: input.direction,
     },
   };
 }

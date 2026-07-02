@@ -21,7 +21,17 @@ export type PortfolioEventType =
   | "PriceMarked"
   | "Deposit"
   | "Withdraw"
-  | "Transfer";
+  | "Transfer"
+  | "InvalidationMarked";
+
+/**
+ * PROTOTYPE (mvi 2026-07-01-realized-pnl). The side a price must cross to breach a
+ * Position's structured invalidation level. `below` = a long's stop (breached when
+ * the mark falls to/through the level); `above` = a short's stop (breached when the
+ * mark rises to/through it). The prose `invalidationCondition` on `PositionOpened`
+ * stays; this is the structured, comparable form the dashboard watches.
+ */
+export type InvalidationDirection = "below" | "above";
 
 /** The five decision fields a Position cannot open without (product coherence). */
 export interface PositionDecision {
@@ -121,13 +131,30 @@ export interface PriceMarkedEvent extends BaseEvent {
   usdMxn?: number;
 }
 
+/**
+ * PROTOTYPE (mvi 2026-07-01-realized-pnl). Sets (or revises) the structured
+ * invalidation level of an OPEN Position — the price + direction the thesis breaks
+ * on. Latest-wins per `positionId`, exactly parallel to how `PriceMarked` is
+ * latest-wins per instrument; the user can revise it after open (a later mark
+ * supersedes an earlier one). The dashboard derives breach at compose time
+ * (latest mark vs latest level). Opening a Position with a structured stop is two
+ * events: `PositionOpened` + `InvalidationMarked`.
+ */
+export interface InvalidationMarkedEvent extends BaseEvent {
+  type: "InvalidationMarked";
+  positionId: string;
+  price: number;
+  direction: InvalidationDirection;
+}
+
 export type PortfolioEvent =
   | PositionOpenedEvent
   | PositionClosedEvent
   | PriceMarkedEvent
   | DepositEvent
   | WithdrawEvent
-  | TransferEvent;
+  | TransferEvent
+  | InvalidationMarkedEvent;
 
 export interface EventOk {
   kind: "ok";

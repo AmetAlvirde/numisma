@@ -5,11 +5,14 @@
 // cents-precision rule cannot silently diverge across the CLI and TUI surfaces.
 import type {
   Currency,
+  ClosedBook,
   CompositionReport,
   CompositionRow,
   DashboardFocus,
   DashboardSectionId,
+  InvalidationWatchRow,
   PriceJourney,
+  RealizedRollupRow,
   ReserveReconciliationLine,
 } from "./contracts.js";
 
@@ -98,6 +101,18 @@ export function formatCompositionReport(report: CompositionReport): string {
     formatPriceJourneys(report.priceJourneys),
   ];
 
+  // PROTOTYPE (mvi 2026-07-01-realized-pnl): the closed-book blotter + invalidation
+  // watch. Both render nothing when empty, so a fold with no closes / no levels
+  // produces byte-for-byte the prior report (existing snapshots stay green).
+  const blotter = formatClosedBook(report.closedBook);
+  if (blotter) {
+    sections.push("", blotter);
+  }
+  const watch = formatInvalidationWatch(report.invalidationWatch);
+  if (watch) {
+    sections.push("", watch);
+  }
+
   if (report.warnings.length > 0) {
     sections.push(
       "",
@@ -108,6 +123,69 @@ export function formatCompositionReport(report: CompositionReport): string {
 
   sections.push("", "Keys: q quit | r reload data");
   return sections.join("\n");
+}
+
+/**
+ * PROTOTYPE (mvi 2026-07-01-realized-pnl). Render the trade blotter: one row per
+ * closed position with realized Trading P&L, then realized rolled up by Tempo and by
+ * Tier, then the grand total — flagged descriptive-only so it is never mistaken for
+ * an addition to NAV. Returns "" when the closed book is empty.
+ */
+export function formatClosedBook(book: ClosedBook): string {
+  if (book.rows.length === 0) {
+    return "";
+  }
+  const title = "Realized P&L — Closed Book (blotter)";
+  const header = `${pad("Instrument", 12)} ${pad("Tempo", 10)} ${pad("Strategy", 14)} ${pad("Opened", 11)} ${pad("Closed", 11)} ${padLeft("Cost", 12)} ${padLeft("Proceeds", 12)} ${padLeft("Realized", 12)}`;
+  const body = book.rows.map((row) =>
+    `${pad(row.instrumentId, 12)} ${pad(row.tempo, 10)} ${pad(row.strategy ?? "—", 14)} ` +
+    `${pad(row.openedAsOf ?? "genesis", 11)} ${pad(row.closedAsOf, 11)} ` +
+    `${padLeft(formatUsd(row.costBasisUsd), 12)} ${padLeft(formatUsd(row.proceedsUsd), 12)} ` +
+    `${padLeft(formatUsd(row.realizedPnlUsd), 12)}`,
+  );
+
+  return [
+    title,
+    "-".repeat(title.length),
+    "Descriptive only — realized profit already sits in a Reserve; NOT re-added to NAV.",
+    header,
+    "-".repeat(header.length),
+    ...body,
+    "",
+    formatRealizedRollup("Realized by Tempo", book.byTempo),
+    "",
+    formatRealizedRollup("Realized by Tier", book.byTier),
+    "",
+    `Total realized since genesis: ${formatUsd(book.totalRealizedPnlUsd)}`,
+  ].join("\n");
+}
+
+function formatRealizedRollup(title: string, rows: RealizedRollupRow[]): string {
+  const header = `${pad("Key", 14)} ${padLeft("Cost", 12)} ${padLeft("Proceeds", 12)} ${padLeft("Realized", 12)}`;
+  const body = rows.map((row) =>
+    `${pad(row.key, 14)} ${padLeft(formatUsd(row.costBasisUsd), 12)} ${padLeft(formatUsd(row.proceedsUsd), 12)} ${padLeft(formatUsd(row.realizedPnlUsd), 12)}`,
+  );
+  return [title, "-".repeat(title.length), header, ...body].join("\n");
+}
+
+/**
+ * PROTOTYPE (mvi 2026-07-01-realized-pnl). Render the invalidation watch: one line
+ * per OPEN position carrying a structured level, showing its latest mark vs level and
+ * whether the thesis is breached. Returns "" when no position carries a level.
+ */
+export function formatInvalidationWatch(rows: InvalidationWatchRow[]): string {
+  if (rows.length === 0) {
+    return "";
+  }
+  const title = "Invalidation Watch";
+  const body = rows.map((row) => {
+    const status = row.breached ? "⚠ THESIS INVALIDATED" : "OK";
+    return (
+      `${pad(row.positionId, 20)} ${pad(row.instrumentId, 10)} ` +
+      `mark ${row.markPrice} ${row.direction} ${row.level}  ${status}`
+    );
+  });
+  return [title, "-".repeat(title.length), ...body].join("\n");
 }
 
 function formatWeeklyReviewFocus(report: CompositionReport): string {
