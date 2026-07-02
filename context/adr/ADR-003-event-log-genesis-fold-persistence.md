@@ -2,7 +2,7 @@
 
 _Made during: MVI — portfolio history persistence increment / 2026-06-29 prototype → reliable conversion (publication gate for PRD "Persists portfolio history as an append-only event log with as-of review")_
 _Scope: product_
-_Status: accepted (amended 2026-07-01 — see "Amendment: cash leg + durable-log migration/versioning" below; amended 2026-07-02 — see "Amendment: closed-book fold output + invalidation verb" below)_
+_Status: accepted (amended 2026-07-01 — see "Amendment: cash leg + durable-log migration/versioning" below; amended 2026-07-02 — see "Amendment: closed-book fold output + invalidation verb" below; amended 2026-07-02 — see "Amendment: trim/add verbs + lot-mutating fold + partial closed-book rows" below)_
 
 The durable source of truth for portfolio history is an append-only **event log**
 of material actions (`PositionOpened` / `PositionClosed` / `PriceMarked`) layered
@@ -229,3 +229,121 @@ verbatim. Considered and rejected: **realized as a field on the surviving open
 `PositionRecord`** (a closed trade is not an open holding — it must survive the
 close as its own record) and **realized additive to NAV** (double-counts the profit
 the cash leg already booked into a Reserve).
+
+## Amendment: trim/add verbs + lot-mutating fold + partial closed-book rows
+
+_Made during: MVI — partial-close + profit-split increment / 2026-07-02 prototype →
+reliable conversion (PRD "Trims and adds to Positions and derives the profit-split
+obligation", #96) / slice "Ratifies the trim/add event schema amendment and the
+preferences-sidecar boundary" (#97)._
+
+The partial-close + profit-split increment amends this ADR's load-bearing persisted
+schema and — for the first time — the fold's treatment of **open** positions. As with
+the cash-settlement and realized-P&L amendments, these decisions become persisted
+truth on the first real write, so they are ratified before any `PositionTrimmed` /
+`PositionAddedTo` reaches the durable log (no forced later log migration). The
+`product.md`/glossary ratification of the trader-facing vocabulary these verbs imply
+("Position Trim", "Position Add-To", the trim-reject-on-empty rule) lands separately
+in slice #103.
+
+- **7 verbs → 9.** The enumeration is now `PositionOpened` / `PositionClosed` /
+  `PriceMarked` / `Deposit` / `Withdraw` / `Transfer` / `InvalidationMarked` /
+  `PositionTrimmed` / `PositionAddedTo`. `PositionTrimmed { positionId, removals:
+  [{tier, quantity}], settlement }` takes partial profit off named tiers; the atomic
+  `settlement` cash leg rides on it exactly as `PositionClosed`'s does (the
+  cash-settlement amendment's on-the-trade-leg discipline, preserved).
+  `PositionAddedTo { positionId, lot, funding }` scales into an existing Position; the
+  atomic `funding` cash leg rides on it exactly as `PositionOpened`'s does.
+- **The fold now mutates open-position lots — a new capability.** Before this
+  amendment the fold only ever *created* a Position (open) or *retired* it
+  (close/delete); reserves were the only records it mutated in place (the
+  cash-settlement amendment). `PositionTrimmed` **removes named quantities from an
+  open Position's lots** (the position survives with reduced lots); `PositionAddedTo`
+  **appends a new lot** to an open Position. The fold stays a pure projection — the
+  mutation is of the in-memory fold accumulator, and every invariant is still enforced
+  at the **ingest boundary** (per-tier sufficiency + full-retirement rejection +
+  settlement/funding magnitude), never by an in-fold assertion. ADR-003's original
+  promise — a pure fold, trust established at ingest — is preserved.
+- **The fold emits *partial* `closedPositions[]` rows that share the surviving
+  Position's lineage id.** A trim produces a `ClosedPositionRecord` with `partial:
+  true` carrying the realized Trading P&L on the removed quantity (proceeds − Σ removed
+  lot USD cost at entry FX, one blended number per ADR-002), attributed per Capital
+  Tier by reusing `reserveDeltasForClose` — consistent-by-construction with the Reserve
+  credit the same trim produces. Crucially, **the partial row carries the id of the
+  Position that is still open**: many partial trims plus a final full close all thread
+  **one `positionId`** on the blotter (partials carry `partial: true`; the final close
+  does not). Realized stays **descriptive-only** — never added to NAV (the cash leg
+  already booked the proceeds into a Reserve) — the #90 blank-the-closed-book lock,
+  extended to partial rows.
+- **`ClosedPositionRecord.partial?` is optional / back-compat (C2).** The only
+  construction site is `buildClosedPosition`; full closes omit the flag entirely, so
+  existing folds and #90 closed-book consumers are unaffected. The one internal seam
+  change is `buildClosedPosition` gaining a `lots` subset param + `partial` flag (C3,
+  no external callers).
+
+### `EVENT_SCHEMA_VERSION` decision: two additive verbs, marker stays `2` (C4)
+
+`EVENT_SCHEMA_VERSION` **stays `2`**. `PositionTrimmed` and `PositionAddedTo` are
+documented as **v2-era additive verbs** — the `InvalidationMarked` precedent applied
+again, for the same reasons:
+
+- **No existing record shape changes and no line needs migration.** Every prior
+  record — genesis seeds, opens, closes, marks, cash movements, invalidations — parses
+  byte-for-byte identically. The v1 → v2 bump was forced only because `funding` /
+  `settlement` became **required** on existing verbs; nothing of that kind happens
+  here. The new `partial?` field lives on the fold's *read-model output*
+  (`ClosedPositionRecord`), not on any persisted event verb, and is optional. Bumping
+  to `3` with no `v2 → v3` migration would make the marker denote a shape generation
+  that never changed and would over-stamp records the running build already fully
+  understands.
+- **The forward-compat guard stays honest.** An older build meeting a
+  `PositionTrimmed` / `PositionAddedTo` line fails loud at the per-verb parse switch
+  (unknown `type` → ingest error → the fail-loud-on-partial-log read path refuses to
+  fold), never a silent misread. One `schemaVersion` marker must **not** denote two
+  different verb sets in a way that endangers reads — and it does not, because the
+  marker tracks *persisted record shape*, not verb-set cardinality (the concern
+  resolved in the realized-P&L amendment). Additive verbs that change no existing
+  record shape ride within the current version; only a change to an existing verb's
+  required shape bumps the marker.
+
+### The three SDP tests, restated for this amendment
+
+- **Hard to reverse.** The verb enumeration and the trim/add settlement shapes become
+  persisted log truth on the first real write, and the retire-on-empty/reject semantics
+  are baked into the ingest gate — re-spelling or re-scoping either later is a log
+  migration, not a one-file edit.
+- **Surprising without context.** A **partial closed-book row shares the id of a
+  Position that is still open** (not a new id, not the retired-position pattern of a
+  full close), and the profit-split obligation these partials feed is descriptive-only
+  on the exact cumulative total — it is never a second source of NAV. Neither is
+  guessable from the record shapes alone.
+- **A real trade-off.** Two were decided:
+  - **Trader-directed *between* tiers vs. pro-rata *within* a tier.** The trader names
+    which tiers to trim (`removals: [{tier, quantity}]`) — deliberate control over
+    *which* capital comes off — while removal *within* each named tier's lots is
+    pro-rata (the last in-tier lot absorbing the float residual so `Σ removed ===
+    quantity` exactly). Chosen over fully trader-directed lot picking (needless
+    per-lot ceremony for a single-operator fund) and over fully pro-rata across all
+    tiers (which would silently trim a tier the trader meant to leave running with its
+    stop).
+  - **Full-retirement REJECT vs. alias-to-`PositionClosed`.** A trim whose removals
+    would empty the Position **fails loud at the ingest gate** and tells the operator
+    to use `PositionClosed`; the fold never reaches `positions.delete`. Chosen over
+    silently aliasing an emptying trim to a full close — which would blur two distinct
+    material actions (a partial-profit trim vs. a deliberate full exit) in the audit
+    log and let a fat-finger quantity retire a position the trader meant to keep. The
+    trim's ratified invariant: **the position always survives.**
+
+### Append-only and ADR-001/002, preserved
+
+The fold stays a **pure projection** and lives in `@numisma/engine`; the pure
+within-tier removal seam (`splitTierRemoval`), both verb folds, and the partial
+closed-book build are all pure. `packages/tui/src/event-store.ts` is **unmodified** —
+it dispatches events generically, so both new verbs reach the real ingest/persist path
+with zero access-surface change. ADR-002 is respected, not extended: add **appends** a
+lot preserving its own entry FX / tier (never weighted-average merged), and trim's
+within-tier pro-rata cost basis inherits the FX-P&L deferral verbatim (per-tier
+proceeds stay approximate under mixed entry FX; totals exact — carried from #90, not
+re-opened). Considered and rejected: **weighted-average lot merging on add** (destroys
+the per-lot entry-FX provenance ADR-002 exists to keep) and **a full-retirement trim
+aliased to `PositionClosed`** (see the trade-off above).
