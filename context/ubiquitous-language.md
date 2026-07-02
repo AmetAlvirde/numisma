@@ -73,6 +73,18 @@
 | **Manual Adjustment**       | A user-entered correction or annotation that changes a recorded value outside a normal execution event.                                    | correction              |
 | **Dashboard**               | A presentation surface for reviewing a focused set of Numisma records.                                                                     | perspective             |
 
+## Profit Split and Position Adjustment
+
+| Term                    | Definition                                                                                                                                                                                                                             | Aliases to avoid      |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
+| **Profit Split**        | The Fund's rule for setting aside a configured fraction of realized profit, split by ratio across Tempos (this Fund's default 60/40, routing 60 to the Wealth Tempo and 40 to the Reserve Tempo).                                      | profit share          |
+| **Obligation**          | The descriptive amount the Profit Split owes, computed on the exact cumulative total realized under the configured Split Basis; derived at read time and never added to NAV.                                                           | liability, accrual    |
+| **Split Basis**         | The configured loss-netting rule that determines how the Obligation accrues: `highWaterMark` (default — accrues only on new cumulative peaks, no clawback) or `perClose` (accrues on the sum of winning closes).                       | netting mode          |
+| **Preferences Sidecar** | The append-only `data/preferences.jsonl` artifact holding time-stamped trader policy (the Profit Split ratio and Split Basis), decoupled from the event log and selected as-of by a pure selector so the log still folds standalone.   | config file, settings |
+| **Position Trim**       | A partial reduction of an open Position that removes named quantities from named Capital Tiers, settling the removed quantity to cash and recording a partial realized result; the Position always survives (a full trim is rejected). | partial close         |
+| **Position Add-To**     | An increase of an open Position that appends new capital as its own Lot, preserving that Lot's entry FX and Capital Tier rather than blending into the average, and books no realized P&L.                                             | scale-in, average-in  |
+| **Reserve Target**      | The policy target that the Reserve Tempo hold 10% of total NAV; the dashboard measures the whole Reserve Tempo's share of total NAV against this 10% target, and the Profit Split's 40% share routes to the same Reserve Tempo.        | reserve floor         |
+
 ## Relationships
 
 - A **Fund** contains one or more **Portfolios**.
