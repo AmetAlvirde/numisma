@@ -1,7 +1,7 @@
 /**
- * PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). Access-surface half of the
- * profit-split preferences seam: read/seed the time-stamped, append-only preferences
- * SIDECAR that is DECOUPLED from the event log (ADR-001 keeps this file IO out of
+ * Access-surface half of the profit-split preferences seam: read/seed the
+ * time-stamped, append-only preferences SIDECAR that is DECOUPLED from the event log
+ * (ADR-001 keeps this file IO out of
  * `@numisma/engine`; the pure `pickPolicyAsOf` selector lives in the engine).
  *
  * The log folds standalone to the pure #90 book with ZERO preferences; this sidecar is
@@ -23,7 +23,7 @@
  *     selector `pickPolicyAsOf` owns as-of ordering (it sorts by `effectiveAt`, so a
  *     non-monotonic file replays deterministically).
  */
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import {
   defaultProfitPolicyEntry,
@@ -168,15 +168,4 @@ export async function seedDefaultPreferences(
   const seeded = defaultProfitPolicyEntry(effectiveAt, routingReserveId);
   await appendPreference(path, seeded);
   return [seeded];
-}
-
-/**
- * PROTOTYPE-DEMO ONLY (NOT the reliable path): whole-file overwrite kept solely so the
- * `prototype-partial-close-profit-split-demo.ts` script still compiles until the R5/M6
- * de-prototype slice removes that demo. The reliable path (`appendPreference` /
- * `seedDefaultPreferences`) never truncates the sidecar. Do not use in shipped code.
- */
-export async function writePreferences(path: string, entries: ProfitPolicyEntry[]): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
 }

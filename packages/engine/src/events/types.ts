@@ -97,8 +97,8 @@ export interface PositionClosedEvent extends BaseEvent {
 }
 
 /**
- * PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). One tier-directed removal
- * on a trim: take `quantity` out of the named `tier`'s lots (pro-rata across the
+ * One tier-directed removal on a trim: take `quantity` out of the named `tier`'s
+ * lots (pro-rata across the
  * lots within that tier, preserving each lot's blended entryFx). Trader-directed
  * BETWEEN tiers, pro-rata WITHIN a tier.
  */
@@ -108,8 +108,8 @@ export interface TierRemoval {
 }
 
 /**
- * PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). Partially close a Position:
- * remove `removals` from the named tiers (the asset leg) and credit the atomic
+ * Partially close a Position: remove `removals` from the named tiers (the asset leg)
+ * and credit the atomic
  * `settlement` cash leg into a Reserve — the partial-close analog of
  * {@link PositionClosedEvent}. The position stays OPEN with reduced lots (a
  * full-retirement trim is rejected at ingest — use {@link PositionClosedEvent}); the
@@ -127,8 +127,8 @@ export interface PositionTrimmedEvent extends BaseEvent {
 }
 
 /**
- * PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). Add to an OPEN Position:
- * APPEND a new {@link PositionLot} (its own entryFx/tier preserved — NEVER
+ * Add to an OPEN Position: APPEND a new {@link PositionLot} (its own entryFx/tier
+ * preserved — NEVER
  * weighted-average-merged, ADR-002) funded atomically by the `funding` cash leg.
  * Produces no realized P&L. NAV is conserved when funding = lot market value.
  */

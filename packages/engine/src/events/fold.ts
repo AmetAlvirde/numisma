@@ -463,8 +463,8 @@ function buildClosedPosition(
 }
 
 /**
- * PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). THE PARTIAL-REMOVAL SEAM.
- * Take `quantity` out of the lots that belong to `tier`, PRO-RATA across those lots
+ * THE PARTIAL-REMOVAL SEAM. Take `quantity` out of the lots that belong to `tier`,
+ * PRO-RATA across those lots
  * by their own quantity — so a removal preserves each lot's blended entryFx/cost
  * attribution rather than picking one lot arbitrarily. Returns the removed sub-lots
  * (each a copy carrying its parent's cost/entryFx/tier) and the surviving lots

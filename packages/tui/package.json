@@ -10,7 +10,6 @@
   "scripts": {
     "dev": "bun src/app.ts",
     "report": "tsx src/report.ts",
-    "demo:partial-close": "tsx src/prototype-partial-close-profit-split-demo.ts",
     "smoke:tui": "bun src/smoke-openTui.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   }

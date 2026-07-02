@@ -202,12 +202,11 @@ export function formatInvalidationWatch(rows: InvalidationWatchRow[]): string {
 }
 
 /**
- * PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). Render the descriptive-only
- * profit-split block: the basis, the exact cumulative net realized (with its peak on
- * the high-water-mark basis), the split OBLIGATION on that basis, and the RESERVE
- * tempo's actual % of NAV vs its target.
+ * Render the descriptive-only profit-split block: the basis, the exact cumulative
+ * net realized (with its peak on the high-water-mark basis), the split OBLIGATION on
+ * that basis, and the RESERVE tempo's actual % of NAV vs its target.
  *
- * OBLIGATION-ONLY (PRD #96 R1): absent an explicit routing signal, the block prints
+ * OBLIGATION-ONLY: absent an explicit routing signal, the block prints
  * ONLY the honestly computable obligation plus the RESERVE %-vs-target line — no
  * inferred "routed into sink" flow and no "unallocated profit" line. EMPTY-GUARDED —
  * returns "" for an undefined split (no policy / no closes), so blanking the block

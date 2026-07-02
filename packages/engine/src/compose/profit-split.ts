@@ -1,6 +1,6 @@
 /**
- * PROTOTYPE (mvi 2026-07-02-partial-close-profit-split). The profit-split layer —
- * DERIVED, DESCRIPTIVE-ONLY (no new verb; mirrors PRD #90's closed book).
+ * The profit-split layer — DERIVED, DESCRIPTIVE-ONLY (no new verb; mirrors the
+ * realized-P&L closed book).
  *
  * The fund's flagship split rule is COMPUTABLE from the realized closed book plus a
  * PREFERENCES policy that lives in a time-stamped sidecar DECOUPLED from the event log
