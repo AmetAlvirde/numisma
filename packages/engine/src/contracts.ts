@@ -97,6 +97,29 @@ export interface ClosedPositionRecord {
   proceedsUsd: number;
   realizedPnlUsd: number;
   tierAttribution: RealizedTierAttribution[];
+  /**
+   * True when this row is a PARTIAL realized result emitted by a `PositionTrimmed`
+   * on the removed portion — the surviving position (same `positionId`) stays open
+   * with reduced lots. Absent/false for a full `PositionClosed`. Many trims plus a
+   * final close thread one lineage id: every partial row carries `partial: true`,
+   * the final full close omits it.
+   */
+  partial?: boolean;
+  /**
+   * NAV-honesty disclosure on a PARTIAL trim row: the removed units valued at the
+   * latest mark
+   * (`markValueUsd`) versus the actual fill (`proceedsUsd`), and their signed
+   * `deltaUsd`. NAV conservation is a settle-AT-mark property, not an unconditional
+   * one: when the fill lands at the mark `deltaUsd ≈ 0` and NAV is conserved; when
+   * the fill lands OFF the mark the difference is a real realized gain/loss that
+   * legitimately moves NAV, surfaced here rather than hidden behind a false
+   * neutrality claim. Present only on partial rows (absent on full closes).
+   */
+  markVsFill?: {
+    markValueUsd: number;
+    proceedsUsd: number;
+    deltaUsd: number;
+  };
 }
 
 /** The structured price+direction level a

@@ -1,7 +1,8 @@
-// R1 regression lock (ADR-003 realized-P&L amendment): reliable-tier engine code
-// must not ship literally labelled with the realized-P&L prototype marker. Walks the
-// engine source tree and asserts the marker is gone. The needle is built from
-// fragments so this guard file never matches itself.
+// R1 regression lock (ADR-003 amendments): reliable-tier engine + TUI code must not
+// ship literally labelled with a prototype marker. Walks the source trees and asserts
+// the markers are gone — both the realized-P&L prototype (#90) and the
+// partial-close/profit-split prototype (#96). Each needle is built from fragments so
+// this guard file never matches itself (and the scan also skips this file by name).
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -12,7 +13,11 @@ const SRC_DIR = dirname(fileURLToPath(import.meta.url));
 // there (packages/tui/src), so the marker could reach main via either package.
 const TUI_SRC_DIR = join(SRC_DIR, "..", "..", "tui", "src");
 const SCAN_DIRS = [SRC_DIR, TUI_SRC_DIR];
-const MARKER = "2026-07-01" + "-realized-pnl";
+// Needles assembled from fragments so this guard file never matches itself.
+const MARKERS = [
+  "2026-07-01" + "-realized-pnl",
+  "PROTOTYPE (mvi " + "2026-07-02" + "-partial-close-profit-split)",
+];
 const SELF = "de-prototype.test.ts";
 
 function tsFiles(dir: string): string[] {
@@ -28,11 +33,12 @@ function tsFiles(dir: string): string[] {
   return out;
 }
 
-describe("de-prototype: realized-P&L marker is stripped from engine + TUI source", () => {
-  it("leaves no realized-P&L prototype marker anywhere under engine/src or tui/src", () => {
-    const offenders = SCAN_DIRS.flatMap(tsFiles).filter((file) =>
-      readFileSync(file, "utf8").includes(MARKER),
-    );
-    expect(offenders).toEqual([]);
-  });
+describe("de-prototype: prototype markers are stripped from engine + TUI source", () => {
+  const files = SCAN_DIRS.flatMap(tsFiles);
+  for (const marker of MARKERS) {
+    it(`leaves no "${marker}" prototype marker anywhere under engine/src or tui/src`, () => {
+      const offenders = files.filter((file) => readFileSync(file, "utf8").includes(marker));
+      expect(offenders).toEqual([]);
+    });
+  }
 });
