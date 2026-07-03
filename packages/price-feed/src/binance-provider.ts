@@ -10,12 +10,21 @@ import type { InstrumentRegistryEntry } from "@numisma/engine";
 
 const BINANCE_KLINES = "https://api.binance.com/api/v3/klines";
 
-/** A raw provider observation: the close and the instant it was fetched. */
+/**
+ * A raw provider observation: the close, the DATE of the bar it came from, and the
+ * instant it was fetched. `observationDate` (`YYYY-MM-DD`) is the provider's own bar
+ * date — a Binance 1d kline's `openTime` day (UTC), or a Twelve Data row's
+ * `datetime` day. The orchestrator uses it to tell a fresh close from a stale one on
+ * a market-closed day (see the per-provider bar-date rule in `fetch-prices.ts`); it
+ * is NOT the trading-day `asOf` (which is timezone-anchored in the engine).
+ */
 export interface ProviderObservation {
   instrumentId: string;
   symbol: string;
   close: number;
   fetchedAt: string;
+  /** The provider bar's own date (`YYYY-MM-DD`); see the interface doc above. */
+  observationDate: string;
 }
 
 export interface FetchOptions {
@@ -70,10 +79,20 @@ export async function fetchBinanceDailyClose(
   if (!Number.isFinite(close) || close <= 0) {
     throw new Error(`Binance ${entry.symbol} -> non-positive close ${String(row[4])}`);
   }
+  // The bar's own date, from its `openTime` (epoch ms), in UTC. Crypto trades 24/7
+  // so this date is informational only — the orchestrator does NOT gate crypto
+  // marks on it (a Saturday bar is a real close), and it is deliberately NOT forced
+  // to equal the CDMX trading-day `asOf`. Fall back to the fetch date if a payload
+  // ever omits a usable openTime (crypto is ungated, so this never hides staleness).
+  const openTime = Number(row[0]);
+  const observationDate = (Number.isFinite(openTime) ? new Date(openTime) : now())
+    .toISOString()
+    .slice(0, 10);
   return {
     instrumentId: entry.instrumentId,
     symbol: entry.symbol,
     close,
     fetchedAt: now().toISOString(),
+    observationDate,
   };
 }

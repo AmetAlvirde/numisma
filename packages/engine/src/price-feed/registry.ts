@@ -61,11 +61,14 @@ const CRYPTO_ENTRIES: readonly InstrumentRegistryEntry[] = [
  *
  * Provider decision (resolves PRD-#105 open question 1): TWELVE DATA over Alpha
  * Vantage. Both fit this registry seam identically, but Twelve Data's free tier
- * (800 req/day, 8 req/min) leaves headroom for all 9 equity symbols plus future
- * sub-daily fetch cadence, where Alpha Vantage's 25 req/day free cap would be
- * exhausted almost immediately; and Twelve Data's `/time_series?interval=1day`
- * returns a daily OHLC row that maps cleanly onto the same `ProviderObservation`
- * shape the Binance kline already produces.
+ * (800 req/day, 8 req/min) comfortably covers the daily cadence, where Alpha
+ * Vantage's 25 req/day free cap would be exhausted almost immediately. NOTE: the 8
+ * req/min cap does NOT fit the 9 Twelve Data symbols below (3 equities + 6 `*-mxn`
+ * USD legs) as 9 sequential single-symbol calls — the 9th would 429. What makes
+ * them fit is BATCHING: the fetch shell packs all 9 into ONE comma-separated
+ * `/time_series` request (see `fetchTwelveDataDailyCloses`). Twelve Data's
+ * `/time_series?interval=1day` returns a daily OHLC row that maps cleanly onto the
+ * same `ProviderObservation` shape the Binance kline already produces.
  */
 const EQUITY_ENTRIES: readonly InstrumentRegistryEntry[] = [
   { instrumentId: "aapl", symbol: "AAPL", quoteCurrency: "USD", source: "twelvedata" },

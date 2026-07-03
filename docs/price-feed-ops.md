@@ -14,8 +14,8 @@ Everything here is machine-local. Nothing secret or trade-derived enters the rep
 
 | File | Role |
 | --- | --- |
-| `ops/price-feed/run-daily-fetch.sh` | Wrapper the scheduler calls. Sources tokens, runs `pnpm prices:fetch`, and — only on a clean fetch — `pnpm spine`. Preserves the non-zero exit code so the scheduler notices a failure or rejection. |
-| `ops/price-feed/com.numisma.pricefeed.daily.plist` | launchd definition firing the wrapper at 18:00 local (the default mark time). |
+| `ops/price-feed/run-daily-fetch.sh` | Wrapper the scheduler calls. Sets a PATH that can find `pnpm`, sources tokens, runs `pnpm prices:fetch`, and — only on a clean fetch — `pnpm spine`. Preserves the non-zero exit code so the scheduler notices a failure or rejection. |
+| `ops/price-feed/com.numisma.pricefeed.daily.plist` | launchd definition firing the wrapper at 18:00 local (the default mark time), **every day** (see "Why the schedule fires 7 days/week" below). |
 
 Both files are templates: replace `__REPO_DIR__` / `__HOME__` before installing.
 
@@ -55,6 +55,29 @@ Both files are templates: replace `__REPO_DIR__` / `__HOME__` before installing.
    launchctl load ~/Library/LaunchAgents/com.numisma.pricefeed.daily.plist
    ```
 
+### PATH: the scheduler must be able to find `pnpm`
+
+launchd and cron start the job with a **bare, non-login PATH**
+(`/usr/bin:/bin:/usr/sbin:/sbin`), which does **not** include the directory holding
+`pnpm` (typically `~/Library/pnpm` or a Homebrew prefix like `/opt/homebrew/bin`).
+Without a fix the 18:00 run dies immediately with `pnpm: command not found` (exit
+127), even though a manual dry run in your interactive shell passes (it inherits
+your login PATH).
+
+The wrapper is **self-sufficient**: it prepends the common pnpm/Homebrew locations
+to `PATH` before calling `pnpm`. If `pnpm` lives somewhere else on your machine,
+find it and point the override at that directory:
+
+```sh
+dirname "$(command -v pnpm)"          # e.g. /Users/you/Library/pnpm
+# then either export it for the wrapper…
+export NUMISMA_PATH_PREPEND="/Users/you/Library/pnpm:/opt/homebrew/bin:/usr/local/bin"
+# …or add a PATH entry to the plist's EnvironmentVariables dict (optional, belt-and-suspenders).
+```
+
+If `pnpm` is still unresolvable the wrapper fails LOUD with a named error (not a bare
+127), telling you exactly which override to set.
+
 ### cron alternative
 
 If you prefer cron over launchd (again assuming the box is on CDMX time):
@@ -63,6 +86,26 @@ If you prefer cron over launchd (again assuming the box is on CDMX time):
 # m h  dom mon dow  command
   0 18  *   *   *   /bin/bash /ABSOLUTE/PATH/numisma/ops/price-feed/run-daily-fetch.sh
 ```
+
+## Why the schedule fires 7 days/week (crypto vs. equities)
+
+The `dow` field is `*` — **every day** — on purpose, and it is safe:
+
+- **Crypto (Binance) trades 24/7**, so it *should* produce a fresh mark every day,
+  weekends and holidays included.
+- **Equities (Twelve Data, incl. the `*-mxn` USD legs) do not trade** weekends or
+  market holidays. On a market-closed day the provider returns the **last trading
+  day's** bar. Emitting that under today's `asOf` would append a **misdated, stale**
+  mark (a fresh deterministic id the dedup can't catch, 0% move so the magnitude
+  guard passes) — it would silently pile up every weekend.
+
+The fetch prevents that with **per-provider bar-date validation**: an equity mark is
+emitted only when the provider bar's date equals the run's trading-day `asOf`. When
+it doesn't (weekend/holiday), that instrument is **skipped as INFO** — you'll see
+`equity mark skipped — no fresh close for <asOf>` in the fetch output — **not** a
+failure. The run stays clean (exit 0), the crypto marks still ingest, and the
+`*-mxn` derived marks naturally skip too (their USD leg is stale). A weekday-only
+schedule was rejected: it would starve crypto AND still misfire on weekday holidays.
 
 ## Manual dry run (the schedule's only verification)
 
@@ -87,6 +130,11 @@ Confirm, in order:
    and `pnpm spine` reports `0 new` (idempotency — the deterministic id, #106).
 3. The wrapper exit code is `0` on a clean run, non-zero if any symbol failed or a
    mark was rejected.
+4. **On a weekend/holiday**, the equity lines read
+   `equity mark skipped — no fresh close for <asOf>` (one per equity, incl. the
+   `*-mxn` legs), the crypto marks still emit, and the wrapper exit stays `0` — a
+   market-closed skip is expected INFO, not a failure. If you install on a weekday,
+   the equity marks emit normally; re-check this on the first weekend run.
 
 ### Dry-run record
 
@@ -121,12 +169,34 @@ bad day never appends a bad mark. The console/log distinguishes the two cases �
   1. Look at the price. If it is a data error (unit slip, bad payload), delete that
      mark from `data/inbox/transactions.json` and let the next run re-fetch.
   2. If the move is **real** (a genuine >50% day, or a long gap since the last
-     mark), hand-author the mark through the inbox — the permanent manual fallback
-     — then re-run `pnpm spine`. The guard is a sanity check on automation, not a
-     veto on reality.
-  3. Do not leave a doomed mark in the inbox: `pnpm spine` ingest is
-     all-or-nothing, so one guard-tripping mark blocks the whole batch (including
-     hand-authored events) until it is removed or replaced.
+     mark), keep the mark and re-run the spine with the magnitude guard raised for
+     that ONE run — the guard is a sanity check on automation, not a veto on
+     reality. Pick a band that clears the real deviation but still catches a unit
+     slip, and pass it as a relative threshold (`0.5` is the default ±50%):
+
+         pnpm spine --magnitude-threshold=1.5
+
+     or equivalently `SPINE_MAGNITUDE_THRESHOLD=1.5 pnpm spine` for a ±150% band.
+     The override is OFF by default and applies to that single run only — it never
+     changes the standing ±50% guard, and it relaxes ONLY the magnitude check, not
+     the structural / existence / Reserve-sufficiency validation. The run announces
+     the relaxed band loudly on stderr (`WARNING: magnitude guard RELAXED to ±150%
+     for this ingest …`) so it is never silent, and a malformed value fails loud
+     before anything is ingested. Choose the smallest band that admits the real
+     move.
+  3. Do not leave a doomed mark in the inbox unless you are about to run the
+     override: `pnpm spine` ingest is all-or-nothing, so one guard-tripping mark
+     blocks the whole batch (including hand-authored events) until it is removed,
+     replaced, or admitted via `--magnitude-threshold`.
+
+### `equity mark skipped — no fresh close for <asOf>` — NOT a failure
+
+- Info, not an error. It means the market was closed (weekend/holiday) so the Twelve
+  Data provider had no fresh close dated `asOf`; that equity (and, if it is a `*-mxn`
+  leg, its derived MXN mark) is skipped for the day rather than re-marked stale.
+- **Action: none.** The run still exits `0`, crypto still marks, and the equity marks
+  resume on the next trading day. Only investigate if you see it on a **trading day**
+  (would suggest provider bar-date drift or a stuck symbol).
 
 ### Where to look
 

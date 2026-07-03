@@ -10,6 +10,18 @@
   18:00) are harmless: launchd runs the job at the next wake, and the deterministic
   id makes the catch-up run add no duplicate marks.
 
+  The schedule fires EVERY day (7 days/week) ON PURPOSE. Crypto (Binance) trades
+  24/7 and SHOULD mark every day, weekends included. Equities do NOT trade
+  weekends/holidays, so on a market-closed day the fetch self-skips each equity mark
+  via per-provider bar-date validation (the provider's latest bar is a prior trading
+  day → INFO "equity mark skipped", not a failure) instead of appending a misdated
+  stale mark. So a 7-day schedule is correct for crypto AND safe for equities — a
+  weekday-only schedule would wrongly starve crypto and still misfire on holidays.
+
+  PATH: launchd starts this job with a bare, non-login PATH, so the wrapper sets its
+  own PATH to find pnpm (NUMISMA_PATH_PREPEND). You may ALSO set a PATH here in
+  EnvironmentVariables as an extra safeguard, but the wrapper is self-sufficient.
+
   Install (edit the two __PLACEHOLDERS__ first):
     cp ops/price-feed/com.numisma.pricefeed.daily.plist \
        ~/Library/LaunchAgents/com.numisma.pricefeed.daily.plist
@@ -32,14 +44,17 @@
     <string>__REPO_DIR__/ops/price-feed/run-daily-fetch.sh</string>
   </array>
 
-  <!-- Pass the repo dir to the wrapper (it also has its own default). -->
+  <!-- Pass the repo dir to the wrapper (it also has its own default). The wrapper
+       sets its own PATH to find pnpm; if you prefer to pin it here too, add a
+       <key>PATH</key><string>/Users/you/Library/pnpm:/opt/homebrew/bin:/usr/bin:/bin</string>
+       entry to this dict (optional — the wrapper is self-sufficient). -->
   <key>EnvironmentVariables</key>
   <dict>
     <key>NUMISMA_REPO_DIR</key>
     <string>__REPO_DIR__</string>
   </dict>
 
-  <!-- 18:00 local, every day. -->
+  <!-- 18:00 local, EVERY day (7-day schedule; see the header note on why). -->
   <key>StartCalendarInterval</key>
   <dict>
     <key>Hour</key>
