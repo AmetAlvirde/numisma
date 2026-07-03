@@ -10,13 +10,19 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   buildEventReference,
+  deriveMxnMark,
   markFromQuote,
   PRICE_MARK_MAGNITUDE_THRESHOLD,
   type FundReviewData,
   type Quote,
 } from "@numisma/engine";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { findMarkRejections, loadSpineReference, scanFetchedMarks } from "./rejection-check.js";
+import {
+  findMarkRejections,
+  loadSpineReference,
+  marksFromRun,
+  scanFetchedMarks,
+} from "./rejection-check.js";
 import type { FetchRunResult } from "./fetch-prices.js";
 import { resolvePriceFeedPaths } from "./paths.js";
 
@@ -117,6 +123,68 @@ describe("findMarkRejections — the ±50% guard is surfaced, not swallowed", ()
   });
 });
 
+describe("derived MXN marks are pre-checked at USD×FIX, not the raw USD quote (regression)", () => {
+  // Guards against the #107↔#108 integration bug: the pre-check must read the run's
+  // OWN constructed marks. A `*-mxn` mark is `USD × FIX`; re-deriving markFromQuote
+  // off the raw USD quote pre-checks a value ~1/FIX of the real mark and falsely
+  // trips the guard against an MXN last-close.
+  function genesisWithMxn(): FundReviewData {
+    const base = genesis();
+    return {
+      ...base,
+      instruments: [
+        ...base.instruments,
+        { id: "nu-mxn", name: "Nu MXN-listed", symbol: "NU", currency: "MXN" },
+      ],
+      positions: [
+        ...base.positions,
+        {
+          id: "nu-core",
+          portfolioId: "core",
+          tempo: "Capital",
+          executionMode: "live",
+          accountId: "xtb-usd",
+          instrumentId: "nu-mxn",
+          direction: "long",
+          markPrice: 200, // last MXN close
+          currency: "MXN",
+          lots: [{ quantity: 10, cost: 1500, tier: "c1" }],
+        },
+      ],
+    };
+  }
+
+  it("passes the derived MXN value and would have rejected the raw USD re-derivation", () => {
+    const reference = buildEventReference(genesisWithMxn());
+    const usdLeg = quote("nu-mxn", 11); // 11 USD leg
+    const derived = deriveMxnMark(usdLeg, { rate: 20, date: "2026-07-03" });
+    expect(derived.price).toBe(220); // 11 × 20, not 11
+    expect(derived.usdMxn).toBe(20);
+
+    // Correct: the derived 220 is +10% vs the 200 MXN last close — within ±50%, no reject.
+    expect(findMarkRejections([derived], reference)).toEqual([]);
+    // The old bug re-derived markFromQuote(usdLeg) = 11 — a ~95% drop vs 200 → falsely rejected.
+    expect(findMarkRejections([markFromQuote(usdLeg)], reference)).toHaveLength(1);
+  });
+
+  it("marksFromRun returns the run's constructed marks verbatim (no re-derivation)", () => {
+    const derived = deriveMxnMark(quote("nu-mxn", 11), { rate: 20, date: "2026-07-03" });
+    const result: FetchRunResult = {
+      quotes: [quote("nu-mxn", 11)],
+      totalCount: 1,
+      storedCount: 1,
+      emittedCount: 1,
+      skippedCount: 0,
+      markEmitted: true,
+      marks: [derived],
+      failures: [],
+    };
+    expect(marksFromRun(result)).toEqual([derived]);
+    // Before the mark time, nothing is pre-checked even if marks are present.
+    expect(marksFromRun({ ...result, markEmitted: false, marks: [] })).toEqual([]);
+  });
+});
+
 describe("loadSpineReference + scanFetchedMarks — reads the real genesis/log off disk", () => {
   let dataDir: string;
 
@@ -143,6 +211,9 @@ describe("loadSpineReference + scanFetchedMarks — reads the real genesis/log o
       emittedCount: 1,
       skippedCount: 0,
       markEmitted: true,
+      // `btc` is a direct instrument, so its emitted mark is `markFromQuote`; the
+      // pre-check reads these constructed marks, not a re-derivation from quotes.
+      marks: [markFromQuote(quote("btc", price))],
       failures: [],
     };
   }

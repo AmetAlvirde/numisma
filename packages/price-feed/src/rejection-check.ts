@@ -26,7 +26,6 @@ import { readFile } from "node:fs/promises";
 import {
   buildEventReference,
   crossReferenceEvent,
-  markFromQuote,
   parseEvent,
   parseFundReview,
   type EventReference,
@@ -142,9 +141,14 @@ export function findMarkRejections(
   return rejections;
 }
 
-/** The marks a fetch run queued for the spine this run: none before the mark time. */
+/**
+ * The marks a fetch run queued for the spine this run: none before the mark time.
+ * Uses the run's OWN constructed marks (`result.marks`) rather than re-deriving
+ * from quotes — a `*-mxn` mark is `USD × FIX`, not `markFromQuote`, so re-deriving
+ * would pre-check the wrong (raw-USD) value against the guard.
+ */
 export function marksFromRun(result: FetchRunResult): PriceMarkedEvent[] {
-  return result.markEmitted ? result.quotes.map(markFromQuote) : [];
+  return result.markEmitted ? [...result.marks] : [];
 }
 
 /** Whether a rejection was found, or the pre-check could not run (no reference). */

@@ -66,6 +66,14 @@ export interface FetchRunResult {
   skippedCount: number;
   /** Whether this run is at/after the mark time (marks eligible to emit). */
   markEmitted: boolean;
+  /**
+   * The exact mark candidates this run constructed — a direct `markFromQuote`
+   * mark for crypto/US equities and a derived `USD × FIX` mark for `*-mxn`.
+   * Empty before the mark time. Carried so the fetch-time spine pre-check checks
+   * the REAL emitted marks (including the derived MXN value + `usdMxn` snapshot),
+   * not a re-derivation from the raw USD quotes.
+   */
+  marks: PriceMarkedEvent[];
   failures: FetchFailure[];
 }
 
@@ -138,6 +146,7 @@ export async function runPriceFetch(options: RunOptions = {}): Promise<FetchRunR
     emittedCount,
     skippedCount: marks.length - emittedCount,
     markEmitted,
+    marks,
     failures,
   };
 }
