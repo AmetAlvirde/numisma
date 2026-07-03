@@ -9,13 +9,15 @@
  * an `AbortController` timeout so a stalled provider cannot hang a scheduled run,
  * and every failure carries the symbol so it stays per-symbol attributable.
  *
- * BATCHING (rate-limit fix): the free tier caps at 8 requests/minute, but the
- * registry has 9 Twelve Data symbols (3 US equities + 6 `*-mxn` USD legs). Nine
- * back-to-back single-symbol calls blow the cap — the 9th 429s, fails the run, and
- * the spine never ingests. So the orchestrator uses {@link fetchTwelveDataDailyCloses},
- * which packs every symbol into ONE comma-separated request that returns an object
- * keyed by symbol. A bad/failed symbol still becomes only THAT instrument's failure
- * (the others in the batch succeed), preserving per-symbol attribution.
+ * BATCHING + PACING (rate-limit fix): the free tier caps at 8 API CREDITS/minute
+ * and a batched `time_series` costs 1 CREDIT PER SYMBOL, so the registry's 9 Twelve
+ * Data symbols (3 US equities + 6 `*-mxn` USD legs) are 9 credits > 8 — a single
+ * request 429s no matter how it is batched. This function packs a GIVEN chunk of
+ * symbols into ONE comma-separated request (returning an object keyed by symbol);
+ * the orchestrator (`fetch-prices.ts`) is what splits the 9 symbols into ≤8-credit
+ * chunks and paces them a minute apart. A bad/failed symbol still becomes only THAT
+ * instrument's failure (the others in the chunk succeed), preserving per-symbol
+ * attribution.
  *
  * Provider decision (PRD-#105 open question 1): Twelve Data over Alpha Vantage —
  * see the equities rows in `@numisma/engine`'s registry for the rationale. The API
