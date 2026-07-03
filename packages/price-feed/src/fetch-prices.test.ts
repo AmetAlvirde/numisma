@@ -54,13 +54,6 @@ function klineResponse(close: number): Response {
   return new Response(JSON.stringify([row]), { status: 200 });
 }
 
-function timeSeriesResponse(close: number): Response {
-  return new Response(
-    JSON.stringify({ status: "ok", values: [{ datetime: AS_OF, close: String(close) }] }),
-    { status: 200 },
-  );
-}
-
 function fixResponse(rate: string, fecha = "03/07/2026"): Response {
   return new Response(
     JSON.stringify({ bmx: { series: [{ idSerie: "SF43718", datos: [{ fecha, dato: rate }] }] } }),
@@ -69,11 +62,41 @@ function fixResponse(rate: string, fecha = "03/07/2026"): Response {
 }
 
 interface Overrides {
-  /** Keyed by provider symbol (e.g. ETHUSDT, EWW) or "FIX". */
+  /**
+   * Keyed by provider symbol (e.g. ETHUSDT, EWW) or "FIX". A crypto/FIX override
+   * returns the whole `Response` for that (single) request. A Twelve Data equity
+   * override injects that symbol's SLICE into the batched keyed response — its
+   * `Response` body is parsed and placed under the symbol key (Twelve Data now
+   * fetches every equity in ONE comma-separated request, so a per-symbol failure
+   * is a `status:"error"` slice, not a per-request HTTP status).
+   */
   [key: string]: () => Response | Promise<Response>;
 }
 
-/** A mock fetch that routes by host and the symbol in the request URL. */
+/**
+ * Build the ONE batched Twelve Data response: parse the comma-separated `symbol=`
+ * list and return the keyed `{ AAPL: {values…}, … }` map (the un-keyed shape for a
+ * lone symbol, per the provider contract). An overridden symbol contributes its own
+ * parsed slice so a single equity can fail (`status:"error"`) while the rest succeed.
+ */
+async function twelveDataBatchResponse(href: string, overrides: Overrides): Promise<Response> {
+  const match = /[?&]symbol=([^&]+)/.exec(href);
+  const symbols = match ? decodeURIComponent(match[1]!).split(",") : [];
+  const keyed: Record<string, unknown> = {};
+  for (const symbol of symbols) {
+    if (overrides[symbol]) {
+      keyed[symbol] = await (await overrides[symbol]!()).json();
+    } else if (symbol in EQUITY_CLOSES) {
+      keyed[symbol] = { status: "ok", values: [{ datetime: AS_OF, close: String(EQUITY_CLOSES[symbol]) }] };
+    } else {
+      keyed[symbol] = { status: "error", message: "not found" };
+    }
+  }
+  const body = symbols.length === 1 ? keyed[symbols[0]!] : keyed;
+  return new Response(JSON.stringify(body), { status: 200 });
+}
+
+/** A mock fetch that routes by host and the symbol(s) in the request URL. */
 function mockFetch(overrides: Overrides = {}): typeof fetch {
   return ((url: string | URL | Request) => {
     const href = typeof url === "string" ? url : url.toString();
@@ -87,12 +110,7 @@ function mockFetch(overrides: Overrides = {}): typeof fetch {
       return Promise.resolve(new Response("[]", { status: 200 }));
     }
     if (href.includes("api.twelvedata.com")) {
-      const symbol = Object.keys(EQUITY_CLOSES).find((s) => href.includes(`symbol=${s}&`));
-      if (symbol && overrides[symbol]) return Promise.resolve(overrides[symbol]!());
-      if (symbol) return Promise.resolve(timeSeriesResponse(EQUITY_CLOSES[symbol]!));
-      return Promise.resolve(
-        new Response(JSON.stringify({ status: "error", message: "not found" }), { status: 200 }),
-      );
+      return twelveDataBatchResponse(href, overrides);
     }
     return Promise.resolve(new Response("[]", { status: 200 }));
   }) as typeof fetch;
@@ -235,7 +253,10 @@ describe("runPriceFetch — per-symbol failure isolation (R4)", () => {
       config: { dataDir, markTime: "00:00" },
       fetchImpl: mockFetch({
         ETHUSDT: () => new Response("{}", { status: 200 }), // non-array response
-        AAPL: () => new Response("nope", { status: 500, statusText: "Server Error" }),
+        // One equity's slice comes back as a Twelve Data `status:"error"` inside the
+        // batched response — attributable to just that symbol, the rest of the batch ok.
+        AAPL: () =>
+          new Response(JSON.stringify({ status: "error", message: "symbol halted" }), { status: 200 }),
       }),
       now: () => RUN_INSTANT,
       credentials: CREDENTIALS,
@@ -244,7 +265,7 @@ describe("runPriceFetch — per-symbol failure isolation (R4)", () => {
     // 11 of 13 succeeded; the two bad symbols each failed attributably.
     expect(result.storedCount).toBe(11);
     expect(result.failures.map((f) => f.instrumentId).sort()).toEqual(["aapl", "eth"]);
-    expect(result.failures.find((f) => f.instrumentId === "aapl")?.message).toMatch(/HTTP 500/);
+    expect(result.failures.find((f) => f.instrumentId === "aapl")?.message).toMatch(/symbol halted/);
     expect(result.failures.find((f) => f.instrumentId === "eth")?.message).toMatch(
       /unexpected payload shape/,
     );
@@ -312,12 +333,15 @@ describe("runPriceFetch — missing/stale FIX fails *-mxn loudly (ADR-005)", () 
 });
 
 describe("runPriceFetch — request timeout attribution (R4)", () => {
-  it("attributes a stalled provider to its symbol", async () => {
+  it("attributes a stalled batched equities request to every equity symbol", async () => {
     const result = await runPriceFetch({
       config: { dataDir, markTime: "00:00", requestTimeoutMs: 20 },
       fetchImpl: ((url: string | URL | Request, init?: RequestInit) => {
         const href = typeof url === "string" ? url : url.toString();
-        if (href.includes("symbol=TSLA")) {
+        // The equities now ride ONE batched Twelve Data request; a stall aborts the
+        // whole batch, so every equity symbol times out attributably (R4) while crypto
+        // still completes — a stalled provider can never hang or silently drop the run.
+        if (href.includes("api.twelvedata.com")) {
           return new Promise<Response>((_resolve, reject) => {
             init?.signal?.addEventListener("abort", () => {
               const error = new Error("aborted");
@@ -335,6 +359,8 @@ describe("runPriceFetch — request timeout attribution (R4)", () => {
     expect(result.failures.find((f) => f.instrumentId === "tsla")?.message).toMatch(
       /timed out after 20ms/,
     );
-    expect(result.storedCount).toBe(12);
+    // All 9 Twelve Data symbols timed out; the 4 crypto quotes still stored.
+    expect(result.failures).toHaveLength(9);
+    expect(result.storedCount).toBe(4);
   });
 });

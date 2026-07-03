@@ -23,7 +23,19 @@ REPO_DIR="${NUMISMA_REPO_DIR:-__REPO_DIR__}"
 ENV_FILE="${NUMISMA_PRICEFEED_ENV:-$HOME/.config/numisma/price-feed.env}"
 # Where per-run logs land (outside the repo; never committed).
 LOG_DIR="${NUMISMA_PRICEFEED_LOG_DIR:-$HOME/Library/Logs/numisma}"
+# Directories to PREPEND to PATH so `pnpm` resolves under the scheduler. launchd/
+# cron start this job with a bare, non-login PATH (/usr/bin:/bin:/usr/sbin:/sbin),
+# so `pnpm` (installed under ~/Library/pnpm or Homebrew) is invisible and the run
+# would die with a bare `pnpm: command not found` (exit 127). The default covers the
+# common macOS locations; override it if pnpm lives elsewhere on this machine. The
+# manual dry run passes without this only because it inherits your interactive PATH.
+PATH_PREPEND="${NUMISMA_PATH_PREPEND:-$HOME/Library/pnpm:/opt/homebrew/bin:/usr/local/bin}"
 # ----------------------------------------------------------------------------
+
+# Give the scheduled (non-login) job a deterministic PATH that can find pnpm. This
+# is the self-sufficient fix; the plist's EnvironmentVariables PATH is an optional
+# additional belt-and-suspenders (see the plist / docs/price-feed-ops.md).
+export PATH="$PATH_PREPEND:$PATH"
 
 mkdir -p "$LOG_DIR"
 STAMP="$(date +%Y-%m-%dT%H-%M-%S%z)"
@@ -45,6 +57,18 @@ else
 fi
 
 cd "$REPO_DIR"
+
+# Fail LOUD if pnpm is still unresolvable — a clear, named error beats dying as a
+# bare exit 127 mid-run. This is exactly the scheduled-environment PATH problem, so
+# say so and point at the override.
+if ! command -v pnpm >/dev/null 2>&1; then
+  echo "[$STAMP] FATAL: 'pnpm' not found on PATH after prepending '$PATH_PREPEND'."
+  echo "[$STAMP] The scheduler runs with a bare PATH and pnpm is not in it. Point"
+  echo "[$STAMP] NUMISMA_PATH_PREPEND (or the plist EnvironmentVariables PATH) at the"
+  echo "[$STAMP] directory holding pnpm (e.g. \`dirname \"\$(command -v pnpm)\"\` in your"
+  echo "[$STAMP] interactive shell). See docs/price-feed-ops.md (install section)."
+  exit 127
+fi
 
 # 1) Fetch + store + queue marks. Non-zero here = a provider failure OR a mark the
 #    spine would reject (the CLI's fetch-time pre-check). Either way, STOP: do not
