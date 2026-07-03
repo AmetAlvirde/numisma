@@ -12,12 +12,16 @@
  * Three providers ride ONE reliability envelope (R4): Binance (crypto, keyless),
  * Twelve Data (US equities, `TWELVEDATA_API_KEY`), and Banxico SF43718 (USD/MXN
  * FIX, `BANXICO_TOKEN`). Binance is fetched one symbol at a time (keyless, no rate
- * budget worth batching); Twelve Data is fetched in ONE batched multi-symbol
- * request, because the free tier's 8 req/min cap cannot fit the registry's 9
- * Twelve Data symbols as 9 sequential calls (the 9th 429s and the run dies). Either
- * way a bad symbol stays individually attributable instead of masking the others.
- * Partial progress is always kept — a failure records and continues; the run exits
- * non-zero so a scheduler notices.
+ * budget worth batching). Twelve Data is fetched in batched multi-symbol requests
+ * that are PACED across minute windows: the free tier caps at 8 API CREDITS/minute
+ * and a batched `time_series` costs 1 CREDIT PER SYMBOL, so the registry's 9 equity
+ * symbols exceed the cap in a single request (9 credits > 8 ⇒ HTTP 429) — batching
+ * alone does NOT fix it. The fetch therefore chunks equities into
+ * `twelveDataMaxSymbolsPerMinute`-sized batches and sleeps `twelveDataPauseMs`
+ * between chunks so each window stays under the cap (config.ts). Either way a bad
+ * symbol stays individually attributable instead of masking the others. Partial
+ * progress is always kept — a failure records and continues; the run exits non-zero
+ * so a scheduler notices.
  *
  * Non-trading-day honesty (finding 3): the schedule fires 7 days/week so crypto —
  * which trades 24/7 — marks every day. Equities do NOT trade weekends/holidays, so
@@ -120,6 +124,12 @@ export interface RunOptions {
   now?: () => Date;
   /** Provider credentials; default to the environment. Injectable for tests. */
   credentials?: Partial<ProviderCredentials>;
+  /**
+   * Injectable sleep used to PACE Twelve Data chunks under the free-tier per-minute
+   * credit cap. Defaults to a real `setTimeout` wait; tests pass a no-op so pacing
+   * logic is exercised without waiting a real minute.
+   */
+  sleepImpl?: (ms: number) => Promise<void>;
 }
 
 /** One fetched instrument paired with its registry row (needed to build the mark). */
@@ -144,6 +154,8 @@ export async function runPriceFetch(options: RunOptions = {}): Promise<FetchRunR
   };
   const fetchImpl = options.fetchImpl ?? fetch;
   const now = options.now ?? (() => new Date());
+  const sleepImpl =
+    options.sleepImpl ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const instant = now();
   const asOf = tradingDayAsOf(instant, config.timeZone);
   const paths = resolvePriceFeedPaths(config.dataDir);
@@ -163,16 +175,31 @@ export async function runPriceFetch(options: RunOptions = {}): Promise<FetchRunR
   await fetchInto(binanceEntries, successes, failures, paths.pricesDir, asOf, (entry) =>
     fetchBinanceDailyClose(entry, { timeoutMs: config.requestTimeoutMs, fetchImpl, now }),
   );
-  // Equities (Twelve Data): ONE batched multi-symbol request (rate-limit fix) — 9
-  // sequential calls would blow the 8 req/min free-tier cap; a bad symbol is still
-  // per-instrument attributable within the batch.
-  const equityResults = await fetchTwelveDataDailyCloses(equityEntries, {
-    timeoutMs: config.requestTimeoutMs,
-    apiKey: credentials.twelveDataApiKey,
-    fetchImpl,
-    now,
-  });
-  await recordResults(equityResults, successes, failures, paths.pricesDir, asOf);
+  // Equities (Twelve Data): batched, but PACED across minute windows. The free tier
+  // caps at 8 CREDITS/min and a batch costs 1 credit PER SYMBOL, so all 9 symbols in
+  // one request is 9 credits > 8 ⇒ 429. Chunk to `twelveDataMaxSymbolsPerMinute` and
+  // sleep `twelveDataPauseMs` between chunks so each window stays under the cap. A
+  // bad symbol is still per-instrument attributable within its chunk.
+  const equityChunks = chunk(equityEntries, Math.max(1, config.twelveDataMaxSymbolsPerMinute));
+  for (let i = 0; i < equityChunks.length; i++) {
+    if (i > 0) {
+      // Pace the next chunk so the free-tier per-minute credit quota resets first.
+      // Announce it — a silent ~1-minute gap otherwise looks like a hung run.
+      console.info(
+        `  pausing ${Math.round(config.twelveDataPauseMs / 1000)}s for the Twelve Data ` +
+          `per-minute credit quota to reset (chunk ${i + 1}/${equityChunks.length}, ` +
+          `${equityChunks[i]!.length} symbol(s))…`,
+      );
+      await sleepImpl(config.twelveDataPauseMs);
+    }
+    const equityResults = await fetchTwelveDataDailyCloses(equityChunks[i]!, {
+      timeoutMs: config.requestTimeoutMs,
+      apiKey: credentials.twelveDataApiKey,
+      fetchImpl,
+      now,
+    });
+    await recordResults(equityResults, successes, failures, paths.pricesDir, asOf);
+  }
 
   // Two-plane rule: the store always upserts above; marks only at/after mark time.
   const markEmitted = isAtOrAfterMarkTime(instant, config);
@@ -192,6 +219,15 @@ export async function runPriceFetch(options: RunOptions = {}): Promise<FetchRunR
     failures,
     staleEquitySkips,
   };
+}
+
+/** Split `items` into consecutive chunks of at most `size` (size ≥ 1). */
+function chunk<T>(items: readonly T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    out.push(items.slice(i, i + size));
+  }
+  return out;
 }
 
 /**
@@ -224,8 +260,8 @@ async function fetchInto(
 /**
  * Fold a BATCHED provider's per-entry results into the same success/failure tally
  * a sequential `fetchInto` produces: each `observation` is stored, each `error` is
- * recorded as a per-symbol failure. Used for the one-shot Twelve Data batch so a
- * single bad symbol in the batch stays individually attributable.
+ * recorded as a per-symbol failure. Called once per paced Twelve Data chunk so a
+ * single bad symbol in a chunk stays individually attributable.
  */
 async function recordResults(
   results: readonly ProviderFetchResult[],
