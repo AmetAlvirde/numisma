@@ -178,6 +178,7 @@ describe("derived MXN marks are pre-checked at USD×FIX, not the raw USD quote (
       markEmitted: true,
       marks: [derived],
       failures: [],
+      staleEquitySkips: [],
     };
     expect(marksFromRun(result)).toEqual([derived]);
     // Before the mark time, nothing is pre-checked even if marks are present.
@@ -215,6 +216,7 @@ describe("loadSpineReference + scanFetchedMarks — reads the real genesis/log o
       // pre-check reads these constructed marks, not a re-derivation from quotes.
       marks: [markFromQuote(quote("btc", price))],
       failures: [],
+      staleEquitySkips: [],
     };
   }
 
@@ -222,8 +224,8 @@ describe("loadSpineReference + scanFetchedMarks — reads the real genesis/log o
     await writeGenesis();
     const paths = resolvePriceFeedPaths(dataDir);
 
-    const reference = await loadSpineReference(paths);
-    expect(reference).toBeDefined();
+    const world = await loadSpineReference(paths);
+    expect(world?.reference).toBeDefined();
 
     const scan = await scanFetchedMarks(runResult(BTC_LAST_CLOSE * 3), paths);
     expect(scan.skipped).toBe(false);
@@ -266,5 +268,153 @@ describe("loadSpineReference + scanFetchedMarks — reads the real genesis/log o
     expect(scan.skipped).toBe(true);
     expect(scan.rejections).toEqual([]);
     expect(scan.unavailableReason).toMatch(/not valid JSON/);
+  });
+});
+
+describe("scanFetchedMarks folds the pending inbox exactly as ingestInbox does", () => {
+  // The pre-check must build the SAME reference the spine builds (genesis + log,
+  // then advanced by the pending inbox events in order) and judge the SAME set the
+  // spine guards (only marks NEW to the batch, after id dedup). These tests pin the
+  // two-way fidelity Findings 4 and 5 restore.
+  let dataDir: string;
+
+  beforeEach(async () => {
+    dataDir = await mkdtemp(join(tmpdir(), "rejection-check-fidelity-"));
+  });
+
+  afterEach(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  /** A `btc` quote pinned to an explicit trading day, so its mark id varies by asOf. */
+  function btcQuote(price: number, asOf: string): Quote {
+    return { ...quote("btc", price), asOf };
+  }
+
+  /** The engine's real mark for a `btc` close on `asOf` (deterministic `pm-btc-<asOf>` id). */
+  function btcMark(price: number, asOf: string) {
+    return markFromQuote(btcQuote(price, asOf));
+  }
+
+  async function writeGenesisAt(paths: ReturnType<typeof resolvePriceFeedPaths>): Promise<void> {
+    await mkdir(dirname(paths.genesis), { recursive: true });
+    await writeFile(paths.genesis, JSON.stringify(genesis()), "utf8");
+  }
+
+  /** Seed the durable log with already-appended events (JSONL, one event per line). */
+  async function writeLog(
+    paths: ReturnType<typeof resolvePriceFeedPaths>,
+    events: readonly object[],
+  ): Promise<void> {
+    await mkdir(dirname(paths.log), { recursive: true });
+    await writeFile(paths.log, events.map((event) => JSON.stringify(event)).join("\n") + "\n", "utf8");
+  }
+
+  /** Seed the shared inbox with pending records (the JSON array spine consumes). */
+  async function writeInbox(
+    paths: ReturnType<typeof resolvePriceFeedPaths>,
+    records: readonly object[],
+  ): Promise<void> {
+    await mkdir(dirname(paths.inbox), { recursive: true });
+    await writeFile(paths.inbox, JSON.stringify(records, null, 2) + "\n", "utf8");
+  }
+
+  /** A run result carrying exactly `marks` as its constructed marks. */
+  function resultWith(marks: object[], emittedCount: number): FetchRunResult {
+    return {
+      quotes: [],
+      totalCount: marks.length,
+      storedCount: marks.length,
+      emittedCount,
+      skippedCount: marks.length - emittedCount,
+      markEmitted: true,
+      marks: marks as FetchRunResult["marks"],
+      failures: [],
+      staleEquitySkips: [],
+    };
+  }
+
+  it("4a: a pending hand-authored corrective mark advances the reference so a fresh mark PASSES", async () => {
+    const paths = resolvePriceFeedPaths(dataDir);
+    await writeGenesisAt(paths);
+    // Genesis last close is 65k. A corrective mark hand-authored into the inbox lifts
+    // btc to 95k (+46%, within ±50% → accepted). The fresh 140k mark this run queued
+    // is +47% vs 95k (accepted) but +115% vs the STALE 65k (rejected). Spine folds the
+    // corrective first, so it accepts the fresh mark — and so must the pre-check.
+    const corrective = btcMark(95_000, "2026-07-02");
+    const fresh = btcMark(140_000, "2026-07-03");
+    // Inbox as spine sees it AFTER this run merged its fresh mark at the tail.
+    await writeInbox(paths, [corrective, fresh]);
+
+    const scan = await scanFetchedMarks(resultWith([fresh], 1), paths);
+    expect(scan.skipped).toBe(false);
+    expect(scan.rejections).toEqual([]);
+
+    // Contrast: without the corrective folded in, the very same fresh mark trips the
+    // guard against the stale 65k close — proving the fold is what saves it.
+    await writeInbox(paths, [fresh]);
+    const stale = await scanFetchedMarks(resultWith([fresh], 1), paths);
+    expect(stale.rejections).toHaveLength(1);
+    expect(stale.rejections[0]?.price).toBe(140_000);
+  });
+
+  it("4b: a doomed mark left queued by a PRIOR run is still surfaced by a later run", async () => {
+    const paths = resolvePriceFeedPaths(dataDir);
+    await writeGenesisAt(paths);
+    // A prior run queued a +200% mark (195k vs 65k) that spine will reject; nobody has
+    // fixed it. This later run re-derives the same (dedup-skipped) mark and adds nothing
+    // new — yet the doomed pending mark must NOT let the run exit 0.
+    const doomed = btcMark(195_000, "2026-07-03");
+    await writeInbox(paths, [doomed]);
+
+    const scan = await scanFetchedMarks(resultWith([doomed], 0), paths);
+    expect(scan.skipped).toBe(false);
+    expect(scan.rejections).toHaveLength(1);
+    expect(scan.rejections[0]?.instrumentId).toBe("btc");
+    expect(scan.rejections[0]?.price).toBe(195_000);
+    expect(scan.rejections[0]?.reason).toMatch(/beyond the 50% sanity threshold/);
+  });
+
+  it("5: a mark whose id is already in the durable LOG is NOT guarded (spine dedup-skips it)", async () => {
+    const paths = resolvePriceFeedPaths(dataDir);
+    await writeGenesisAt(paths);
+    // Today's mark was already ingested (66k, in the log). A same-day re-run reconstructs
+    // the same id with a wild price; spine dedup-skips it at event-store.ts:259 BEFORE the
+    // guard, so the pre-check must not flag it — even though 999k would trip the guard.
+    await writeLog(paths, [btcMark(66_000, "2026-07-03")]);
+    const reRun = btcMark(999_000, "2026-07-03"); // same id pm-btc-2026-07-03
+
+    const scan = await scanFetchedMarks(resultWith([reRun], 1), paths);
+    expect(scan.skipped).toBe(false);
+    expect(scan.rejections).toEqual([]);
+  });
+
+  it("5: a mark whose id is already PENDING in the inbox is NOT guarded again", async () => {
+    const paths = resolvePriceFeedPaths(dataDir);
+    await writeGenesisAt(paths);
+    // The mark is already pending (66k, accepted); a re-run's same-id mark with a wild
+    // price is dedup-skipped by mergeInbox, so spine only ever guards the pending copy.
+    await writeInbox(paths, [btcMark(66_000, "2026-07-03")]);
+    const reRun = btcMark(999_000, "2026-07-03"); // same id, dedup-skipped → emittedCount 0
+
+    const scan = await scanFetchedMarks(resultWith([reRun], 0), paths);
+    expect(scan.skipped).toBe(false);
+    expect(scan.rejections).toEqual([]);
+  });
+
+  it("still flags a genuinely NEW >50% mark even with benign pending context folded in", async () => {
+    const paths = resolvePriceFeedPaths(dataDir);
+    await writeGenesisAt(paths);
+    // A benign corrective (70k, +8%) advances the close; the fresh 200k mark is +186%
+    // vs that advanced close — genuinely new to the batch and genuinely doomed.
+    const benign = btcMark(70_000, "2026-07-02");
+    const doomedFresh = btcMark(200_000, "2026-07-03");
+    await writeInbox(paths, [benign, doomedFresh]);
+
+    const scan = await scanFetchedMarks(resultWith([doomedFresh], 1), paths);
+    expect(scan.skipped).toBe(false);
+    expect(scan.rejections).toHaveLength(1);
+    expect(scan.rejections[0]?.price).toBe(200_000);
+    expect(scan.rejections[0]?.path).toBe("price");
   });
 });
