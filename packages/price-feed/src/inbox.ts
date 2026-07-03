@@ -44,7 +44,17 @@ async function readInbox(inboxPath: string): Promise<InboxRecord[]> {
     }
     throw error;
   }
-  const parsed: unknown = JSON.parse(raw);
+  // Parse OUTSIDE the ENOENT guard above but WITH its own attribution: a corrupt
+  // or empty inbox file would otherwise throw a bare `SyntaxError: Unexpected
+  // token…` with no path — and, worse, only AFTER fresh marks were already
+  // written to the store, skipping the per-symbol report. Fail loudly naming the
+  // file, matching the tui's event-store phrasing (`Inbox … is not valid JSON.`).
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`Inbox ${inboxPath} is not valid JSON.`);
+  }
   if (!Array.isArray(parsed)) {
     throw new Error(`Inbox ${inboxPath} must be a JSON array of transactions.`);
   }
