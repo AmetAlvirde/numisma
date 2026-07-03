@@ -3,3 +3,8 @@
 *.jsonl
 *.quarantine
 *.tmp
+
+# The disposable market-data plane (ADR-005 / C4): the WHOLE price store is
+# private and re-fetchable, ignored explicitly regardless of file format — never
+# relying on the *.jsonl glob above.
+prices/
