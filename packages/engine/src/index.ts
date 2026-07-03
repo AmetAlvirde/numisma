@@ -120,6 +120,31 @@ export {
   SETTLEMENT_MAGNITUDE_THRESHOLD,
 } from "./events/crossref.js";
 
+// The pure price-feed core (ADR-005 two-plane price model). Everything that turns
+// a raw provider observation into a fund-history mark WITHOUT any IO: the typed
+// instrument registry, the trading-day/mark-instant contract, quote → real
+// `PriceMarkedEvent` construction, and the non-clobbering inbox merge. The fetch/
+// IO/scheduling shell lives in `@numisma/price-feed`, which depends only on this.
+export type {
+  PriceSource,
+  InstrumentRegistryEntry,
+} from "./price-feed/registry.js";
+export { instrumentsForSource, resolveInstrument } from "./price-feed/registry.js";
+export type { Quote, MarkClock } from "./price-feed/mark.js";
+export {
+  tradingDayAsOf,
+  isAtOrAfterMarkTime,
+  priceMarkId,
+  markFromQuote,
+} from "./price-feed/mark.js";
+export type { InboxRecord, InboxMergeResult } from "./price-feed/inbox-merge.js";
+export {
+  mergeInbox,
+  INBOX_PATH_SEGMENTS,
+  PRICE_STORE_DIR_SEGMENT,
+  priceStoreFileName,
+} from "./price-feed/inbox-merge.js";
+
 // Shared formatters (the engine's one source of truth for the cents-precision /
 // padding conventions, consumed by the TUI) + the CLI composition renderer.
 export {
