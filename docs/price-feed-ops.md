@@ -21,20 +21,22 @@ Both files are templates: replace `__REPO_DIR__` / `__HOME__` before installing.
 
 ## Where provider tokens live (scheduled environment)
 
-- **Crypto (this slice) needs no token.** Binance public REST is keyless, so a
-  crypto-only daily run works with no secret at all.
-- **Future providers (equities / Banxico FIX, slice #107)** read their keys from a
-  private env file **outside the repo**, default `~/.config/numisma/price-feed.env`,
-  sourced by the wrapper. Create it `chmod 600`, one `KEY=value` per line, e.g.:
+- **Crypto needs no token.** Binance public REST is keyless, so a crypto-only run
+  works with no secret at all.
+- **US equities (Twelve Data) and the Banxico USD/MXN FIX (slice #107) each need a
+  free key.** They are read from a private env file **outside the repo**, default
+  `~/.config/numisma/price-feed.env`, sourced by the wrapper. Create it `chmod 600`,
+  one `KEY=value` per line:
 
   ```sh
   install -m 600 /dev/null ~/.config/numisma/price-feed.env
-  # then edit; example future keys:
-  #   TWELVEDATA_API_KEY=...
-  #   BANXICO_SIE_TOKEN=...
+  # then edit; the two keys the fetch reads (see packages/price-feed/src/config.ts):
+  #   TWELVEDATA_API_KEY=...   # Twelve Data free key, US equities
+  #   BANXICO_TOKEN=...        # Banxico SIE free token, USD/MXN FIX series SF43718
   ```
 
-  The wrapper `source`s it if present and runs keyless if absent. The file is never
+  The wrapper `source`s it if present. If a key is absent, only that provider's
+  instruments fail (loud, per-symbol) — crypto still runs keyless. The file is never
   committed and never printed (only its path is logged). This mirrors the
   `data/`-is-private posture: secrets are a machine-local artifact beside the repo,
   not in it.

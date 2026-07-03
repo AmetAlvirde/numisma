@@ -19,7 +19,7 @@ guarded append. Cranking the fetch cadence from daily to hourly to per-minute on
 `data/prices/`; the log keeps receiving exactly the sparse marks the mark cadence
 defines. Per ADR-001 the pure transforms (`quote → PriceMarkedEvent`, symbol resolution,
 later MXN derivation) live in `@numisma/engine`; the fetch/IO/scheduling shell lives in
-the runtime (tui, or a dedicated `packages/pricefeed`).
+the runtime (a dedicated headless `packages/price-feed`).
 
 ## Considered Options
 
