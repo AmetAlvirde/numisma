@@ -41,6 +41,52 @@ Both files are templates: replace `__REPO_DIR__` / `__HOME__` before installing.
   `data/`-is-private posture: secrets are a machine-local artifact beside the repo,
   not in it.
 
+### Twelve Data free tier: why the run pauses ~1 minute
+
+The Twelve Data **Basic (free)** plan allows **8 API credits/minute** (800/day), and
+a batched `time_series` request costs **1 credit per symbol**. The registry has **9**
+Twelve Data symbols (3 US equities + 6 `*-mxn` USD legs), so fetching all 9 at once
+is 9 credits > 8 ⇒ **HTTP 429**. The fetch therefore paces equities in chunks of
+`twelveDataMaxSymbolsPerMinute` (default **8**), sleeping `twelveDataPauseMs`
+(default **60 s**) between chunks — you'll see `pausing 60s for the Twelve Data
+per-minute credit quota to reset…` in the output. **A daily run consequently takes
+~1 minute, not seconds; that pause is expected, not a hang.** (Both knobs live in
+`packages/price-feed/src/config.ts`; a paid tier with a higher per-minute cap can
+raise `twelveDataMaxSymbolsPerMinute` ≥ 9 to fetch every symbol in one window and
+skip the pause.)
+
+### Why plaintext-at-rest is the right posture here (and when to upgrade)
+
+These are **free, read-only, revocable market-data keys** — not exchange/trading
+keys. They carry no write access, move no money, and expose no PII. The blast
+radius of a leak is "someone reads public prices on your quota until you
+regenerate the key." Against that thin threat, a `chmod 600` file outside the repo
+is proportionate, and it keeps the hands-off 18:00 launchd run dead-simple: no
+interactive keychain/vault unlock that could block a scheduled, non-login job.
+
+**Your real defense is fast revocation, not encryption-at-rest.** If a key ever
+leaks (committed by mistake, copied into a shared backup, pasted somewhere):
+
+- **Twelve Data:** sign in → API dashboard → regenerate/roll the API key, then
+  update `TWELVEDATA_API_KEY` in the env file.
+- **Banxico SIE:** the token is tied to your SIE account — request a new token
+  (email signup flow) and replace `BANXICO_TOKEN`. The old token stops working
+  once reissued.
+- **Binance:** nothing to revoke — the daily fetch uses keyless public REST.
+
+After rotating, re-run the manual dry run to confirm the new credential works.
+
+**Upgrade the posture (to macOS Keychain or 1Password/Bitwarden CLI) only when a
+real trigger appears** — do not pre-build it:
+
+- a **write-capable or trading** key enters the picture (real money at risk), or
+- a **second machine or operator** needs the same secret, or
+- a **hosted surface** ships (then use the platform's secret store / Vercel env,
+  not a machine-local file at all).
+
+Until then, the friction of a non-interactive vault unlock buys encryption the
+threat model does not need.
+
 ## Install the daily schedule (macOS launchd)
 
 1. Set the Mac's timezone to America/Mexico_City (or adjust the plist `Hour`/`Minute`
