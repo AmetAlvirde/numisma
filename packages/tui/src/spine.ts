@@ -8,20 +8,40 @@
  *   3. render the existing composition report, unchanged
  *
  * Run: `pnpm spine` (current) or `pnpm spine --as-of 2026-06-26`.
+ *
+ * MAGNITUDE-GUARD OVERRIDE (opt-in, off by default). A genuine >50% move trips the
+ * spine's ±50% fat-finger guard and is rejected. To consciously land such a mark,
+ * raise the guard for THIS one run with `--magnitude-threshold=<n>` (or the
+ * `SPINE_MAGNITUDE_THRESHOLD=<n>` env var), e.g. `pnpm spine --magnitude-threshold=1.5`
+ * for a ±150% band. A normal run passes NO override, so the ±50% guard stands. When
+ * an override is active the run announces it loudly on stderr, so a relaxed guard is
+ * never silent; a malformed value fails loud before anything is ingested.
  */
 import { buildCompositionReport, formatCompositionReport } from "@numisma/engine";
 import {
   ingestInbox,
   loadFoldedReview,
   parseAsOfArg,
+  parseMagnitudeThresholdArg,
   resolveEventStorePaths,
 } from "./event-store.js";
 
 try {
   const paths = resolveEventStorePaths();
   const asOf = parseAsOfArg(process.argv);
+  const magnitudeThreshold = parseMagnitudeThresholdArg(process.argv);
 
-  const ingest = await ingestInbox(paths);
+  if (magnitudeThreshold !== undefined) {
+    process.stderr.write(
+      `WARNING: magnitude guard RELAXED to ±${magnitudeThreshold * 100}% for this ingest ` +
+        `(default is ±50%). Only genuine large moves should be landed this way.\n`,
+    );
+  }
+
+  const ingest =
+    magnitudeThreshold === undefined
+      ? await ingestInbox(paths)
+      : await ingestInbox(paths, { magnitudeThreshold });
   process.stdout.write(
     `Success, ${ingest.newCount} new transaction${ingest.newCount === 1 ? "" : "s"} found, ` +
       `${ingest.duplicateCount} duplicate${ingest.duplicateCount === 1 ? "" : "s"} skipped` +
