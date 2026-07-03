@@ -104,6 +104,65 @@ function requireAsOfValue(value: string | undefined): string {
   return value;
 }
 
+/** The env var that raises the ingest magnitude guard for a single conscious run. */
+export const SPINE_MAGNITUDE_THRESHOLD_ENV = "SPINE_MAGNITUDE_THRESHOLD";
+
+/**
+ * Parse the OPT-IN magnitude-guard override for a single `pnpm spine` run, from
+ * either the `--magnitude-threshold=<n>` / `--magnitude-threshold <n>` CLI flag or
+ * the `SPINE_MAGNITUDE_THRESHOLD` env var (the flag wins when both are set).
+ * Returns `undefined` when NEITHER is set — the overwhelmingly common case — so the
+ * engine keeps its own ±50% default and the run is byte-for-byte a normal run.
+ *
+ * Deliberately conspicuous, never a routine dial: this widens the fat-finger guard,
+ * so a present-but-malformed value (non-numeric, non-finite, or ≤ 0 — a value that
+ * cannot be a real relative deviation) FAILS LOUD rather than silently falling back
+ * to the default. `0.75` means ±75% from the instrument's last close; the operator
+ * raises it only to land a mark they have confirmed reflects a genuine big move.
+ */
+export function parseMagnitudeThresholdArg(
+  args: string[],
+  env: Record<string, string | undefined> = process.env,
+): number | undefined {
+  const raw = magnitudeThresholdSource(args, env);
+  if (raw === undefined) {
+    return undefined;
+  }
+  const value = Number(raw.value);
+  if (raw.value.trim() === "" || !Number.isFinite(value) || value <= 0) {
+    throw new Error(
+      `Invalid magnitude-threshold override from ${raw.origin}: '${raw.value}'. ` +
+        `Expected a positive number (a relative deviation, e.g. 1.5 for ±150%).`,
+    );
+  }
+  return value;
+}
+
+/** The override's raw string and where it came from, flag taking precedence. */
+function magnitudeThresholdSource(
+  args: string[],
+  env: Record<string, string | undefined>,
+): { value: string; origin: string } | undefined {
+  for (let index = 2; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--magnitude-threshold") {
+      const value = args[index + 1];
+      if (value === undefined || value.startsWith("--")) {
+        throw new Error("Missing value for --magnitude-threshold (expected a positive number).");
+      }
+      return { value, origin: "--magnitude-threshold" };
+    }
+    if (arg?.startsWith("--magnitude-threshold=")) {
+      return { value: arg.slice("--magnitude-threshold=".length), origin: "--magnitude-threshold" };
+    }
+  }
+  const fromEnv = env[SPINE_MAGNITUDE_THRESHOLD_ENV];
+  if (fromEnv !== undefined) {
+    return { value: fromEnv, origin: SPINE_MAGNITUDE_THRESHOLD_ENV };
+  }
+  return undefined;
+}
+
 /** Read and structurally validate the immutable genesis seed. */
 export async function loadGenesis(genesisPath: string): Promise<FundReviewData> {
   const raw = await readFile(genesisPath, "utf8");
@@ -218,10 +277,23 @@ async function surfaceQuarantine(logPath: string, quarantined: QuarantinedLine[]
  * log is left byte-for-byte unchanged and the inbox stays in place for the user
  * to fix. Per ADR-001 this orchestration (loading the genesis seed off disk,
  * driving the loop) lives here; the validation logic it calls lives in the engine.
+ *
+ * MAGNITUDE OVERRIDE (`options.magnitudeThreshold`). A `PriceMarked` deviating
+ * beyond the engine's ±50% guard (`PRICE_MARK_MAGNITUDE_THRESHOLD`) is normally
+ * rejected as a fat-finger / currency-unit slip. When a genuine big move is real,
+ * the operator can consciously widen the band for THIS ingest by passing a larger
+ * relative threshold (e.g. `1.5` for ±150%); it is handed straight to the engine's
+ * `crossReferenceEvent` and applies ONLY to the magnitude guard — structural
+ * (`parseEvent`), existence, id-collision, and Reserve-sufficiency validation are
+ * untouched. Left unset (the default), the engine keeps its own ±50% default and
+ * behavior is byte-for-byte identical to a run with no options. This is the
+ * documented recovery for a real >50% move (see docs/price-feed-ops.md); the
+ * `pnpm spine` entry point exposes it only via a conspicuous, opt-in operator
+ * override, never a routine dial.
  */
 export async function ingestInbox(
   paths: EventStorePaths,
-  options: { now?: () => Date } = {},
+  options: { now?: () => Date; magnitudeThreshold?: number } = {},
 ): Promise<IngestReport> {
   const raw = await readOptional(paths.inbox);
   if (raw === undefined) {
@@ -247,6 +319,14 @@ export async function ingestInbox(
   // in order, so a position opened earlier in this inbox can be referenced later.
   const reference = buildEventReference(genesis, existing);
 
+  // Only pass the magnitude dial when the operator set it, so the engine keeps its
+  // own ±50% default (exactOptionalPropertyTypes forbids handing an explicit
+  // `undefined`). Mirrors the guard pattern in price-feed's findMarkRejections.
+  const guardOptions =
+    options.magnitudeThreshold === undefined
+      ? undefined
+      : { magnitudeThreshold: options.magnitudeThreshold };
+
   const toAppend: PortfolioEvent[] = [];
   let duplicateCount = 0;
   for (const [index, candidate] of parsed.entries()) {
@@ -260,7 +340,7 @@ export async function ingestInbox(
       duplicateCount += 1;
       continue;
     }
-    const crossRef = crossReferenceEvent(result.value, reference);
+    const crossRef = crossReferenceEvent(result.value, reference, guardOptions);
     if (crossRef.kind !== "ok") {
       throw new Error(
         `Inbox transaction [${index}] failed cross-reference (${crossRef.path}: ${crossRef.message}).`,
