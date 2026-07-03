@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd definition for the hands-off daily price run (slice #108).
+
+  Fires the wrapper (run-daily-fetch.sh) at 18:00 in the MACHINE's local timezone.
+  The mark-instant contract's default mark time is 18:00 America/Mexico_City
+  (ADR-005 / config.ts), so this assumes the Mac's System Settings timezone is
+  CDMX. If the machine runs another timezone, set Hour/Minute to the local clock
+  that equals 18:00 CDMX, or keep the OS on CDMX. Missed fires (laptop asleep at
+  18:00) are harmless: launchd runs the job at the next wake, and the deterministic
+  id makes the catch-up run add no duplicate marks.
+
+  Install (edit the two __PLACEHOLDERS__ first):
+    cp ops/price-feed/com.numisma.pricefeed.daily.plist \
+       ~/Library/LaunchAgents/com.numisma.pricefeed.daily.plist
+    launchctl load  ~/Library/LaunchAgents/com.numisma.pricefeed.daily.plist
+  Trigger a manual dry run (does not wait for 18:00):
+    launchctl start com.numisma.pricefeed.daily
+  Remove:
+    launchctl unload ~/Library/LaunchAgents/com.numisma.pricefeed.daily.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.numisma.pricefeed.daily</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__REPO_DIR__/ops/price-feed/run-daily-fetch.sh</string>
+  </array>
+
+  <!-- Pass the repo dir to the wrapper (it also has its own default). -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>NUMISMA_REPO_DIR</key>
+    <string>__REPO_DIR__</string>
+  </dict>
+
+  <!-- 18:00 local, every day. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>18</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <!-- Do not run at load; only on the calendar interval (and manual `start`). -->
+  <key>RunAtLoad</key>
+  <false/>
+
+  <!-- launchd's own capture of the wrapper's stdout/stderr (outside the repo). -->
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/numisma/launchd.price-feed.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/numisma/launchd.price-feed.err.log</string>
+</dict>
+</plist>

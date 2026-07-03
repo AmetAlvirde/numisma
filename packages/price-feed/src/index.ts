@@ -20,3 +20,12 @@ export {
   type FetchFailure,
   type RunOptions,
 } from "./fetch-prices.js";
+export {
+  loadSpineReference,
+  findMarkRejections,
+  marksFromRun,
+  scanFetchedMarks,
+  type MarkRejection,
+  type SpineReferencePaths,
+  type RejectionScan,
+} from "./rejection-check.js";

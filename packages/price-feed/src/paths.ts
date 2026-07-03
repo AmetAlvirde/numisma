@@ -11,6 +11,10 @@ export interface PriceFeedPaths {
   pricesDir: string;
   /** The shared inbox file `pnpm spine` consumes. */
   inbox: string;
+  /** The immutable t0 seed the fetch-time rejection pre-check reads (read-only). */
+  genesis: string;
+  /** The append-only event log the rejection pre-check reads for last-close (read-only). */
+  log: string;
 }
 
 export function resolvePriceFeedPaths(dataDir: string): PriceFeedPaths {
@@ -18,5 +22,10 @@ export function resolvePriceFeedPaths(dataDir: string): PriceFeedPaths {
   return {
     pricesDir: join(base, PRICE_STORE_DIR_SEGMENT),
     inbox: join(base, ...INBOX_PATH_SEGMENTS),
+    // The spine owns genesis/log writes (R6); the pre-check only READS them to
+    // rebuild the known world the ±50% guard judges a fetched mark against. Same
+    // filenames the tui's event-store uses, without a price-feed→tui dependency.
+    genesis: join(base, "genesis.json"),
+    log: join(base, "events.jsonl"),
   };
 }

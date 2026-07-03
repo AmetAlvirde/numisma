@@ -8,6 +8,7 @@
 import { resolvePriceFeedPaths } from "./paths.js";
 import { DEFAULT_CONFIG } from "./config.js";
 import { runPriceFetch } from "./fetch-prices.js";
+import { scanFetchedMarks } from "./rejection-check.js";
 
 async function main(): Promise<void> {
   const paths = resolvePriceFeedPaths(DEFAULT_CONFIG.dataDir);
@@ -20,7 +21,7 @@ async function main(): Promise<void> {
   }
   for (const failure of result.failures) {
     console.error(
-      `  FAILED  ${failure.instrumentId.padEnd(7)} ${failure.symbol.padEnd(11)} ${failure.message}`,
+      `  FETCH FAILED  ${failure.instrumentId.padEnd(7)} ${failure.symbol.padEnd(11)} ${failure.message}`,
     );
   }
 
@@ -39,12 +40,45 @@ async function main(): Promise<void> {
   if (result.failures.length > 0) {
     console.log(`  ${result.failures.length} fetch failure(s) surfaced above (not swallowed).`);
   }
+
+  // Fetch-time pre-check (open question 2): would the spine's ±50% guard reject any
+  // mark this run queued? Surface it here, attributably and distinctly from a
+  // provider failure, so a scheduled run never exits 0 on a doomed-but-queued mark.
+  const scan = await scanFetchedMarks(result, paths);
+  for (const rejection of scan.rejections) {
+    console.error(
+      `  SPINE WOULD REJECT  ${rejection.instrumentId.padEnd(7)} ${rejection.asOf}  ` +
+        `price ${rejection.price} — ${rejection.reason}`,
+    );
+  }
+  if (scan.rejections.length > 0) {
+    console.log("");
+    console.log(
+      `  ${scan.rejections.length} fetched mark(s) would be rejected by the spine guard (above).`,
+    );
+    console.log(
+      "  Triage: this is NOT a provider failure. Review the move; if it is real, hand-author",
+    );
+    console.log(
+      "  the mark through the inbox (the permanent manual fallback) and re-run `pnpm spine`.",
+    );
+    console.log(
+      "  A doomed mark left in the inbox blocks the whole spine ingest (all-or-nothing).",
+    );
+  } else if (scan.unavailableReason !== undefined) {
+    console.log("");
+    console.log(`  Note: could not pre-check marks against the spine guard — ${scan.unavailableReason}`);
+    console.log("  `pnpm spine` remains the authoritative guard; run it to validate the marks.");
+  }
+
   console.log("");
   console.log("Next: run `pnpm spine` to validate + append the marks to the event log.");
 
-  // Non-zero exit so a scheduler notices failures — but only AFTER storing and
-  // emitting everything that DID succeed (partial progress is always kept).
-  if (result.failures.length > 0) {
+  // Non-zero exit so a scheduler notices — but only AFTER storing and emitting
+  // everything that DID succeed (partial progress is always kept). A provider
+  // failure and a guard rejection are distinct triage paths (surfaced above) but
+  // both must halt a hands-off run so the operator looks before `pnpm spine`.
+  if (result.failures.length > 0 || scan.rejections.length > 0) {
     process.exitCode = 1;
   }
 }

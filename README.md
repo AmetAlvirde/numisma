@@ -70,6 +70,7 @@ refactors:
 | `pnpm dev`         | Run the interactive openTUI dashboard (Bun). On startup it ingests any dropped inbox, then folds genesis + log to current state (or `--as-of`).      |
 | `pnpm report`      | Print the one-shot text composition report (tsx), rendered from the fold over genesis + log. Read-only — it folds and renders, never ingests.        |
 | `pnpm spine`       | Node tracer for the event-sourcing spine (no Bun/openTUI): ingest the inbox (dedup / append / archive), fold to `--as-of` (or current), then render. |
+| `pnpm prices:fetch` | Fetch free market data (crypto via keyless Binance) into the disposable price store and queue one `PriceMarked` per instrument per trading day in the inbox; at/after the mark time it also pre-checks each mark against the spine's ±50% guard and exits non-zero on a provider failure or a would-be rejection. Never writes the event log — `pnpm spine` owns the guarded append. |
 | `pnpm spine:reset` | Iteration helper: clear the event log and restore the most recent archived inbox so an edited inbox can be re-folded. Genesis is never touched.      |
 | `pnpm smoke:tui`   | Headless openTUI keypress smoke render.                                                                                                              |
 | `pnpm smoke:startup` | Bun: drives the real startup data path + `mountApp` through the openTUI test renderer against an on-disk store, asserting the spine targets on the rendered surface. |
@@ -100,3 +101,8 @@ reaches the log. Any rejection leaves the durable log byte-for-byte unchanged an
 the inbox in place so it can be fixed and re-dropped.
 
 The repo intentionally does not ship real or sample portfolio data.
+
+For the hands-off daily price run (scheduling, provider-token storage, and how to
+triage a failed or rejected run), see
+[`docs/price-feed-ops.md`](./docs/price-feed-ops.md). Provider tokens live in a
+private file outside the repo; the disposable `data/prices/` store is git-ignored.
