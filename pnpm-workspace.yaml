@@ -3,3 +3,9 @@ packages:
 
 allowBuilds:
   esbuild: true
+
+# Force the patched esbuild across the tree (transitive via vite/vitest + tsx).
+# Closes GHSA-g7r4-m6w7-qqqr (dev-only, Windows dev-server file read); < 0.28.1
+# is vulnerable. Patch bump satisfies vite@7's and tsx@4's esbuild ranges.
+overrides:
+  esbuild: ">=0.28.1"

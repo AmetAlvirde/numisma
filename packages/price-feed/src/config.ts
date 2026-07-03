@@ -39,6 +39,23 @@ export interface PriceFeedConfig extends MarkClock {
    * not a CWD-relative `"data"`. Callers may still override with any path.
    */
   dataDir: string;
+  /**
+   * Max Twelve Data symbols fetched per minute. The free Basic tier caps at 8 API
+   * CREDITS/minute and a batched `time_series` request costs 1 CREDIT PER SYMBOL
+   * (per Twelve Data docs) — so the registry's 9 equity symbols cannot clear the
+   * cap in one request (9 credits > 8 ⇒ HTTP 429), batched or not. The fetch
+   * therefore paces equities in chunks of this size, sleeping {@link twelveDataPauseMs}
+   * between chunks. Default 8 = the free cap; a paid tier can raise this to fetch
+   * every symbol in one window (set it ≥ the equity count to disable pacing).
+   */
+  twelveDataMaxSymbolsPerMinute: number;
+  /**
+   * Milliseconds to pause between Twelve Data chunks so the per-minute credit quota
+   * resets before the next chunk. Default 60_000 (the quota resets each minute). A
+   * daily fetch with 9 equity symbols therefore takes ~one extra minute; that is
+   * fine for a daily/scheduled run and the only cost of staying on the free tier.
+   */
+  twelveDataPauseMs: number;
 }
 
 /**
@@ -76,6 +93,8 @@ export const DEFAULT_CONFIG: PriceFeedConfig = {
   requestTimeoutMs: 10_000,
   fixMaxStaleDays: 4,
   dataDir: resolveWorkspaceDataDir(),
+  twelveDataMaxSymbolsPerMinute: 8,
+  twelveDataPauseMs: 60_000,
 };
 
 /**

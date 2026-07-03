@@ -8,8 +8,14 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPriceFetch } from "./fetch-prices.js";
+import { runPriceFetch as runPriceFetchRaw, type RunOptions } from "./fetch-prices.js";
 import { resolvePriceFeedPaths } from "./paths.js";
+
+// Default a no-op sleep so Twelve Data pacing never waits a real minute in the
+// suite (the default 8/min cap chunks the 9 equities into [8, 1] with a 60s pause).
+// A test that asserts pacing passes its own sleepImpl — spread last, so it wins.
+const runPriceFetch = (options: RunOptions = {}) =>
+  runPriceFetchRaw({ sleepImpl: async () => {}, ...options });
 
 // 2026-07-03T12:00Z = 06:00 in CDMX on the 3rd → asOf "2026-07-03".
 const RUN_INSTANT = new Date("2026-07-03T12:00:00.000Z");
@@ -66,9 +72,9 @@ interface Overrides {
    * Keyed by provider symbol (e.g. ETHUSDT, EWW) or "FIX". A crypto/FIX override
    * returns the whole `Response` for that (single) request. A Twelve Data equity
    * override injects that symbol's SLICE into the batched keyed response — its
-   * `Response` body is parsed and placed under the symbol key (Twelve Data now
-   * fetches every equity in ONE comma-separated request, so a per-symbol failure
-   * is a `status:"error"` slice, not a per-request HTTP status).
+   * `Response` body is parsed and placed under the symbol key (Twelve Data fetches
+   * equities in PACED comma-separated batches, so a per-symbol failure is a
+   * `status:"error"` slice, not a per-request HTTP status).
    */
   [key: string]: () => Response | Promise<Response>;
 }
@@ -338,8 +344,8 @@ describe("runPriceFetch — request timeout attribution (R4)", () => {
       config: { dataDir, markTime: "00:00", requestTimeoutMs: 20 },
       fetchImpl: ((url: string | URL | Request, init?: RequestInit) => {
         const href = typeof url === "string" ? url : url.toString();
-        // The equities now ride ONE batched Twelve Data request; a stall aborts the
-        // whole batch, so every equity symbol times out attributably (R4) while crypto
+        // The equities ride PACED batched Twelve Data requests; a stall aborts each
+        // chunk, so every equity symbol times out attributably (R4) while crypto
         // still completes — a stalled provider can never hang or silently drop the run.
         if (href.includes("api.twelvedata.com")) {
           return new Promise<Response>((_resolve, reject) => {
@@ -362,5 +368,65 @@ describe("runPriceFetch — request timeout attribution (R4)", () => {
     // All 9 Twelve Data symbols timed out; the 4 crypto quotes still stored.
     expect(result.failures).toHaveLength(9);
     expect(result.storedCount).toBe(4);
+  });
+});
+
+describe("runPriceFetch — Twelve Data pacing under the free-tier credit cap", () => {
+  // Record the symbol list of every Twelve Data request so we can assert the batches.
+  function recordingFetch(batches: string[][]): typeof fetch {
+    return ((url: string | URL | Request) => {
+      const href = typeof url === "string" ? url : url.toString();
+      if (href.includes("api.twelvedata.com")) {
+        const match = /[?&]symbol=([^&]+)/.exec(href);
+        batches.push(decodeURIComponent(match![1]!).split(","));
+        return twelveDataBatchResponse(href, {});
+      }
+      return mockFetch()(url as string);
+    }) as typeof fetch;
+  }
+
+  it("chunks the 9 equity symbols into ≤8-credit windows with one 60s pause between", async () => {
+    const batches: string[][] = [];
+    const sleeps: number[] = [];
+
+    const result = await runPriceFetch({
+      config: { dataDir, markTime: "00:00", twelveDataMaxSymbolsPerMinute: 8, twelveDataPauseMs: 60_000 },
+      fetchImpl: recordingFetch(batches),
+      now: () => RUN_INSTANT,
+      credentials: CREDENTIALS,
+      sleepImpl: async (ms) => {
+        sleeps.push(ms);
+      },
+    });
+
+    // 9 symbols, 8/min cap → two windows of 8 + 1; NEVER a single 9-credit request.
+    expect(batches.map((b) => b.length)).toEqual([8, 1]);
+    expect(batches.every((b) => b.length <= 8)).toBe(true);
+    // Exactly one pause, BETWEEN the two chunks (never after the last).
+    expect(sleeps).toEqual([60_000]);
+    // Pacing changes timing, not coverage: all 13 still stored and marked.
+    expect(result.storedCount).toBe(13);
+    expect(result.emittedCount).toBe(13);
+    expect(result.failures).toEqual([]);
+  });
+
+  it("makes one request and never pauses when the cap fits every symbol (paid tier)", async () => {
+    const batches: string[][] = [];
+    const sleeps: number[] = [];
+
+    await runPriceFetch({
+      config: { dataDir, markTime: "00:00", twelveDataMaxSymbolsPerMinute: 60 },
+      fetchImpl: recordingFetch(batches),
+      now: () => RUN_INSTANT,
+      credentials: CREDENTIALS,
+      sleepImpl: async (ms) => {
+        sleeps.push(ms);
+      },
+    });
+
+    // A cap ≥ the equity count collapses to one batch and disables pacing entirely.
+    expect(batches).toHaveLength(1);
+    expect(batches[0]).toHaveLength(9);
+    expect(sleeps).toEqual([]);
   });
 });
