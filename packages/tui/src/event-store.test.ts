@@ -13,8 +13,10 @@ import {
   loadEventLog,
   loadFoldedReview,
   migrateLegacyLog,
+  parseMagnitudeThresholdArg,
   quarantineLogPath,
   resolveEventStorePaths,
+  SPINE_MAGNITUDE_THRESHOLD_ENV,
   type EventStorePaths,
 } from "./event-store.js";
 import type { SuppliedCashLeg } from "@numisma/engine";
@@ -268,6 +270,105 @@ describe("ingestInbox — fail-loud rejection leaves the log unchanged and inbox
 
     expect(await readFile(paths.log, "utf8")).toBe(logBefore);
     expect(await readOrUndefined(paths.log)).not.toContain("open-btc");
+  });
+});
+
+// Magnitude-guard override (Finding 6): the documented recovery for a GENUINE
+// >50% move. Default ingest keeps the engine's ±50% guard; an operator-set
+// `magnitudeThreshold` widens ONLY the magnitude guard for that one conscious run.
+// A +100% mark (last close 150 → 300) is beyond the default band, inside a ±150%
+// band, so it pins both the reject-by-default and accept-on-override behaviors.
+describe("ingestInbox — magnitude override lands a genuine big move (Finding 6)", () => {
+  it("rejects a >50% move by default (no override) with the engine ±50% guard", async () => {
+    const paths = await makeStore({ inbox: [markAapl(300, "big-move")] }); // +100% of 150
+    const logBefore = await readOrUndefined(paths.log);
+
+    await expect(ingestInbox(paths)).rejects.toThrowError(/cross-reference.*price/);
+
+    // Fail-loud, all-or-nothing: nothing written, inbox preserved for the override run.
+    expect(await readOrUndefined(paths.log)).toBe(logBefore);
+    expect(await exists(paths.inbox)).toBe(true);
+  });
+
+  it("accepts the SAME mark when the override raises the threshold", async () => {
+    const paths = await makeStore({ inbox: [markAapl(300, "big-move")] }); // +100% of 150
+
+    const report = await ingestInbox(paths, { magnitudeThreshold: 1.5 }); // ±150%
+
+    expect(report).toMatchObject({ newCount: 1, duplicateCount: 0 });
+    const log = (await readFile(paths.log, "utf8")).trim().split("\n");
+    expect(JSON.parse(log[0]!).id).toBe("big-move");
+    expect(await exists(paths.inbox)).toBe(false);
+  });
+
+  it("applies the override only to the magnitude guard, not structural validation", async () => {
+    // A negative price is a STRUCTURAL failure — a huge override must not smuggle it in.
+    const malformed = { id: "neg", asOf: "2026-06-06", type: "PriceMarked", instrumentId: "aapl-usd", price: -5 };
+    const paths = await makeStore({ inbox: [malformed] });
+
+    await expect(ingestInbox(paths, { magnitudeThreshold: 100 })).rejects.toThrowError(/is invalid.*price/);
+  });
+
+  it("leaves default behavior byte-for-byte unchanged when no override is passed", async () => {
+    // Same inbox, once with an explicit-undefined-free default call and once via the
+    // options-less call: both must land identically (engine keeps its own ±50%).
+    const withoutOptions = await makeStore({ inbox: [markAapl(200, "in-band")] }); // +33%
+    const withEmptyOptions = await makeStore({ inbox: [markAapl(200, "in-band")] });
+
+    const a = await ingestInbox(withoutOptions);
+    const b = await ingestInbox(withEmptyOptions, {});
+
+    expect(a).toMatchObject({ newCount: 1, duplicateCount: 0 });
+    expect(b).toMatchObject({ newCount: 1, duplicateCount: 0 });
+    // A +33% mark is inside ±50%; a >50% mark stays rejected without an override.
+    const rejects = await makeStore({ inbox: [markAapl(300, "big")] });
+    await expect(ingestInbox(rejects)).rejects.toThrowError(/cross-reference.*price/);
+  });
+});
+
+describe("parseMagnitudeThresholdArg — opt-in operator override, fail-loud on garbage", () => {
+  it("returns undefined when neither flag nor env is set (the default run)", () => {
+    expect(parseMagnitudeThresholdArg(["node", "spine"], {})).toBeUndefined();
+  });
+
+  it("reads --magnitude-threshold=<n>", () => {
+    expect(parseMagnitudeThresholdArg(["node", "spine", "--magnitude-threshold=1.5"], {})).toBe(1.5);
+  });
+
+  it("reads the space-separated --magnitude-threshold <n>", () => {
+    expect(parseMagnitudeThresholdArg(["node", "spine", "--magnitude-threshold", "0.75"], {})).toBe(0.75);
+  });
+
+  it("reads the env var when no flag is present", () => {
+    expect(
+      parseMagnitudeThresholdArg(["node", "spine"], { [SPINE_MAGNITUDE_THRESHOLD_ENV]: "2" }),
+    ).toBe(2);
+  });
+
+  it("lets the flag win over the env var", () => {
+    expect(
+      parseMagnitudeThresholdArg(["node", "spine", "--magnitude-threshold=1.5"], {
+        [SPINE_MAGNITUDE_THRESHOLD_ENV]: "9",
+      }),
+    ).toBe(1.5);
+  });
+
+  it("fails loud on a non-numeric value", () => {
+    expect(() => parseMagnitudeThresholdArg(["node", "spine", "--magnitude-threshold=huge"], {})).toThrow(
+      /Invalid magnitude-threshold/,
+    );
+  });
+
+  it("fails loud on a non-positive value", () => {
+    expect(() => parseMagnitudeThresholdArg(["node", "spine"], { [SPINE_MAGNITUDE_THRESHOLD_ENV]: "0" })).toThrow(
+      /Invalid magnitude-threshold/,
+    );
+  });
+
+  it("fails loud on a missing flag value", () => {
+    expect(() => parseMagnitudeThresholdArg(["node", "spine", "--magnitude-threshold"], {})).toThrow(
+      /Missing value for --magnitude-threshold/,
+    );
   });
 });
 

@@ -12,11 +12,17 @@ const SRC_DIR = dirname(fileURLToPath(import.meta.url));
 // Also scan the sibling TUI package's source: a realized-P&L prototype demo lived
 // there (packages/tui/src), so the marker could reach main via either package.
 const TUI_SRC_DIR = join(SRC_DIR, "..", "..", "tui", "src");
-const SCAN_DIRS = [SRC_DIR, TUI_SRC_DIR];
+// And the price-feed package: the crypto price tracer (#106) was prototyped there
+// before its reliable conversion, so its markers must be stripped too (R7).
+const PRICE_FEED_SRC_DIR = join(SRC_DIR, "..", "..", "price-feed", "src");
+const SCAN_DIRS = [SRC_DIR, TUI_SRC_DIR, PRICE_FEED_SRC_DIR];
 // Needles assembled from fragments so this guard file never matches itself.
 const MARKERS = [
   "2026-07-01" + "-realized-pnl",
   "PROTOTYPE (mvi " + "2026-07-02" + "-partial-close-profit-split)",
+  // The crypto price-fetch prototype marker + its tmp-path handoff (#106 / R7).
+  "MVI " + "PROTOTYPE",
+  "Dev/tmp/mvi-numisma-" + "2026-07-03" + "-price-fetch-prototype",
 ];
 const SELF = "de-prototype.test.ts";
 

@@ -23,6 +23,9 @@ export default defineConfig({
         "packages/tui/src/report.ts",
         "packages/tui/src/spine.ts",
         "packages/tui/src/spine-reset.ts",
+        // Thin price-feed CLI entry: top-level console/exit-code wiring over the
+        // tested `runPriceFetch`, no unit to assert.
+        "packages/price-feed/src/cli.ts",
         // Bun-only openTUI wiring: never executes under Node's vitest run, so
         // instrumenting it would only report dead 0%. Guarded by the openTUI
         // smokes (`pnpm smoke:tui`, `pnpm smoke:startup`).

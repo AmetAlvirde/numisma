@@ -47,6 +47,21 @@
 | **Currency** | The denomination used to record, hold, convert, or report a monetary value.                                 | money type       |
 | **FX Rate**  | A conversion rate between two Currencies used to translate values for reporting at a specific review point. | forex price      |
 
+## Market Data Plane
+
+The two-plane price model (ADR-005): raw observations live in the disposable
+**Price Store** at the **Fetch Cadence**; the sparse valuation **Mark** rides the
+event log at the separate **Mark Cadence**. Candle intervals are never called
+"Timeframe" — that alias belongs to Tempo.
+
+| Term                   | Definition                                                                                                                                                                                                             | Aliases to avoid       |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| **Quote**              | A raw provider price observation for an Instrument (e.g. a Binance daily close), upserted into the Price Store every fetch. Disposable and re-fetchable; never a fund-history record and permitted to diverge intraday from the Mark. | candle, tick, price    |
+| **Price Store**        | The disposable, git-ignored `data/prices/` plane holding one file per Instrument of upserted Quotes (latest-wins per trading day). Re-fetchable market data, deliberately not the event log; carries no durability contract beyond git-ignore. | price log, market log  |
+| **Fetch Cadence**      | How often the price feed pulls Quotes into the Price Store. Cranking it (daily → hourly → per-minute) only grows the Price Store and never multiplies Marks.                                                          | poll rate, timeframe   |
+| **Mark Cadence**       | How often a `PriceMarked` Mark is emitted to the event log — separate from and sparser than the Fetch Cadence; default one Mark per Instrument per trading day at the configured mark time.                            | fetch cadence, timeframe |
+| **Mark (`PriceMarked`)** | The `PriceMarked` sense: a sparse valuation decision about the Fund's book — at most one per Instrument per mark period, `asOf`-dated in the configured trading-day timezone, ingested through the validated inbox with the ±50% magnitude guard. Manual authoring is the permanent fallback. | quote, price update    |
+
 ## Risk, Reporting, and Records
 
 | Term                        | Definition                                                                                                                                 | Aliases to avoid        |
