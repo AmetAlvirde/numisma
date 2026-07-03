@@ -137,6 +137,8 @@ export {
   priceMarkId,
   markFromQuote,
 } from "./price-feed/mark.js";
+export type { FixObservation } from "./price-feed/derive.js";
+export { requireFreshFix, deriveMxnMark } from "./price-feed/derive.js";
 export type { InboxRecord, InboxMergeResult } from "./price-feed/inbox-merge.js";
 export {
   mergeInbox,

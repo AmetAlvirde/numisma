@@ -23,6 +23,13 @@ export interface PriceFeedConfig extends MarkClock {
    * harmless under the idempotent deterministic id).
    */
   requestTimeoutMs: number;
+  /**
+   * How many calendar days old the Banxico USD/MXN FIX may be before an `*-mxn`
+   * derivation refuses it (ADR-005: no stale-rate reuse). Default 4 tolerates a
+   * Friday FIX marking through a weekend plus one holiday; an older FIX fails the
+   * derivation loudly rather than silently reusing it.
+   */
+  fixMaxStaleDays: number;
   /** Root data directory holding the price store and the inbox. */
   dataDir: string;
 }
@@ -31,5 +38,28 @@ export const DEFAULT_CONFIG: PriceFeedConfig = {
   timeZone: "America/Mexico_City",
   markTime: "18:00",
   requestTimeoutMs: 10_000,
+  fixMaxStaleDays: 4,
   dataDir: "data",
 };
+
+/**
+ * Provider credentials, read from the environment — NEVER committed. Document the
+ * two variables here so operators know what to export:
+ *   - `TWELVEDATA_API_KEY` — free Twelve Data key for US equities.
+ *   - `BANXICO_TOKEN`      — free Banxico SIE token for the USD/MXN FIX (SF43718).
+ * Binance is keyless, so no credential is needed for crypto.
+ */
+export interface ProviderCredentials {
+  twelveDataApiKey: string;
+  banxicoToken: string;
+}
+
+/** Read the provider credentials from `process.env`; missing keys become "". */
+export function readCredentialsFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): ProviderCredentials {
+  return {
+    twelveDataApiKey: env.TWELVEDATA_API_KEY ?? "",
+    banxicoToken: env.BANXICO_TOKEN ?? "",
+  };
+}

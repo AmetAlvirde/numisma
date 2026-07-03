@@ -1,7 +1,9 @@
-// Shell reliability suite for the crypto price pipe. No live network (every fetch
-// is mocked) and never the live data files (each run uses a fresh temp data dir):
-// the happy-path store+emit, the pre-mark-time no-mark case, idempotent re-runs,
-// per-symbol failure isolation on malformed payloads, and the request timeout.
+// Shell reliability suite for the full price pipe (crypto + US equities + derived
+// MXN). No live network (every fetch is mocked) and never the live data files
+// (each run uses a fresh temp data dir): the happy-path store+emit across all 13
+// instruments plus the FIX, the derived `USD × FIX` MXN marks with the `usdMxn`
+// snapshot, the pre-mark-time no-mark case, idempotent re-runs, per-symbol failure
+// isolation, and the loud missing/stale-FIX behavior.
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +14,7 @@ import { resolvePriceFeedPaths } from "./paths.js";
 // 2026-07-03T12:00Z = 06:00 in CDMX on the 3rd → asOf "2026-07-03".
 const RUN_INSTANT = new Date("2026-07-03T12:00:00.000Z");
 const AS_OF = "2026-07-03";
+const CREDENTIALS = { twelveDataApiKey: "test-key", banxicoToken: "test-token" };
 
 let dataDir: string;
 
@@ -23,7 +26,27 @@ afterEach(async () => {
   await rm(dataDir, { recursive: true, force: true });
 });
 
-/** A well-formed Binance 1d kline payload with `close`. */
+const CRYPTO_CLOSES: Record<string, number> = {
+  BTCUSDT: 65000,
+  ETHUSDT: 3400,
+  RENDERUSDT: 8.2,
+  GRAMUSDT: 5.5,
+};
+
+const EQUITY_CLOSES: Record<string, number> = {
+  AAPL: 212.5,
+  GOOGL: 178.25,
+  TSLA: 240,
+  EWW: 62.5,
+  INTC: 34.2,
+  NKE: 78.4,
+  NU: 12.6,
+  RIVN: 15.5,
+  SBUX: 95.3,
+};
+
+const FIX_RATE = 18.5;
+
 function klineResponse(close: number): Response {
   const openTime = Date.UTC(2026, 6, 3);
   const closeTime = openTime + 86_399_999;
@@ -31,29 +54,58 @@ function klineResponse(close: number): Response {
   return new Response(JSON.stringify([row]), { status: 200 });
 }
 
-const CLOSES: Record<string, number> = {
-  BTCUSDT: 65000,
-  ETHUSDT: 3400,
-  RENDERUSDT: 8.2,
-  GRAMUSDT: 5.5,
-};
+function timeSeriesResponse(close: number): Response {
+  return new Response(
+    JSON.stringify({ status: "ok", values: [{ datetime: AS_OF, close: String(close) }] }),
+    { status: 200 },
+  );
+}
 
-/** A mock fetch keyed off the symbol in the request URL. */
-function mockFetch(overrides: Record<string, () => Response | Promise<Response>> = {}): typeof fetch {
+function fixResponse(rate: string, fecha = "03/07/2026"): Response {
+  return new Response(
+    JSON.stringify({ bmx: { series: [{ idSerie: "SF43718", datos: [{ fecha, dato: rate }] }] } }),
+    { status: 200 },
+  );
+}
+
+interface Overrides {
+  /** Keyed by provider symbol (e.g. ETHUSDT, EWW) or "FIX". */
+  [key: string]: () => Response | Promise<Response>;
+}
+
+/** A mock fetch that routes by host and the symbol in the request URL. */
+function mockFetch(overrides: Overrides = {}): typeof fetch {
   return ((url: string | URL | Request) => {
     const href = typeof url === "string" ? url : url.toString();
-    const symbol = Object.keys(CLOSES).find((s) => href.includes(`symbol=${s}`));
-    if (symbol && overrides[symbol]) {
-      return Promise.resolve(overrides[symbol]!());
+    if (href.includes("banxico.org.mx")) {
+      return Promise.resolve(overrides.FIX ? overrides.FIX() : fixResponse(String(FIX_RATE)));
     }
-    if (symbol) {
-      return Promise.resolve(klineResponse(CLOSES[symbol]!));
+    if (href.includes("api.binance.com")) {
+      const symbol = Object.keys(CRYPTO_CLOSES).find((s) => href.includes(`symbol=${s}`));
+      if (symbol && overrides[symbol]) return Promise.resolve(overrides[symbol]!());
+      if (symbol) return Promise.resolve(klineResponse(CRYPTO_CLOSES[symbol]!));
+      return Promise.resolve(new Response("[]", { status: 200 }));
+    }
+    if (href.includes("api.twelvedata.com")) {
+      const symbol = Object.keys(EQUITY_CLOSES).find((s) => href.includes(`symbol=${s}&`));
+      if (symbol && overrides[symbol]) return Promise.resolve(overrides[symbol]!());
+      if (symbol) return Promise.resolve(timeSeriesResponse(EQUITY_CLOSES[symbol]!));
+      return Promise.resolve(
+        new Response(JSON.stringify({ status: "error", message: "not found" }), { status: 200 }),
+      );
     }
     return Promise.resolve(new Response("[]", { status: 200 }));
   }) as typeof fetch;
 }
 
-async function readInbox(): Promise<{ id: string }[]> {
+interface InboxEvent {
+  id: string;
+  instrumentId?: string;
+  price?: number;
+  usdMxn?: number;
+}
+
+async function readInbox(): Promise<InboxEvent[]> {
   const { inbox } = resolvePriceFeedPaths(dataDir);
   return JSON.parse(await readFile(inbox, "utf8"));
 }
@@ -63,18 +115,19 @@ async function readStore(instrumentId: string): Promise<string> {
   return readFile(join(pricesDir, `${instrumentId}.jsonl`), "utf8");
 }
 
-describe("runPriceFetch — happy path at/after the mark time", () => {
-  it("stores every quote and queues one deterministic-id mark per instrument", async () => {
+describe("runPriceFetch — happy path across every provider (at/after mark time)", () => {
+  it("stores all 13 quotes and queues one deterministic-id mark per instrument", async () => {
     const result = await runPriceFetch({
       config: { dataDir, markTime: "00:00" },
       fetchImpl: mockFetch(),
       now: () => RUN_INSTANT,
+      credentials: CREDENTIALS,
     });
 
-    expect(result.storedCount).toBe(4);
-    expect(result.totalCount).toBe(4);
+    expect(result.totalCount).toBe(13);
+    expect(result.storedCount).toBe(13);
     expect(result.markEmitted).toBe(true);
-    expect(result.emittedCount).toBe(4);
+    expect(result.emittedCount).toBe(13);
     expect(result.failures).toEqual([]);
 
     const inbox = await readInbox();
@@ -83,34 +136,56 @@ describe("runPriceFetch — happy path at/after the mark time", () => {
       `pm-eth-${AS_OF}`,
       `pm-render-${AS_OF}`,
       `pm-gram-${AS_OF}`,
+      `pm-aapl-${AS_OF}`,
+      `pm-googl-${AS_OF}`,
+      `pm-tsla-${AS_OF}`,
+      `pm-eww-mxn-${AS_OF}`,
+      `pm-intc-mxn-${AS_OF}`,
+      `pm-nke-mxn-${AS_OF}`,
+      `pm-nu-mxn-${AS_OF}`,
+      `pm-rivn-mxn-${AS_OF}`,
+      `pm-sbux-mxn-${AS_OF}`,
     ]);
+  });
 
-    const btc = JSON.parse((await readStore("btc")).trim());
-    expect(btc).toMatchObject({
-      instrumentId: "btc",
-      symbol: "BTCUSDT",
-      asOf: AS_OF,
-      price: 65000,
-      source: "binance",
+  it("marks *-mxn at USD × FIX with the usdMxn snapshot; the store keeps the USD leg", async () => {
+    await runPriceFetch({
+      config: { dataDir, markTime: "00:00" },
+      fetchImpl: mockFetch(),
+      now: () => RUN_INSTANT,
+      credentials: CREDENTIALS,
     });
-    expect(btc.fetchedAt).toBe(RUN_INSTANT.toISOString());
+
+    const inbox = await readInbox();
+    const eww = inbox.find((event) => event.id === `pm-eww-mxn-${AS_OF}`);
+    // 62.5 USD × 18.5 FIX = 1156.25 MXN, with the FIX carried as usdMxn.
+    expect(eww).toMatchObject({ instrumentId: "eww-mxn", price: 1156.25, usdMxn: FIX_RATE });
+
+    // A direct US equity mark carries no usdMxn.
+    const aapl = inbox.find((event) => event.id === `pm-aapl-${AS_OF}`);
+    expect(aapl).toMatchObject({ instrumentId: "aapl", price: 212.5 });
+    expect(aapl?.usdMxn).toBeUndefined();
+
+    // The disposable store holds the raw USD leg for eww-mxn, never the derived MXN.
+    const stored = JSON.parse((await readStore("eww-mxn")).trim());
+    expect(stored).toMatchObject({ instrumentId: "eww-mxn", symbol: "EWW", price: 62.5, source: "twelvedata" });
   });
 });
 
 describe("runPriceFetch — before the mark time", () => {
-  it("upserts the store but emits no mark", async () => {
+  it("upserts the store (all 13) but emits no mark and fetches no FIX", async () => {
     const result = await runPriceFetch({
       config: { dataDir, markTime: "23:59" },
       fetchImpl: mockFetch(),
       now: () => RUN_INSTANT,
+      credentials: CREDENTIALS,
     });
 
-    expect(result.storedCount).toBe(4);
+    expect(result.storedCount).toBe(13);
     expect(result.markEmitted).toBe(false);
     expect(result.emittedCount).toBe(0);
-    // The store is written even though no mark is emitted.
-    expect((await readStore("btc")).trim().length).toBeGreaterThan(0);
-    // No inbox is created when there is nothing to emit.
+    expect(result.failures).toEqual([]);
+    expect((await readStore("aapl")).trim().length).toBeGreaterThan(0);
     await expect(readInbox()).rejects.toThrow();
   });
 });
@@ -121,16 +196,16 @@ describe("runPriceFetch — idempotent re-run (spine claim)", () => {
       config: { dataDir, markTime: "00:00" },
       fetchImpl: mockFetch(),
       now: () => RUN_INSTANT,
+      credentials: CREDENTIALS,
     };
     const first = await runPriceFetch(options);
-    expect(first.emittedCount).toBe(4);
+    expect(first.emittedCount).toBe(13);
 
     const second = await runPriceFetch(options);
     expect(second.emittedCount).toBe(0);
-    expect(second.skippedCount).toBe(4);
+    expect(second.skippedCount).toBe(13);
 
-    const inbox = await readInbox();
-    expect(inbox).toHaveLength(4);
+    expect(await readInbox()).toHaveLength(13);
   });
 
   it("never clobbers a hand-authored pending inbox event", async () => {
@@ -144,16 +219,13 @@ describe("runPriceFetch — idempotent re-run (spine claim)", () => {
       config: { dataDir, markTime: "00:00" },
       fetchImpl: mockFetch(),
       now: () => RUN_INSTANT,
+      credentials: CREDENTIALS,
     });
 
     const merged = await readInbox();
-    expect(merged.map((event) => event.id)).toEqual([
-      "hand-authored",
-      `pm-btc-${AS_OF}`,
-      `pm-eth-${AS_OF}`,
-      `pm-render-${AS_OF}`,
-      `pm-gram-${AS_OF}`,
-    ]);
+    expect(merged).toHaveLength(14);
+    expect(merged[0]!.id).toBe("hand-authored");
+    expect(merged.some((event) => event.id === `pm-sbux-mxn-${AS_OF}`)).toBe(true);
   });
 });
 
@@ -163,38 +235,89 @@ describe("runPriceFetch — per-symbol failure isolation (R4)", () => {
       config: { dataDir, markTime: "00:00" },
       fetchImpl: mockFetch({
         ETHUSDT: () => new Response("{}", { status: 200 }), // non-array response
-        RENDERUSDT: () => new Response("[[]]", { status: 200 }), // missing row fields → NaN close
-        GRAMUSDT: () => new Response("nope", { status: 500, statusText: "Server Error" }),
+        AAPL: () => new Response("nope", { status: 500, statusText: "Server Error" }),
       }),
       now: () => RUN_INSTANT,
+      credentials: CREDENTIALS,
     });
 
-    // Only BTC succeeded; the other three each failed attributably.
-    expect(result.storedCount).toBe(1);
-    expect(result.failures.map((f) => f.instrumentId).sort()).toEqual(["eth", "gram", "render"]);
-    expect(result.failures.find((f) => f.instrumentId === "gram")?.message).toMatch(/HTTP 500/);
+    // 11 of 13 succeeded; the two bad symbols each failed attributably.
+    expect(result.storedCount).toBe(11);
+    expect(result.failures.map((f) => f.instrumentId).sort()).toEqual(["aapl", "eth"]);
+    expect(result.failures.find((f) => f.instrumentId === "aapl")?.message).toMatch(/HTTP 500/);
     expect(result.failures.find((f) => f.instrumentId === "eth")?.message).toMatch(
       /unexpected payload shape/,
     );
-    expect(result.failures.find((f) => f.instrumentId === "render")?.message).toMatch(
-      /non-positive close/,
-    );
 
-    // Partial progress kept: BTC stored and its mark emitted.
+    // Partial progress kept: the other marks still emitted (incl. derived MXN).
     const inbox = await readInbox();
-    expect(inbox.map((event) => event.id)).toEqual([`pm-btc-${AS_OF}`]);
+    expect(inbox.map((e) => e.id)).not.toContain(`pm-eth-${AS_OF}`);
+    expect(inbox.map((e) => e.id)).toContain(`pm-eww-mxn-${AS_OF}`);
+    expect(inbox).toHaveLength(11);
+  });
+});
+
+describe("runPriceFetch — missing/stale FIX fails *-mxn loudly (ADR-005)", () => {
+  it("fails every *-mxn derivation when the FIX is unavailable, keeping USD marks", async () => {
+    const result = await runPriceFetch({
+      config: { dataDir, markTime: "00:00" },
+      fetchImpl: mockFetch({
+        FIX: () => new Response("down", { status: 503, statusText: "Service Unavailable" }),
+      }),
+      now: () => RUN_INSTANT,
+      credentials: CREDENTIALS,
+    });
+
+    // All 13 USD legs still stored (the store never depends on the FIX).
+    expect(result.storedCount).toBe(13);
+    // The FIX outage + all six *-mxn derivations fail, attributably.
+    const failedIds = result.failures.map((f) => f.instrumentId).sort();
+    expect(failedIds).toEqual([
+      "eww-mxn",
+      "intc-mxn",
+      "nke-mxn",
+      "nu-mxn",
+      "rivn-mxn",
+      "sbux-mxn",
+      "usd-mxn-fix",
+    ]);
+    expect(result.failures.find((f) => f.instrumentId === "usd-mxn-fix")?.message).toMatch(/HTTP 503/);
+    expect(result.failures.find((f) => f.instrumentId === "eww-mxn")?.message).toMatch(/unavailable/);
+
+    // Only the 7 direct USD marks emit; no underived MXN mark is written.
+    expect(result.emittedCount).toBe(7);
+    const inbox = await readInbox();
+    expect(inbox.map((e) => e.id)).not.toContain(`pm-eww-mxn-${AS_OF}`);
+    expect(inbox.map((e) => e.id)).toContain(`pm-btc-${AS_OF}`);
   });
 
-  it("attributes a request timeout to the stalled symbol", async () => {
-    const stall: () => Promise<Response> = () =>
-      new Promise(() => {
-        /* never resolves; the AbortController fires the timeout */
-      });
+  it("fails *-mxn derivations loudly when the FIX is stale, never reusing an old rate", async () => {
+    const result = await runPriceFetch({
+      config: { dataDir, markTime: "00:00", fixMaxStaleDays: 4 },
+      fetchImpl: mockFetch({
+        // A FIX dated well before the mark day, outside the freshness window.
+        FIX: () => fixResponse("18.5", "25/06/2026"),
+      }),
+      now: () => RUN_INSTANT,
+      credentials: CREDENTIALS,
+    });
+
+    expect(result.emittedCount).toBe(7);
+    const mxnFailures = result.failures.filter((f) => f.instrumentId.endsWith("-mxn"));
+    expect(mxnFailures).toHaveLength(6);
+    expect(mxnFailures[0]?.message).toMatch(/stale/);
+    const inbox = await readInbox();
+    expect(inbox.map((e) => e.id)).not.toContain(`pm-nke-mxn-${AS_OF}`);
+  });
+});
+
+describe("runPriceFetch — request timeout attribution (R4)", () => {
+  it("attributes a stalled provider to its symbol", async () => {
     const result = await runPriceFetch({
       config: { dataDir, markTime: "00:00", requestTimeoutMs: 20 },
       fetchImpl: ((url: string | URL | Request, init?: RequestInit) => {
         const href = typeof url === "string" ? url : url.toString();
-        if (href.includes("symbol=ETHUSDT")) {
+        if (href.includes("symbol=TSLA")) {
           return new Promise<Response>((_resolve, reject) => {
             init?.signal?.addEventListener("abort", () => {
               const error = new Error("aborted");
@@ -206,12 +329,12 @@ describe("runPriceFetch — per-symbol failure isolation (R4)", () => {
         return mockFetch()(url as string, init);
       }) as typeof fetch,
       now: () => RUN_INSTANT,
+      credentials: CREDENTIALS,
     });
 
-    void stall;
-    const eth = result.failures.find((f) => f.instrumentId === "eth");
-    expect(eth?.message).toMatch(/timed out after 20ms/);
-    // The other three still succeeded.
-    expect(result.storedCount).toBe(3);
+    expect(result.failures.find((f) => f.instrumentId === "tsla")?.message).toMatch(
+      /timed out after 20ms/,
+    );
+    expect(result.storedCount).toBe(12);
   });
 });

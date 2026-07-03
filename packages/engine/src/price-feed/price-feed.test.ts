@@ -54,6 +54,40 @@ describe("instrument registry (R5)", () => {
   it("fails loud on an unknown instrument id", () => {
     expect(() => resolveInstrument("doge")).toThrow(/Unknown instrument id 'doge'/);
   });
+
+  it("lists the US equities served by Twelve Data (direct + *-mxn USD legs)", () => {
+    const ids = instrumentsForSource("twelvedata").map((entry) => entry.instrumentId);
+    expect(ids).toEqual([
+      "aapl",
+      "googl",
+      "tsla",
+      "eww-mxn",
+      "intc-mxn",
+      "nke-mxn",
+      "nu-mxn",
+      "rivn-mxn",
+      "sbux-mxn",
+    ]);
+  });
+
+  it("resolves a US equity to a direct USD quote (not derived)", () => {
+    expect(resolveInstrument("aapl")).toEqual({
+      instrumentId: "aapl",
+      symbol: "AAPL",
+      quoteCurrency: "USD",
+      source: "twelvedata",
+    });
+  });
+
+  it("resolves a *-mxn instrument to its US-listed symbol, MXN mark currency, derived flag", () => {
+    expect(resolveInstrument("eww-mxn")).toEqual({
+      instrumentId: "eww-mxn",
+      symbol: "EWW",
+      quoteCurrency: "MXN",
+      source: "twelvedata",
+      derived: true,
+    });
+  });
 });
 
 describe("deterministic mark id (C2)", () => {
