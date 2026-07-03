@@ -26,6 +26,12 @@ importers:
 
   packages/engine: {}
 
+  packages/price-feed:
+    dependencies:
+      '@numisma/engine':
+        specifier: workspace:*
+        version: link:../engine
+
   packages/tui:
     dependencies:
       '@numisma/engine':
