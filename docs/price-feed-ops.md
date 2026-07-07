@@ -38,8 +38,10 @@ Both files are templates: replace `__REPO_DIR__` / `__HOME__` before installing.
   The wrapper `source`s it if present. If a key is absent, only that provider's
   instruments fail (loud, per-symbol) — crypto still runs keyless. The file is never
   committed and never printed (only its path is logged). This mirrors the
-  `data/`-is-private posture: secrets are a machine-local artifact beside the repo,
-  not in it.
+  ledger-privacy posture: the durable store lives in the private sibling `accumulus`
+  repo (`~/Dev/accumulus/data` by default, or wherever `NUMISMA_DATA_DIR` points),
+  never inside the numisma checkout; secrets likewise are a machine-local artifact
+  beside the repo, not in it.
 
 ### Twelve Data free tier: why the run pauses ~1 minute
 
@@ -93,7 +95,14 @@ threat model does not need.
    to the local clock equal to 18:00 CDMX).
 2. Edit both placeholders in `run-daily-fetch.sh` (`REPO_DIR`) and the plist
    (`__REPO_DIR__`, `__HOME__`).
-3. Install and load:
+3. Set the durable-data home in the plist. The wrapper forwards `NUMISMA_DATA_DIR`
+   to every `pnpm` invocation; it is the **single machine-specific override** that
+   points the ledger at the sibling private `accumulus` repo. launchd **cannot expand
+   `~`**, so the plist's `NUMISMA_DATA_DIR` must be an **absolute** path (e.g.
+   `/Users/you/Dev/accumulus/data`) — unlike the code default, which derives
+   `~/Dev/accumulus/data` from `os.homedir()`. Leave it unset only if this machine
+   should use that default.
+4. Install and load:
 
    ```sh
    cp ops/price-feed/com.numisma.pricefeed.daily.plist \
@@ -101,7 +110,7 @@ threat model does not need.
    launchctl load ~/Library/LaunchAgents/com.numisma.pricefeed.daily.plist
    ```
 
-### PATH: the scheduler must be able to find `pnpm`
+### PATH: the scheduler must be able to find `pnpm` **and** `node`
 
 launchd and cron start the job with a **bare, non-login PATH**
 (`/usr/bin:/bin:/usr/sbin:/sbin`), which does **not** include the directory holding
@@ -110,19 +119,31 @@ Without a fix the 18:00 run dies immediately with `pnpm: command not found` (exi
 127), even though a manual dry run in your interactive shell passes (it inherits
 your login PATH).
 
-The wrapper is **self-sufficient**: it prepends the common pnpm/Homebrew locations
-to `PATH` before calling `pnpm`. If `pnpm` lives somewhere else on your machine,
-find it and point the override at that directory:
+There is a **second, subtler hazard on a fresh install**: if `node` is managed by
+**asdf**, the real `node` lives behind `~/.asdf/shims`. Even once `pnpm` resolves,
+pnpm's own `node` lookup then fails with the **same exit-127 node-not-found** unless
+`~/.asdf/shims` is on PATH — and **first**, so its shim wins. This is why the wrapper's
+default `NUMISMA_PATH_PREPEND` puts `~/.asdf/shims` ahead of the pnpm/Homebrew
+locations:
 
 ```sh
+$HOME/.asdf/shims:$HOME/Library/pnpm:/opt/homebrew/bin:/usr/local/bin
+```
+
+The wrapper is **self-sufficient** with that default. If `pnpm` or `node` live
+somewhere else on your machine, find them and point the override at those
+directories (drop the asdf entry if you do not use asdf):
+
+```sh
+dirname "$(command -v node)"          # e.g. /Users/you/.asdf/shims  (asdf-managed)
 dirname "$(command -v pnpm)"          # e.g. /Users/you/Library/pnpm
-# then either export it for the wrapper…
-export NUMISMA_PATH_PREPEND="/Users/you/Library/pnpm:/opt/homebrew/bin:/usr/local/bin"
+# then either export the combined list for the wrapper (shims FIRST)…
+export NUMISMA_PATH_PREPEND="$HOME/.asdf/shims:$HOME/Library/pnpm:/opt/homebrew/bin:/usr/local/bin"
 # …or add a PATH entry to the plist's EnvironmentVariables dict (optional, belt-and-suspenders).
 ```
 
-If `pnpm` is still unresolvable the wrapper fails LOUD with a named error (not a bare
-127), telling you exactly which override to set.
+If `pnpm` or `node` is still unresolvable the wrapper fails LOUD with a named error
+(not a bare 127), telling you exactly which override to set.
 
 ### cron alternative
 
@@ -213,7 +234,9 @@ bad day never appends a bad mark. The console/log distinguishes the two cases �
   of as a silent gap.
 - **Action:**
   1. Look at the price. If it is a data error (unit slip, bad payload), delete that
-     mark from `data/inbox/transactions.json` and let the next run re-fetch.
+     mark from `<dataDir>/inbox/transactions.json` (the `accumulus` data root,
+     `~/Dev/accumulus/data` by default or `$NUMISMA_DATA_DIR`) and let the next run
+     re-fetch.
   2. If the move is **real** (a genuine >50% day, or a long gap since the last
      mark), keep the mark and re-run the spine with the magnitude guard raised for
      that ONE run — the guard is a sanity check on automation, not a veto on
@@ -248,5 +271,10 @@ bad day never appends a bad mark. The console/log distinguishes the two cases �
 
 - Per-run logs: `~/Library/Logs/numisma/price-feed-*.log` (wrapper) and
   `launchd.price-feed.*.log` (launchd's own capture).
-- The queued marks awaiting ingest: `data/inbox/transactions.json`.
-- The disposable quotes (always upserted, even pre-mark-time): `data/prices/`.
+- The queued marks awaiting ingest: `<dataDir>/inbox/transactions.json`.
+- The disposable quotes (always upserted, even pre-mark-time): `<dataDir>/prices/`.
+
+`<dataDir>` is the durable-data root resolved by `NUMISMA_DATA_DIR` — the sibling
+private `accumulus` repo, `~/Dev/accumulus/data` by default. The `inbox/` and
+`prices/` subtrees are the disposable cache: `accumulus`'s allowlist `.gitignore`
+keeps them (and `ingested/`, `*.tmp`, `*.quarantine`) out of the versioned history.
