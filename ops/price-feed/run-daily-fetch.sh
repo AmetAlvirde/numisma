@@ -23,13 +23,18 @@ REPO_DIR="${NUMISMA_REPO_DIR:-__REPO_DIR__}"
 ENV_FILE="${NUMISMA_PRICEFEED_ENV:-$HOME/.config/numisma/price-feed.env}"
 # Where per-run logs land (outside the repo; never committed).
 LOG_DIR="${NUMISMA_PRICEFEED_LOG_DIR:-$HOME/Library/Logs/numisma}"
-# Directories to PREPEND to PATH so `pnpm` resolves under the scheduler. launchd/
-# cron start this job with a bare, non-login PATH (/usr/bin:/bin:/usr/sbin:/sbin),
-# so `pnpm` (installed under ~/Library/pnpm or Homebrew) is invisible and the run
-# would die with a bare `pnpm: command not found` (exit 127). The default covers the
-# common macOS locations; override it if pnpm lives elsewhere on this machine. The
-# manual dry run passes without this only because it inherits your interactive PATH.
-PATH_PREPEND="${NUMISMA_PATH_PREPEND:-$HOME/Library/pnpm:/opt/homebrew/bin:/usr/local/bin}"
+# Directories to PREPEND to PATH so `pnpm` — AND the `node` it shells out to —
+# resolve under the scheduler. launchd/cron start this job with a bare, non-login
+# PATH (/usr/bin:/bin:/usr/sbin:/sbin), so `pnpm` (installed under ~/Library/pnpm or
+# Homebrew) is invisible and the run would die with a bare `pnpm: command not found`
+# (exit 127). There is a SECOND, subtler hazard: if node is managed by asdf, `node`
+# lives behind `~/.asdf/shims`, so even once pnpm resolves, pnpm's `node` lookup
+# fails with the SAME exit-127 node-not-found unless the shims dir is on PATH FIRST.
+# The default therefore puts `~/.asdf/shims` first, then the common pnpm/Homebrew
+# locations. Override it if pnpm or node live elsewhere on this machine (drop the
+# asdf entry if you do not use asdf). The manual dry run passes without this only
+# because it inherits your interactive PATH.
+PATH_PREPEND="${NUMISMA_PATH_PREPEND:-$HOME/.asdf/shims:$HOME/Library/pnpm:/opt/homebrew/bin:/usr/local/bin}"
 # ----------------------------------------------------------------------------
 
 # Give the scheduled (non-login) job a deterministic PATH that can find pnpm. This
@@ -58,15 +63,23 @@ fi
 
 cd "$REPO_DIR"
 
-# Fail LOUD if pnpm is still unresolvable — a clear, named error beats dying as a
-# bare exit 127 mid-run. This is exactly the scheduled-environment PATH problem, so
-# say so and point at the override.
+# Fail LOUD if pnpm — or the node it drives — is still unresolvable. A clear, named
+# error beats dying as a bare exit 127 mid-run. This is exactly the scheduled-
+# environment PATH problem, so say so and point at the override.
 if ! command -v pnpm >/dev/null 2>&1; then
   echo "[$STAMP] FATAL: 'pnpm' not found on PATH after prepending '$PATH_PREPEND'."
   echo "[$STAMP] The scheduler runs with a bare PATH and pnpm is not in it. Point"
   echo "[$STAMP] NUMISMA_PATH_PREPEND (or the plist EnvironmentVariables PATH) at the"
   echo "[$STAMP] directory holding pnpm (e.g. \`dirname \"\$(command -v pnpm)\"\` in your"
   echo "[$STAMP] interactive shell). See docs/price-feed-ops.md (install section)."
+  exit 127
+fi
+if ! command -v node >/dev/null 2>&1; then
+  echo "[$STAMP] FATAL: 'node' not found on PATH after prepending '$PATH_PREPEND'."
+  echo "[$STAMP] pnpm resolved but its 'node' did not — with asdf-managed node, 'node'"
+  echo "[$STAMP] lives behind ~/.asdf/shims, which must be on PATH FIRST. Add the shims"
+  echo "[$STAMP] dir to NUMISMA_PATH_PREPEND (e.g. \`dirname \"\$(command -v node)\"\` in"
+  echo "[$STAMP] your interactive shell). See docs/price-feed-ops.md (install section)."
   exit 127
 fi
 
