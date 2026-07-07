@@ -2,7 +2,7 @@
 
 _Made during: MVI — portfolio history persistence increment / 2026-06-29 prototype → reliable conversion (publication gate for PRD "Persists portfolio history as an append-only event log with as-of review")_
 _Scope: product_
-_Status: accepted (amended 2026-07-01 — see "Amendment: cash leg + durable-log migration/versioning" below; amended 2026-07-02 — see "Amendment: closed-book fold output + invalidation verb" below; amended 2026-07-02 — see "Amendment: trim/add verbs + lot-mutating fold + partial closed-book rows" below)_
+_Status: accepted (amended 2026-07-01 — see "Amendment: cash leg + durable-log migration/versioning" below; amended 2026-07-02 — see "Amendment: closed-book fold output + invalidation verb" below; amended 2026-07-02 — see "Amendment: trim/add verbs + lot-mutating fold + partial closed-book rows" below; amended 2026-07-07 — see "Amendment: the derived Head Digest breadcrumb" below)_
 
 The durable source of truth for portfolio history is an append-only **event log**
 of material actions (`PositionOpened` / `PositionClosed` / `PriceMarked`) layered
@@ -347,3 +347,70 @@ proceeds stay approximate under mixed entry FX; totals exact — carried from #9
 re-opened). Considered and rejected: **weighted-average lot merging on add** (destroys
 the per-lot entry-FX provenance ADR-002 exists to keep) and **a full-retirement trim
 aliased to `PositionClosed`** (see the trade-off above).
+
+## Amendment: the derived Head Digest breadcrumb
+
+_Made during: MVI — portable-durable-log increment / 2026-07-03 prototype → AAR → audit →
+reliable conversion (the durable log gains a versioned, restorable history in the private
+sibling repo `~/Dev/accumulus`; the substrate and the best-effort commit-per-ingest
+contract are ratified in ADR-006 — this amendment records the one decision that touches
+this ADR's own doctrine)._
+
+The portable-durable-log increment commits a **derived** summary of the folded head — the
+**Head Digest** (`head-digest.json`, type `HeadDigest`, produced by `deriveHeadDigest`) —
+alongside the log on every ingest. On its face this contradicts this ADR's "Considered
+Options," which explicitly **rejected dated full snapshots as source of truth**. It does
+not, and the reason is *structural*, not a matter of discipline:
+
+- **The Head Digest is a re-derivable breadcrumb, not stored state.** It carries only
+  `fundValueUsd` (sourced from the canonical `buildCompositionReport`, never a side calc),
+  open/closed Position counts, the head event id, and the writing-app version — every field
+  recomputable from the log by a fold. The rejected "dated full snapshot" was a *replacement*
+  for the actions log; the Head Digest is a *pointer into* it.
+- **It is overwritten each ingest, not accumulated per period.** The rejected option
+  duplicated unchanged `FundReviewData` every review point; the Head Digest is a single file
+  rewritten in place, so it never grows into a parallel history of state.
+- **It has no read-back validation and — the load-bearing fact — no engine reader.** Nothing
+  in `@numisma/engine` folds a Head Digest back into the read model; there is no
+  `parseHeadDigest`, no code path that trusts it. **A file no reader consumes cannot become
+  a shadow source of truth**, whatever it contains. That is precisely why this ADR's
+  snapshot-rejection is *honored*, not contradicted: the fold-over-events remains the only
+  truth, and the digest is merely the breadcrumb that makes the search for a bad append
+  cheap. Validated on live data — a wrong-but-valid mark's `19760.70 → 22863.31` NAV jump was
+  pinned to one commit by `git log -p head-digest.json`, then `git revert` + re-fold restored
+  `19760.70`; the fold stayed truth, the digest only made the search a one-liner.
+
+### The anti-drift invariant (named, ADR-cited)
+
+Elevated here from an incidental test assertion to a **named invariant of this ADR**,
+analogous to the realized-P&L amendment's blank-the-closed-book lock:
+
+> `deriveHeadDigest(folded).fundValueUsd === buildCompositionReport(folded).totals.fundValueUsd`
+
+The Head Digest's value **must equal the canonical composition report's fund value,
+byte-for-byte** — never a rounded, reformatted, or independently computed number. Any change
+that inserts a `toFixed` / rounding / side-calculation between the fold and the digest breaks
+this invariant and must fail a test (the true anti-drift regression guard fires on a
+non-round float, not just on `> 0`). The digest exists to *point at* the Fund's value, so it
+must equal it exactly — otherwise the breadcrumb would itself become the plausible-but-wrong
+number this increment exists to fight.
+
+### Not a Close, not a checkpoint
+
+The breadcrumb is deliberately named **Head Digest** — not "snapshot" (this ADR's rejected
+option, and the glossary's own definition word for **Close**) and not "checkpoint" (a
+**Close** alias the glossary bans, `context/ubiquitous-language.md`). The prototype's
+`Checkpoint` / `deriveCheckpoint` / `checkpoint.json` names are retired and superseded; see
+ADR-006 for the substrate and the glossary's new **Head Digest** row.
+
+### ADR-001/003, preserved
+
+The fold stays a **pure projection** in `@numisma/engine`; `deriveHeadDigest` and
+`formatIngestCommitMessage` are pure (no IO), and the write of `head-digest.json` is runtime
+IO in `@numisma/tui`. The log stays **append-only** and the atomic temp-and-rename append is
+unchanged — the digest is written *after* the append is already durable, and its write
+failing is one more best-effort loud-warn (ADR-006's commit contract), so it can never block
+or corrupt an append. Considered and rejected here: **giving the digest an engine reader /
+a `parseHeadDigest`** (exactly what would turn a breadcrumb into the second source of truth
+this ADR rejects) and **accumulating one digest per period** (the dated-snapshot option this
+ADR already declined).
