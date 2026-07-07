@@ -106,7 +106,7 @@ NUMISMA_DATA_DIR=~/Dev/accumulus/data pnpm report
 Confirm `fundValueUsd` matches the known-good value from step 1 (the value *before* the
 bad commit). Because the Head Digest is derived from exactly this fold, the re-derived
 digest equals the reverted one — the **go-back invariant**, locked as an automated test
-(`packages/tui/src/go-back-invariant.test.ts`): after `git revert` + re-fold, the
+(`apps/tui/src/go-back-invariant.test.ts`): after `git revert` + re-fold, the
 re-derived Head Digest equals the pre-bad Head Digest.
 
 ## 5. Push — publish the reversal
