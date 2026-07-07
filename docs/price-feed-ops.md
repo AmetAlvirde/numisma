@@ -205,11 +205,22 @@ Confirm, in order:
 
 ### Dry-run record
 
-> Fill in when the schedule is installed on the operator machine.
+> Recorded from the installed launchd job's production runs (America/Mexico_City,
+> 18:00) plus one manual fetch-only dry run. The schedule has run hands-off daily
+> since 2026-07-03.
 
 | Date | Machine / TZ | Fetch result | Spine result | Re-run idempotent? | Wrapper exit |
 | --- | --- | --- | --- | --- | --- |
-| _pending_ | | | | | |
+| 2026-07-06 (Mon) | operator Mac / America/Mexico_City | 13/13 stored — crypto + equities + all 6 `*-mxn` (Banxico FIX × USD) | all 13 `PriceMarked` appended to `events.jsonl` | not separately re-run | 0 (log: "daily run complete") |
+| 2026-07-04–05 (Sat/Sun) | same | crypto-only; 9 equities skipped as INFO (`no fresh close` — market closed) | 4 crypto marks appended | — | 0 |
+| 2026-07-03 (Fri) | same | first hands-off run — clean | marks appended | — | 0 |
+| 2026-07-07 (Tue), manual 15:02 | same | 13/13 quotes stored, **pre-18:00** (store upserted, no mark emitted) | n/a — fetch-only dry run, `spine` deliberately not run | — | 0 |
+
+Notes: weekend equity-skip (checklist item 4) is confirmed by the 07-04/05
+crypto-only runs. Same-day re-run idempotency (item 2) has not been separately
+exercised; the deterministic mark id (#106) is the dedup that guarantees it.
+Banxico end-to-end is confirmed by the MXN-derived marks in the 07-06 run, not by
+the pre-mark-time manual fetch (which stores the raw USD leg only).
 
 ## Triage: a failed OR rejected scheduled run
 
