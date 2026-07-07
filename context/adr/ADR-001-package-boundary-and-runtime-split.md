@@ -13,6 +13,13 @@ Accepted
 > `packages/engine/README.md` for the resulting module layout. The decision below
 > is unchanged; this note records that its named follow-on is complete.
 
+> **Amended (2026-07-07):** the `@numisma/tui` runtime relocated from
+> `packages/tui/` to `apps/tui/` as a folder-convention cleanup — `apps/` holds
+> runnable surfaces, `packages/` holds imported libraries. The package name
+> (`@numisma/tui`) and the engine/runtime boundary decided below are unchanged;
+> only the on-disk location moved. The workspace now globs both `apps/*` and
+> `packages/*`.
+
 ## Context
 
 - The reliable Fund review PRD requires a reusable engine that future access

@@ -27,22 +27,22 @@ importers:
         specifier: ^3.2.4
         version: 3.2.6(@types/node@24.12.4)(tsx@4.22.3)
 
-  packages/engine: {}
-
-  packages/price-feed:
+  apps/price-feed:
     dependencies:
       '@numisma/engine':
         specifier: workspace:*
-        version: link:../engine
+        version: link:../../packages/engine
 
-  packages/tui:
+  apps/tui:
     dependencies:
       '@numisma/engine':
         specifier: workspace:*
-        version: link:../engine
+        version: link:../../packages/engine
       '@opentui/core':
         specifier: 0.2.15
         version: 0.2.15(typescript@5.9.3)(web-tree-sitter@0.25.10)
+
+  packages/engine: {}
 
 packages:
 

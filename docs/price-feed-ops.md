@@ -30,7 +30,7 @@ Both files are templates: replace `__REPO_DIR__` / `__HOME__` before installing.
 
   ```sh
   install -m 600 /dev/null ~/.config/numisma/price-feed.env
-  # then edit; the two keys the fetch reads (see packages/price-feed/src/config.ts):
+  # then edit; the two keys the fetch reads (see apps/price-feed/src/config.ts):
   #   TWELVEDATA_API_KEY=...   # Twelve Data free key, US equities
   #   BANXICO_TOKEN=...        # Banxico SIE free token, USD/MXN FIX series SF43718
   ```
@@ -53,7 +53,7 @@ is 9 credits > 8 ⇒ **HTTP 429**. The fetch therefore paces equities in chunks 
 (default **60 s**) between chunks — you'll see `pausing 60s for the Twelve Data
 per-minute credit quota to reset…` in the output. **A daily run consequently takes
 ~1 minute, not seconds; that pause is expected, not a hang.** (Both knobs live in
-`packages/price-feed/src/config.ts`; a paid tier with a higher per-minute cap can
+`apps/price-feed/src/config.ts`; a paid tier with a higher per-minute cap can
 raise `twelveDataMaxSymbolsPerMinute` ≥ 9 to fetch every symbol in one window and
 skip the pause.)
 

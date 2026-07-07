@@ -43,13 +43,14 @@ effect at any as-of date, while the sidecar's file IO stays in the TUI
 
 ## Architecture
 
-A private pnpm workspace (`packages/*`) split along a runtime boundary
+A private pnpm workspace (`packages/*` for imported libraries, `apps/*` for
+runnable surfaces) split along a runtime boundary
 ([ADR-001](./context/adr/ADR-001-package-boundary-and-runtime-split.md)):
 
 | Package                                          | Runtime                         | Owns                                                                                                                                                                                                |
 | ------------------------------------------------ | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`@numisma/engine`](./packages/engine/README.md) | Node-compatible, no Bun/openTUI | Parsing untrusted input, validating events, folding genesis + log into the `CompositionReport` read model, and the shared formatters. The reusable domain.                                          |
-| [`@numisma/tui`](./packages/tui/README.md)       | Bun + openTUI                   | The local access surface: durable event-store IO (ingest / dedup / atomic append / archive / quarantine), startup orchestration, the interactive dashboard, and smoke rendering. Consumes the engine through its package root only. |
+| [`@numisma/tui`](./apps/tui/README.md)       | Bun + openTUI                   | The local access surface: durable event-store IO (ingest / dedup / atomic append / archive / quarantine), startup orchestration, the interactive dashboard, and smoke rendering. Consumes the engine through its package root only. |
 | `@numisma/price-feed`                            | Node-compatible, headless (no Bun/openTUI) | The market-data runtime shell (ADR-005): the provider fetchers (Binance, Twelve Data, Banxico FIX), the disposable price-store IO, the atomic inbox emit, the fetch-time spine-guard pre-check, and the `prices:fetch` CLI. Depends only on `@numisma/engine`; all domain decisions (registry, mark-instant rule, MXN derivation) stay in the engine's pure core. |
 
 Per ADR-003 the fold and event validation are pure `@numisma/engine` domain,

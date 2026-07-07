@@ -25,11 +25,11 @@ the disposable cache (`prices/`, `inbox/`, `ingested/`) is kept out of history b
 
 | Requirement | Behavior | Where |
 | --- | --- | --- |
-| R-M1 | The ingest commit **never blocks**: `git()` forces `GIT_TERMINAL_PROMPT=0` and bounded push/commit timeouts; a hang, timeout, or any git failure degrades to one loud stderr warning and returns. | `packages/tui/src/ingest-commit.ts` |
-| R-M2 | The orphaned in-repo `data/` ledger is retired; a tree guard asserts no `data/events.jsonl`. | `packages/tui/src/durable-log-guards.test.ts` |
-| R-M3 | `resolvePreferencesPath()` resolves under the accumulus default — never a CWD-relative `"data"`. | `packages/tui/src/preferences.ts` |
+| R-M1 | The ingest commit **never blocks**: `git()` forces `GIT_TERMINAL_PROMPT=0` and bounded push/commit timeouts; a hang, timeout, or any git failure degrades to one loud stderr warning and returns. | `apps/tui/src/ingest-commit.ts` |
+| R-M2 | The orphaned in-repo `data/` ledger is retired; a tree guard asserts no `data/events.jsonl`. | `apps/tui/src/durable-log-guards.test.ts` |
+| R-M3 | `resolvePreferencesPath()` resolves under the accumulus default — never a CWD-relative `"data"`. | `apps/tui/src/preferences.ts` |
 | R-M4 | A fresh install's launchd job finds `pnpm` **and** `node`: `~/.asdf/shims` leads PATH, with a loud named error (not a bare exit-127) if either is unresolvable. | `ops/price-feed/run-daily-fetch.sh` |
-| R-M5 | `spine:reset` refuses whenever `dataDir` resolves to the accumulus default. | `packages/tui/src/spine-reset.ts` |
+| R-M5 | `spine:reset` refuses whenever `dataDir` resolves to the accumulus default. | `apps/tui/src/spine-reset.ts` |
 | R-M6 | PROTOTYPE banners stripped from shipping engine/runtime durable-log code. | engine + tui |
 | R-M7 | `Checkpoint` → `HeadDigest`, `deriveCheckpoint` → `deriveHeadDigest`, `checkpoint.json` → `head-digest.json` (before the filename froze). | engine + tui |
 | R-M8 | The restore runbook + repointed `README` / `price-feed-ops` docs. | `docs/` |
