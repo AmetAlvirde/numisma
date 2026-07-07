@@ -20,7 +20,6 @@
  *     rename over the log) so an interrupted write cannot truncate a line.
  */
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { captureIngestCommit, readAppVersion, resolveWorkspaceRoot } from "./ingest-commit.js";
 import {
@@ -32,6 +31,7 @@ import {
   migrateLegacyEvent,
   parseEvent,
   parseFundReview,
+  resolveDataDir,
   type FundReviewData,
   type PortfolioEvent,
   type SuppliedCashLeg,
@@ -65,36 +65,14 @@ export interface EventLogLoad {
 }
 
 /**
- * The durable log's default home: the sibling private `accumulus` repo's `data/`.
- * Per the grill decision (durable log lives in the sibling `accumulus` repo, not the
- * numisma checkout), the DEFAULT data root is `~/Dev/accumulus/data`, resolved from
- * `os.homedir()` (never a hardcoded `/Users/...`). `NUMISMA_DATA_DIR` still overrides.
- */
-export function accumulusDataDirDefault(): string {
-  return join(homedir(), "Dev", "accumulus", "data");
-}
-
-/**
- * Resolve the default dataDir root honoring the `NUMISMA_DATA_DIR` env var — the SINGLE
- * knob that moves BOTH planes (this tui event-store AND price-feed's config). When set,
- * its value is `~`-expanded and made absolute; otherwise we default to the sibling
- * `accumulus` repo's `data/` (the grill's durable-log home), NOT a CWD-relative `"data"`.
- *
- * SHORTCUT: this env-check + default is duplicated verbatim in
- * `packages/price-feed/src/config.ts` (`resolveWorkspaceDataDir`). tui and price-feed
- * share no runtime package and cannot import each other, and ADR-001 keeps this IO out
- * of the engine — so the honest minimal placement is the same few lines in each
- * resolver, both reading the same env var. "Single change, both planes" holds at the
- * operator surface: one `NUMISMA_DATA_DIR` steers both. Keep the two copies in sync.
+ * Resolve the default dataDir root honoring the `NUMISMA_DATA_DIR` env var — the
+ * SINGLE knob that moves EVERY plane. The resolution rule (env override with an
+ * absolute, homedir-derived accumulus default; relative values rejected) is the
+ * pure engine `resolveDataDir`; this thin wrapper keeps the public name the tui
+ * callers already use.
  */
 export function resolveDataDirDefault(): string {
-  const fromEnv = process.env.NUMISMA_DATA_DIR;
-  if (fromEnv && fromEnv.trim() !== "") {
-    const raw = fromEnv.trim();
-    const expanded = raw === "~" || raw.startsWith("~/") ? join(homedir(), raw.slice(1)) : raw;
-    return resolve(expanded);
-  }
-  return accumulusDataDirDefault();
+  return resolveDataDir();
 }
 
 /** The quarantine lane sits beside the log it shadows. */

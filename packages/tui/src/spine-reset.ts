@@ -21,10 +21,15 @@
  */
 import { readdir, rename, rm, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { accumulusDataDirDefault, resolveDataDirDefault, resolveEventStorePaths } from "./event-store.js";
+import { resolveDataDir } from "@numisma/engine";
+import { resolveDataDirDefault, resolveEventStorePaths } from "./event-store.js";
 
 const dataDir = resolveDataDirDefault();
-if (resolve(dataDir) === resolve(accumulusDataDirDefault())) {
+// The accumulus default, ignoring any env override: `resolveDataDir` with an empty
+// env skips the `NUMISMA_DATA_DIR` branch and returns the homedir-derived default.
+// Refuse whenever the resolved dataDir equals it — whether the default was reached
+// implicitly (env unset) or by an explicit `NUMISMA_DATA_DIR` pointed at accumulus.
+if (resolve(dataDir) === resolve(resolveDataDir({}))) {
   process.stderr.write(
     `⚠️ spine:reset refused: dataDir resolves to the default accumulus ledger (${dataDir}).\n` +
       `   This command deletes events.jsonl and must NEVER touch the durable log.\n` +
