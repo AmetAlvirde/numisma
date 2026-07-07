@@ -342,7 +342,10 @@ describe("@numisma/tui dashboard rendering", () => {
 function loadSanitizedRealisticFixture(): FundReviewData {
   const parsed = parseFundReview(
     readFileSync(
-      new URL("../../engine/tests/fixtures/sanitized-realistic-fund-review.json", import.meta.url),
+      new URL(
+        "../../../packages/engine/tests/fixtures/sanitized-realistic-fund-review.json",
+        import.meta.url,
+      ),
       "utf8",
     ),
   );

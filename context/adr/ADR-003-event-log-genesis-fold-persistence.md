@@ -221,7 +221,7 @@ persisted truth on the first real write, so they are ratified before any
 
 The fold stays a **pure projection** and lives in `@numisma/engine`; the closed-book
 build (`buildClosedPosition`), the invalidation fold, and the compose-time breach
-derivation (`buildInvalidationWatch`) are all pure. `packages/tui/src/event-store.ts`
+derivation (`buildInvalidationWatch`) are all pure. `apps/tui/src/event-store.ts`
 is unmodified — it dispatches events generically, so the 7th verb reaches the real
 ingest/persist path with zero access-surface change. ADR-002 is respected, not
 extended: realized uses cost basis at entry FX and inherits the FX-P&L deferral
@@ -338,7 +338,7 @@ again, for the same reasons:
 
 The fold stays a **pure projection** and lives in `@numisma/engine`; the pure
 within-tier removal seam (`splitTierRemoval`), both verb folds, and the partial
-closed-book build are all pure. `packages/tui/src/event-store.ts` is **unmodified** —
+closed-book build are all pure. `apps/tui/src/event-store.ts` is **unmodified** —
 it dispatches events generically, so both new verbs reach the real ingest/persist path
 with zero access-surface change. ADR-002 is respected, not extended: add **appends** a
 lot preserving its own entry FX / tier (never weighted-average merged), and trim's

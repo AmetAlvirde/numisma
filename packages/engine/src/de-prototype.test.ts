@@ -9,9 +9,9 @@ import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const SRC_DIR = dirname(fileURLToPath(import.meta.url));
-// Also scan the sibling TUI package's source: a realized-P&L prototype demo lived
-// there (packages/tui/src), so the marker could reach main via either package.
-const TUI_SRC_DIR = join(SRC_DIR, "..", "..", "tui", "src");
+// Also scan the TUI app's source: a realized-P&L prototype demo lived there
+// (apps/tui/src), so the marker could reach main via either package.
+const TUI_SRC_DIR = join(SRC_DIR, "..", "..", "..", "apps", "tui", "src");
 // And the price-feed package: the crypto price tracer (#106) was prototyped there
 // before its reliable conversion, so its markers must be stripped too (R7).
 const PRICE_FEED_SRC_DIR = join(SRC_DIR, "..", "..", "price-feed", "src");
