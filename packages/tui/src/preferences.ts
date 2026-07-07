@@ -27,11 +27,20 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import {
   defaultProfitPolicyEntry,
+  resolveDataDir,
   type ProfitPolicyEntry,
   type SplitBasis,
 } from "@numisma/engine";
 
-export function resolvePreferencesPath(dataDir = "data"): string {
+/**
+ * Resolve the preferences sidecar path. With no `dataDir` we resolve under the shared
+ * engine `resolveDataDir` (the `NUMISMA_DATA_DIR` override or the absolute, homedir-derived
+ * accumulus default) — NEVER a CWD-relative `./data/preferences.jsonl` (R-M3). This is
+ * latent today (no runtime caller), but becomes silent split-brain the moment the sidecar
+ * is wired into the read path (ADR-004), so it routes through the single resolver now. An
+ * explicit `dataDir` is still honored verbatim for callers (e.g. tests) that pass one.
+ */
+export function resolvePreferencesPath(dataDir = resolveDataDir()): string {
   return join(resolve(dataDir), "preferences.jsonl");
 }
 
