@@ -120,6 +120,12 @@ export {
   SETTLEMENT_MAGNITUDE_THRESHOLD,
 } from "./events/crossref.js";
 
+// PROTOTYPE (mvi portable-durable-log): pure derivations for the git-backed durable
+// event log — a compact checkpoint snapshot of a folded read model, and a
+// deterministic ingest commit message.
+export type { Checkpoint, IngestCommitInput } from "./durable-log.js";
+export { deriveCheckpoint, formatIngestCommitMessage } from "./durable-log.js";
+
 // The pure price-feed core (ADR-005 two-plane price model). Everything that turns
 // a raw provider observation into a fund-history mark WITHOUT any IO: the typed
 // instrument registry, the trading-day/mark-instant contract, quote → real
