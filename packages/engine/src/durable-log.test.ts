@@ -1,7 +1,7 @@
-// PROTOTYPE (mvi portable-durable-log). Behavior locks for the two pure durable-log
-// derivations: `deriveCheckpoint` (its fields, and that `fundValueUsd` matches the
-// canonical `buildCompositionReport`) and `formatIngestCommitMessage` (its shape and
-// deterministic, sorted verb ordering).
+// Behavior locks for the two pure durable-log derivations: `deriveCheckpoint` (its
+// fields, and that `fundValueUsd` matches the canonical `buildCompositionReport`)
+// and `formatIngestCommitMessage` (its shape and deterministic, sorted verb
+// ordering).
 import { describe, expect, it } from "vitest";
 import {
   buildCompositionReport,

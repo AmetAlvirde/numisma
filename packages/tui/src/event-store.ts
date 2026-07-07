@@ -70,7 +70,7 @@ export interface EventLogLoad {
  * numisma checkout), the DEFAULT data root is `~/Dev/accumulus/data`, resolved from
  * `os.homedir()` (never a hardcoded `/Users/...`). `NUMISMA_DATA_DIR` still overrides.
  */
-function accumulusDataDirDefault(): string {
+export function accumulusDataDirDefault(): string {
   return join(homedir(), "Dev", "accumulus", "data");
 }
 

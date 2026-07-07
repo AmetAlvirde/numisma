@@ -1,8 +1,8 @@
-// PROTOTYPE (mvi portable-durable-log). Two pure derivations for the durable
-// event log's git-backed shell: a compact `Checkpoint` snapshot of a folded read
-// model (so a reader can trust a head without replaying the whole log), and a
-// deterministic ingest commit message. Both are pure — no IO, no clock — so the
-// IO/git shell that persists them can be tested against a fixed input.
+// Two pure derivations for the durable event log's git-backed shell: a compact
+// `Checkpoint` snapshot of a folded read model (so a reader can trust a head
+// without replaying the whole log), and a deterministic ingest commit message.
+// Both are pure — no IO, no clock — so the IO/git shell that persists them can be
+// tested against a fixed input.
 import type { FundReviewData } from "./contracts.js";
 import { buildCompositionReport } from "./compose/report.js";
 
