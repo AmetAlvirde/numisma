@@ -120,6 +120,11 @@ export {
   SETTLEMENT_MAGNITUDE_THRESHOLD,
 } from "./events/crossref.js";
 
+// Pure derivations for the git-backed durable event log — a compact Head Digest
+// of a folded read model, and a deterministic ingest commit message.
+export type { HeadDigest, IngestCommitInput } from "./durable-log.js";
+export { deriveHeadDigest, formatIngestCommitMessage } from "./durable-log.js";
+
 // The pure price-feed core (ADR-005 two-plane price model). Everything that turns
 // a raw provider observation into a fund-history mark WITHOUT any IO: the typed
 // instrument registry, the trading-day/mark-instant contract, quote → real
@@ -146,6 +151,12 @@ export {
   PRICE_STORE_DIR_SEGMENT,
   priceStoreFileName,
 } from "./price-feed/inbox-merge.js";
+
+// The ONE pure resolver for the durable ledger's data root, honoring the
+// `NUMISMA_DATA_DIR` env override with an absolute, homedir-derived accumulus
+// default. Shared by the tui event-store, the price-feed config, and the
+// preferences sidecar so every plane resolves the same store.
+export { resolveDataDir } from "./data-dir.js";
 
 // Shared formatters (the engine's one source of truth for the cents-precision /
 // padding conventions, consumed by the TUI) + the CLI composition renderer.
