@@ -12,7 +12,8 @@
 //     package-level `prices:fetch`, CWD = packages/price-feed, write a divergent,
 //     commit-eligible ghost store) and never a hardcoded `/Users/...`. These
 //     assertions live in this file because the review scope permits creating only
-//     `inbox.test.ts`; they exercise `config.ts`'s `resolveWorkspaceDataDir`.
+//     `inbox.test.ts`; they exercise `DEFAULT_CONFIG.dataDir`, which now flows through
+//     the shared engine `resolveDataDir`.
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
