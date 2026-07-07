@@ -19,8 +19,11 @@
   weekday-only schedule would wrongly starve crypto and still misfire on holidays.
 
   PATH: launchd starts this job with a bare, non-login PATH, so the wrapper sets its
-  own PATH to find pnpm (NUMISMA_PATH_PREPEND). You may ALSO set a PATH here in
-  EnvironmentVariables as an extra safeguard, but the wrapper is self-sufficient.
+  own PATH to find pnpm AND the node pnpm shells out to (NUMISMA_PATH_PREPEND). With
+  asdf-managed node the shims dir (~/.asdf/shims) must be FIRST on PATH or the run
+  dies exit-127 node-not-found even after pnpm resolves; the wrapper's default puts
+  it there. You may ALSO set a PATH here in EnvironmentVariables as an extra
+  safeguard, but the wrapper is self-sufficient.
 
   Install (edit the two __PLACEHOLDERS__ first):
     cp ops/price-feed/com.numisma.pricefeed.daily.plist \
@@ -45,13 +48,20 @@
   </array>
 
   <!-- Pass the repo dir to the wrapper (it also has its own default). The wrapper
-       sets its own PATH to find pnpm; if you prefer to pin it here too, add a
-       <key>PATH</key><string>/Users/you/Library/pnpm:/opt/homebrew/bin:/usr/bin:/bin</string>
-       entry to this dict (optional — the wrapper is self-sufficient). -->
+       sets its own PATH to find pnpm and node; if you prefer to pin it here too, add a
+       <key>PATH</key><string>/Users/you/.asdf/shims:/Users/you/Library/pnpm:/opt/homebrew/bin:/usr/bin:/bin</string>
+       entry to this dict (optional — the wrapper is self-sufficient). Keep the asdf
+       shims dir FIRST if node is asdf-managed. -->
   <key>EnvironmentVariables</key>
   <dict>
     <key>NUMISMA_REPO_DIR</key>
     <string>__REPO_DIR__</string>
+    <!-- Durable-data home: the sibling private `accumulus` repo. launchd cannot
+         expand `~`, so this ops file uses an absolute machine-specific path (unlike
+         the code default, which derives it from os.homedir()). The wrapper forwards
+         this to `pnpm prices:fetch`/`pnpm spine`. -->
+    <key>NUMISMA_DATA_DIR</key>
+    <string>/Users/amet/Dev/accumulus/data</string>
   </dict>
 
   <!-- 18:00 local, EVERY day (7-day schedule; see the header note on why). -->

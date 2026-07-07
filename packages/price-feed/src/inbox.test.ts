@@ -6,16 +6,18 @@
 //     parse now sits in its own try/catch inside `readInbox`, distinct from the
 //     ENOENT→[] guard around `readFile`.
 //
-//  2. Workspace-anchored data dir (finding 7): `DEFAULT_CONFIG.dataDir` must be
-//     an ABSOLUTE path anchored at the workspace root, not a CWD-relative "data".
-//     A relative default lets the package-level `prices:fetch` (CWD =
-//     packages/price-feed) write a divergent, commit-eligible ghost store. These
+//  2. Sibling-repo data dir (grill decision): `DEFAULT_CONFIG.dataDir` must be an
+//     ABSOLUTE path in the sibling private `accumulus` repo (`~/Dev/accumulus/data`),
+//     derived from `os.homedir()` — never a CWD-relative "data" (which would let the
+//     package-level `prices:fetch`, CWD = packages/price-feed, write a divergent,
+//     commit-eligible ghost store) and never a hardcoded `/Users/...`. These
 //     assertions live in this file because the review scope permits creating only
-//     `inbox.test.ts`; they exercise `config.ts`'s `resolveWorkspaceDataDir`.
+//     `inbox.test.ts`; they exercise `DEFAULT_CONFIG.dataDir`, which now flows through
+//     the shared engine `resolveDataDir`.
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { basename, isAbsolute, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { emitMarksToInbox } from "./inbox.js";
 import { DEFAULT_CONFIG } from "./config.js";
@@ -66,15 +68,17 @@ describe("emitMarksToInbox / readInbox", () => {
   });
 });
 
-describe("DEFAULT_CONFIG.dataDir (workspace-anchored, CWD-independent)", () => {
+describe("DEFAULT_CONFIG.dataDir (accumulus sibling repo, CWD-independent)", () => {
   it("is an absolute path whose basename is data", () => {
     expect(isAbsolute(DEFAULT_CONFIG.dataDir)).toBe(true);
     expect(basename(DEFAULT_CONFIG.dataDir)).toBe("data");
   });
 
-  it("is anchored at the workspace root (the dir holding pnpm-workspace.yaml)", () => {
-    // Its parent must contain the workspace marker — proving the store resolves
-    // to the one real data plane regardless of the process CWD.
-    expect(existsSync(join(dirname(DEFAULT_CONFIG.dataDir), "pnpm-workspace.yaml"))).toBe(true);
+  it("defaults into the sibling accumulus repo, derived from homedir (never hardcoded, CWD-independent)", () => {
+    // The grill decision: the durable log lives in `~/Dev/accumulus/data`, resolved
+    // from os.homedir() so it holds on any machine/user — not a CWD-relative "data"
+    // and not a hardcoded /Users/... path. (NUMISMA_DATA_DIR overrides this; not set
+    // here, so DEFAULT_CONFIG reflects the pure default computed at import time.)
+    expect(DEFAULT_CONFIG.dataDir).toBe(join(homedir(), "Dev", "accumulus", "data"));
   });
 });

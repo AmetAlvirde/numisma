@@ -6,9 +6,9 @@
 // a non-monotonic file replays deterministically through `pickPolicyAsOf`; and seeding
 // goes through the append path (no whole-file overwrite). Prior art: #90/#93.
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
-import { tmpdir } from "node:os";
-import { pickPolicyAsOf, type ProfitPolicyEntry } from "@numisma/engine";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { pickPolicyAsOf, resolveDataDir, type ProfitPolicyEntry } from "@numisma/engine";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   appendPreference,
@@ -181,5 +181,62 @@ describe("non-monotonic file — deterministic as-of replay through the selector
     expect(pickPolicyAsOf(loaded, "2026-06-05")?.splitBasis).toBe("highWaterMark");
     expect(pickPolicyAsOf(loaded, "2026-06-20")?.splitBasis).toBe("perClose");
     expect(pickPolicyAsOf(loaded)?.splitBasis).toBe("perClose");
+  });
+});
+
+// R-M3: `resolvePreferencesPath` with NO argument must resolve under the shared engine
+// `resolveDataDir` (the accumulus default), NEVER a CWD-relative `./data/preferences.jsonl`.
+// Latent today (no runtime caller), but silent split-brain the moment the sidecar is wired
+// into the read path (ADR-004). This guards the closure of the third resolver copy.
+describe("resolvePreferencesPath — R-M3 no-arg resolves under accumulus, never a bare `data`", () => {
+  function withoutEnvOverride<T>(fn: () => T): T {
+    const saved = process.env.NUMISMA_DATA_DIR;
+    try {
+      delete process.env.NUMISMA_DATA_DIR;
+      return fn();
+    } finally {
+      if (saved === undefined) {
+        delete process.env.NUMISMA_DATA_DIR;
+      } else {
+        process.env.NUMISMA_DATA_DIR = saved;
+      }
+    }
+  }
+
+  it("no-arg call resolves under the accumulus default, not the CWD-relative `data`", () => {
+    withoutEnvOverride(() => {
+      const path = resolvePreferencesPath();
+      expect(isAbsolute(path)).toBe(true);
+      expect(path).toBe(join(homedir(), "Dev", "accumulus", "data", "preferences.jsonl"));
+      // The pre-fix trap: a bare `"data"` default resolved to `<cwd>/data/preferences.jsonl`.
+      expect(path).not.toBe(join(resolve("data"), "preferences.jsonl"));
+    });
+  });
+
+  it("agrees with the shared engine resolver (no drift between the two)", () => {
+    withoutEnvOverride(() => {
+      expect(resolvePreferencesPath()).toBe(join(resolveDataDir(), "preferences.jsonl"));
+    });
+  });
+
+  it("honors the NUMISMA_DATA_DIR override, still under the shared resolver", () => {
+    const saved = process.env.NUMISMA_DATA_DIR;
+    try {
+      process.env.NUMISMA_DATA_DIR = "~/override-store";
+      expect(resolvePreferencesPath()).toBe(
+        join(homedir(), "override-store", "preferences.jsonl"),
+      );
+    } finally {
+      if (saved === undefined) {
+        delete process.env.NUMISMA_DATA_DIR;
+      } else {
+        process.env.NUMISMA_DATA_DIR = saved;
+      }
+    }
+  });
+
+  it("still honors an EXPLICIT dataDir argument verbatim (unchanged for callers/tests)", () => {
+    const explicit = join(homedir(), "explicit-store");
+    expect(resolvePreferencesPath(explicit)).toBe(join(explicit, "preferences.jsonl"));
   });
 });

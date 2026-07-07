@@ -35,8 +35,8 @@ configuration), and renders **obligation-only** — the obligation plus a RESERV
 %-of-NAV-vs-10%-target line, with no routed-flow / unallocated balance (a deferred
 fast-follow). It is empty-guarded and, like the closed book, is never fed into
 NAV. The split policy lives in a **preferences sidecar**
-(`data/preferences.jsonl`) — append-only, validated on load, and decoupled from
-the event log; the engine-pure `pickPolicyAsOf(prefs, asOf)` selects the policy in
+(`preferences.jsonl`, in the durable-data root) — append-only, validated on load,
+and decoupled from the event log; the engine-pure `pickPolicyAsOf(prefs, asOf)` selects the policy in
 effect at any as-of date, while the sidecar's file IO stays in the TUI
 ([ADR-001](./context/adr/ADR-001-package-boundary-and-runtime-split.md),
 [ADR-004](./context/adr/ADR-004-preferences-sidecar.md)).
@@ -85,16 +85,41 @@ they render current state. An `--as-of` earlier than the genesis date fails loud
 
 ## Local data
 
-The durable store lives under `data/` and is local-only — `data/.gitignore`
-keeps every `*.json` / `*.jsonl` / archive / quarantine file out of git:
+The durable store does **not** live inside this checkout. It lives in a **private
+sibling repository, `accumulus`**, so the git-ignored ledger gains a versioned,
+restorable history without ever exposing trade data (ADR-006). Every runtime plane
+resolves the same root through one rule (`resolveDataDir` in `@numisma/engine`):
 
-| Path                              | Role                                                                                  |
-| --------------------------------- | ------------------------------------------------------------------------------------- |
-| `data/genesis.json`               | Immutable t0 seed (a `FundReviewData` shape) — the start of recorded history.         |
-| `data/events.jsonl`               | Append-only event log, one JSON event per line. Appended atomically (temp + rename).  |
-| `data/inbox/transactions.json`    | Disposable write channel: drop an array of new events here to be ingested on startup. |
-| `data/ingested/<wall-clock>.json` | Archive of a consumed inbox — stamped, never clobbered.                               |
-| `data/events.jsonl.quarantine`    | The side lane for corrupt log lines, surfaced rather than aborting the load.          |
+- **Default:** `~/Dev/accumulus/data` — absolute, derived from `os.homedir()` (never a
+  CWD-relative `data/`, never a hardcoded `/Users/...`).
+- **Override:** `NUMISMA_DATA_DIR` — the single knob that moves every plane (the TUI
+  event-store, `pnpm prices:fetch`, the preferences sidecar, the launchd job). It must
+  be **absolute or `~/`-prefixed**; a relative value is rejected loudly. launchd cannot
+  expand `~`, so the plist sets an absolute value (see `docs/price-feed-ops.md`).
+
+Under that root (`<dataDir>`, e.g. `~/Dev/accumulus/data`):
+
+| Path                                   | Role                                                                                  | In git history? |
+| -------------------------------------- | ------------------------------------------------------------------------------------- | --------------- |
+| `<dataDir>/genesis.json`               | Immutable t0 seed (a `FundReviewData` shape) — the start of recorded history.         | tracked         |
+| `<dataDir>/events.jsonl`               | Append-only event log, one JSON event per line. Appended atomically (temp + rename).  | tracked         |
+| `<dataDir>/head-digest.json`           | Derived, versioned summary of the folded head (the Head Digest) — a breadcrumb that makes a bad-NAV search cheap; never a source of truth (nothing folds it back). | tracked |
+| `<dataDir>/preferences.jsonl`          | Append-only profit-split policy sidecar, validated on load.                           | tracked         |
+| `<dataDir>/inbox/transactions.json`    | Disposable write channel: drop an array of new events here to be ingested on startup. | ignored         |
+| `<dataDir>/ingested/<wall-clock>.json` | Archive of a consumed inbox — stamped, never clobbered.                               | ignored         |
+| `<dataDir>/prices/`                     | Disposable price-quote cache (upserted every fetch).                                  | ignored         |
+| `<dataDir>/events.jsonl.quarantine`    | The side lane for corrupt log lines, surfaced rather than aborting the load.          | ignored         |
+
+`accumulus`'s `.gitignore` is an **allowlist**: only the four durable files are
+tracked; `prices/`, `inbox/`, `ingested/`, `*.tmp`, and `*.quarantine` are structurally
+excluded, so the disposable cache can never enter history.
+
+Because each successful ingest commits `events.jsonl` + `head-digest.json` under the
+operator's own git identity, a bad-but-valid append is **locatable and reversible**:
+`git log -p head-digest.json` pins the NAV jump to one commit, and `git revert` +
+re-fold (`pnpm report`) restores the correct NAV — the fold over events, not the
+breadcrumb, is the source of truth. The step-by-step procedure is the
+[accumulus restore runbook](./docs/accumulus-restore-runbook.md).
 
 Ingest is a validated boundary: every event must pass structural `parseEvent`,
 cross-reference against genesis ids, and a `PriceMarked` magnitude guard before it
@@ -106,4 +131,4 @@ The repo intentionally does not ship real or sample portfolio data.
 For the hands-off daily price run (scheduling, provider-token storage, and how to
 triage a failed or rejected run), see
 [`docs/price-feed-ops.md`](./docs/price-feed-ops.md). Provider tokens live in a
-private file outside the repo; the disposable `data/prices/` store is git-ignored.
+private file outside the repo; the disposable `<dataDir>/prices/` store is git-ignored.

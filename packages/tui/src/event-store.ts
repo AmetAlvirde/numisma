@@ -21,6 +21,7 @@
  */
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { captureIngestCommit, readAppVersion, resolveWorkspaceRoot } from "./ingest-commit.js";
 import {
   applyEventToReference,
   buildEventReference,
@@ -30,6 +31,7 @@ import {
   migrateLegacyEvent,
   parseEvent,
   parseFundReview,
+  resolveDataDir,
   type FundReviewData,
   type PortfolioEvent,
   type SuppliedCashLeg,
@@ -62,14 +64,23 @@ export interface EventLogLoad {
   quarantined: QuarantinedLine[];
 }
 
-const DATA_DIR = "data";
+/**
+ * Resolve the default dataDir root honoring the `NUMISMA_DATA_DIR` env var — the
+ * SINGLE knob that moves EVERY plane. The resolution rule (env override with an
+ * absolute, homedir-derived accumulus default; relative values rejected) is the
+ * pure engine `resolveDataDir`; this thin wrapper keeps the public name the tui
+ * callers already use.
+ */
+export function resolveDataDirDefault(): string {
+  return resolveDataDir();
+}
 
 /** The quarantine lane sits beside the log it shadows. */
 export function quarantineLogPath(logPath: string): string {
   return `${logPath}.quarantine`;
 }
 
-export function resolveEventStorePaths(dataDir = DATA_DIR): EventStorePaths {
+export function resolveEventStorePaths(dataDir = resolveDataDirDefault()): EventStorePaths {
   const base = resolve(dataDir);
   return {
     genesis: join(base, "genesis.json"),
@@ -359,6 +370,21 @@ export async function ingestInbox(
   }
 
   await appendEvents(paths.log, toAppend);
+
+  // Best-effort durable-log capture: fold the new head and commit head-digest + log into
+  // the dataDir's accumulus checkout. The append above already landed atomically, so this
+  // whole block is guarded — a fold/git failure downgrades to a warning and NEVER fails
+  // the ingest. `paths.log` is `<dataDir>/events.jsonl`, so its dirname is the dataDir.
+  try {
+    const dataDir = dirname(paths.log);
+    const foldedHead = foldEvents(genesis, [...existing, ...toAppend]);
+    const appVersion = readAppVersion(resolveWorkspaceRoot());
+    await captureIngestCommit({ dataDir, folded: foldedHead, appendedEvents: toAppend, appVersion });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`⚠️ ingest commit capture skipped — append is durable on disk. ${detail}\n`);
+  }
+
   const now = options.now ?? (() => new Date());
   const archivedTo = await archiveInbox(paths, now());
 
