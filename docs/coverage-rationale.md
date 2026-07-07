@@ -1,7 +1,7 @@
 # Coverage rationale
 
 `pnpm coverage` reports a measured Node-side number (see
-[`packages/tui/README.md`](../packages/tui/README.md#coverage) for the Node/Bun
+[`apps/tui/README.md`](../apps/tui/README.md#coverage) for the Node/Bun
 split). This document is the honest companion to that number: it accounts,
 concretely and line-by-line, for **every** thing the number does not cover, so
 the percentage is never read as "100% of everything" and no gap is silent.
@@ -22,13 +22,13 @@ dishonest.
 
 | File | Why excluded | What guards it instead |
 | --- | --- | --- |
-| `packages/tui/src/app.ts` | Self-executing Bun entry: top-level `await`, `prepareStartup`, openTUI renderer construction, `process.exit` startup glue. Never runs under Node's `vitest run`. | `pnpm dev` (manual) + the startup/keypress smokes for the wiring it delegates to; `prepareStartup` itself is unit-tested (`startup.test.ts`). |
-| `packages/tui/src/mount-app.ts` | Bun-only openTUI wiring (`@opentui/core` import, keypress subscription, `requestRender`). Never runs under Node. | `pnpm smoke:tui` drives real `j`/`k`/`enter` through it on the real openTUI test renderer. |
-| `packages/tui/src/smoke-openTui.ts` | The keypress Bun smoke harness itself. | It *is* the test; running it (`pnpm smoke:tui`) is the assertion. |
-| `packages/tui/src/smoke-startup-openTui.ts` | The startup Bun smoke harness itself: drives `prepareStartup` + `mountApp` through the real openTUI renderer against an on-disk store. | It *is* the test; running it (`pnpm smoke:startup`) is the assertion. |
-| `packages/tui/src/report.ts` | A `tsx` CLI script: a top-level `try/catch` that folds genesis + log (`loadFoldedReview`) and renders the already-tested composition report. No unit to assert beyond a `process.stdout.write`. | Its constituent functions are unit-tested directly (`event-store.test.ts`, `report-fold.test.ts`, `fund-composition.test.ts`). |
-| `packages/tui/src/spine.ts` | The `tsx` Node tracer (`pnpm spine`): a top-level `try/catch` orchestrating already-tested `ingestInbox` / `loadFoldedReview` / `buildCompositionReport` / `formatCompositionReport`. Same script category — no unit to assert. | Its constituent functions are unit-tested (`event-store.test.ts`, `report-fold.test.ts`); the end-to-end path is also driven by `pnpm spine` / `pnpm smoke:startup`. |
-| `packages/tui/src/spine-reset.ts` | A `tsx` dev iteration helper (`pnpm spine:reset`): clear the log, restore the most recent archived inbox. A throwaway utility, not product behavior — no unit to assert. | Manual: it exists to re-run `pnpm spine` against an edited inbox. |
+| `apps/tui/src/app.ts` | Self-executing Bun entry: top-level `await`, `prepareStartup`, openTUI renderer construction, `process.exit` startup glue. Never runs under Node's `vitest run`. | `pnpm dev` (manual) + the startup/keypress smokes for the wiring it delegates to; `prepareStartup` itself is unit-tested (`startup.test.ts`). |
+| `apps/tui/src/mount-app.ts` | Bun-only openTUI wiring (`@opentui/core` import, keypress subscription, `requestRender`). Never runs under Node. | `pnpm smoke:tui` drives real `j`/`k`/`enter` through it on the real openTUI test renderer. |
+| `apps/tui/src/smoke-openTui.ts` | The keypress Bun smoke harness itself. | It *is* the test; running it (`pnpm smoke:tui`) is the assertion. |
+| `apps/tui/src/smoke-startup-openTui.ts` | The startup Bun smoke harness itself: drives `prepareStartup` + `mountApp` through the real openTUI renderer against an on-disk store. | It *is* the test; running it (`pnpm smoke:startup`) is the assertion. |
+| `apps/tui/src/report.ts` | A `tsx` CLI script: a top-level `try/catch` that folds genesis + log (`loadFoldedReview`) and renders the already-tested composition report. No unit to assert beyond a `process.stdout.write`. | Its constituent functions are unit-tested directly (`event-store.test.ts`, `report-fold.test.ts`, `fund-composition.test.ts`). |
+| `apps/tui/src/spine.ts` | The `tsx` Node tracer (`pnpm spine`): a top-level `try/catch` orchestrating already-tested `ingestInbox` / `loadFoldedReview` / `buildCompositionReport` / `formatCompositionReport`. Same script category — no unit to assert. | Its constituent functions are unit-tested (`event-store.test.ts`, `report-fold.test.ts`); the end-to-end path is also driven by `pnpm spine` / `pnpm smoke:startup`. |
+| `apps/tui/src/spine-reset.ts` | A `tsx` dev iteration helper (`pnpm spine:reset`): clear the log, restore the most recent archived inbox. A throwaway utility, not product behavior — no unit to assert. | Manual: it exists to re-run `pnpm spine` against an edited inbox. |
 
 ## 2. Defensive / unreachable guards (kept on purpose, cannot be tested honestly)
 
@@ -54,7 +54,7 @@ state the pipeline already excludes, so they are documented rather than tested.
   : String(error)` false branch (~L448) — `JSON.parse` only throws `SyntaxError`
   (an `Error`), so the `String(error)` fallback never runs.
 
-**`packages/tui/src/review-file.ts`**
+**`apps/tui/src/review-file.ts`**
 
 - `normalizeLoadFundReviewError` `error instanceof Error ? error : new
   Error(String(error))` false branch (~L108) — the only throwers reaching it
@@ -81,7 +81,7 @@ state the pipeline already excludes, so they are documented rather than tested.
   always present in the report, so `.find(...)` never returns undefined and the
   `?? []` fallback is unreachable from `formatCompositionReport`.
 
-**`packages/tui/src/dashboard.ts`**
+**`apps/tui/src/dashboard.ts`**
 
 - `emptyDetailMessage` Tempo branch (~L345-346) and Account branches
   (~L348-350) — `emptyDetailMessage` is reached only when a drill-down's detail
@@ -115,7 +115,7 @@ a regression could break while the suite stayed green. It is now unit-tested:
   `fund-composition-dashboard.test.ts`). (`parseFundReview` rejects empty `lots`,
   so that one guard is exercised through the public `buildCompositionReport` with
   a directly-built `FundReviewData`, the same way the TUI tests do.)
-- **`packages/tui/src/dashboard.ts`** (100% branches) — empty-section "No live
+- **`apps/tui/src/dashboard.ts`** (100% branches) — empty-section "No live
   records." rows, the Portfolio empty-detail message, typed vs untyped detail
   columns, zero-denominator tier-table guards, and the `detailTitle` /
   summary-focus placeholder branches — all in `dashboard.test.ts`.
@@ -145,7 +145,7 @@ follow-up, tracked against the spine's reliable-conversion work.
   exists yet; plus two real branches in `events/fold.ts` — a `PriceMarked`
   carrying `usdMxn` updating the fold's FX (~L223), and the zero-`totalQuantity`
   guard in the weighted-average helper (~L281).
-- **`packages/tui/src/event-store.ts`** (94% lines) — the covered core is the
+- **`apps/tui/src/event-store.ts`** (94% lines) — the covered core is the
   validated ingest boundary, dedup, atomic append, archive, and quarantine
   (`event-store.test.ts`). Uncovered: the inbox **invalid-JSON** and
   **non-array** rejection throws, the `--as-of=<date>` (equals-form) arg variant

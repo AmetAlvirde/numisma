@@ -10,8 +10,8 @@ export default defineConfig({
       // executes under Node's vitest run, so instrumenting it would only report
       // it as dead 0% and make the number dishonest. That path is guarded by the
       // openTUI smokes (`pnpm smoke:tui`, `pnpm smoke:startup`) instead. See
-      // packages/tui/README.md for the split.
-      include: ["packages/*/src/**/*.ts"],
+      // apps/tui/README.md for the split.
+      include: ["packages/*/src/**/*.ts", "apps/*/src/**/*.ts"],
       exclude: [
         "**/*.test.ts",
         // Test-only shared fixtures/helpers extracted from split test files:
@@ -20,19 +20,19 @@ export default defineConfig({
         "**/*.d.ts",
         // Thin script entries: top-level orchestration over already-tested
         // functions, no unit to assert. See docs/coverage-rationale.md.
-        "packages/tui/src/report.ts",
-        "packages/tui/src/spine.ts",
-        "packages/tui/src/spine-reset.ts",
+        "apps/tui/src/report.ts",
+        "apps/tui/src/spine.ts",
+        "apps/tui/src/spine-reset.ts",
         // Thin price-feed CLI entry: top-level console/exit-code wiring over the
         // tested `runPriceFetch`, no unit to assert.
-        "packages/price-feed/src/cli.ts",
+        "apps/price-feed/src/cli.ts",
         // Bun-only openTUI wiring: never executes under Node's vitest run, so
         // instrumenting it would only report dead 0%. Guarded by the openTUI
         // smokes (`pnpm smoke:tui`, `pnpm smoke:startup`).
-        "packages/tui/src/app.ts",
-        "packages/tui/src/mount-app.ts",
-        "packages/tui/src/smoke-openTui.ts",
-        "packages/tui/src/smoke-startup-openTui.ts",
+        "apps/tui/src/app.ts",
+        "apps/tui/src/mount-app.ts",
+        "apps/tui/src/smoke-openTui.ts",
+        "apps/tui/src/smoke-startup-openTui.ts",
       ],
     },
   },

@@ -67,7 +67,7 @@ describe("spine:reset destructive-default guard (R-M5)", () => {
   /** Run the real `spine-reset.ts` script under tsx with a controlled env. */
   function runReset(dataDir?: string): { status: number | null; stderr: string; stdout: string } {
     const root = repoRoot();
-    const script = join(root, "packages", "tui", "src", "spine-reset.ts");
+    const script = join(root, "apps", "tui", "src", "spine-reset.ts");
     const tsx = join(root, "node_modules", ".bin", "tsx");
     const env = { ...process.env };
     delete env.NUMISMA_DATA_DIR;
