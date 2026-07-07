@@ -9,7 +9,7 @@
 //  2. Sibling-repo data dir (grill decision): `DEFAULT_CONFIG.dataDir` must be an
 //     ABSOLUTE path in the sibling private `accumulus` repo (`~/Dev/accumulus/data`),
 //     derived from `os.homedir()` — never a CWD-relative "data" (which would let the
-//     package-level `prices:fetch`, CWD = packages/price-feed, write a divergent,
+//     package-level `prices:fetch`, CWD = apps/price-feed, write a divergent,
 //     commit-eligible ghost store) and never a hardcoded `/Users/...`. These
 //     assertions live in this file because the review scope permits creating only
 //     `inbox.test.ts`; they exercise `DEFAULT_CONFIG.dataDir`, which now flows through

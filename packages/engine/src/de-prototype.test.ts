@@ -12,9 +12,10 @@ const SRC_DIR = dirname(fileURLToPath(import.meta.url));
 // Also scan the TUI app's source: a realized-P&L prototype demo lived there
 // (apps/tui/src), so the marker could reach main via either package.
 const TUI_SRC_DIR = join(SRC_DIR, "..", "..", "..", "apps", "tui", "src");
-// And the price-feed package: the crypto price tracer (#106) was prototyped there
-// before its reliable conversion, so its markers must be stripped too (R7).
-const PRICE_FEED_SRC_DIR = join(SRC_DIR, "..", "..", "price-feed", "src");
+// And the price-feed app: the crypto price tracer (#106) was prototyped there
+// (apps/price-feed/src) before its reliable conversion, so its markers must be
+// stripped too (R7).
+const PRICE_FEED_SRC_DIR = join(SRC_DIR, "..", "..", "..", "apps", "price-feed", "src");
 const SCAN_DIRS = [SRC_DIR, TUI_SRC_DIR, PRICE_FEED_SRC_DIR];
 // Needles assembled from fragments so this guard file never matches itself.
 const MARKERS = [
