@@ -6,9 +6,8 @@
  * knob-turner exists (there is one operator today), so these are named defaults,
  * not a sidecar.
  */
-import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import type { MarkClock } from "@numisma/engine";
 
 export interface PriceFeedConfig extends MarkClock {
@@ -35,8 +34,9 @@ export interface PriceFeedConfig extends MarkClock {
   fixMaxStaleDays: number;
   /**
    * Root data directory holding the price store and the inbox. Defaults to an
-   * ABSOLUTE path anchored at the workspace root (see `resolveWorkspaceDataDir`),
-   * not a CWD-relative `"data"`. Callers may still override with any path.
+   * ABSOLUTE path in the sibling `accumulus` repo (`~/Dev/accumulus/data`; see
+   * `resolveWorkspaceDataDir`), overridable via `NUMISMA_DATA_DIR` or any explicit
+   * path. Never a CWD-relative `"data"`.
    */
   dataDir: string;
   /**
@@ -59,32 +59,34 @@ export interface PriceFeedConfig extends MarkClock {
 }
 
 /**
- * The single real data plane lives at the workspace root's `data/` — the same
- * store `pnpm spine` reads. A CWD-relative default (`"data"`) is a trap: the
- * package ships a `prices:fetch` script, so `pnpm --filter @numisma/price-feed
- * prices:fetch` runs with CWD = `packages/price-feed` and would silently write a
- * divergent `packages/price-feed/data/` ghost store — one `pnpm spine` never
- * reads and that (unlike the root `data/`) NO `.gitignore` guards, making it
- * commit-eligible. Anchoring the default to the workspace root deterministically
- * makes BOTH the documented root invocation and the package-level invocation
- * write the same real, git-ignored store.
+ * The single real data plane's default now lives in the sibling private `accumulus`
+ * repo's `data/` — per the grill decision (the durable log lives in `accumulus`, not
+ * the numisma checkout), the DEFAULT is `~/Dev/accumulus/data`, resolved from
+ * `os.homedir()` (never a hardcoded `/Users/...`). `NUMISMA_DATA_DIR` still overrides.
  *
- * We locate the root by walking up from this module to the directory holding
- * `pnpm-workspace.yaml`; if that marker is never found we fall back to the
- * historical CWD-relative `"data"` rather than throwing.
+ * This is the same store `pnpm spine` reads. The prior workspace-root walk (anchoring
+ * the default at `<repo>/data`) is retired as the default, but the reasoning it guarded
+ * against still holds for any relative fallback: the package ships a `prices:fetch`
+ * script run with CWD = `packages/price-feed`, so a CWD-relative default would silently
+ * write a divergent ghost store. An ABSOLUTE default under the home dir sidesteps that
+ * entirely and matches the tui event-store resolver.
  */
 function resolveWorkspaceDataDir(): string {
-  let dir = dirname(fileURLToPath(import.meta.url));
-  for (;;) {
-    if (existsSync(join(dir, "pnpm-workspace.yaml"))) {
-      return join(dir, "data");
-    }
-    const parent = dirname(dir);
-    if (parent === dir) {
-      return "data";
-    }
-    dir = parent;
+  // NUMISMA_DATA_DIR override — the SINGLE knob that moves BOTH planes (price-feed AND
+  // the tui event-store). When set, `~`-expanded and made absolute; otherwise default
+  // to the sibling `accumulus` repo's `data/` (the grill's durable-log home).
+  //
+  // SHORTCUT: duplicated verbatim from `packages/tui/src/event-store.ts`
+  // (`resolveDataDirDefault`). tui and price-feed share no runtime package and cannot
+  // import each other, and ADR-001 keeps this IO out of the engine — so the honest
+  // minimal placement is the same few lines in each resolver. Keep the two copies in sync.
+  const fromEnv = process.env.NUMISMA_DATA_DIR;
+  if (fromEnv && fromEnv.trim() !== "") {
+    const raw = fromEnv.trim();
+    const expanded = raw === "~" || raw.startsWith("~/") ? join(homedir(), raw.slice(1)) : raw;
+    return resolve(expanded);
   }
+  return join(homedir(), "Dev", "accumulus", "data");
 }
 
 export const DEFAULT_CONFIG: PriceFeedConfig = {

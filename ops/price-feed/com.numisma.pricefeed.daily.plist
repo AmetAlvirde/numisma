@@ -52,6 +52,12 @@
   <dict>
     <key>NUMISMA_REPO_DIR</key>
     <string>__REPO_DIR__</string>
+    <!-- Durable-data home: the sibling private `accumulus` repo. launchd cannot
+         expand `~`, so this ops file uses an absolute machine-specific path (unlike
+         the code default, which derives it from os.homedir()). The wrapper forwards
+         this to `pnpm prices:fetch`/`pnpm spine`. -->
+    <key>NUMISMA_DATA_DIR</key>
+    <string>/Users/amet/Dev/accumulus/data</string>
   </dict>
 
   <!-- 18:00 local, EVERY day (7-day schedule; see the header note on why). -->
