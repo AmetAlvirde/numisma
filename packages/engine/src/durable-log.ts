@@ -1,22 +1,35 @@
 // Two pure derivations for the durable event log's git-backed shell: a compact
-// `Checkpoint` snapshot of a folded read model (so a reader can trust a head
-// without replaying the whole log), and a deterministic ingest commit message.
-// Both are pure — no IO, no clock — so the IO/git shell that persists them can be
-// tested against a fixed input.
+// Head Digest of a folded read model (so a reader can trust a head without
+// replaying the whole log), and a deterministic ingest commit message. Both are
+// pure — no IO, no clock — so the IO/git shell that persists them can be tested
+// against a fixed input.
 import type { FundReviewData } from "./contracts.js";
 import { buildCompositionReport } from "./compose/report.js";
 
 /**
- * A compact, durable summary of a folded read model at a point in the log. Written
- * alongside the event log so a reader can trust the head's shape (value, open/closed
- * counts, the event it was folded through) without replaying every event. `asOf`,
- * the counts, and `fundValueUsd` all come straight from the canonical fold — never a
- * side calculation — so a checkpoint can never disagree with a full recompute.
+ * A derived, versioned summary of a folded read model at a point in the log — the
+ * Head Digest (persisted as `head-digest.json`). Written alongside the event log so a
+ * reader can trust the head's shape (value, open/closed counts, the event it was
+ * folded through) without replaying every event. `asOf`, the counts, and
+ * `fundValueUsd` all come straight from the canonical fold — never a side calculation
+ * — so the Head Digest can never disagree with a full recompute. It has no engine
+ * reader (nothing folds it back), so it can never become a shadow source of truth.
+ *
+ * Divergence note (D1): `openPositionCount` counts ALL logged open positions
+ * (`folded.positions.length`), including non-live / unsupported ones, whereas
+ * `fundValueUsd` (from `buildCompositionReport`) values only the live, supported
+ * population. The two intentionally diverge when a non-live position is logged — the
+ * count is "positions on the book", not "positions contributing to the fund value".
  */
-export interface Checkpoint {
+export interface HeadDigest {
   schemaVersion: 1;
   asOf: string;
   fundValueUsd: number;
+  /**
+   * Count of ALL logged open positions (incl. non-live / unsupported), i.e.
+   * `folded.positions.length`. NOT the valued population — see the D1 divergence
+   * note on {@link HeadDigest}; `fundValueUsd` excludes non-live positions.
+   */
   openPositionCount: number;
   closedPositionCount: number;
   headEventId: string | null;
@@ -24,17 +37,17 @@ export interface Checkpoint {
 }
 
 /**
- * Derive a {@link Checkpoint} from a folded read model. `fundValueUsd` is taken from
+ * Derive a {@link HeadDigest} from a folded read model. `fundValueUsd` is taken from
  * `buildCompositionReport(folded)` — the ONE canonical fund-value computation — rather
- * than re-summing positions by hand, so the checkpoint and the composition report can
- * never drift. `headEventId` is the id of the last event folded in (or `null` for the
- * genesis-only state).
+ * than re-summing positions by hand, so the Head Digest and the composition report can
+ * never drift (the named ADR-003 anti-drift invariant). `headEventId` is the id of the
+ * last event folded in (or `null` for the genesis-only state).
  */
-export function deriveCheckpoint(
+export function deriveHeadDigest(
   folded: FundReviewData,
   headEventId: string | null,
   appVersion: string,
-): Checkpoint {
+): HeadDigest {
   const { fundValueUsd } = buildCompositionReport(folded).totals;
   return {
     schemaVersion: 1,

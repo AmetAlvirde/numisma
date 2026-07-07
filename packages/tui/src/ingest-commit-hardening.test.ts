@@ -80,8 +80,8 @@ describe("captureIngestCommit — degrades every fault to a loud warn, never thr
     ).resolves.toBeUndefined();
 
     expect(stderr.warnings()).toMatch(/add failed/i);
-    // The checkpoint was still written before the failed stage.
-    await expect(readFile(resolve(dir, "checkpoint.json"), "utf8")).resolves.toContain("headEventId");
+    // The head-digest was still written before the failed stage.
+    await expect(readFile(resolve(dir, "head-digest.json"), "utf8")).resolves.toContain("headEventId");
   });
 
   it("downgrades a refused commit (git commit fails)", async () => {
@@ -114,8 +114,8 @@ describe("captureIngestCommit — degrades every fault to a loud warn, never thr
     expect(stderr.warnings()).toMatch(/push timed out/i);
   });
 
-  it("downgrades an unexpected exception (checkpoint write throws) to a warn", async () => {
-    // dataDir is a FILE, so writing `<dataDir>/checkpoint.json` throws ENOTDIR — an
+  it("downgrades an unexpected exception (head-digest write throws) to a warn", async () => {
+    // dataDir is a FILE, so writing `<dataDir>/head-digest.json` throws ENOTDIR — an
     // exception from inside the seam that must still be caught and downgraded.
     const parent = await tempDir("numisma-throw-");
     const filePath = resolve(parent, "not-a-dir");
@@ -167,7 +167,7 @@ describe("captureIngestCommit — exec safety + scoped staging in a real repo", 
     await captureIngestCommit({ dataDir: dir, folded, appendedEvents: appended, appVersion: "v" });
 
     const committed = git(dir, ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]).stdout;
-    expect(committed).toContain("checkpoint.json");
+    expect(committed).toContain("head-digest.json");
     expect(committed).not.toContain("stray.tmp");
     expect(committed).not.toContain("prices/foo.json");
     // The stray files remain untracked in the working tree (never staged).

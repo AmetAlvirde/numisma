@@ -371,7 +371,7 @@ export async function ingestInbox(
 
   await appendEvents(paths.log, toAppend);
 
-  // Best-effort durable-log capture: fold the new head and commit checkpoint + log into
+  // Best-effort durable-log capture: fold the new head and commit head-digest + log into
   // the dataDir's accumulus checkout. The append above already landed atomically, so this
   // whole block is guarded — a fold/git failure downgrades to a warning and NEVER fails
   // the ingest. `paths.log` is `<dataDir>/events.jsonl`, so its dirname is the dataDir.

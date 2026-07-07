@@ -1,6 +1,6 @@
 // End-to-end hook-wiring locks: drive the REAL `ingestInbox` against a temp GIT-REPO
 // dataDir and prove the capture happy-path that was previously only manual — a commit
-// lands with `checkpoint.json` staged, the deterministic message, and
+// lands with `head-digest.json` staged, the deterministic message, and
 // `headEventId === last appended id`. Plus the ingest-level reliability invariants: an
 // append survives a capture failure (non-repo dataDir) with a normal report and a
 // byte-intact log; the hook fires exactly once per ≥1-event ingest; and an empty ingest
@@ -43,7 +43,7 @@ async function makeDataDir(options: { git?: boolean; inbox?: unknown[] } = {}): 
 }
 
 describe("ingestInbox → durable-log capture, wired end-to-end against a temp git repo", () => {
-  it("lands a commit with checkpoint.json staged, the deterministic message, and the head id", async () => {
+  it("lands a commit with head-digest.json staged, the deterministic message, and the head id", async () => {
     const dir = await makeDataDir({ git: true, inbox: [MARK] });
     const paths = resolveEventStorePaths(dir);
     const before = Number(git(dir, ["rev-list", "--count", "HEAD"]).stdout.trim());
@@ -57,20 +57,20 @@ describe("ingestInbox → durable-log capture, wired end-to-end against a temp g
     const after = Number(git(dir, ["rev-list", "--count", "HEAD"]).stdout.trim());
     expect(after).toBe(before + 1);
 
-    // checkpoint.json is part of that commit, with the appended head + version.
+    // head-digest.json is part of that commit, with the appended head + version.
     const staged = git(dir, ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]).stdout;
-    expect(staged).toContain("checkpoint.json");
+    expect(staged).toContain("head-digest.json");
     expect(staged).toContain("events.jsonl");
 
-    const checkpoint = JSON.parse(await readFile(resolve(dir, "checkpoint.json"), "utf8"));
-    expect(checkpoint.headEventId).toBe("mark-aapl"); // === last appended id
+    const headDigest = JSON.parse(await readFile(resolve(dir, "head-digest.json"), "utf8"));
+    expect(headDigest.headEventId).toBe("mark-aapl"); // === last appended id
 
     // The landed message is exactly the engine's deterministic format.
     const expected = formatIngestCommitMessage({
       verbs: { PriceMarked: 1 },
       totalCount: 1,
-      asOf: checkpoint.asOf,
-      appVersion: checkpoint.appVersion,
+      asOf: headDigest.asOf,
+      appVersion: headDigest.appVersion,
       timestamp: "ignored",
     });
     const body = git(dir, ["log", "-1", "--format=%B"]).stdout.trim();
@@ -106,7 +106,7 @@ describe("ingestInbox → durable-log capture, wired end-to-end against a temp g
     expect(report.newCount).toBe(0);
     const after = Number(git(dir, ["rev-list", "--count", "HEAD"]).stdout.trim());
     expect(after).toBe(before);
-    // Nothing was captured: no checkpoint.json written for a zero-event ingest.
-    await expect(readFile(resolve(dir, "checkpoint.json"), "utf8")).rejects.toThrow();
+    // Nothing was captured: no head-digest.json written for a zero-event ingest.
+    await expect(readFile(resolve(dir, "head-digest.json"), "utf8")).rejects.toThrow();
   });
 });

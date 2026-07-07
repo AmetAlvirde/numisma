@@ -1,9 +1,9 @@
 /**
  * The git-backed shell for the durable event log: after a successful ingest append,
- * capture a `checkpoint.json` + the log into a commit in the dataDir (an accumulus git
+ * capture a `head-digest.json` + the log into a commit in the dataDir (an accumulus git
  * checkout) and best-effort push it. Per ADR-001 all IO lives here in the runtime half,
  * NOT in `@numisma/engine`; the engine supplies only the two PURE derivations
- * (`deriveCheckpoint`, `formatIngestCommitMessage`).
+ * (`deriveHeadDigest`, `formatIngestCommitMessage`).
  *
  * The load-bearing promise: this capture is BEST-EFFORT and never breaks the ingest.
  * The append already durably landed via temp+rename before we are called, so every git
@@ -14,7 +14,7 @@
  * TTY can never hang us, and the network-touching `commit`/`push` carry a bounded
  * timeout so a stuck child is killed and downgraded to one more loud warning.
  *
- * Ordering invariant: append → write checkpoint → scoped stage → commit → push. Each
+ * Ordering invariant: append → write head-digest → scoped stage → commit → push. Each
  * step's failure is terminal-and-loud; nothing after the (already durable) append can
  * throw out of this seam.
  *
@@ -27,14 +27,14 @@ import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  deriveCheckpoint,
+  deriveHeadDigest,
   formatIngestCommitMessage,
   type FundReviewData,
   type PortfolioEvent,
 } from "@numisma/engine";
 
 /** The durable files we stage each ingest, when present in the dataDir. */
-const TRACKED_FILES = ["events.jsonl", "checkpoint.json", "genesis.json", "preferences.jsonl"];
+const TRACKED_FILES = ["events.jsonl", "head-digest.json", "genesis.json", "preferences.jsonl"];
 
 /**
  * Bounded timeouts (ms) for the git steps that can touch the network or a credential
@@ -102,7 +102,7 @@ function warn(message: string): void {
 /**
  * The numisma workspace root (the directory holding `pnpm-workspace.yaml`), located by
  * walking up from this module. Used as the git dir {@link readAppVersion} stamps the
- * checkpoint/commit from. Falls back to the process CWD if the marker is never found.
+ * head-digest/commit from. Falls back to the process CWD if the marker is never found.
  */
 export function resolveWorkspaceRoot(): string {
   let dir = dirname(fileURLToPath(import.meta.url));
@@ -119,7 +119,7 @@ export function resolveWorkspaceRoot(): string {
 }
 
 /**
- * The numisma code version to stamp into a checkpoint/commit: `git rev-parse --short
+ * The numisma code version to stamp into a head-digest/commit: `git rev-parse --short
  * HEAD`, suffixed `-dirty` when the working tree has uncommitted changes. Falls back to
  * `"unknown"` if git is unavailable or `numismaRepoDir` is not a repo — a version we
  * cannot read must never fail an ingest.
@@ -146,8 +146,8 @@ function verbCounts(events: PortfolioEvent[]): Record<string, number> {
 
 /**
  * Best-effort durable-log capture, called right after a successful ingest append that
- * wrote ≥1 new event. Writes `checkpoint.json` (via the engine's pure
- * `deriveCheckpoint`), stages the durable files, commits with the deterministic
+ * wrote ≥1 new event. Writes `head-digest.json` (via the engine's pure
+ * `deriveHeadDigest`), stages the durable files, commits with the deterministic
  * `formatIngestCommitMessage`, then pushes — every failure downgraded to a loud warning.
  *
  * `headEventId` is the id of the log's head, i.e. the LAST appended event (appends go to
@@ -167,11 +167,11 @@ export async function captureIngestCommit(input: {
     const headEventId =
       appendedEvents.length > 0 ? appendedEvents[appendedEvents.length - 1]!.id : null;
 
-    // 1) checkpoint.json — the compact folded head a reader can trust without replay.
-    const checkpoint = deriveCheckpoint(folded, headEventId, appVersion);
+    // 1) head-digest.json — the compact folded head a reader can trust without replay.
+    const headDigest = deriveHeadDigest(folded, headEventId, appVersion);
     await writeFile(
-      join(dataDir, "checkpoint.json"),
-      `${JSON.stringify(checkpoint, null, 2)}\n`,
+      join(dataDir, "head-digest.json"),
+      `${JSON.stringify(headDigest, null, 2)}\n`,
       "utf8",
     );
 
@@ -216,7 +216,7 @@ export async function captureIngestCommit(input: {
       warn(`⚠️ accumulus push ${why} — commit is local-only. ${push.stderr.trim()}`);
     }
   } catch (error) {
-    // Any unexpected exception (a bad fold, an IO error writing checkpoint) must never
+    // Any unexpected exception (a bad fold, an IO error writing head-digest) must never
     // fail the ingest: the append already landed. Downgrade to a loud warning.
     const detail = error instanceof Error ? error.message : String(error);
     warn(`⚠️ ingest commit capture errored — append is durable, but not captured in git. ${detail}`);

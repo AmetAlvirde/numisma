@@ -1,6 +1,6 @@
 // Git-shell tests (mvi portable-durable-log). The engine owns the two PURE derivations
-// (deriveCheckpoint / formatIngestCommitMessage, tested there); this suite locks the
-// IO/git shell around them: that captureIngestCommit writes checkpoint.json and lands a
+// (deriveHeadDigest / formatIngestCommitMessage, tested there); this suite locks the
+// IO/git shell around them: that captureIngestCommit writes head-digest.json and lands a
 // commit with the deterministic message in a real (throwaway) git repo, and — the
 // load-bearing reliability promise — that a push failure (or a non-repo dataDir)
 // degrades to a warning WITHOUT ever throwing. All against a temp repo in the OS tmpdir,
@@ -102,18 +102,18 @@ async function makeRepo(options: { withRemote?: boolean } = {}): Promise<string>
   return dir;
 }
 
-describe("captureIngestCommit — lands a checkpoint + commit in the dataDir repo", () => {
-  it("writes checkpoint.json and commits with the deterministic message", async () => {
+describe("captureIngestCommit — lands a head-digest + commit in the dataDir repo", () => {
+  it("writes head-digest.json and commits with the deterministic message", async () => {
     const dir = await makeRepo();
     const { folded, appended } = foldedFixture();
 
     await captureIngestCommit({ dataDir: dir, folded, appendedEvents: appended, appVersion: "abc1234" });
 
-    // checkpoint.json exists, is valid JSON, and carries the appended head + version.
-    const checkpoint = JSON.parse(await readFile(resolve(dir, "checkpoint.json"), "utf8"));
-    expect(checkpoint.headEventId).toBe("mark-aapl");
-    expect(checkpoint.appVersion).toBe("abc1234");
-    expect(checkpoint.asOf).toBe(folded.review.asOf);
+    // head-digest.json exists, is valid JSON, and carries the appended head + version.
+    const headDigest = JSON.parse(await readFile(resolve(dir, "head-digest.json"), "utf8"));
+    expect(headDigest.headEventId).toBe("mark-aapl");
+    expect(headDigest.appVersion).toBe("abc1234");
+    expect(headDigest.asOf).toBe(folded.review.asOf);
 
     // A new commit exists on top of the seed, with the engine's deterministic message.
     const expected = formatIngestCommitMessage({
@@ -159,8 +159,8 @@ describe("captureIngestCommit — degrades, never throws", () => {
       captureIngestCommit({ dataDir: dir, folded, appendedEvents: appended, appVersion: "v" }),
     ).resolves.toBeUndefined();
 
-    // The checkpoint is still written even with no repo to commit into.
-    await expect(readFile(resolve(dir, "checkpoint.json"), "utf8")).resolves.toContain("headEventId");
+    // The head-digest is still written even with no repo to commit into.
+    await expect(readFile(resolve(dir, "head-digest.json"), "utf8")).resolves.toContain("headEventId");
     const warnings = warn.mock.calls.map((c) => String(c[0])).join("");
     expect(warnings).toMatch(/not a git checkout/i);
   });
