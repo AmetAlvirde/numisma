@@ -1,20 +1,39 @@
 /**
- * PROTOTYPE (mvi 2026-06-29-portfolio-persistence). Iteration helper for the
- * Node tracer: undo a consumed ingest so an edited inbox can be re-folded.
+ * Iteration helper for a THROWAWAY dataDir: undo a consumed ingest so an edited
+ * inbox can be re-folded during local experimentation.
  *
- * `ingestInbox` archives the inbox (rename → data/ingested/<asOf>.json) and the
+ * `ingestInbox` archives the inbox (rename → <dataDir>/ingested/<asOf>.json) and the
  * appended ids are deduped forever after, so editing prices and re-running
  * `pnpm spine` would skip every line as a duplicate. This reset:
- *   1. deletes the append-only log (data/events.jsonl), and
+ *   1. deletes the append-only log (<dataDir>/events.jsonl), and
  *   2. if the inbox is gone, restores the most recent archive back to it.
+ *
+ * DESTRUCTIVE-DEFAULT GUARD: `rm(paths.log)` deletes the sacred append-only log.
+ * With the default dataDir resolving to the private `accumulus` sibling repo, an
+ * unguarded run would `rm ~/Dev/accumulus/data/events.jsonl` — the very durable
+ * ledger this increment exists to protect. So this command REFUSES to run whenever
+ * the resolved dataDir is the accumulus default; it requires an explicit,
+ * non-default `NUMISMA_DATA_DIR` (a throwaway experiment/test dir). Scoping it this
+ * way — rather than dropping it from the reliable cut — keeps the local-iteration
+ * ergonomics while making the accumulus footgun structurally impossible.
  *
  * Genesis is never touched. Safe to run repeatedly; a no-op when already clean.
  */
 import { readdir, rename, rm, stat } from "node:fs/promises";
-import { join } from "node:path";
-import { resolveEventStorePaths } from "./event-store.js";
+import { join, resolve } from "node:path";
+import { accumulusDataDirDefault, resolveDataDirDefault, resolveEventStorePaths } from "./event-store.js";
 
-const paths = resolveEventStorePaths();
+const dataDir = resolveDataDirDefault();
+if (resolve(dataDir) === resolve(accumulusDataDirDefault())) {
+  process.stderr.write(
+    `⚠️ spine:reset refused: dataDir resolves to the default accumulus ledger (${dataDir}).\n` +
+      `   This command deletes events.jsonl and must NEVER touch the durable log.\n` +
+      `   Set NUMISMA_DATA_DIR to an explicit throwaway dir to reset that instead.\n`,
+  );
+  process.exit(1);
+}
+
+const paths = resolveEventStorePaths(dataDir);
 
 await rm(paths.log, { force: true });
 
