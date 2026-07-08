@@ -2,9 +2,11 @@
  * Push shell (Deliverable C) — headless, price-feed-style script (NOT a package).
  *
  * Loads the fixture CompositionReport and idempotently upserts it into the
- * projection DB using the WRITE credential (PROJECTION_WRITE_DATABASE_URL).
- * Shares the schema version + fund-id derivation with the web reader via the
- * projection contract, so writer and reader can never disagree.
+ * projection DB using the WRITE credential (PROJECTION_WRITE_DATABASE_URL). The
+ * pure derivation and the actual upsert SQL live in `push-core.ts` (importable,
+ * unit- and integration-tested); this file is just the argv + credential +
+ * process-exit wiring around them, so importing `push-core.ts` never runs the
+ * script.
  *
  *   pnpm --filter @numisma/web push            # upsert the fixture snapshot
  *   pnpm --filter @numisma/web push -- --init  # create table first, then upsert
@@ -12,31 +14,13 @@
  *
  * From the repo root: `pnpm push` (and `pnpm db:init`).
  */
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
 import { Pool } from "pg";
-import type { CompositionReport } from "@numisma/engine";
-import {
-  COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
-  fundIdOf,
-} from "../projection/contract.ts";
 import { readSchemaDdl } from "../projection/provision.ts";
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const FIXTURE_PATH = resolve(
-  HERE,
-  "../../fixtures/composition-report.fixture.json",
-);
-
-async function loadFixture(): Promise<CompositionReport> {
-  const raw = await readFile(FIXTURE_PATH, "utf-8");
-  return JSON.parse(raw) as CompositionReport;
-}
+import { loadFixture, upsertSnapshot } from "./push-core.ts";
 
 /**
  * Apply the DDL (composition_snapshot table) through the driver for one-command
- * local setup with the writer cred. schema.sql is now DDL-only (grants live in
+ * local setup with the writer cred. schema.sql is DDL-only (grants live in
  * provision.ts and are applied by `db:provision`), so there is no marker to
  * split on and no chance of feeding psql meta-commands to the pg driver.
  */
@@ -54,9 +38,6 @@ async function main(): Promise<void> {
   }
 
   const report = await loadFixture();
-  const fundId = fundIdOf(report);
-  const asOf = report.dashboard.summary.asOf;
-  const schemaVersion = COMPOSITION_SNAPSHOT_SCHEMA_VERSION;
 
   const pool = new Pool({ connectionString });
   try {
@@ -64,15 +45,7 @@ async function main(): Promise<void> {
       await initSchema(pool);
     }
 
-    await pool.query(
-      `INSERT INTO composition_snapshot (fund_id, as_of, schema_version, report)
-       VALUES ($1, $2, $3, $4::jsonb)
-       ON CONFLICT (fund_id, as_of)
-       DO UPDATE SET report = EXCLUDED.report,
-                     schema_version = EXCLUDED.schema_version,
-                     pushed_at = now()`,
-      [fundId, asOf, schemaVersion, JSON.stringify(report)],
-    );
+    const { fundId, asOf, schemaVersion } = await upsertSnapshot(pool, report);
 
     console.log(
       `[push] pushed snapshot fundId=${fundId} asOf=${asOf} schemaVersion=${schemaVersion}`,

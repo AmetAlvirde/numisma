@@ -47,7 +47,9 @@ export default defineConfig({
         // self-executing script — that would otherwise report dishonest 0%.
         // `contract.ts` IS measured (contract.test.ts); `lib/dashboard.ts` stays
         // measured too — it is real, reachable behavior tested in slice #124, not
-        // dead weight. See docs/coverage-rationale.md §6.
+        // dead weight. `push/push-core.ts` (the pure derivation + real upsert
+        // extracted from the script) is measured too (slice #127) — only the thin
+        // self-exec `push.ts` wrapper stays excluded. See docs/coverage-rationale.md §6.
         "apps/web/src/routeTree.gen.ts",
         "apps/web/src/lib/auth.ts",
         "apps/web/src/lib/auth-client.ts",
