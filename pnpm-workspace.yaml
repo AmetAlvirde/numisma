@@ -3,6 +3,10 @@ packages:
   - apps/*
 
 allowBuilds:
+  # better-auth pulls these as OPTIONAL adapter deps; @numisma/web uses the pg
+  # (node-postgres) adapter only, so neither native build is needed.
+  '@prisma/client': false
+  better-sqlite3: false
   esbuild: true
 
 # Force the patched esbuild across the tree (transitive via vite/vitest + tsx).
