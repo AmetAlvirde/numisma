@@ -14,3 +14,5 @@ src/routeTree.gen.ts
 
 # Better Auth CLI generated migration.
 better-auth.schema.sql
+.vercel
+.env*.local
