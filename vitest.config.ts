@@ -17,6 +17,10 @@ export default defineConfig({
         // Test-only shared fixtures/helpers extracted from split test files:
         // exercised by the tests that import them, not product code to measure.
         "**/*.fixtures.ts",
+        // Test-only substrate/helpers (e.g. the throwaway-Postgres testkit that
+        // slices #123/#127 share): exercised by the integration tests that
+        // import them, not product code to measure. See docs/coverage-rationale.md.
+        "**/*.testkit.ts",
         "**/*.d.ts",
         // Thin script entries: top-level orchestration over already-tested
         // functions, no unit to assert. See docs/coverage-rationale.md.
@@ -50,6 +54,14 @@ export default defineConfig({
         "apps/web/src/lib/query.ts",
         "apps/web/src/routes/api/auth/$.ts",
         "apps/web/src/push/push.ts",
+        // Self-executing provisioning/auth CLI scripts (same category as
+        // push.ts): top-level main().then(..., process.exit) over the tested
+        // provision.ts builders / vendored SQL. No unit to assert as written;
+        // provision.ts's pure builders ARE measured (provision.test.ts) and the
+        // DB-applying provisionProjection() is exercised by the gated
+        // integration test. See docs/coverage-rationale.md §6.
+        "apps/web/src/projection/provision-projection.ts",
+        "apps/web/src/auth/apply-auth-schema.ts",
       ],
     },
   },

@@ -1,17 +1,20 @@
 -- composition_snapshot: the hosted read-projection table (ADR-007).
 --
--- The push shell (PROJECTION_WRITE_DATABASE_URL) writes here; the web app
--- (PROJECTION_DATABASE_URL) reads here. This file has two halves:
+-- DDL ONLY. This file is plain, driver-safe SQL: no GRANT/REVOKE, no psql
+-- meta-commands (`:"var"` interpolation). It is applied through the
+-- node-postgres driver by both:
 --
---   1. Everything ABOVE the GRANTS marker is plain SQL. It is what
---      `pnpm --filter @numisma/web db:init` (i.e. `push.ts --init`) executes
---      through the node-postgres driver for one-command local setup.
+--   * the push shell  (`pnpm --filter @numisma/web db:init`, writer cred), and
+--   * provisioning    (`pnpm --filter @numisma/web db:provision`, admin cred),
 --
---   2. Everything BELOW the GRANTS marker uses psql meta-commands (:var
---      interpolation) and MUST be applied with psql:
---        psql "$SUPERUSER_URL" -f schema.sql -v writer_role=numisma_push \
---                                            -v reader_role=numisma_web
---      The node driver cannot parse psql meta-commands, so `--init` skips it.
+-- via `readSchemaDdl()` in `provision.ts`.
+--
+-- The ADR-007 two-role grants (writer append-only, reader SELECT-only) are NOT
+-- here — they are generated from the configured role names and applied through
+-- the same driver by `buildGrantStatements()` / `provisionProjection()` in
+-- `provision.ts`. Keeping DDL and grants in physically separate places is
+-- deliberate (see ADR-010): a reworded comment can no longer silently skip the
+-- grants, and no psql meta-command can ever reach the pg driver.
 
 CREATE TABLE IF NOT EXISTS composition_snapshot (
   fund_id        TEXT        NOT NULL,
@@ -21,24 +24,3 @@ CREATE TABLE IF NOT EXISTS composition_snapshot (
   pushed_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (fund_id, as_of)
 );
-
--- >>> GRANTS (psql only, ADR-007 two-role split) <<<
---
--- Two roles back this table, bound to real login roles via psql -v:
---
---   writer_role  the push shell's credential (PROJECTION_WRITE_DATABASE_URL).
---                Needs to INSERT/UPDATE snapshots. NO DELETE — the projection
---                is append/upsert only.
---
---   reader_role  the web app's credential (PROJECTION_DATABASE_URL). This is
---                ADR-007-CRITICAL: the web credential must be PHYSICALLY unable
---                to mutate the projection. SELECT only; writes revoked so the
---                grant actually rejects INSERT/UPDATE/DELETE at the DB level.
-
--- WRITER: read + append/upsert, no delete.
-GRANT SELECT, INSERT, UPDATE ON composition_snapshot TO :"writer_role";
-
--- READER: strictly read-only. The REVOKE is belt-and-suspenders in case the
--- role inherited writes from PUBLIC or a group role.
-GRANT SELECT ON composition_snapshot TO :"reader_role";
-REVOKE INSERT, UPDATE, DELETE ON composition_snapshot FROM :"reader_role";

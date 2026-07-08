@@ -10,8 +10,10 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "push": "tsx src/push/push.ts",
     "db:init": "tsx src/push/push.ts --init",
-    "auth:generate": "npx @better-auth/cli@latest generate --config src/lib/auth.ts --output better-auth.schema.sql -y",
-    "auth:migrate": "npx @better-auth/cli@latest migrate --config src/lib/auth.ts -y"
+    "db:provision": "tsx src/projection/provision-projection.ts",
+    "auth:generate": "npx @better-auth/cli@1.4.21 generate --config src/lib/auth.ts --output src/auth/better-auth.schema.sql -y",
+    "auth:apply": "tsx src/auth/apply-auth-schema.ts",
+    "auth:migrate": "npx @better-auth/cli@1.4.21 migrate --config src/lib/auth.ts -y"
   },
   "dependencies": {
     "@numisma/engine": "workspace:*",

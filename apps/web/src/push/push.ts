@@ -21,14 +21,13 @@ import {
   COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
   fundIdOf,
 } from "../projection/contract.ts";
+import { readSchemaDdl } from "../projection/provision.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_PATH = resolve(
   HERE,
   "../../fixtures/composition-report.fixture.json",
 );
-const SCHEMA_PATH = resolve(HERE, "../projection/schema.sql");
-const GRANTS_MARKER = "-- >>> GRANTS";
 
 async function loadFixture(): Promise<CompositionReport> {
   const raw = await readFile(FIXTURE_PATH, "utf-8");
@@ -36,14 +35,13 @@ async function loadFixture(): Promise<CompositionReport> {
 }
 
 /**
- * Run the plain-SQL (pre-GRANTS) half of schema.sql through the driver. The
- * grants half is psql-only (see schema.sql) and is intentionally skipped here.
+ * Apply the DDL (composition_snapshot table) through the driver for one-command
+ * local setup with the writer cred. schema.sql is now DDL-only (grants live in
+ * provision.ts and are applied by `db:provision`), so there is no marker to
+ * split on and no chance of feeding psql meta-commands to the pg driver.
  */
 async function initSchema(pool: Pool): Promise<void> {
-  const sql = await readFile(SCHEMA_PATH, "utf-8");
-  const markerAt = sql.indexOf(GRANTS_MARKER);
-  const ddl = markerAt === -1 ? sql : sql.slice(0, markerAt);
-  await pool.query(ddl);
+  await pool.query(readSchemaDdl());
   console.log("[push] schema applied (composition_snapshot table)");
 }
 
