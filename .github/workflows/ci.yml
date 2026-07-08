@@ -1,0 +1,72 @@
+name: CI
+
+# Free for this repo: numisma is public, so GitHub Actions minutes are unlimited,
+# and the Postgres below is a service container on the runner (no external DB, no
+# spend). Delete this file to discard CI entirely.
+#
+# This is what makes the PRD #121 reliability bar real: the ADR-007 credential
+# invariants (reader can't write, writer can't delete) and push upsert idempotency
+# run against a REAL Postgres here, so a provisioning regression fails the build,
+# not production.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        # Wait until Postgres accepts connections before the job's steps run.
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # Points the gated DB-integration tests (pg-substrate.testkit.ts) at the
+      # service container. The default `postgres` role is a superuser, so the
+      # throwaway-DB substrate can CREATE DATABASE / CREATE ROLE as it needs.
+      # Absent this, those tests skip loudly; here they RUN.
+      NUMISMA_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck (all packages)
+        run: pnpm typecheck
+
+      - name: Test (unit + DB-backed ADR-007 invariants & push idempotency)
+        # --testTimeout raises the default 5s ceiling for the git-heavy tui tests,
+        # which flake on slower CI runners under full-suite parallel load. This is
+        # a CI-runner mitigation, not a change to any assertion.
+        run: pnpm test -- --testTimeout=30000
