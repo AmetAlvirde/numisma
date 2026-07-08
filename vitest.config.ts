@@ -33,6 +33,23 @@ export default defineConfig({
         "apps/tui/src/mount-app.ts",
         "apps/tui/src/smoke-openTui.ts",
         "apps/tui/src/smoke-startup-openTui.ts",
+        // apps/web coverage posture (PRD #121 / slice #122). The include glob is
+        // `*.ts`, so the `.tsx` render components (SummaryCard, SectionTable) and
+        // the route/router `.tsx` files are already outside instrumentation — a
+        // deliberate decision, not an accident: they are RTL-shaped render surfaces,
+        // not Node-unit-testable, and this increment does not add an RTL toolchain
+        // (see docs/coverage-rationale.md). What remains excluded below is the
+        // apps/web `.ts` dead weight — framework wiring, a generated file, and a
+        // self-executing script — that would otherwise report dishonest 0%.
+        // `contract.ts` IS measured (contract.test.ts); `lib/dashboard.ts` stays
+        // measured too — it is real, reachable behavior tested in slice #124, not
+        // dead weight. See docs/coverage-rationale.md §6.
+        "apps/web/src/routeTree.gen.ts",
+        "apps/web/src/lib/auth.ts",
+        "apps/web/src/lib/auth-client.ts",
+        "apps/web/src/lib/query.ts",
+        "apps/web/src/routes/api/auth/$.ts",
+        "apps/web/src/push/push.ts",
       ],
     },
   },

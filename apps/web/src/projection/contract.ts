@@ -63,6 +63,21 @@ export function getReaderPool(): Pool {
 }
 
 /**
+ * TEST-ONLY seam for the module-level `readerPool` singleton. NOT part of the
+ * production reader/writer contract — do not call from app code.
+ *
+ * `getReaderPool()` memoizes a lazily-constructed pool in module scope, which
+ * would otherwise leak across tests (a pool set up in one test would be returned
+ * to the next). This lets a test reset the singleton (`setReaderPoolForTests()`
+ * with no argument) or inject a stub pool (`setReaderPoolForTests(stub)`) so each
+ * test starts from a known state. Production lazy construction from
+ * PROJECTION_DATABASE_URL in `getReaderPool()` is unchanged.
+ */
+export function setReaderPoolForTests(pool?: Pool): void {
+  readerPool = pool;
+}
+
+/**
  * Read the most recent snapshot. Returns a refusal result rather than throwing
  * for the two "expected" bad states:
  *  - no rows yet            -> { status: "empty" }
