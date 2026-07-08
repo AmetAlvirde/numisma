@@ -103,6 +103,86 @@ describe("getLatestSnapshot", () => {
   });
 });
 
+/**
+ * Multi-snapshot arbitration (M4). "Latest" must be the genuinely most recent
+ * snapshot by its logical `as_of` date — correct by construction, not by the
+ * accident that the fixture happens to use zero-padded ISO dates that sort the
+ * same lexically and chronologically. These feed several rows to the mocked pool
+ * (order-independent, since the SQL no longer sorts) and assert newest-wins.
+ */
+describe("getLatestSnapshot multi-snapshot arbitration", () => {
+  /** A stored snapshot row with the given `as_of`; overrides tweak a single field. */
+  function snapshotRow(
+    asOf: string,
+    overrides: Partial<{
+      fund_id: string;
+      schema_version: number;
+      report: CompositionReport;
+    }> = {},
+  ) {
+    return {
+      fund_id: "sanitized-exploratory-fund",
+      as_of: asOf,
+      schema_version: COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
+      report: fixtureReport,
+      ...overrides,
+    };
+  }
+
+  it("returns the snapshot with the most recent as_of regardless of row order", async () => {
+    const result = await getLatestSnapshot(
+      poolReturning([
+        snapshotRow("2026-05-08"),
+        snapshotRow("2026-05-29"),
+        snapshotRow("2026-05-15"),
+      ]),
+    );
+    expect(result).toMatchObject({ status: "ok", asOf: "2026-05-29" });
+  });
+
+  it("arbitrates on a typed date key, not lexical TEXT order (the trap the old ORDER BY as_of DESC hit)", async () => {
+    // Non-zero-padded month: September "2026-9-1" vs October "2026-10-01".
+    // October is chronologically LATER, but lexically "2026-10-01" < "2026-9-1"
+    // ('1' < '9' at the fifth character), so the old TEXT `ORDER BY as_of DESC
+    // LIMIT 1` would return the WRONG, earlier September snapshot.
+    const september = snapshotRow("2026-9-1");
+    const october = snapshotRow("2026-10-01");
+
+    // Prove the trap is real: a lexical DESC sort picks September, not October.
+    const lexicalDescWinner = [september.as_of, october.as_of]
+      .sort() // ascending lexical
+      .at(-1); // == the row a DESC TEXT sort would place first
+    expect(lexicalDescWinner).toBe("2026-9-1");
+
+    // Typed arbitration returns the genuinely-latest October snapshot instead.
+    const result = await getLatestSnapshot(poolReturning([october, september]));
+    expect(result).toMatchObject({ status: "ok", asOf: "2026-10-01" });
+  });
+
+  it("judges schema staleness on the latest snapshot, not an older ok one", async () => {
+    const staleVersion = COMPOSITION_SNAPSHOT_SCHEMA_VERSION + 1;
+    const result = await getLatestSnapshot(
+      poolReturning([
+        snapshotRow("2026-05-08"), // older, current version
+        snapshotRow("2026-05-29", { schema_version: staleVersion }), // latest, stale
+      ]),
+    );
+    expect(result).toEqual({
+      status: "stale",
+      storedVersion: staleVersion,
+      expectedVersion: COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
+    });
+  });
+
+  it("rejects rather than silently mis-ordering when an as_of is not a sortable ISO date", async () => {
+    await expect(
+      getLatestSnapshot(
+        poolReturning([snapshotRow("2026-05-29"), snapshotRow("last thursday")]),
+      ),
+    ).rejects.toThrow(/not a sortable ISO calendar date/);
+  });
+});
+
 describe("fundIdOf slug derivation", () => {
   it("derives the canonical fixture slug", () => {
     expect(fundIdOf(fixtureReport)).toBe("sanitized-exploratory-fund");

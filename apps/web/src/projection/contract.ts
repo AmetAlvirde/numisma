@@ -78,35 +78,75 @@ export function setReaderPoolForTests(pool?: Pool): void {
 }
 
 /**
+ * Chronologically-comparable sort key for an `as_of` calendar date.
+ *
+ * `as_of` is stored as TEXT (schema.sql), so a SQL `ORDER BY as_of` is a *lexical*
+ * TEXT sort — correct ONLY while every value is strict zero-padded ISO
+ * (`YYYY-MM-DD`). It silently picks the wrong "latest" the moment a value is not
+ * zero-padded: lexically `"2026-10-01" < "2026-9-1"` (because `'1' < '9'` at the
+ * fifth character), yet October is chronologically *after* September. We therefore
+ * arbitrate "latest" on a *typed* numeric key (year*10000 + month*100 + day)
+ * rather than trusting TEXT order.
+ *
+ * Throwing on an unparseable `as_of` keeps the contract honest: a value we cannot
+ * order chronologically must not silently win or lose under a lexical fallback.
+ */
+function asOfSortKey(asOf: string): number {
+  const match = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(asOf);
+  if (!match) {
+    throw new Error(
+      `getLatestSnapshot: as_of ${JSON.stringify(asOf)} is not a sortable ISO calendar date`,
+    );
+  }
+  const [, year, month, day] = match;
+  return Number(year) * 10000 + Number(month) * 100 + Number(day);
+}
+
+/**
  * Read the most recent snapshot. Returns a refusal result rather than throwing
  * for the two "expected" bad states:
  *  - no rows yet            -> { status: "empty" }
  *  - stored schema mismatch -> { status: "stale", storedVersion, expectedVersion }
- * Only an actual DB/query failure rejects.
+ * Only an actual DB/query failure — or an `as_of` we cannot order (see
+ * {@link asOfSortKey}) — rejects.
+ *
+ * "Latest" is arbitrated in-process on a typed date key, NOT by a SQL
+ * `ORDER BY as_of ... LIMIT 1`: `as_of` is a TEXT column, so a SQL sort is lexical
+ * and mis-picks the latest for any non-zero-padded date. It is also decided by the
+ * snapshot's logical `as_of` date, never by `pushed_at` — `pushed_at` is refreshed
+ * on every upsert, so an old-dated snapshot re-pushed must not win.
  */
 export async function getLatestSnapshot(pool: Pool): Promise<LatestSnapshot> {
   const { rows } = await pool.query<SnapshotRow>(
     `SELECT fund_id, as_of, schema_version, report
-       FROM composition_snapshot
-      ORDER BY as_of DESC
-      LIMIT 1`,
+       FROM composition_snapshot`,
   );
 
-  const row = rows[0];
-  if (!row) {
+  let latest: SnapshotRow | undefined;
+  let latestKey = -Infinity;
+  for (const row of rows) {
+    const key = asOfSortKey(row.as_of);
+    if (key > latestKey) {
+      latest = row;
+      latestKey = key;
+    }
+  }
+
+  if (!latest) {
     return { status: "empty" };
   }
-  if (row.schema_version !== COMPOSITION_SNAPSHOT_SCHEMA_VERSION) {
+
+  if (latest.schema_version !== COMPOSITION_SNAPSHOT_SCHEMA_VERSION) {
     return {
       status: "stale",
-      storedVersion: row.schema_version,
+      storedVersion: latest.schema_version,
       expectedVersion: COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
     };
   }
   return {
     status: "ok",
-    fundId: row.fund_id,
-    asOf: row.as_of,
-    report: row.report,
+    fundId: latest.fund_id,
+    asOf: latest.as_of,
+    report: latest.report,
   };
 }
