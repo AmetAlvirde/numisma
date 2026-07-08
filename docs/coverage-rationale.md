@@ -186,10 +186,19 @@ for what that number measures.
   construction from `PROJECTION_DATABASE_URL` is unchanged.
 - **`apps/web/src/lib/dashboard.ts`** — the session-gated read server function.
   Left **measured, not excluded**: it is real, reachable behavior, not dead
-  weight. It is not yet unit-tested here (importing `@tanstack/react-start` server
-  functions needs an injection seam), and will show as uncovered until **slice
-  #124** asserts the session gate + the header-reaches-`getSession` regression. It
-  is listed here honestly rather than hidden behind an exclusion.
+  weight. **Slice #124** factored the gate's core into `loadDashboard`, whose
+  request headers, auth surface, and snapshot reader are INJECTED dependencies
+  (`SessionGateDeps`). `dashboard.test.ts` drives that seam for real: authenticated
+  session → snapshot; no session → `/login` redirect (zero-byte body); and the
+  header-forwarding regression — an injected `auth` whose `getSession` outcome
+  depends on the forwarded cookie, so the incoming request cookie must actually
+  reach `auth.api.getSession({ headers })` (a dropped/blank cookie fails the test,
+  the assertion a stubbed session return cannot make). `loadDashboard` is fully
+  covered (100% branch/func). The remaining uncovered lines are the thin
+  `getDashboard = createServerFn(...).handler(...)` wrapper that wires the real
+  `getRequest()` / `auth` / `getReaderPool()` into `loadDashboard` — framework
+  wiring that needs the TanStack Start server runtime, in the same category as the
+  §1 excluded wiring but kept measured here so the covered core is visible.
 
 **Excluded (`.ts` dead weight — see §1 table):** `push/push.ts` (self-executing
 script), `lib/auth.ts` / `lib/auth-client.ts` / `lib/query.ts` /
