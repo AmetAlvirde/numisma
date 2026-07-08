@@ -64,6 +64,12 @@ export default defineConfig({
         // integration test. See docs/coverage-rationale.md §6.
         "apps/web/src/projection/provision-projection.ts",
         "apps/web/src/auth/apply-auth-schema.ts",
+        // Self-executing single-tenant seed CLI (slice #125): top-level
+        // main().then(..., process.exit) that writes the ONE account through
+        // Better Auth's internal adapter. Same category as apply-auth-schema.ts
+        // — no unit to assert as written; the single-tenant invariant it serves
+        // (server-side signup disabled) IS tested (lib/single-tenant.test.ts).
+        "apps/web/src/auth/seed-account.ts",
       ],
     },
   },

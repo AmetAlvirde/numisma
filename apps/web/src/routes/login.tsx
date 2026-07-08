@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
+import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useMutation } from "@tanstack/react-query";
 import { authClient } from "../lib/auth-client.ts";
 
@@ -60,9 +60,9 @@ function LoginPage() {
         <button type="submit" disabled={signIn.isPending}>
           {signIn.isPending ? "Signing in…" : "Sign in"}
         </button>
-        <p className="muted">
-          No account? <Link to="/signup">Create one</Link>
-        </p>
+        {/* Single-tenant (ADR-007): no self-service signup. The one account is
+            established by `pnpm --filter @numisma/web auth:seed`, so there is no
+            "Create one" link and no /signup route. */}
       </form>
     </main>
   );

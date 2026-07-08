@@ -13,7 +13,8 @@
     "db:provision": "tsx src/projection/provision-projection.ts",
     "auth:generate": "npx @better-auth/cli@1.4.21 generate --config src/lib/auth.ts --output src/auth/better-auth.schema.sql -y",
     "auth:apply": "tsx src/auth/apply-auth-schema.ts",
-    "auth:migrate": "npx @better-auth/cli@1.4.21 migrate --config src/lib/auth.ts -y"
+    "auth:migrate": "npx @better-auth/cli@1.4.21 migrate --config src/lib/auth.ts -y",
+    "auth:seed": "tsx src/auth/seed-account.ts"
   },
   "dependencies": {
     "@numisma/engine": "workspace:*",

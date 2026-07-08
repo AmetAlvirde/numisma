@@ -135,3 +135,39 @@ pnpm --filter @numisma/web auth:generate     # regenerate the vendored file afte
 ```
 
 `auth:migrate` (also pinned) remains available as the CLI-driven alternative.
+
+### Single-tenant seed account (ADR-007 / slice #125)
+
+The product is **single-tenant, single-account**: open self-service signup is
+**disabled at the auth server** (`emailAndPassword.disableSignUp` in
+`apps/web/src/lib/auth.ts`), so `/api/auth/sign-up/email` rejects every
+new-account request and there is no `/signup` route. Sign-**in** stays enabled.
+
+Because signup is disabled, the one account is established by a **deterministic,
+idempotent seed** — not a one-off manual signup:
+
+```
+# set the account's credentials (see apps/web/.env.example):
+#   NUMISMA_SEED_EMAIL=operator@example.com
+#   NUMISMA_SEED_PASSWORD=...            # a strong password
+#   NUMISMA_SEED_NAME=Operator           # optional, defaults to the email
+pnpm --filter @numisma/web auth:seed
+```
+
+`auth:seed` (`src/auth/seed-account.ts`) writes through Better Auth's **internal
+adapter** (`auth.$context`), not the disabled HTTP signup route — creating the
+user plus a `credential` account carrying the hashed password, exactly what
+`signIn.email` reads. So the seeded account can sign in immediately, and
+disabling signup never breaks it. It is **idempotent**: keyed on
+`NUMISMA_SEED_EMAIL`, a second run finds the existing user and no-ops, so it can
+never create a second account.
+
+First-time setup order for the auth store:
+
+```
+pnpm --filter @numisma/web auth:apply     # 1. create the auth tables (idempotent)
+pnpm --filter @numisma/web auth:seed      # 2. seed the single account (idempotent)
+```
+
+ADR-008 disjointness holds: the seed touches only the `numisma_auth` RW store
+(`AUTH_DATABASE_URL`); it never reads or writes `PROJECTION_*`.
