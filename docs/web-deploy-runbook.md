@@ -1,0 +1,113 @@
+# Web deploy runbook — prebuilt Vercel deploy (D2)
+
+How to deploy `@numisma/web` (the TanStack Start read-projection dashboard, ADR-007
+/ ADR-009) to Vercel using the **manual prebuilt** path: build the Vercel Build
+Output locally, then upload it with `vercel deploy --prebuilt`.
+
+This is the **documented manual path**. Automated CI/CD (git-push deploy) is
+deferred (PRD #121, out-of-scope D2) — this runbook is the reliable-conversion
+deliverable for the deploy step, not automation.
+
+## Why prebuilt
+
+`apps/web/vite.config.ts` sets the Nitro Vite plugin to `preset: "vercel"`, so
+`vite build` emits a **Vercel Build Output API** artifact at
+`apps/web/.vercel/output`. Deploying with `--prebuilt` uploads *that* artifact
+as-is instead of running the build on Vercel's builders. We deploy prebuilt
+because:
+
+- The build target is pinned in the repo (`preset: "vercel"`), so what ships is
+  exactly what `vite build` produced locally — no second, differently-configured
+  build on Vercel.
+- The repo intentionally does **not** wire a Vercel Git integration
+  (`vite.config.ts`: "We do NOT deploy from this repo"). Prebuilt is the deploy
+  path that matches that decision.
+
+## Prerequisites
+
+- Vercel CLI installed and authenticated: `vercel login`.
+- The project linked once: from `apps/web/`, run `vercel link` and pick the
+  target Vercel project. This writes `apps/web/.vercel/project.json` (the
+  `.vercel/` dir is git-ignored — see the repo `.gitignore`).
+- Environment variables set in the Vercel **project** (Production scope) — see
+  [Environment variables](#environment-variables). These are read at **runtime**
+  by the deployed server functions; they are NOT baked into the prebuilt output.
+
+## Steps
+
+Run from the repo root unless noted.
+
+```bash
+# 1. Build the Vercel Build Output artifact (Nitro preset: "vercel").
+#    Emits apps/web/.vercel/output/ (the Build Output API v3 layout).
+pnpm --filter @numisma/web build
+
+# 2. Deploy the prebuilt artifact to PRODUCTION.
+#    Must run from apps/web/ (the linked project dir that holds .vercel/).
+cd apps/web
+vercel deploy --prebuilt --prod
+```
+
+For a **preview** (non-production) deploy, drop `--prod`:
+
+```bash
+cd apps/web && vercel deploy --prebuilt
+```
+
+`vercel deploy --prebuilt` uploads `apps/web/.vercel/output` without re-building.
+It prints the deployment URL; open it (or the project's production domain) and
+confirm the dashboard renders (login → fund summary + composition sections).
+
+## Environment variables
+
+The deployed app reads these at runtime (server functions only — no credential
+reaches the client bundle, ADR-007 / ADR-009). Set them in the Vercel project's
+**Production** environment (`vercel env add <NAME> production`, or the dashboard):
+
+| Var | Purpose |
+| --- | --- |
+| `PROJECTION_DATABASE_URL` | READ-ONLY projection cred (SELECT-only). The dashboard reader. |
+| `AUTH_DATABASE_URL` | RW Better Auth DB — a **separate** DB, disjoint from the projection (ADR-008). |
+| `BETTER_AUTH_SECRET` | Better Auth signing secret (`openssl rand -base64 32`). |
+| `BETTER_AUTH_URL` | The app's public origin (e.g. `https://<your-domain>`), NOT `localhost`. |
+
+`PROJECTION_WRITE_DATABASE_URL` / `PROJECTION_ADMIN_DATABASE_URL` are **not** part
+of the web runtime — they belong to the push shell and one-shot provisioning
+(local/operator only), never the deployed app. Keep them out of the web project's
+env (ADR-007 split-cred: the running web service holds exactly the RO projection
+cred + the RW auth cred, nothing that can write the projection).
+
+## Gotchas
+
+### An env change needs a redeploy to take effect
+
+Vercel injects environment variables at **deploy/build time**, not on every
+request against a live deployment. Changing a variable in the Vercel project
+(e.g. rotating `BETTER_AUTH_SECRET`, pointing `PROJECTION_DATABASE_URL` at a new
+DB, or fixing `BETTER_AUTH_URL`) does **NOT** retroactively update the currently
+running deployment. You must **redeploy** for the new value to apply — re-run
+`vercel deploy --prebuilt --prod` (the prebuilt artifact is unchanged; the
+redeploy is what re-reads the env). This is the single most common "I changed it
+in the dashboard but nothing happened" trap — the change is staged, not live,
+until the next deploy.
+
+### Prebuilt deploys the artifact, not the source
+
+`--prebuilt` uploads whatever is in `apps/web/.vercel/output` **right now**. It
+does not run `vite build` for you. So:
+
+- **Always `pnpm --filter @numisma/web build` first.** A stale `.vercel/output`
+  from an earlier build ships silently — `--prebuilt` will happily upload last
+  week's bundle. If in doubt, delete `apps/web/.vercel/output` and rebuild.
+- **Run `vercel deploy` from `apps/web/`**, the linked project dir. Running it
+  from the repo root deploys the wrong (or no) linked project.
+- The `.vercel/` directory is git-ignored (build output + local project link).
+  Never commit it; it is regenerated by `build` + `vercel link`.
+
+### Disposability
+
+The deploy introduces no cloud state that can't be regenerated (ADR-007 §8.2):
+the projection DB is a re-pushable view (re-projection = `pnpm push`), and the
+deployment itself is reproducible from `pnpm --filter @numisma/web build` +
+`vercel deploy --prebuilt`. A lost deployment is re-created by re-running these
+two commands.

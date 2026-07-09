@@ -1,0 +1,497 @@
+{
+  "totals": {
+    "baseCurrency": "USD",
+    "fundValueUsd": 10859.930675909878,
+    "usdMxn": 17.31
+  },
+  "dashboard": {
+    "summary": {
+      "fundName": "Sanitized Exploratory Fund",
+      "asOf": "2026-05-29",
+      "fundValueUsd": 10859.930675909878,
+      "usdMxn": 17.31,
+      "totalUnrealizedPnlUsd": 453.6528981321009,
+      "largestPortfolio": {
+        "rowId": "portfolio:core",
+        "kind": "portfolio",
+        "label": "Core",
+        "usdValue": 6220,
+        "percentOfFund": 57.274767082976
+      },
+      "largestTempo": {
+        "rowId": "tempo:Capital",
+        "kind": "tempo",
+        "label": "Capital",
+        "usdValue": 3090,
+        "percentOfFund": 28.453220303279
+      },
+      "largestAccount": {
+        "rowId": "account:xtb-usd",
+        "kind": "account",
+        "label": "XTB: Main Broker",
+        "usdValue": 2270,
+        "percentOfFund": 20.902527536713
+      },
+      "largestInstrument": {
+        "rowId": "instrument:btc-usd",
+        "kind": "instrument",
+        "label": "BTC (Bitcoin)",
+        "usdValue": 3500,
+        "percentOfFund": 32.228566686562
+      },
+      "reserve": {
+        "rowId": "tempo:Reserve",
+        "kind": "tempo",
+        "label": "Reserve",
+        "usdValue": 1840,
+        "percentOfFund": 16.943017915221
+      },
+      "dataSafety": {
+        "nonLiveExcluded": 1,
+        "invalidExcluded": 1,
+        "shortDeferredExcluded": 0,
+        "hasWarnings": true
+      }
+    },
+    "sections": [
+      {
+        "id": "portfolios",
+        "title": "Portfolio Composition",
+        "rows": [
+          {
+            "id": "portfolio:core",
+            "kind": "portfolio",
+            "label": "Core",
+            "usdValue": 6220,
+            "percentOfFund": 57.274767082976,
+            "costBasisUsd": 5040,
+            "unrealizedPnlUsd": 260
+          },
+          {
+            "id": "portfolio:tactical",
+            "kind": "portfolio",
+            "label": "Tactical",
+            "usdValue": 4639.930675909879,
+            "percentOfFund": 42.725232917024,
+            "costBasisUsd": 3526.277777777778,
+            "unrealizedPnlUsd": 193.65289813210092
+          }
+        ]
+      },
+      {
+        "id": "tempos",
+        "title": "Tempo Composition",
+        "rows": [
+          {
+            "id": "tempo:Capital",
+            "kind": "tempo",
+            "label": "Capital",
+            "usdValue": 3090,
+            "percentOfFund": 28.453220303279,
+            "costBasisUsd": 3016,
+            "unrealizedPnlUsd": 74
+          },
+          {
+            "id": "tempo:Wealth",
+            "kind": "tempo",
+            "label": "Wealth",
+            "usdValue": 2950,
+            "percentOfFund": 27.164077635816,
+            "costBasisUsd": 2696,
+            "unrealizedPnlUsd": 254
+          },
+          {
+            "id": "tempo:Reserve",
+            "kind": "tempo",
+            "label": "Reserve",
+            "usdValue": 1840,
+            "percentOfFund": 16.943017915221
+          },
+          {
+            "id": "tempo:Liquid",
+            "kind": "tempo",
+            "label": "Liquid",
+            "usdValue": 1150,
+            "percentOfFund": 10.589386197013,
+            "costBasisUsd": 1077.5,
+            "unrealizedPnlUsd": 72.5
+          },
+          {
+            "id": "tempo:Foresight",
+            "kind": "tempo",
+            "label": "Foresight",
+            "usdValue": 1079.9306759098786,
+            "percentOfFund": 9.944176515836,
+            "costBasisUsd": 992.2777777777778,
+            "unrealizedPnlUsd": 87.65289813210092
+          },
+          {
+            "id": "tempo:Pulse",
+            "kind": "tempo",
+            "label": "Pulse",
+            "usdValue": 750,
+            "percentOfFund": 6.906121432835,
+            "costBasisUsd": 784.5,
+            "unrealizedPnlUsd": -34.5
+          }
+        ]
+      },
+      {
+        "id": "accounts",
+        "title": "Account Composition",
+        "rows": [
+          {
+            "id": "account:xtb-usd",
+            "kind": "account",
+            "label": "XTB: Main Broker",
+            "usdValue": 2270,
+            "percentOfFund": 20.902527536713,
+            "costBasisUsd": 1510,
+            "unrealizedPnlUsd": 140
+          },
+          {
+            "id": "account:t1-usd",
+            "kind": "account",
+            "label": "T1: Cold Storage T1",
+            "usdValue": 2100,
+            "percentOfFund": 19.337140011937,
+            "costBasisUsd": 1896,
+            "unrealizedPnlUsd": 204
+          },
+          {
+            "id": "account:binance-usd",
+            "kind": "account",
+            "label": "BINANCE: Primary Exchange",
+            "usdValue": 1710,
+            "percentOfFund": 15.745956866863,
+            "costBasisUsd": 1289.5,
+            "unrealizedPnlUsd": 60.5
+          },
+          {
+            "id": "account:bingx-usd",
+            "kind": "account",
+            "label": "BINGX: Swing Exchange",
+            "usdValue": 1270,
+            "percentOfFund": 11.694365626267,
+            "costBasisUsd": 932.5,
+            "unrealizedPnlUsd": 17.5
+          },
+          {
+            "id": "account:gbm-usd",
+            "kind": "account",
+            "label": "GBM: Capital Broker",
+            "usdValue": 950,
+            "percentOfFund": 8.747753814924,
+            "costBasisUsd": 982,
+            "unrealizedPnlUsd": -32
+          },
+          {
+            "id": "account:t2-usd",
+            "kind": "account",
+            "label": "T2: Cold Storage T2",
+            "usdValue": 899.9999999999999,
+            "percentOfFund": 8.287345719402,
+            "costBasisUsd": 881.9999999999999,
+            "unrealizedPnlUsd": 18
+          },
+          {
+            "id": "account:bitso-mxn",
+            "kind": "account",
+            "label": "BITSO: MXN Reserve",
+            "usdValue": 819.9306759098787,
+            "percentOfFund": 7.55005441912,
+            "costBasisUsd": 465.27777777777777,
+            "unrealizedPnlUsd": 54.652898132100916
+          },
+          {
+            "id": "account:bitget-usd",
+            "kind": "account",
+            "label": "BITGET: Pulse Exchange",
+            "usdValue": 540,
+            "percentOfFund": 4.972407431641,
+            "costBasisUsd": 312,
+            "unrealizedPnlUsd": -12
+          },
+          {
+            "id": "account:bitso-usd",
+            "kind": "account",
+            "label": "BITSO: Crypto Spot Desk",
+            "usdValue": 300,
+            "percentOfFund": 2.762448573134,
+            "costBasisUsd": 297,
+            "unrealizedPnlUsd": 3
+          }
+        ]
+      },
+      {
+        "id": "instruments",
+        "title": "Instrument Composition",
+        "rows": [
+          {
+            "id": "instrument:btc-usd",
+            "kind": "instrument",
+            "label": "BTC (Bitcoin)",
+            "usdValue": 3500,
+            "percentOfFund": 32.228566686562,
+            "costBasisUsd": 3373,
+            "unrealizedPnlUsd": 127
+          },
+          {
+            "id": "instrument:eth-usd",
+            "kind": "instrument",
+            "label": "ETH (Ethereum)",
+            "usdValue": 2400,
+            "percentOfFund": 22.099588585071,
+            "costBasisUsd": 2236,
+            "unrealizedPnlUsd": 164
+          },
+          {
+            "id": "instrument:reserve",
+            "kind": "instrument",
+            "label": "Reserve",
+            "usdValue": 1840,
+            "percentOfFund": 16.943017915221
+          },
+          {
+            "id": "instrument:aapl-usd",
+            "kind": "instrument",
+            "label": "AAPL (Apple Inc.)",
+            "usdValue": 850,
+            "percentOfFund": 7.826937623879,
+            "costBasisUsd": 800,
+            "unrealizedPnlUsd": 50
+          },
+          {
+            "id": "instrument:cemex-mxn",
+            "kind": "instrument",
+            "label": "CEMEXCPO (Cemex CPO)",
+            "usdValue": 519.9306759098787,
+            "percentOfFund": 4.787605845986,
+            "costBasisUsd": 465.27777777777777,
+            "unrealizedPnlUsd": 54.652898132100916
+          },
+          {
+            "id": "instrument:googl-usd",
+            "kind": "instrument",
+            "label": "GOOGL (Alphabet Inc.)",
+            "usdValue": 510,
+            "percentOfFund": 4.696162574328,
+            "costBasisUsd": 480,
+            "unrealizedPnlUsd": 30
+          },
+          {
+            "id": "instrument:rivn-usd",
+            "kind": "instrument",
+            "label": "RIVN (Rivian Automotive)",
+            "usdValue": 310,
+            "percentOfFund": 2.854530192238,
+            "costBasisUsd": 260,
+            "unrealizedPnlUsd": 50
+          },
+          {
+            "id": "instrument:tsla-usd",
+            "kind": "instrument",
+            "label": "TSLA (Tesla Inc.)",
+            "usdValue": 260,
+            "percentOfFund": 2.394122096716,
+            "costBasisUsd": 230,
+            "unrealizedPnlUsd": 30
+          },
+          {
+            "id": "instrument:intc-usd",
+            "kind": "instrument",
+            "label": "INTC (Intel Corp.)",
+            "usdValue": 240,
+            "percentOfFund": 2.209958858507,
+            "costBasisUsd": 310,
+            "unrealizedPnlUsd": -70
+          },
+          {
+            "id": "instrument:sbux-usd",
+            "kind": "instrument",
+            "label": "SBUX (Starbucks)",
+            "usdValue": 230,
+            "percentOfFund": 2.117877239403,
+            "costBasisUsd": 220,
+            "unrealizedPnlUsd": 10
+          },
+          {
+            "id": "instrument:nke-usd",
+            "kind": "instrument",
+            "label": "NKE (Nike)",
+            "usdValue": 200,
+            "percentOfFund": 1.841632382089,
+            "costBasisUsd": 192,
+            "unrealizedPnlUsd": 8
+          }
+        ]
+      },
+      {
+        "id": "tiers",
+        "title": "Capital Tier Composition",
+        "rows": [
+          {
+            "id": "tier:c1",
+            "kind": "tier",
+            "label": "c1",
+            "usdValue": 8100,
+            "percentOfFund": 74.586111474615,
+            "costBasisUsd": 7717,
+            "unrealizedPnlUsd": 383
+          },
+          {
+            "id": "tier:c2",
+            "kind": "tier",
+            "label": "c2",
+            "usdValue": 746.6204506065858,
+            "percentOfFund": 6.875001994836,
+            "costBasisUsd": 696.5,
+            "unrealizedPnlUsd": 50.12045060658579
+          },
+          {
+            "id": "tier:c3",
+            "kind": "tier",
+            "label": "c3",
+            "usdValue": 173.3102253032929,
+            "percentOfFund": 1.595868615329,
+            "costBasisUsd": 152.77777777777777,
+            "unrealizedPnlUsd": 20.532447525515124
+          }
+        ]
+      }
+    ]
+  },
+  "priceJourneys": [
+    {
+      "instrumentId": "btc-usd",
+      "label": "BTC (Bitcoin)",
+      "currency": "USD",
+      "points": [
+        {
+          "asOf": "2026-05-08",
+          "price": 115340
+        },
+        {
+          "asOf": "2026-05-15",
+          "price": 108900
+        },
+        {
+          "asOf": "2026-05-22",
+          "price": 104200
+        },
+        {
+          "asOf": "2026-05-29",
+          "price": 100000
+        }
+      ],
+      "firstPrice": 115340,
+      "latestPrice": 100000,
+      "changeAbs": -15340,
+      "changePct": -13.29980925958
+    },
+    {
+      "instrumentId": "eth-usd",
+      "label": "ETH (Ethereum)",
+      "currency": "USD",
+      "points": [
+        {
+          "asOf": "2026-05-08",
+          "price": 2810
+        },
+        {
+          "asOf": "2026-05-22",
+          "price": 2640
+        },
+        {
+          "asOf": "2026-05-29",
+          "price": 2500
+        }
+      ],
+      "firstPrice": 2810,
+      "latestPrice": 2500,
+      "changeAbs": -310,
+      "changePct": -11.032028469751
+    },
+    {
+      "instrumentId": "aapl-usd",
+      "label": "AAPL (Apple Inc.)",
+      "currency": "USD",
+      "points": [
+        {
+          "asOf": "2026-05-15",
+          "price": 198
+        },
+        {
+          "asOf": "2026-05-29",
+          "price": 212.5
+        }
+      ],
+      "firstPrice": 198,
+      "latestPrice": 212.5,
+      "changeAbs": 14.5,
+      "changePct": 7.323232323232
+    }
+  ],
+  "closedBook": {
+    "rows": [],
+    "byTempo": [],
+    "byTier": [],
+    "totalRealizedPnlUsd": 0
+  },
+  "invalidationWatch": [],
+  "reserveReconciliation": [
+    {
+      "reserveId": "reserve-xtb-usd-core",
+      "venueLabel": "XTB: Main Broker",
+      "currency": "USD",
+      "balance": 620,
+      "usdValue": 620
+    },
+    {
+      "reserveId": "reserve-bitso-mxn-core",
+      "venueLabel": "BITSO: MXN Reserve",
+      "currency": "MXN",
+      "balance": 5193,
+      "usdValue": 300
+    },
+    {
+      "reserveId": "reserve-binance-usd-tactical",
+      "venueLabel": "BINANCE: Primary Exchange",
+      "currency": "USD",
+      "balance": 360,
+      "usdValue": 360
+    },
+    {
+      "reserveId": "reserve-bingx-usd-tactical",
+      "venueLabel": "BINGX: Swing Exchange",
+      "currency": "USD",
+      "balance": 320,
+      "usdValue": 320
+    },
+    {
+      "reserveId": "reserve-bitget-usd-tactical",
+      "venueLabel": "BITGET: Pulse Exchange",
+      "currency": "USD",
+      "balance": 240,
+      "usdValue": 240
+    }
+  ],
+  "warnings": [
+    {
+      "code": "missing-instrument",
+      "severity": "warning",
+      "message": "Position sol-binance-invalid references missing Instrument sol-usd and was excluded.",
+      "recordId": "sol-binance-invalid"
+    }
+  ],
+  "excluded": {
+    "nonLive": 1,
+    "invalid": 1,
+    "shortDeferred": 0
+  },
+  "load": {
+    "status": "loaded",
+    "sourcePath": "sanitized-realistic-fund-review.json (fixture)",
+    "loadedAt": "2026-07-07T00:00:00.000Z"
+  }
+}
