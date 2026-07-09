@@ -1,0 +1,20 @@
+# Local env — never commit real credentials.
+.env
+.env*.local
+
+# TanStack Router generated route tree. Committed (not ignored) so a fresh
+# checkout / CI can `typecheck` without a generate step — it is deterministic,
+# machine-independent, and `@ts-nocheck`. `vite dev` / `vite build` regenerate it
+# on route changes; commit the refreshed file alongside the route change.
+#
+# The Better Auth schema (src/auth/better-auth.schema.sql) is likewise COMMITTED,
+# not ignored: ADR-010 makes it the vendored source of truth for `auth:apply`, so
+# a clean checkout must have it on disk. Regenerate with `auth:generate` after a
+# better-auth bump and commit the refreshed file.
+
+# Build / deploy output.
+.output/
+.nitro/
+.tanstack/
+.vercel/
+.vinxi/

@@ -1,0 +1,38 @@
+{
+  "name": "@numisma/web",
+  "version": "0.7.3",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "start": "node .output/server/index.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "push": "tsx src/push/push.ts",
+    "db:init": "tsx src/push/push.ts --init",
+    "db:provision": "tsx src/projection/provision-projection.ts",
+    "auth:generate": "npx @better-auth/cli@1.4.21 generate --config src/lib/auth.ts --output src/auth/better-auth.schema.sql -y",
+    "auth:apply": "tsx src/auth/apply-auth-schema.ts",
+    "auth:migrate": "npx @better-auth/cli@1.4.21 migrate --config src/lib/auth.ts -y",
+    "auth:seed": "tsx src/auth/seed-account.ts"
+  },
+  "dependencies": {
+    "@numisma/engine": "workspace:*",
+    "@tanstack/react-query": "5.101.2",
+    "@tanstack/react-router": "1.170.17",
+    "@tanstack/react-start": "1.168.27",
+    "@tanstack/react-table": "8.21.3",
+    "better-auth": "1.6.23",
+    "pg": "8.22.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "@types/pg": "8.20.0",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "5.2.0",
+    "nitro": "3.0.260610-beta",
+    "vite": "7.3.6"
+  }
+}
