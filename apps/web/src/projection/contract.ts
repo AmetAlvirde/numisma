@@ -115,6 +115,14 @@ function asOfSortKey(asOf: string): number {
  * and mis-picks the latest for any non-zero-padded date. It is also decided by the
  * snapshot's logical `as_of` date, never by `pushed_at` — `pushed_at` is refreshed
  * on every upsert, so an old-dated snapshot re-pushed must not win.
+ *
+ * SCOPE — single fund (ADR-007). The product is single-tenant/single-fund, so
+ * this deliberately scans the whole `composition_snapshot` table with no
+ * `WHERE fund_id` filter and arbitrates across every row. That is intentional,
+ * not an oversight: the in-process typed-date arbitration above requires reading
+ * all candidate rows anyway, and a `LIMIT` would have to follow a (lexically
+ * unsafe) SQL sort. If funds ever coexist, add a `fund_id` parameter + filter
+ * here so one fund's snapshots can't out-date another's.
  */
 export async function getLatestSnapshot(pool: Pool): Promise<LatestSnapshot> {
   const { rows } = await pool.query<SnapshotRow>(

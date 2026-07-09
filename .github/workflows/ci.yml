@@ -65,7 +65,26 @@ jobs:
       - name: Typecheck (all packages)
         run: pnpm typecheck
 
-      - name: Test (unit + DB-backed ADR-007 invariants & push idempotency)
+      - name: Apply vendored auth schema (ADR-010 — guards the committed SQL)
+        # Runs the documented first-time auth step against the service Postgres.
+        # It fails if src/auth/better-auth.schema.sql is missing (the regression
+        # that shipped once: the file was git-ignored), and the second run proves
+        # the apply is idempotent (already-exists → no-op). AUTH_DATABASE_URL
+        # points at the `postgres` DB; the throwaway-DB integration tests below
+        # create their own databases, so the auth tables here don't collide.
+        env:
+          AUTH_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+        run: |
+          pnpm --filter @numisma/web auth:apply
+          pnpm --filter @numisma/web auth:apply
+
+      - name: Build web app (ADR-007 — produces the client bundle to inspect)
+        # The client-bundle invariant test below is substrate-gated on a built
+        # `.vercel/output/static`; building here makes it RUN (it skips loudly on
+        # an unbuilt tree). A vite build is also a real check the app compiles.
+        run: pnpm --filter @numisma/web build
+
+      - name: Test (unit + DB-backed ADR-007 invariants, push idempotency, client-bundle guard)
         # --testTimeout raises the default 5s ceiling for the git-heavy tui tests,
         # which flake on slower CI runners under full-suite parallel load. This is
         # a CI-runner mitigation, not a change to any assertion.

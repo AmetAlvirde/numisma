@@ -7,8 +7,9 @@
  * `@better-auth/cli@1.4.21`, no `@latest`) and applies it to AUTH_DATABASE_URL
  * through the node-postgres driver. Network-free and idempotent: the generated
  * `create table` / `create index` statements have no `IF NOT EXISTS`, so a
- * re-run raises "already exists" (42P07 / 42P06 / 42P07-class) — those are
- * caught and treated as no-ops, leaving every other error to surface loudly.
+ * re-run raises an "already exists" error (a `create index` on an existing name
+ * raises 42P07, same class as a duplicate table) — those are caught and treated
+ * as no-ops, leaving every other error to surface loudly.
  *
  * This is the deterministic apply path for the auth store; `auth:migrate`
  * (also pinned) remains available as the CLI-driven alternative.
@@ -21,7 +22,9 @@ import { Pool } from "pg";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCHEMA_PATH = resolve(HERE, "./better-auth.schema.sql");
 
-// "already exists" classes: duplicate_table, duplicate_object, duplicate_index.
+// "already exists" classes: duplicate_table (also covers a duplicate index —
+// an index is a relation, so `create index` on an existing name raises 42P07),
+// duplicate_object, duplicate_schema.
 const ALREADY_EXISTS = new Set(["42P07", "42710", "42P06"]);
 
 /** Split the vendored SQL into individual statements (no string literals contain ';'). */
