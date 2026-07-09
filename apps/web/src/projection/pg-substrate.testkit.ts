@@ -75,6 +75,30 @@ function quoteIdent(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
 }
 
+/**
+ * A `pg.Pool` with a mandatory idle-client error handler attached.
+ *
+ * node-postgres re-emits an idle client's async errors on the Pool, and an
+ * EventEmitter `"error"` with NO listener becomes an UNCAUGHT exception that
+ * kills the whole `vitest` run — even though every test passed. Teardown makes
+ * this concrete: `drop()` runs `DROP DATABASE ... WITH (FORCE)`, which SIGTERMs
+ * any backend still attached to the throwaway db; that backend sends a FATAL
+ * 57P01 ("terminating connection due to administrator command") to a connection
+ * that may still be draining after `pool.end()`. Swallowing it here is correct:
+ * these pools are per-test-file and short-lived, and a termination during
+ * teardown is expected, not a test signal. Without this handler the failure is a
+ * flaky "1 unhandled error" that appears only when worker scheduling loses the
+ * race — the worst kind of CI red.
+ */
+function newPool(connectionString: string): Pool {
+  const pool = new Pool({ connectionString });
+  pool.on("error", () => {
+    // Expected teardown noise (e.g. 57P01 from DROP DATABASE ... FORCE). The
+    // integration tests assert on query results, never on idle-client events.
+  });
+  return pool;
+}
+
 /** A login role created inside a {@link ThrowawayDb}. */
 export interface LoginRole {
   /** The generated (unique) role name. */
@@ -112,12 +136,12 @@ export async function createThrowawayDb(): Promise<ThrowawayDb> {
 
   // Maintenance connection (the base URL's own database) — used to CREATE/DROP
   // the throwaway database, which cannot be done from within it.
-  const maintPool = new Pool({ connectionString: baseUrl });
+  const maintPool = newPool(baseUrl);
   const dbName = `numisma_test_${token()}`;
   await maintPool.query(`CREATE DATABASE ${quoteIdent(dbName)}`);
 
   const databaseUrl = urlForDatabase(baseUrl, dbName);
-  const adminPool = new Pool({ connectionString: databaseUrl });
+  const adminPool = newPool(databaseUrl);
 
   const createdRoles: string[] = [];
   const rolePools: Pool[] = [];
@@ -138,7 +162,7 @@ export async function createThrowawayDb(): Promise<ThrowawayDb> {
         role,
         url,
         pool() {
-          const p = new Pool({ connectionString: url });
+          const p = newPool(url);
           rolePools.push(p);
           return p;
         },
