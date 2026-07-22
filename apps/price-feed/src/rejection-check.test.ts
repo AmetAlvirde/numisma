@@ -178,7 +178,7 @@ describe("derived MXN marks are pre-checked at USD×FIX, not the raw USD quote (
       markEmitted: true,
       marks: [derived],
       failures: [],
-      staleEquitySkips: [],
+      staleMarkSkips: [],
     };
     expect(marksFromRun(result)).toEqual([derived]);
     // Before the mark time, nothing is pre-checked even if marks are present.
@@ -216,7 +216,7 @@ describe("loadSpineReference + scanFetchedMarks — reads the real genesis/log o
       // pre-check reads these constructed marks, not a re-derivation from quotes.
       marks: [markFromQuote(quote("btc", price))],
       failures: [],
-      staleEquitySkips: [],
+      staleMarkSkips: [],
     };
   }
 
@@ -330,7 +330,7 @@ describe("scanFetchedMarks folds the pending inbox exactly as ingestInbox does",
       markEmitted: true,
       marks: marks as FetchRunResult["marks"],
       failures: [],
-      staleEquitySkips: [],
+      staleMarkSkips: [],
     };
   }
 
