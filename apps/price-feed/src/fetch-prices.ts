@@ -23,14 +23,16 @@
  * progress is always kept — a failure records and continues; the run exits non-zero
  * so a scheduler notices.
  *
- * Non-trading-day honesty (finding 3): the schedule fires 7 days/week so crypto —
- * which trades 24/7 — marks every day. Equities do NOT trade weekends/holidays, so
- * on those days Twelve Data returns the LAST trading day's bar; emitting it under
- * today's `asOf` would append a misdated, never-moved stale mark. Each equity mark
- * is therefore gated on the provider bar's `observationDate` equaling the run's
- * `asOf`; a mismatch is an INFO skip (market closed, no fresh close), never a
- * failure, so the run stays clean and the crypto marks still ingest. Crypto is
- * intentionally UNGATED (a Saturday crypto bar is a real close).
+ * Freshness honesty (finding 3 / ADR-005): EVERY instrument's mark is gated on the
+ * provider bar's `observationDate` equalling the run's trading-day `asOf` — one
+ * uniform rule for crypto, US equities, and derived `*-mxn` alike. Equities do NOT
+ * trade weekends/holidays, so on those days Twelve Data returns the LAST trading
+ * day's bar; crypto reads the last SETTLED UTC daily candle. Either way, emitting a
+ * bar that predates `asOf` would append a misdated, never-moved stale mark, so it is
+ * an INFO skip (market closed for equities; a late/missed fire or provider hiccup
+ * for crypto), never a failure — the run stays clean. In normal operation at/after
+ * 18:00 CDMX the settled UTC candle's date equals `asOf` by construction, so the
+ * gate does not fire for crypto.
  *
  * MXN honesty (ADR-005): `*-mxn` instruments store the raw USD leg as their
  * disposable quote and get a DERIVED `USD × FIX` mark with the `usdMxn` snapshot
@@ -72,13 +74,15 @@ export interface FetchFailure {
 }
 
 /**
- * One equity whose fresh mark was intentionally SKIPPED this run because the market
- * was closed (weekend/holiday): the provider's latest bar (`observationDate`)
- * predates the run's trading-day `asOf`, so emitting it would append a misdated
- * stale mark. This is expected INFO, NOT a {@link FetchFailure} — it must not force
- * a non-zero exit and must not block the spine.
+ * One instrument whose fresh mark was intentionally SKIPPED this run because its bar
+ * (`observationDate`) predates the run's trading-day `asOf`, so emitting it would
+ * append a misdated stale mark. For an equity this means the market was closed
+ * (weekend/holiday); for crypto it means a late/missed fire or a provider hiccup —
+ * NOT a market-closed day, since crypto trades 24/7. Either way this is expected
+ * INFO, NOT a {@link FetchFailure} — it must not force a non-zero exit and must not
+ * block the spine.
  */
-export interface EquityMarkSkip {
+export interface MarkSkip {
   instrumentId: string;
   symbol: string;
   /** The provider's latest bar date (`YYYY-MM-DD`) — a prior trading day. */
@@ -108,12 +112,13 @@ export interface FetchRunResult {
   marks: PriceMarkedEvent[];
   failures: FetchFailure[];
   /**
-   * Equity marks skipped because the market was closed (weekend/holiday): the
-   * provider's latest bar predates `asOf`, so no fresh close exists to mark. These
-   * are INFO, not failures — the run stays clean and crypto still marks. Empty
-   * before the mark time (no marks are built then) and on ordinary trading days.
+   * Marks skipped because the instrument's bar predates `asOf`, so no fresh close
+   * exists to mark: an equity on a closed market (weekend/holiday), or a crypto bar
+   * from a late/missed fire or provider hiccup. These are INFO, not failures — the
+   * run stays clean and the other instruments still mark. Empty before the mark time
+   * (no marks are built then) and on ordinary at/after-18:00 CDMX runs.
    */
-  staleEquitySkips: EquityMarkSkip[];
+  staleMarkSkips: MarkSkip[];
 }
 
 export interface RunOptions {
@@ -136,7 +141,7 @@ export interface RunOptions {
 interface FetchedQuote {
   entry: InstrumentRegistryEntry;
   quote: Quote;
-  /** The provider bar's own date (`YYYY-MM-DD`); gates equity mark freshness. */
+  /** The provider bar's own date (`YYYY-MM-DD`); gates every mark's freshness. */
   observationDate: string;
 }
 
@@ -168,7 +173,7 @@ export async function runPriceFetch(options: RunOptions = {}): Promise<FetchRunR
 
   const successes: FetchedQuote[] = [];
   const failures: FetchFailure[] = [];
-  const staleEquitySkips: EquityMarkSkip[] = [];
+  const staleMarkSkips: MarkSkip[] = [];
 
   // Crypto (Binance): keyless, so fetch one symbol at a time — no rate budget worth
   // batching, and each stays individually attributable.
@@ -204,7 +209,7 @@ export async function runPriceFetch(options: RunOptions = {}): Promise<FetchRunR
   // Two-plane rule: the store always upserts above; marks only at/after mark time.
   const markEmitted = isAtOrAfterMarkTime(instant, config);
   const marks = markEmitted
-    ? await buildMarks(successes, failures, staleEquitySkips, asOf, config, credentials, fetchImpl)
+    ? await buildMarks(successes, failures, staleMarkSkips, asOf, config, credentials, fetchImpl)
     : [];
   const emittedCount = await emitMarksToInbox(paths.inbox, marks);
 
@@ -217,7 +222,7 @@ export async function runPriceFetch(options: RunOptions = {}): Promise<FetchRunR
     markEmitted,
     marks,
     failures,
-    staleEquitySkips,
+    staleMarkSkips,
   };
 }
 
@@ -310,18 +315,20 @@ async function storeSuccess(
  * missing or stale FIX fails every `*-mxn` derivation loudly and attributably — the
  * direct marks still emit (partial progress kept).
  *
- * Per-provider bar-date validation (finding 3): an EQUITY (Twelve Data) mark is
- * built only when the provider bar's `observationDate` equals the run's trading-day
- * `asOf`. On a weekend/holiday the latest bar is a prior trading day, so the equity
- * (incl. each `*-mxn` USD leg) is SKIPPED as INFO — recorded in `staleEquitySkips`,
- * never a failure. CRYPTO (Binance) trades 24/7, so it is UNGATED: a daily crypto
- * bar is a legitimately fresh close every day, and its UTC bar date is deliberately
- * NOT forced to equal the CDMX `asOf`.
+ * Uniform bar-date validation (finding 3 / ADR-005): EVERY mark — crypto (Binance),
+ * US equity (Twelve Data), and derived `*-mxn` — is built only when the provider
+ * bar's `observationDate` equals the run's trading-day `asOf`. One rule, no
+ * per-source special case. On a weekend/holiday an equity's latest bar is a prior
+ * trading day; a crypto bar can predate `asOf` on a late/missed fire or a provider
+ * hiccup. Either way the instrument (incl. each `*-mxn` USD leg) is SKIPPED as INFO
+ * — recorded in `staleMarkSkips`, never a failure. In normal operation at/after
+ * 18:00 CDMX the settled UTC crypto candle's date equals `asOf` by construction, so
+ * the gate does not fire for crypto.
  */
 async function buildMarks(
   successes: readonly FetchedQuote[],
   failures: FetchFailure[],
-  staleEquitySkips: EquityMarkSkip[],
+  staleMarkSkips: MarkSkip[],
   asOf: string,
   config: PriceFeedConfig,
   credentials: ProviderCredentials,
@@ -332,7 +339,7 @@ async function buildMarks(
   // bar is today's trading day). On a market-closed day every equity self-skips
   // below, so fetching the FIX then is not only wasted — a FIX outage would push a
   // spurious failure and block the spine for marks that were never going to emit.
-  if (successes.some((s) => s.entry.derived && isFreshEquityBar(s, asOf))) {
+  if (successes.some((s) => s.entry.derived && isFreshBar(s, asOf))) {
     try {
       fix = await fetchBanxicoFix({
         timeoutMs: config.requestTimeoutMs,
@@ -353,11 +360,12 @@ async function buildMarks(
   const marks: PriceMarkedEvent[] = [];
   for (const success of successes) {
     const { entry, quote, observationDate } = success;
-    // Equity market-closed skip: no fresh close for today's asOf. INFO, not failure.
-    if (entry.source === "twelvedata" && !isFreshEquityBar(success, asOf)) {
-      staleEquitySkips.push({ instrumentId: entry.instrumentId, symbol: entry.symbol, observationDate, asOf });
+    // Uniform freshness skip: the bar predates today's asOf, so no fresh close to
+    // mark. INFO, not failure — fires for crypto, equity, and derived alike.
+    if (!isFreshBar(success, asOf)) {
+      staleMarkSkips.push({ instrumentId: entry.instrumentId, symbol: entry.symbol, observationDate, asOf });
       console.info(
-        `  equity mark skipped — no fresh close for ${asOf}: ${entry.instrumentId} ` +
+        `  mark skipped — no fresh close for ${asOf}: ${entry.instrumentId} ` +
           `${entry.symbol} (latest bar ${observationDate})`,
       );
       continue;
@@ -380,7 +388,7 @@ async function buildMarks(
   return marks;
 }
 
-/** Whether an equity's fetched bar is today's trading day (a fresh close to mark). */
-function isFreshEquityBar(success: FetchedQuote, asOf: string): boolean {
+/** Whether an instrument's fetched bar is today's trading day (a fresh close to mark). */
+function isFreshBar(success: FetchedQuote, asOf: string): boolean {
   return success.observationDate === asOf;
 }

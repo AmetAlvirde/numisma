@@ -53,11 +53,20 @@ const EQUITY_CLOSES: Record<string, number> = {
 
 const FIX_RATE = 18.5;
 
-function klineResponse(close: number): Response {
-  const openTime = Date.UTC(2026, 6, 3);
+// Build one Binance 1d kline row for the UTC day `openTime` starts, with `close`.
+function klineRow(openTime: number, close: number): unknown[] {
   const closeTime = openTime + 86_399_999;
-  const row = [openTime, "0", "0", "0", String(close), "10", closeTime, "0", 0, "0", "0", "0"];
-  return new Response(JSON.stringify([row]), { status: 200 });
+  return [openTime, "0", "0", "0", String(close), "10", closeTime, "0", 0, "0", "0", "0"];
+}
+
+// The real Binance shape: the newest TWO 1d klines ascending as [completed D,
+// running D+1]. The completed candle (day AS_OF) carries `close`; the running
+// candle (D+1) carries a clearly different close so a test can prove the settled
+// one is chosen, never the running spot reading. The provider takes rows[0].
+function klineResponse(close: number): Response {
+  const completed = klineRow(Date.UTC(2026, 6, 3), close);
+  const running = klineRow(Date.UTC(2026, 6, 4), close + 1000);
+  return new Response(JSON.stringify([completed, running]), { status: 200 });
 }
 
 function fixResponse(rate: string, fecha = "03/07/2026"): Response {
@@ -428,5 +437,142 @@ describe("runPriceFetch — Twelve Data pacing under the free-tier credit cap", 
     expect(batches).toHaveLength(1);
     expect(batches[0]).toHaveLength(9);
     expect(sleeps).toEqual([]);
+  });
+});
+
+describe("runPriceFetch — crypto marks the settled UTC candle, gated uniformly", () => {
+  it("marks the completed candle's close, never the running D+1 candle", async () => {
+    await runPriceFetch({
+      config: { dataDir, markTime: "00:00" },
+      fetchImpl: mockFetch(),
+      now: () => RUN_INSTANT,
+      credentials: CREDENTIALS,
+    });
+
+    const inbox = await readInbox();
+    const btc = inbox.find((event) => event.id === `pm-btc-${AS_OF}`);
+    // klineResponse pairs the completed close (65000) with a running D+1 close of
+    // 66000. The mark must carry the settled candle, never the live running one.
+    expect(btc?.id).toBe(`pm-btc-${AS_OF}`);
+    expect(btc?.price).toBe(CRYPTO_CLOSES.BTCUSDT);
+    expect(btc?.price).not.toBe(CRYPTO_CLOSES.BTCUSDT! + 1000);
+  });
+
+  it("cleanly skips a crypto bar whose completed candle predates asOf — INFO, no mark, no failure", async () => {
+    const result = await runPriceFetch({
+      config: { dataDir, markTime: "00:00" },
+      fetchImpl: mockFetch({
+        // RENDER's completed candle is a prior UTC day (a late/missed fire): its
+        // observationDate ("2026-07-02") ≠ asOf, so the uniform gate skips it.
+        RENDERUSDT: () =>
+          new Response(
+            JSON.stringify([klineRow(Date.UTC(2026, 6, 2), 8.2), klineRow(Date.UTC(2026, 6, 3), 8.3)]),
+            { status: 200 },
+          ),
+      }),
+      now: () => RUN_INSTANT,
+      credentials: CREDENTIALS,
+    });
+
+    // RENDER is a clean INFO skip: recorded once in staleMarkSkips, never a failure.
+    expect(result.failures.map((f) => f.instrumentId)).not.toContain("render");
+    expect(result.staleMarkSkips.map((s) => s.instrumentId)).toEqual(["render"]);
+    expect(result.staleMarkSkips[0]).toMatchObject({
+      instrumentId: "render",
+      symbol: "RENDERUSDT",
+      observationDate: "2026-07-02",
+      asOf: AS_OF,
+    });
+    // No render mark; the other 12 instruments still marked.
+    const inbox = await readInbox();
+    expect(inbox.map((e) => e.id)).not.toContain(`pm-render-${AS_OF}`);
+    expect(inbox).toHaveLength(12);
+  });
+
+  it("treats a thin (<2-row) Binance payload as a per-symbol failure (R4), others unaffected", async () => {
+    const result = await runPriceFetch({
+      config: { dataDir, markTime: "00:00" },
+      fetchImpl: mockFetch({
+        // A single-row payload has no settled candle to mark — attributable failure.
+        GRAMUSDT: () =>
+          new Response(JSON.stringify([klineRow(Date.UTC(2026, 6, 3), 5.5)]), { status: 200 }),
+      }),
+      now: () => RUN_INSTANT,
+      credentials: CREDENTIALS,
+    });
+
+    expect(result.failures.map((f) => f.instrumentId)).toContain("gram");
+    expect(result.failures.find((f) => f.instrumentId === "gram")?.message).toMatch(
+      /expected >=2 klines, got 1/,
+    );
+    // Isolation: the thin symbol fails alone; the other 12 store and mark.
+    expect(result.storedCount).toBe(12);
+    const inbox = await readInbox();
+    expect(inbox.map((e) => e.id)).not.toContain(`pm-gram-${AS_OF}`);
+    expect(inbox.map((e) => e.id)).toContain(`pm-btc-${AS_OF}`);
+  });
+
+  it("at the real 18:00-CDMX fire (00:00 UTC), the completed UTC candle aligns with asOf and crypto marks", async () => {
+    // Pin the invariant the crypto gate rests on IN PRODUCTION: the real fire is
+    // 18:00 CDMX = 00:00 UTC the next day. At that instant Binance's completed 1d
+    // candle (the UTC day that just closed, Jul 22) lines up with the CDMX-anchored
+    // asOf "by construction" — and the candle dates here are computed from the fire
+    // instant, NOT pinned to asOf, so a broken offset (changed markTime, reinstated
+    // DST, Binance row-order flip) would surface as a skip instead of staying green.
+    const FIRE = new Date("2026-07-23T00:00:00.000Z"); // = 18:00 CDMX on 2026-07-22
+    const result = await runPriceFetch({
+      config: { dataDir, markTime: "18:00", timeZone: "America/Mexico_City" },
+      now: () => FIRE,
+      fetchImpl: mockFetch({
+        // What Binance returns at 00:00 UTC: [completed Jul 22, running Jul 23].
+        // The completed candle's UTC day (2026-07-22) must equal the CDMX-anchored asOf.
+        BTCUSDT: () =>
+          new Response(
+            JSON.stringify([
+              klineRow(Date.UTC(2026, 6, 22), 65000),
+              klineRow(Date.UTC(2026, 6, 23), 66000),
+            ]),
+            { status: 200 },
+          ),
+      }),
+      credentials: CREDENTIALS,
+    });
+
+    // asOf is the CDMX calendar day of the fire = 2026-07-22, and it equals the
+    // completed candle's UTC day → BTC marks, never lands in staleMarkSkips. (The
+    // other default mocks are pinned to Jul 3 and simply skip at this instant; the
+    // assertions concern BTC's alignment at the real boundary alone.)
+    const inbox = await readInbox();
+    expect(inbox.map((e) => e.id)).toContain("pm-btc-2026-07-22");
+    expect(result.staleMarkSkips.map((s) => s.instrumentId)).not.toContain("btc");
+  });
+
+  it("routes crypto and equity through ONE gate — a misaligned bar of each lands in staleMarkSkips", async () => {
+    const result = await runPriceFetch({
+      config: { dataDir, markTime: "00:00" },
+      fetchImpl: mockFetch({
+        // A misaligned crypto bar (completed candle on a prior UTC day)…
+        ETHUSDT: () =>
+          new Response(
+            JSON.stringify([klineRow(Date.UTC(2026, 6, 2), 3400), klineRow(Date.UTC(2026, 6, 3), 3500)]),
+            { status: 200 },
+          ),
+        // …and a misaligned equity bar (Twelve Data slice dated a prior trading day).
+        AAPL: () =>
+          new Response(
+            JSON.stringify({ status: "ok", values: [{ datetime: "2026-07-02", close: "212.5" }] }),
+            { status: 200 },
+          ),
+      }),
+      now: () => RUN_INSTANT,
+      credentials: CREDENTIALS,
+    });
+
+    // The twelvedata-only special case is gone: both flow through the same gate.
+    expect(result.staleMarkSkips.map((s) => s.instrumentId).sort()).toEqual(["aapl", "eth"]);
+    expect(result.failures).toEqual([]);
+    const inbox = await readInbox();
+    expect(inbox.map((e) => e.id)).not.toContain(`pm-eth-${AS_OF}`);
+    expect(inbox.map((e) => e.id)).not.toContain(`pm-aapl-${AS_OF}`);
   });
 });
