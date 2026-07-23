@@ -512,6 +512,41 @@ describe("runPriceFetch — crypto marks the settled UTC candle, gated uniformly
     expect(inbox.map((e) => e.id)).toContain(`pm-btc-${AS_OF}`);
   });
 
+  it("at the real 18:00-CDMX fire (00:00 UTC), the completed UTC candle aligns with asOf and crypto marks", async () => {
+    // Pin the invariant the crypto gate rests on IN PRODUCTION: the real fire is
+    // 18:00 CDMX = 00:00 UTC the next day. At that instant Binance's completed 1d
+    // candle (the UTC day that just closed, Jul 22) lines up with the CDMX-anchored
+    // asOf "by construction" — and the candle dates here are computed from the fire
+    // instant, NOT pinned to asOf, so a broken offset (changed markTime, reinstated
+    // DST, Binance row-order flip) would surface as a skip instead of staying green.
+    const FIRE = new Date("2026-07-23T00:00:00.000Z"); // = 18:00 CDMX on 2026-07-22
+    const result = await runPriceFetch({
+      config: { dataDir, markTime: "18:00", timeZone: "America/Mexico_City" },
+      now: () => FIRE,
+      fetchImpl: mockFetch({
+        // What Binance returns at 00:00 UTC: [completed Jul 22, running Jul 23].
+        // The completed candle's UTC day (2026-07-22) must equal the CDMX-anchored asOf.
+        BTCUSDT: () =>
+          new Response(
+            JSON.stringify([
+              klineRow(Date.UTC(2026, 6, 22), 65000),
+              klineRow(Date.UTC(2026, 6, 23), 66000),
+            ]),
+            { status: 200 },
+          ),
+      }),
+      credentials: CREDENTIALS,
+    });
+
+    // asOf is the CDMX calendar day of the fire = 2026-07-22, and it equals the
+    // completed candle's UTC day → BTC marks, never lands in staleMarkSkips. (The
+    // other default mocks are pinned to Jul 3 and simply skip at this instant; the
+    // assertions concern BTC's alignment at the real boundary alone.)
+    const inbox = await readInbox();
+    expect(inbox.map((e) => e.id)).toContain("pm-btc-2026-07-22");
+    expect(result.staleMarkSkips.map((s) => s.instrumentId)).not.toContain("btc");
+  });
+
   it("routes crypto and equity through ONE gate — a misaligned bar of each lands in staleMarkSkips", async () => {
     const result = await runPriceFetch({
       config: { dataDir, markTime: "00:00" },
