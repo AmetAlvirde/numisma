@@ -100,10 +100,13 @@ threat model does not need.
    points the ledger at the sibling private `accumulus` repo. launchd **cannot expand
    `~`**, so the plist's `NUMISMA_DATA_DIR` must be an **absolute** path (e.g.
    `/Users/you/Dev/accumulus/data`) — unlike the code default, which derives
-   `~/Dev/accumulus/data` from `os.homedir()`. If left unset the code default applies
-   to `pnpm` invocations, but the wrapper's step-3 auto-commit requires the var to be
-   explicitly set — when it is absent the commit step is skipped with a logged warning
-   and the durable log is left uncommitted after that run.
+   `~/Dev/accumulus/data` from `os.homedir()`. If left unset the wrapper's step-3
+   auto-commit and step-4 post-check both fall back to that **same** `~/Dev/accumulus/data`
+   default — the exact tree the in-process capture writes to — so an unset var is still
+   committed and still post-checked (no silent "log left uncommitted" gap). Setting it
+   explicitly is only required when your `accumulus` checkout lives somewhere else.
+   (On a fresh box with no `accumulus` checkout at all, the default path is not a git
+   repo, so step 3 degrades gracefully — a logged warning and skip, never a FATAL.)
 4. Install and load:
 
    ```sh
@@ -206,16 +209,23 @@ Confirm, in order:
    the equity marks emit normally; re-check this on the first weekend run.
 5. **Auto-commit (step 3):** after a run that appended new marks, the log reads
    `committed durable-log changes (not pushed)` and `git -C "$NUMISMA_DATA_DIR" log
-   -1` shows a commit from this run. A same-day re-run reads `no tracked data changes
-   to commit (idempotent no-op run)`. If instead it reads `NUMISMA_DATA_DIR unset —
-   skipping`, set the var explicitly in the plist (see install step 3 above) and
-   re-run — when unset the auto-commit is skipped with a warning.
+   -1` (or the `~/Dev/accumulus/data` default when the var is unset) shows a commit
+   from this run. A same-day re-run reads `no tracked data changes to commit
+   (idempotent no-op run)`. A first-time **untracked** source-of-truth file (e.g. an
+   initial `genesis.json`) is staged and committed too — the backstop is not limited
+   to tracked modifications. If instead it reads `WARNING: … is not inside a git repo
+   — skipping`, the resolved data dir has no `accumulus` checkout: create/clone it, or
+   point `NUMISMA_DATA_DIR` at the right path (see install step 3 above), and re-run.
 6. **Post-check (step 4):** a clean run ends with `post-check OK: durable log
    committed clean`. If the source-of-truth log is somehow left uncommitted after
    both the in-process capture and the step-3 backstop, the run logs `FATAL: durable
    LOG uncaptured …` and **exits non-zero so launchd surfaces a red job** — the miss
-   is never silent (issue #132). A lagging `head-digest.json` warns but does not fail
-   the run (it is a forensic breadcrumb, not the source of truth).
+   is never silent (issue #132). The post-check targets the same resolved data dir as
+   step 3 (`NUMISMA_DATA_DIR`, else the `~/Dev/accumulus/data` default the in-process
+   capture writes to), so an unset var no longer disables it. A lagging
+   `head-digest.json` warns but does not fail the run (it is a forensic breadcrumb,
+   not the source of truth); the warning uses `git status --ignored` so it fires even
+   when the breadcrumb is only-ignored-and-present, the actual #132 shape.
 
 ### Dry-run record
 
