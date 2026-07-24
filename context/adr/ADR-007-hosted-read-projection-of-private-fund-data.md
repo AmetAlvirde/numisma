@@ -6,7 +6,7 @@ _Made during: MVI — web-app leg discovery / 2026-07-07 maps + grills
 yet; ratified as **the gate** that freezes the regime before any real fund data
 leaves the local machine and a tracer slice is sliced against it._
 _Scope: product_
-_Status: accepted_
+_Status: accepted (amended 2026-07-24 — see "Amendment: payload narrowed to restore the blast-radius paragraph" below)_
 
 The web-app leg places a **read-only projection of private fund data** (positions,
 portfolio/fund USD values, realized/unrealized P&L) in an **internet-reachable,
@@ -123,3 +123,68 @@ hardening is a dedicated pass that must complete before real data is deployed.
   hardening); and permitting a derived projection to leave the machine at all vs.
   the "transaction-data-is-private" posture (access-controlled derived read vs.
   nothing-leaves absolutism).
+
+## Amendment: payload narrowed to restore the blast-radius paragraph
+
+_Amended 2026-07-24, during the hosted security pass
+(`~/Dev/notes/numisma/2026-07-24-hosted-security-pass-grill.md`, decision D8)
+this ADR itself gated. The gated pass is now complete — see ADR-011 for the
+posture it produced and `docs/hosted-cutover-runbook.md` for the operational
+checklist._
+
+The blast-radius paragraph above ("the cloud holds derived dashboard values,
+not the raw thesis/risk-budget/invalidation prose") was accurate when
+written. It stopped being accurate as `CompositionReport` grew, and the push
+path — which serialized the whole engine report — silently inherited every
+addition:
+
+- **`invalidationWatch`** shipped structured per-position stop levels
+  (`instrumentId`, `markPrice`, `level`, `direction`, `breached`). This ADR
+  had explicitly deferred `invalidationCondition` **prose** to the Option B
+  event-replication iteration as too sensitive for v1 — but the deferral was
+  never enforced against the read-model's own growth, so the **structured**
+  version of the same information shipped anyway. Positions plus the price
+  at which the operator is forced out is a materially more useful (and more
+  sensitive) pair than either alone.
+- **`strategy`** was named explicitly, by this ADR, in the list of richer
+  fields reserved for Option B — and shipped as a field on `closedBook` rows
+  regardless.
+- **`closedBook`** added a full realized-P&L trade blotter with open/close
+  dates. Trade history, not current composition — outside what this ADR's
+  Consequences section ever accounted for.
+
+**Nothing decided this.** No ADR, no PR discussion, no deliberate trade-off
+reopened the blast-radius question. The engine grew in the ordinary course
+of feature work, the projection push imported the wider type, and the wider
+type serialized straight into the `report` JSONB column. ADR-007 did not
+become wrong through a decision — it became wrong through nobody being
+told.
+
+**The fix:** `apps/web/src/projection/contract.ts` now defines
+`ProjectionReport = Pick<CompositionReport, "totals" | "dashboard">`, and
+`toProjectionReport()` builds the pushed payload key-by-key rather than
+trusting the type system alone — a type assertion over the wide object would
+still satisfy the compiler while serializing every dropped field into JSONB.
+`COMPOSITION_SNAPSHOT_SCHEMA_VERSION` bumps 1 → 2 so a v1 row read by the v2
+reader yields a clean `status: "stale"` refusal rather than a mis-render.
+`apps/web/src/push/projection-payload.test.ts` is a forbidden-key contract
+test — a recursive, case-insensitive deep scan of the actual pushed payload
+that fails on `strategy`, any `invalidation*` key, `closedBook`,
+`entryThesis`, and `riskBudget`, with a guard proving the scanner is not
+vacuous (it must find those keys in the wide input before it can be trusted
+to find their absence in the narrowed output).
+
+This is a **narrowing, not a contradiction:** the blast-radius paragraph
+above is restored to literal truth — the cloud again holds only derived
+dashboard values, not stop levels, strategy tags, or trade history — and the
+forbidden-key test is what keeps it true across the next engine increment,
+the way this amendment's own history proves a `Pick` alone would not.
+
+**Widening later stays cheap, exactly as this ADR promised.** "A read-model
+schema change is a re-push, never a data migration" holds unchanged: widen
+the `Pick`, bump `COMPOSITION_SNAPSHOT_SCHEMA_VERSION`, re-push, deploy. The
+reader's `status: "stale"` branch means a version mismatch is a clean
+refusal, never a mis-render, on the way in either direction. If a per-position
+stops view or a closed-book view later earns its place on the phone-glance
+surface, the blast-radius call is re-made at that moment, deliberately — not
+inherited silently the way it was this time.
