@@ -39,12 +39,11 @@ execution behavior, and decision history across Tempos.
 - MVP work excludes broker or exchange integrations, automated execution, team
   workflows, second-party approvals, SaaS deployment, and full back-test or
   forward-test engines.
-- **Automated market data is post-MVP and in progress.** Its MVP exclusion was a
-  sequencing choice, not a permanent boundary. Prices now arrive automatically
-  from free sources through the two-plane price model (ADR-005): a disposable,
-  re-fetchable price store beside the event log, and the sparse `PriceMarked`
-  valuation mark on the existing validated inbox. Manual `PriceMarked` authoring
-  remains the permanent fallback.
+- **Automated market data works through the two-plane price model (ADR-005):** a
+  disposable, re-fetchable price store beside the event log, and the sparse
+  `PriceMarked` valuation mark on the existing validated inbox. Prices arrive
+  automatically from free sources. Manual `PriceMarked` authoring remains the
+  permanent fallback.
 - Taxes may be annotated or exported later, but tax logic is not core decision
   logic for the MVP.
 
