@@ -208,3 +208,90 @@ describe("captureIngestCommit — exec safety + scoped staging in a real repo", 
     expect(git(dir, ["log", "-1", "--format=%B"]).stdout).not.toMatch(/Co-Authored-By/i);
   });
 });
+
+describe("captureIngestCommit — allowlist (.gitignore) repos mirroring accumulus (#132)", () => {
+  // A fresh appended mark, so the durable LOG is genuinely dirty when capture runs —
+  // the real daily shape (the append lands first, then capture commits it). Without
+  // this the log is unchanged since seed and the scenario can't prove it was captured.
+  const DAY2 = { ...MARK, id: "mark-aapl-day2", asOf: "2026-06-07" };
+
+  // The allowlist strategy inlined here (root-relative, since the test's dataDir IS the
+  // repo root) mirrors accumulus's PATTERN — ignore all, then negate the durable files —
+  // WITHOUT reading the sibling repo's real .gitignore, so the suite stays decoupled.
+  const FIXED_ALLOWLIST = [
+    "*",
+    "!/.gitignore",
+    "!/genesis.json",
+    "!/events.jsonl",
+    "!/preferences.jsonl",
+    "!/head-digest.json",
+  ];
+  // The pre-fix drift (issue #132): the 4th durable file is still negated under its DEAD
+  // name, so the real head-digest.json falls under the `*` catch-all and is IGNORED.
+  const DRIFTED_ALLOWLIST = [
+    "*",
+    "!/.gitignore",
+    "!/genesis.json",
+    "!/events.jsonl",
+    "!/preferences.jsonl",
+    "!/checkpoint.json",
+  ];
+
+  /**
+   * A throwaway repo seeded like accumulus: an allowlist `.gitignore`, a committed
+   * genesis + one-line events log, then a SECOND mark appended to the log left dirty in
+   * the working tree (the state capture is called in). No remote, so the best-effort
+   * push warns — callers spy stderr to keep it quiet / assert on it.
+   */
+  async function makeAllowlistRepo(ignoreLines: string[]): Promise<string> {
+    const dir = await tempDir("numisma-allowlist-");
+    await writeFile(resolve(dir, ".gitignore"), `${ignoreLines.join("\n")}\n`, "utf8");
+    await writeFile(resolve(dir, "genesis.json"), JSON.stringify(GENESIS), "utf8");
+    await writeFile(resolve(dir, "events.jsonl"), logLine(MARK), "utf8");
+    git(dir, ["init", "-q"]);
+    git(dir, ["config", "user.email", "test@example.com"]);
+    git(dir, ["config", "user.name", "Test Operator"]);
+    git(dir, ["config", "commit.gpgsign", "false"]);
+    git(dir, ["add", ".gitignore", "genesis.json", "events.jsonl"]);
+    git(dir, ["commit", "-q", "-m", "seed"]);
+    // The day's append: now events.jsonl is dirty, exactly as after a real ingest.
+    await writeFile(resolve(dir, "events.jsonl"), logLine(MARK) + logLine(DAY2), "utf8");
+    return dir;
+  }
+
+  it("captures both the appended log AND head-digest under the correct allowlist (locks Q1's fixed state)", async () => {
+    const dir = await makeAllowlistRepo(FIXED_ALLOWLIST);
+    const { folded, appended } = foldedFixture();
+    const stderr = spyStderr();
+
+    await captureIngestCommit({ dataDir: dir, folded, appendedEvents: appended, appVersion: "v" });
+
+    // head-digest.json is now tracked (allowlisted) and the new commit captured it...
+    expect(git(dir, ["ls-files"]).stdout).toContain("head-digest.json");
+    const committed = git(dir, ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]).stdout;
+    expect(committed).toContain("head-digest.json");
+    // ...alongside the day's appended mark (the log landed, not just the seed).
+    expect(git(dir, ["show", "HEAD:events.jsonl"]).stdout).toContain("mark-aapl-day2");
+    // No durable file was refused.
+    expect(stderr.warnings()).not.toMatch(/add failed/i);
+  });
+
+  it("still captures the LOG when head-digest is only-ignored — per-file add never aborts the batch (Q2 vs. the 17-day outage)", async () => {
+    // The drifted allowlist ignores head-digest.json. The OLD atomic `git add
+    // events.jsonl head-digest.json …` aborted WHOLESALE on that only-ignored pathspec,
+    // dropping the durable log too — the exact silent miss. Per-file staging must let
+    // the log through and only warn on the file that truly can't stage.
+    const dir = await makeAllowlistRepo(DRIFTED_ALLOWLIST);
+    const { folded, appended } = foldedFixture();
+    const stderr = spyStderr();
+
+    await captureIngestCommit({ dataDir: dir, folded, appendedEvents: appended, appVersion: "v" });
+
+    // The appended log DID land in a new commit (old atomic code left it uncommitted).
+    expect(git(dir, ["show", "HEAD:events.jsonl"]).stdout).toContain("mark-aapl-day2");
+    // head-digest.json is genuinely ignored here — it never sneaks into history.
+    expect(git(dir, ["ls-files"]).stdout).not.toContain("head-digest.json");
+    // The refused file warned loudly and by name (reaches an operator, unlike a drop).
+    expect(stderr.warnings()).toMatch(/add failed for head-digest\.json/i);
+  });
+});

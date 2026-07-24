@@ -14,7 +14,7 @@ Everything here is machine-local. Nothing secret or trade-derived enters the rep
 
 | File | Role |
 | --- | --- |
-| `ops/price-feed/run-daily-fetch.sh` | Wrapper the scheduler calls. Sets a PATH that can find `pnpm`, sources tokens, runs `pnpm prices:fetch`, and — only on a clean fetch — `pnpm spine`. Preserves the non-zero exit code so the scheduler notices a failure or rejection. |
+| `ops/price-feed/run-daily-fetch.sh` | Wrapper the scheduler calls. Sets a PATH that can find `pnpm`, sources tokens, runs `pnpm prices:fetch`; on a clean fetch: (2) `pnpm spine` then (3) an auto-commit of any new data-repo changes scoped to `$NUMISMA_DATA_DIR` — idempotent if no new marks, never pushes — then (4) a post-check that **fails the job** if the durable event log is still uncommitted (lenient warn for the `head-digest.json` breadcrumb). Preserves the non-zero exit code so the scheduler notices a failure or rejection. |
 | `ops/price-feed/com.numisma.pricefeed.daily.plist` | launchd definition firing the wrapper at 18:00 local (the default mark time), **every day** (see "Why the schedule fires 7 days/week" below). |
 
 Both files are templates: replace `__REPO_DIR__` / `__HOME__` before installing.
@@ -100,8 +100,13 @@ threat model does not need.
    points the ledger at the sibling private `accumulus` repo. launchd **cannot expand
    `~`**, so the plist's `NUMISMA_DATA_DIR` must be an **absolute** path (e.g.
    `/Users/you/Dev/accumulus/data`) — unlike the code default, which derives
-   `~/Dev/accumulus/data` from `os.homedir()`. Leave it unset only if this machine
-   should use that default.
+   `~/Dev/accumulus/data` from `os.homedir()`. If left unset the wrapper's step-3
+   auto-commit and step-4 post-check both fall back to that **same** `~/Dev/accumulus/data`
+   default — the exact tree the in-process capture writes to — so an unset var is still
+   committed and still post-checked (no silent "log left uncommitted" gap). Setting it
+   explicitly is only required when your `accumulus` checkout lives somewhere else.
+   (On a fresh box with no `accumulus` checkout at all, the default path is not a git
+   repo, so step 3 degrades gracefully — a logged warning and skip, never a FATAL.)
 4. Install and load:
 
    ```sh
@@ -202,6 +207,25 @@ Confirm, in order:
    `*-mxn` legs), the crypto marks still emit, and the wrapper exit stays `0` — a
    market-closed skip is expected INFO, not a failure. If you install on a weekday,
    the equity marks emit normally; re-check this on the first weekend run.
+5. **Auto-commit (step 3):** after a run that appended new marks, the log reads
+   `committed durable-log changes (not pushed)` and `git -C "$NUMISMA_DATA_DIR" log
+   -1` (or the `~/Dev/accumulus/data` default when the var is unset) shows a commit
+   from this run. A same-day re-run reads `no tracked data changes to commit
+   (idempotent no-op run)`. A first-time **untracked** source-of-truth file (e.g. an
+   initial `genesis.json`) is staged and committed too — the backstop is not limited
+   to tracked modifications. If instead it reads `WARNING: … is not inside a git repo
+   — skipping`, the resolved data dir has no `accumulus` checkout: create/clone it, or
+   point `NUMISMA_DATA_DIR` at the right path (see install step 3 above), and re-run.
+6. **Post-check (step 4):** a clean run ends with `post-check OK: durable log
+   committed clean`. If the source-of-truth log is somehow left uncommitted after
+   both the in-process capture and the step-3 backstop, the run logs `FATAL: durable
+   LOG uncaptured …` and **exits non-zero so launchd surfaces a red job** — the miss
+   is never silent (issue #132). The post-check targets the same resolved data dir as
+   step 3 (`NUMISMA_DATA_DIR`, else the `~/Dev/accumulus/data` default the in-process
+   capture writes to), so an unset var no longer disables it. A lagging
+   `head-digest.json` warns but does not fail the run (it is a forensic breadcrumb,
+   not the source of truth); the warning uses `git status --ignored` so it fires even
+   when the breadcrumb is only-ignored-and-present, the actual #132 shape.
 
 ### Dry-run record
 
