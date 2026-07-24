@@ -104,4 +104,30 @@ fi
 #    surfaced to the scheduler too.
 echo "[$STAMP] prices:fetch clean — ingesting marks via pnpm spine"
 pnpm spine
+
+# 3) Persist the appended marks to the private data repo. `pnpm spine` appends the
+#    day's marks to events.jsonl but leaves that change UNCOMMITTED — a stray
+#    reset/checkout would silently lose real fund data (exactly how a multi-day
+#    backlog once piled up in the working tree). Commit the tracked data changes so
+#    the durable log is actually durable. Scoped to the data dir (never sweeps
+#    unrelated repo edits), idempotent (a no-new-marks run commits nothing), and it
+#    NEVER pushes — pushing to the remote stays a manual, reviewed step.
+DATA_DIR="${NUMISMA_DATA_DIR:-}"
+if [[ -z "$DATA_DIR" ]]; then
+  echo "[$STAMP] NUMISMA_DATA_DIR unset — skipping data-repo commit (durable log left uncommitted)."
+elif ! git -C "$DATA_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+  echo "[$STAMP] WARNING: $DATA_DIR is not inside a git repo — skipping commit (durable log left uncommitted)."
+else
+  git -C "$DATA_DIR" add -u -- .
+  if git -C "$DATA_DIR" diff --cached --quiet -- .; then
+    echo "[$STAMP] no tracked data changes to commit (idempotent no-op run)."
+  else
+    git -C "$DATA_DIR" commit -q \
+      -m "data: daily price marks $STAMP" \
+      -m "Auto-committed by run-daily-fetch.sh after spine ingest. Not pushed (push is a manual, reviewed step)." \
+      -- .
+    echo "[$STAMP] committed durable-log changes (not pushed)."
+  fi
+fi
+
 echo "[$STAMP] price-feed daily run complete."
