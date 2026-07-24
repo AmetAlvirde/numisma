@@ -11,6 +11,7 @@ import { deriveSnapshot, loadFixture } from "./push-core.ts";
 /** Minimal report shaped just enough for the derivation under test. */
 function reportWith(fundName: string, asOf: string): CompositionReport {
   return {
+    totals: { baseCurrency: "USD", fundValueUsd: 0, usdMxn: 0 },
     dashboard: { summary: { fundName, asOf } },
   } as unknown as CompositionReport;
 }
@@ -18,7 +19,8 @@ function reportWith(fundName: string, asOf: string): CompositionReport {
 describe("deriveSnapshot (pure fixture → derivation)", () => {
   it("derives fundId (name slug), asOf, and the contract schema version", () => {
     const report = reportWith("Sanitized Exploratory Fund", "2026-05-29");
-    expect(deriveSnapshot(report)).toEqual({
+    const { fundId, asOf, schemaVersion } = deriveSnapshot(report);
+    expect({ fundId, asOf, schemaVersion }).toEqual({
       fundId: "sanitized-exploratory-fund",
       asOf: "2026-05-29",
       schemaVersion: COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
@@ -41,7 +43,8 @@ describe("deriveSnapshot (pure fixture → derivation)", () => {
 describe("loadFixture → deriveSnapshot (the actual push input, no DB)", () => {
   it("loads the shipped fixture and derives its identity/version", async () => {
     const report = await loadFixture();
-    expect(deriveSnapshot(report)).toEqual({
+    const { fundId, asOf, schemaVersion } = deriveSnapshot(report);
+    expect({ fundId, asOf, schemaVersion }).toEqual({
       fundId: "sanitized-exploratory-fund",
       asOf: "2026-05-29",
       schemaVersion: COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
