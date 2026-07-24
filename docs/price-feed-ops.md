@@ -14,7 +14,7 @@ Everything here is machine-local. Nothing secret or trade-derived enters the rep
 
 | File | Role |
 | --- | --- |
-| `ops/price-feed/run-daily-fetch.sh` | Wrapper the scheduler calls. Sets a PATH that can find `pnpm`, sources tokens, runs `pnpm prices:fetch`, and — only on a clean fetch — `pnpm spine`. Preserves the non-zero exit code so the scheduler notices a failure or rejection. |
+| `ops/price-feed/run-daily-fetch.sh` | Wrapper the scheduler calls. Sets a PATH that can find `pnpm`, sources tokens, runs `pnpm prices:fetch`; on a clean fetch: (2) `pnpm spine` then (3) an auto-commit of any new data-repo changes scoped to `$NUMISMA_DATA_DIR` — idempotent if no new marks, never pushes. Preserves the non-zero exit code so the scheduler notices a failure or rejection. |
 | `ops/price-feed/com.numisma.pricefeed.daily.plist` | launchd definition firing the wrapper at 18:00 local (the default mark time), **every day** (see "Why the schedule fires 7 days/week" below). |
 
 Both files are templates: replace `__REPO_DIR__` / `__HOME__` before installing.
@@ -100,8 +100,10 @@ threat model does not need.
    points the ledger at the sibling private `accumulus` repo. launchd **cannot expand
    `~`**, so the plist's `NUMISMA_DATA_DIR` must be an **absolute** path (e.g.
    `/Users/you/Dev/accumulus/data`) — unlike the code default, which derives
-   `~/Dev/accumulus/data` from `os.homedir()`. Leave it unset only if this machine
-   should use that default.
+   `~/Dev/accumulus/data` from `os.homedir()`. If left unset the code default applies
+   to `pnpm` invocations, but the wrapper's step-3 auto-commit requires the var to be
+   explicitly set — when it is absent the commit step is skipped with a logged warning
+   and the durable log is left uncommitted after that run.
 4. Install and load:
 
    ```sh
@@ -202,6 +204,12 @@ Confirm, in order:
    `*-mxn` legs), the crypto marks still emit, and the wrapper exit stays `0` — a
    market-closed skip is expected INFO, not a failure. If you install on a weekday,
    the equity marks emit normally; re-check this on the first weekend run.
+5. **Auto-commit (step 3):** after a run that appended new marks, the log reads
+   `committed durable-log changes (not pushed)` and `git -C "$NUMISMA_DATA_DIR" log
+   -1` shows a commit from this run. A same-day re-run reads `no tracked data changes
+   to commit (idempotent no-op run)`. If instead it reads `NUMISMA_DATA_DIR unset —
+   skipping`, set the var explicitly in the plist (see install step 3 above) and
+   re-run — when unset the auto-commit is skipped with a warning.
 
 ### Dry-run record
 
