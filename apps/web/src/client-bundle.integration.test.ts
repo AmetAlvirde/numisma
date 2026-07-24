@@ -42,8 +42,20 @@ if (!hasBuild) {
 
 /**
  * Server-only string literals. Each exists solely in a server module and is NOT
- * minified away (an env-var key on `process.env`, a SQL identifier). If any of
- * these appears in a browser asset, a server module was bundled into the client.
+ * minified away (an env-var key on `process.env`, a SQL identifier, a connection
+ * scheme). If any of these appears in a browser asset, a server module — or a
+ * credential — was bundled into the client.
+ *
+ * The second group covers the Neon AUTO-INJECTED env set (`DATABASE_URL`,
+ * `POSTGRES_*`, `PG*`), which carries `neondb_owner` MASTER credentials. Those
+ * are being removed from the Vercel environment by hand; this asserts the part a
+ * manual removal cannot: that no credential from that set ever reached a browser
+ * asset, whatever a future refactor does.
+ *
+ * DELIBERATELY NOT LISTED: `VITE_NEON_AUTH_URL`. Its `VITE_` prefix means Vite
+ * INLINES it into the client bundle by design — it is a URL, not a credential,
+ * and it is EXPECTED to ship. Adding it here would assert against a working
+ * feature. What must not ship is a credential, which is what this list names.
  */
 const FORBIDDEN = [
   "composition_snapshot", // the projection table — only in contract.ts / schema.sql
@@ -52,6 +64,12 @@ const FORBIDDEN = [
   "PROJECTION_ADMIN_DATABASE_URL",
   "AUTH_DATABASE_URL",
   "BETTER_AUTH_SECRET",
+  // Neon auto-injected owner-credential set: connection strings and the master role.
+  "neondb_owner",
+  "postgresql://",
+  "postgres://",
+  "PGPASSWORD",
+  "DATABASE_URL",
 ];
 
 /** Every file under `dir`, recursively. */
