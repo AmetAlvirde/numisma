@@ -104,4 +104,79 @@ fi
 #    surfaced to the scheduler too.
 echo "[$STAMP] prices:fetch clean — ingesting marks via pnpm spine"
 pnpm spine
+
+# 3) Persist the appended marks to the private data repo. `pnpm spine` appends the
+#    day's marks to events.jsonl but leaves that change UNCOMMITTED — a stray
+#    reset/checkout would silently lose real fund data (exactly how a multi-day
+#    backlog once piled up in the working tree). Commit the tracked data changes so
+#    the durable log is actually durable. Scoped to the data dir (never sweeps
+#    unrelated repo edits), idempotent (a no-new-marks run commits nothing), and it
+#    NEVER pushes — pushing to the remote stays a manual, reviewed step.
+#
+#    DATA_DIR defaults to the SAME tree the in-process capture writes to
+#    (apps/tui/src/ingest-commit.ts derives ~/Dev/accumulus/data from os.homedir()
+#    when NUMISMA_DATA_DIR is unset), so this backstop AND the step-4 post-check
+#    always target the dir actually written to — never a no-op that leaves a failed
+#    capture uncommitted while the job stays green.
+#
+#    `git add -u` restages tracked modifications only, so a FIRST-TIME untracked
+#    source-of-truth file (e.g. an initial genesis.json) would slip past this
+#    backstop and then FATAL the post-check. The three source-of-truth files are
+#    NEVER ignored, so also add them explicitly. head-digest.json is deliberately
+#    NOT added here — it may be intentionally ignored, and `git add` of an ignored
+#    path aborts under `set -e`. Each explicit add is guarded on file existence so a
+#    missing optional file doesn't trip `set -e`.
+DATA_DIR="${NUMISMA_DATA_DIR:-$HOME/Dev/accumulus/data}"
+if ! git -C "$DATA_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+  echo "[$STAMP] WARNING: $DATA_DIR is not inside a git repo — skipping commit (durable log left uncommitted)."
+else
+  git -C "$DATA_DIR" add -u -- .
+  for f in events.jsonl genesis.json preferences.jsonl; do
+    if [[ -e "$DATA_DIR/$f" ]]; then
+      git -C "$DATA_DIR" add -- "$f"
+    fi
+  done
+  if git -C "$DATA_DIR" diff --cached --quiet -- .; then
+    echo "[$STAMP] no tracked data changes to commit (idempotent no-op run)."
+  else
+    git -C "$DATA_DIR" commit -q \
+      -m "data: daily price marks $STAMP" \
+      -m "Auto-committed by run-daily-fetch.sh after spine ingest. Not pushed (push is a manual, reviewed step)." \
+      -- .
+    echo "[$STAMP] committed durable-log changes (not pushed)."
+  fi
+fi
+
+# 4) Post-check: assert the durable log actually landed. The 17-day silent miss
+#    (the in-process capture skipping every run, issue #132) was invisible because a
+#    launchd job's stderr goes to an UNREAD log — a "loud warning" reaches no one;
+#    only a FAILED job reaches the operator. So after the in-process capture AND the
+#    step-3 backstop have both run, verify the data-dir working tree is clean and
+#    turn the job RED if it is not. Split by ADR stance: the event log is the
+#    source-of-truth (STRICT — dirty ⇒ non-zero exit), head-digest.json is a forensic
+#    breadcrumb (LENIENT — warn only). Paths are relative to $DATA_DIR, which is the
+#    accumulus `data/` subdir holding the durable files directly.
+if git -C "$DATA_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+  # --ignored is REQUIRED: head-digest.json in the #132 shape is only-ignored (an
+  # allowlist .gitignore keeps it out of history), and plain `git status --porcelain`
+  # shows nothing for an ignored path even when named explicitly — so the warning
+  # would be dead in exactly the drift case it documents. With --ignored it fires for
+  # both tracked-modified (` M`) and ignored-present (`!!`) states.
+  DIGEST_DIRTY="$(git -C "$DATA_DIR" status --porcelain --ignored -- head-digest.json)"
+  if [[ -n "$DIGEST_DIRTY" ]]; then
+    echo "[$STAMP] WARNING: head-digest.json uncaptured after ingest (forensic breadcrumb lagging, not fatal):"
+    echo "$DIGEST_DIRTY"
+  fi
+  LOG_DIRTY="$(git -C "$DATA_DIR" status --porcelain -- events.jsonl genesis.json preferences.jsonl)"
+  if [[ -n "$LOG_DIRTY" ]]; then
+    echo "[$STAMP] FATAL: durable LOG uncaptured after ingest + backstop — real fund data at risk:"
+    echo "$LOG_DIRTY"
+    echo "[$STAMP] The source-of-truth log is dirty/uncommitted in $DATA_DIR. Investigate the"
+    echo "[$STAMP] in-process capture (apps/tui/src/ingest-commit.ts) and the accumulus allowlist"
+    echo "[$STAMP] (.gitignore). See issue #132 and docs/durable-log-ops.md."
+    exit 1
+  fi
+  echo "[$STAMP] post-check OK: durable log committed clean in $DATA_DIR."
+fi
+
 echo "[$STAMP] price-feed daily run complete."
