@@ -183,12 +183,26 @@ export async function captureIngestCommit(input: {
       return;
     }
 
-    // 2) stage ONLY the durable files that exist (never `git add -A`, so a stray
-    //    `prices/foo.json` or `*.tmp` in the dataDir can never be captured).
+    // 2) stage ONLY the durable files that exist, EACH in its own `git add` (never
+    //    `git add -A`, so a stray `prices/foo.json` or `*.tmp` in the dataDir can never
+    //    be captured). Per-file, not one atomic add of the whole list: a single
+    //    only-ignored pathspec (e.g. a stale accumulus allowlist that excludes
+    //    head-digest) makes `git add` abort the ENTIRE batch, which is exactly how the
+    //    durable log went uncaptured for 17 days. Each file that refuses to stage warns
+    //    loudly and is skipped; the rest — the log above all — still commit. Q3's
+    //    post-check is the hard backstop that reddens the job if the LOG is left dirty.
     const present = TRACKED_FILES.filter((file) => existsSync(join(dataDir, file)));
-    const add = runGit(dataDir, ["add", ...present]);
-    if (!add.ok) {
-      warn(`⚠️ accumulus git add failed — ingest not captured in git (append is durable). ${add.stderr.trim()}`);
+    let stagedAny = false;
+    for (const file of present) {
+      const add = runGit(dataDir, ["add", file]);
+      if (add.ok) {
+        stagedAny = true;
+      } else {
+        warn(`⚠️ accumulus git add failed for ${file} — that file not captured this ingest (append is durable). ${add.stderr.trim()}`);
+      }
+    }
+    if (!stagedAny) {
+      warn(`⚠️ accumulus git add staged nothing — ingest not captured in git (append is durable).`);
       return;
     }
 

@@ -14,7 +14,7 @@ Everything here is machine-local. Nothing secret or trade-derived enters the rep
 
 | File | Role |
 | --- | --- |
-| `ops/price-feed/run-daily-fetch.sh` | Wrapper the scheduler calls. Sets a PATH that can find `pnpm`, sources tokens, runs `pnpm prices:fetch`; on a clean fetch: (2) `pnpm spine` then (3) an auto-commit of any new data-repo changes scoped to `$NUMISMA_DATA_DIR` — idempotent if no new marks, never pushes. Preserves the non-zero exit code so the scheduler notices a failure or rejection. |
+| `ops/price-feed/run-daily-fetch.sh` | Wrapper the scheduler calls. Sets a PATH that can find `pnpm`, sources tokens, runs `pnpm prices:fetch`; on a clean fetch: (2) `pnpm spine` then (3) an auto-commit of any new data-repo changes scoped to `$NUMISMA_DATA_DIR` — idempotent if no new marks, never pushes — then (4) a post-check that **fails the job** if the durable event log is still uncommitted (lenient warn for the `head-digest.json` breadcrumb). Preserves the non-zero exit code so the scheduler notices a failure or rejection. |
 | `ops/price-feed/com.numisma.pricefeed.daily.plist` | launchd definition firing the wrapper at 18:00 local (the default mark time), **every day** (see "Why the schedule fires 7 days/week" below). |
 
 Both files are templates: replace `__REPO_DIR__` / `__HOME__` before installing.
@@ -210,6 +210,12 @@ Confirm, in order:
    to commit (idempotent no-op run)`. If instead it reads `NUMISMA_DATA_DIR unset —
    skipping`, set the var explicitly in the plist (see install step 3 above) and
    re-run — when unset the auto-commit is skipped with a warning.
+6. **Post-check (step 4):** a clean run ends with `post-check OK: durable log
+   committed clean`. If the source-of-truth log is somehow left uncommitted after
+   both the in-process capture and the step-3 backstop, the run logs `FATAL: durable
+   LOG uncaptured …` and **exits non-zero so launchd surfaces a red job** — the miss
+   is never silent (issue #132). A lagging `head-digest.json` warns but does not fail
+   the run (it is a forensic breadcrumb, not the source of truth).
 
 ### Dry-run record
 

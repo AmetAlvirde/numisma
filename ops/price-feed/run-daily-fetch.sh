@@ -130,4 +130,31 @@ else
   fi
 fi
 
+# 4) Post-check: assert the durable log actually landed. The 17-day silent miss
+#    (the in-process capture skipping every run, issue #132) was invisible because a
+#    launchd job's stderr goes to an UNREAD log — a "loud warning" reaches no one;
+#    only a FAILED job reaches the operator. So after the in-process capture AND the
+#    step-3 backstop have both run, verify the data-dir working tree is clean and
+#    turn the job RED if it is not. Split by ADR stance: the event log is the
+#    source-of-truth (STRICT — dirty ⇒ non-zero exit), head-digest.json is a forensic
+#    breadcrumb (LENIENT — warn only). Paths are relative to $DATA_DIR, which is the
+#    accumulus `data/` subdir holding the durable files directly.
+if [[ -n "$DATA_DIR" ]] && git -C "$DATA_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+  DIGEST_DIRTY="$(git -C "$DATA_DIR" status --porcelain -- head-digest.json)"
+  if [[ -n "$DIGEST_DIRTY" ]]; then
+    echo "[$STAMP] WARNING: head-digest.json uncaptured after ingest (forensic breadcrumb lagging, not fatal):"
+    echo "$DIGEST_DIRTY"
+  fi
+  LOG_DIRTY="$(git -C "$DATA_DIR" status --porcelain -- events.jsonl genesis.json preferences.jsonl)"
+  if [[ -n "$LOG_DIRTY" ]]; then
+    echo "[$STAMP] FATAL: durable LOG uncaptured after ingest + backstop — real fund data at risk:"
+    echo "$LOG_DIRTY"
+    echo "[$STAMP] The source-of-truth log is dirty/uncommitted in $DATA_DIR. Investigate the"
+    echo "[$STAMP] in-process capture (apps/tui/src/ingest-commit.ts) and the accumulus allowlist"
+    echo "[$STAMP] (.gitignore). See issue #132 and docs/durable-log-ops.md."
+    exit 1
+  fi
+  echo "[$STAMP] post-check OK: durable log committed clean in $DATA_DIR."
+fi
+
 echo "[$STAMP] price-feed daily run complete."
