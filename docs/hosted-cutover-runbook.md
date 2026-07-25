@@ -283,23 +283,43 @@ all owned by `numisma_auth_rw`.
 
 ## 5. Deploy
 
-**CORRECTED — the previous version said `vercel deploy --prod`. That triggers
-a REMOTE build, which cannot resolve this app's `workspace:*` dependencies
-(`@numisma/engine`, `@numisma/event-store`). The repo deliberately has no
-Vercel Git integration.**
+**CHANGED 2026-07-25 — the repo is now connected to a Vercel Git integration
+(ADR-009 amendment), so the primary deploy is a merge to `main`. The earlier
+correction below still holds for the CLI, which is now the fallback.**
 
-**The procedure lives in `docs/web-deploy-runbook.md`** — build the Vercel
-Build Output locally, upload the artifact:
+**The procedure lives in `docs/web-deploy-runbook.md`** — that is the deploy
+record, this step is a pointer to it. In short:
+
+- **Primary:** merge to `main`. Production deploys from git; Root Directory
+  `apps/web`, production branch `main`.
+- **Fallback (the CLI path):** build the Vercel Build Output locally and upload
+  the artifact.
 
 ```sh
-rm -rf apps/web/.vercel/output          # `--prebuilt` ships whatever is there
-pnpm --filter @numisma/web build
-cd apps/web && vercel deploy --prebuilt --prod
+cd <repo root>                          # NOT apps/web — see below
+vercel pull --yes --environment production
+vercel build --prod
+vercel deploy --prebuilt --prod
 ```
 
-The `rm -rf` is not paranoia: `--prebuilt` uploads `.vercel/output` **as it
-currently is**, so a stale artifact from before the payload narrowing ships
-silently.
+**Run these from the repo ROOT.** Root Directory is `apps/web` and the CLI
+resolves it relative to where you invoke from, so running the deploy from
+`apps/web/` errors with `The provided path ".../apps/web/apps/web" does not
+exist` — and `apps/web/.vercel/` still exists, so the wrong directory looks
+right until it fails. The `vercel pull` is not optional: without it
+`vercel build` errors `project_settings_required`. Note that pulling production
+writes real secrets to a git-ignored `.vercel/.env.production.local`; delete it
+when done.
+
+`--prebuilt` uploads `.vercel/output` **as it currently is**, so re-run
+`vercel build` immediately before deploying rather than trusting an existing
+artifact.
+
+Why `--prebuilt` and not a plain `vercel deploy --prod`: a plain CLI deploy
+triggers a remote build from a **source upload** that carries no workspace root,
+so it cannot resolve this app's `workspace:*` dependencies (`@numisma/engine`,
+`@numisma/event-store`). That constraint is specific to the CLI upload; the git
+path clones the whole repo and resolves them fine.
 
 **Why here — and why before step 6, which the old numbering had backwards:**
 step 6's rotation is verified by signing in at the **deployed** URL, so the
@@ -402,7 +422,11 @@ straight through.
 
 **Not a preview deployment.** Previews carry Deployment Protection and the app
 secrets are Production-only ("verified unresolvable on Preview", ADR-011 D2) —
-`AUTH_DATABASE_URL` among them. A preview cannot reach `numisma_auth`, and the
+`AUTH_DATABASE_URL` among them. Since 2026-07-25 the Preview environment holds
+**no variables at all** (git-push deploys; previews are build smoke checks — the
+shell returns 200 while DB-dependent routes redirect and sign-in cannot complete,
+by design — `docs/web-deploy-runbook.md`), so this is now true by construction.
+A preview cannot reach `numisma_auth`, and the
 protection layer answers `401` before Better Auth sees the request. Both
 surface as a non-`429`, which this script cannot distinguish from a genuinely
 dead limiter: a preview run produces a **false `exit 1`**.
