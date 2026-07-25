@@ -22,7 +22,7 @@
 import { readdir, rename, rm, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { resolveDataDir } from "@numisma/engine";
-import { resolveDataDirDefault, resolveEventStorePaths } from "./event-store.js";
+import { resolveDataDirDefault, resolveEventStorePaths } from "@numisma/event-store";
 
 const dataDir = resolveDataDirDefault();
 // The accumulus default, ignoring any env override: `resolveDataDir` with an empty
