@@ -70,6 +70,11 @@ export default defineConfig({
         // — no unit to assert as written; the single-tenant invariant it serves
         // (server-side signup disabled) IS tested (lib/single-tenant.test.ts).
         "apps/web/src/auth/seed-account.ts",
+        // Self-executing rate-limit attack script (D5/D10): argv + env +
+        // console + exit-code wiring over the tested `verify-rate-limit-core.ts`
+        // (which IS measured — its decision logic is the thing that matters and
+        // is unit-tested with an injected fetch/clock, no network).
+        "apps/web/src/auth/verify-rate-limit.ts",
       ],
     },
   },
