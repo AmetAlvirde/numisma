@@ -56,6 +56,16 @@ if (!hasBuild) {
  * INLINES it into the client bundle by design — it is a URL, not a credential,
  * and it is EXPECTED to ship. Adding it here would assert against a working
  * feature. What must not ship is a credential, which is what this list names.
+ *
+ * DELIBERATELY REDUNDANT: matching is by `includes()`, so the bare `DATABASE_URL`
+ * added for the Neon set already subsumes `PROJECTION_DATABASE_URL`,
+ * `PROJECTION_WRITE_DATABASE_URL`, `PROJECTION_ADMIN_DATABASE_URL` and
+ * `AUTH_DATABASE_URL` — none of those four can fail on its own any more. They
+ * stay anyway, as a named inventory of the specific credentials ADR-007 and
+ * ADR-011 reasoned about, and because a failure reported against the exact var
+ * name is worth more to whoever reads the CI log than one against a suffix. This
+ * is a choice, not an oversight; if the bare entry is ever removed, the four
+ * become load-bearing again.
  */
 const FORBIDDEN = [
   "composition_snapshot", // the projection table — only in contract.ts / schema.sql
