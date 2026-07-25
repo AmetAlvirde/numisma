@@ -43,9 +43,14 @@
  * on a bucket the cutover is not using, and the only real cost above disappears.
  *
  * NOT A PREVIEW DEPLOYMENT, despite previews being the intuitive "safe" target.
- * ADR-011 D2 puts Deployment Protection on previews and scopes the five app
+ * ADR-011 D2 puts Deployment Protection on previews and scopes the four app
  * secrets Production-only, "verified unresolvable on Preview" — `AUTH_DATABASE_URL`
- * among them. A preview therefore cannot reach `numisma_auth`, so the DB-backed
+ * among them. Since 2026-07-25 the Preview environment holds NO variables at all
+ * (git-push deploys, ADR-009 amendment): previews are build smoke checks. The
+ * shell still renders and returns 200 while DB-dependent routes REDIRECT and
+ * sign-in cannot complete — designed, not broken, and it means a preview looks
+ * healthier than it is. A preview therefore cannot reach
+ * `numisma_auth` — now by construction, not only by scoping — so the DB-backed
  * counter this script exists to prove has no table to live in, and the protection
  * layer answers 401 before the request reaches Better Auth at all. Both failures
  * surface here as a plain non-429, indistinguishable from a genuinely dead

@@ -2,7 +2,7 @@
 
 _Made during: MVI — web-app tracer prototype→reliable conversion (branch `feature/web-app-tracer`, commit a41e486); ratified at PRD synthesis 2026-07-07, backed by two-phase prototype evidence (built + deployed live to Vercel/Neon, phone-verified)._
 _Scope: product_
-_Status: accepted_
+_Status: accepted (amended 2026-07-25 — see "Amendment: git-push deploy, reversing the prebuilt-only regime" below)_
 
 The web leg — ADR-007's hosted read-projection — needs a **full-stack React framework** as `apps/web`, deployable to Vercel, that can read the projection **server-side behind auth** so the read-only DB credential never reaches the browser (an ADR-007 requirement, structurally, not by convention). Next.js-on-Vercel is the obvious default and the most-trodden path. This ADR takes the **other door**: the access surface is built on **TanStack Start** (Vite-based full-stack React) with **TanStack Router + Query** and **TanStack Table** for the composition dashboard. SSR / server functions (`createServerFn`) fetch from the projection DB server-side; the read-only cred and `pg` stay server-only; deploy is via TanStack Start's Nitro `preset: "vercel"` target. The trade-off — recognition vs. read-first fit — was logged consciously in the tracer grill and flagged for ratification in both the grill and the prototype AAR; it is ratified here now that the prototype has **built, deployed live, and rendered on a phone**.
 
@@ -50,7 +50,10 @@ The web leg — ADR-007's hosted read-projection — needs a **full-stack React 
   barrel. Companion rule: files matching `**/*.server.*` trigger strict
   client-import protection, so a server-function module a route imports must **not**
   carry a `.server` infix.
-- **Deploy reality: prebuilt CLI, not git-push CI/CD.** "Deployable on Vercel" turned
+- **Deploy reality: prebuilt CLI, not git-push CI/CD.** **⚠ REVERSED 2026-07-25 —
+  see the amendment below. The repo now deploys from git: merges to `main` ship
+  production. The prebuilt CLI path is retained as the documented fallback.** The
+  original text, for the record: "Deployable on Vercel" turned
   out to mean the **prebuilt runbook** — `pnpm --filter @numisma/web build` → Nitro
   emits `.vercel/output` → `vercel deploy --prebuilt --prod` — not push-to-deploy
   automation. Automated CI/CD is a **separate, explicitly-deferred** increment; the
@@ -75,3 +78,80 @@ The web leg — ADR-007's hosted read-projection — needs a **full-stack React 
   (Next) vs. read-first-dashboard fit, a distinctive portfolio signal, and a clean
   `createServerFn` enforcement seam for the ADR-007 no-creds-in-client boundary
   (TanStack Start). Decided on fit and enforcement, with recognition paid as the price.
+
+## Amendment: git-push deploy, reversing the prebuilt-only regime
+
+_Amended 2026-07-25. Unlike the ADR-011 amendment — which corrected mechanisms
+without reversing any decision — **this one reverses a recorded decision.** The
+framework choice (TanStack Start over Next.js) is untouched and still stands.
+What is reversed is the "Deploy reality" consequence: the deliberate absence of a
+Vercel Git integration, and the deferral of push-to-deploy automation._
+
+**What changed, concretely.** The Vercel project `numisma-web`
+(`prj_fnEbtoHmuXbevg6twcNhV7XPvbfF`, org `team_tul6wDdH2XbZJFV65cTMo6of`) was
+connected to `AmetAlvirde/numisma`; Root Directory moved from `.` to `apps/web`;
+the production branch is `main`. Consequences: **every merge to `main`
+auto-deploys production**, and every branch push builds a preview. Framework
+preset Nitro, Node 24.x, Output Directory None — the build runs
+`apps/web/vite.config.ts`'s `nitro({ preset: "vercel" })` on Vercel's builders
+rather than only locally.
+
+**The blocker that justified prebuilt-only was misattributed, and is now
+falsified for the git path.** The original consequence recorded a real limit — a
+plain CLI `vercel deploy` uploads only the linked directory (`apps/web/`) and so
+cannot resolve this monorepo's `workspace:*` dependencies, which is why
+`--prebuilt` was the path that worked. That was read at the time as "remote
+builds can't do monorepos here." It is narrower than that: it is a property of
+the **CLI source upload**, which has no workspace root. A **git** build clones
+the whole repo, including the root `pnpm-workspace.yaml`, and pnpm installs from
+the workspace root.
+
+**Verified, not assumed** (deployment `dpl_BSahSvPJoEwRHfLuUBRFWDQzc7Nm`, state
+`READY`, 2026-07-25): the build log shows `Scope: all 6 workspace projects`,
+`+ @numisma/engine 0.7.3 <- ../../packages/engine`,
+`+ @numisma/event-store 0.7.3 <- ../../packages/event-store`,
+`Done in 5.8s using pnpm v11.1.2`, and `Build Completed in /vercel/output [23s]`.
+`pnpm@11.1.2` installs with no corepack flag. **Any doc still asserting "a remote
+build cannot resolve `workspace:*`" as a standing limitation is wrong** — the
+claim is CLI-upload-specific.
+
+Auto-deploying production from `main` was accepted knowingly, on ADR-007 §8.2
+grounds: the projection DB is separate and re-pushable, so a bad production
+deploy costs a revert, not data.
+
+**Preview deployments carry no environment variables, deliberately.** They are
+build/compile smoke checks only — **judge a preview by whether the build
+succeeded, not by exercising the app**. Measured behavior with empty Preview env:
+`/`, `/login`, `/dashboard` return **200** (the shell renders); routes needing
+the database (`/api/auth/get-session`, `/api/auth/session`, `/api/health`)
+**redirect (302)**. There are no 500s — unauthenticated traffic is redirected
+before anything touches the DB, and sign-in cannot complete because logging in is
+itself what needs `AUTH_DATABASE_URL`. A preview that looks healthy is therefore
+not evidence the app works; that is designed, not an incident. This tightens
+rather than loosens ADR-011 D2's "app secrets scoped Production-only, verified
+unresolvable on Preview": on Preview there is now nothing to resolve. Making
+previews actually run is a **parked want** with two named blockers
+(`AUTH_DATABASE_URL` is an RW credential, and exposing it to every preview build
+is the objection; `BETTER_AUTH_URL` is a fixed origin that cannot match a
+per-deployment preview URL without deriving it from `VERCEL_URL` at runtime),
+recorded in `docs/web-deploy-runbook.md`. It is not designed and not scheduled.
+
+**What did not change.** The prebuilt CLI path is **kept, not deleted**, as the
+documented fallback for when the builder path breaks — it remains fully usable
+instructions in `docs/web-deploy-runbook.md`. Its **invocation did change with
+the Root Directory move**: the fallback now runs from the repo root
+(`vercel pull` → `vercel build` → `vercel deploy --prebuilt`), because the CLI
+resolves Root Directory relative to the invocation directory and the old
+`cd apps/web` form now composes `apps/web/apps/web` and fails. `.github/workflows/ci.yml` also
+stays: it builds against a **real Postgres** and runs invariant tests Vercel's
+preview build never will, so CI remains the DB-backed gate and Vercel's preview
+is only the compile check.
+
+**Known wrinkle, recorded not fixed.** Every git build warns that
+`pnpm-lock.yaml` is version 9, generated by pnpm@10.x, against
+`package.json#packageManager` `pnpm@11.1.2`. The install succeeds today; it
+becomes a failure the day a frozen-lockfile install is enforced.
+
+**Superseded by this amendment:** PRD #121's out-of-scope D2 ("automated CI/CD
+deferred") and `apps/web/vite.config.ts`'s "We do NOT deploy from this repo"
+comment, both of which have been corrected in place.

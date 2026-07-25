@@ -247,6 +247,25 @@ and recording them in a password manager. **The D7 trade-off is only sound
 while that custody holds**, which is now a written prerequisite rather than an
 assumption.
 
+**D2's preview posture now holds by construction, and previews now build
+themselves.** Later the same day, the repo was connected to a Vercel Git
+integration (ADR-009 amendment, 2026-07-25). Two facts follow for D2. First,
+**every branch push now builds a preview automatically** — the "auto-generated
+preview URLs nobody watches" that D2 sized Deployment Protection for are no
+longer occasional, they are continuous. Second, **the Preview environment holds
+no variables at all, deliberately**: previews are build/compile smoke checks, so
+"app secrets scoped Production-only and verified unresolvable on Preview" is now
+true because Preview is empty, not merely because the scope excludes it. The
+operational consequence, which belongs in writing so a future reader does not
+misread it in either direction: a preview's shell **renders and returns 200**,
+while routes needing the database **redirect** and sign-in cannot complete. There
+are no 500s — the redirect happens before anything touches the DB. So a preview
+that *looks* fine is not evidence the app works, and a preview is judged by its
+**build**, not by exercising it. Making previews actually work is a parked want
+with two named blockers, recorded in `docs/web-deploy-runbook.md`; it is not
+scheduled. Nothing about D2's decision is reversed — only the deploy regime under
+it.
+
 **Verified, not merely asserted.** Two claims this ADR makes structurally were
 confirmed against the live database for the first time during the same pass:
 the grant split (`numisma_push` INSERT/SELECT/UPDATE with **no DELETE**;
