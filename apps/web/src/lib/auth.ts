@@ -66,9 +66,24 @@ export const auth = betterAuth({
   // single-tenant; if a second tenant is ever added, revisit it.
   //
   // ACCEPTED COST: DB-backed limiting writes to Neon on every auth attempt,
-  // including rejected ones — attack traffic costs money. That is bounded
-  // out-of-band by an explicit Neon spend threshold (D6), which prefers an
-  // outage over a surprise bill.
+  // including rejected ones — attack traffic costs money. D6 says that is
+  // bounded by an explicit Neon spend threshold, which prefers an outage over a
+  // surprise bill.
+  //
+  // WHAT ACTUALLY BOUNDS IT TODAY (verified 2026-07-25, ADR-011 amendment):
+  // the Neon FREE plan's hard caps — 100 CU-hrs compute, 0.5 GB storage, 5 GB
+  // transfer — which suspend the database rather than billing past it. There is
+  // NO spend threshold, and none can be set: `vercel integration balance neon`
+  // reports no balance to attach one to on Free. The outage-over-bill posture
+  // holds, but structurally rather than by the configured control D6 names.
+  //
+  // THE TRIGGER TO WATCH: upgrading the Neon plan. A paid plan replaces hard
+  // caps with billable usage, so upgrading WITHOUT setting a threshold silently
+  // converts D6's deliberate choice into the alternative it rejected — an
+  // unbounded bill under sustained attack. Read `create-threshold` carefully if
+  // that day comes: its args are (resource, minimum, spend, limit) and it
+  // configures AUTO-RECHARGE — buying capacity to stay up — which is the
+  // opposite of what D6 wants unless `limit` is doing the work.
   //
   // Verified by attack, not by inspection: `pnpm --filter @numisma/web
   // auth:verify-limit` (src/auth/verify-rate-limit.ts). Configuration alone
