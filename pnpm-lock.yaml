@@ -38,6 +38,9 @@ importers:
       '@numisma/engine':
         specifier: workspace:*
         version: link:../../packages/engine
+      '@numisma/event-store':
+        specifier: workspace:*
+        version: link:../../packages/event-store
       '@opentui/core':
         specifier: 0.2.15
         version: 0.2.15(typescript@5.9.3)(web-tree-sitter@0.25.10)
@@ -47,6 +50,9 @@ importers:
       '@numisma/engine':
         specifier: workspace:*
         version: link:../../packages/engine
+      '@numisma/event-store':
+        specifier: workspace:*
+        version: link:../../packages/event-store
       '@tanstack/react-query':
         specifier: 5.101.2
         version: 5.101.2(react@19.2.7)
@@ -92,6 +98,12 @@ importers:
         version: 7.3.6(@types/node@24.12.4)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.3)
 
   packages/engine: {}
+
+  packages/event-store:
+    dependencies:
+      '@numisma/engine':
+        specifier: workspace:*
+        version: link:../engine
 
 packages:
 

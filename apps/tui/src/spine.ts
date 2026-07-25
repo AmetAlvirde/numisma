@@ -18,13 +18,8 @@
  * never silent; a malformed value fails loud before anything is ingested.
  */
 import { buildCompositionReport, formatCompositionReport } from "@numisma/engine";
-import {
-  ingestInbox,
-  loadFoldedReview,
-  parseAsOfArg,
-  parseMagnitudeThresholdArg,
-  resolveEventStorePaths,
-} from "./event-store.js";
+import { loadFoldedReview, resolveEventStorePaths } from "@numisma/event-store";
+import { ingestInbox, parseAsOfArg, parseMagnitudeThresholdArg } from "./event-store.js";
 
 try {
   const paths = resolveEventStorePaths();

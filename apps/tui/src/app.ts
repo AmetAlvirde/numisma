@@ -1,5 +1,5 @@
 import { mountApp } from "./mount-app.js";
-import { resolveEventStorePaths } from "./event-store.js";
+import { resolveEventStorePaths } from "@numisma/event-store";
 import { prepareStartup, type StartupPlan } from "./startup.js";
 
 // PROTOTYPE (mvi 2026-06-29-portfolio-persistence): the real TUI surface now

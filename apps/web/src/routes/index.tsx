@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import type { CompositionReport } from "@numisma/engine";
+import type { ProjectionReport } from "../projection/contract.ts";
 import { getDashboard } from "../lib/dashboard.ts";
 import { SummaryCard } from "../components/SummaryCard.tsx";
 import { SectionTable } from "../components/SectionTable.tsx";
@@ -49,7 +49,7 @@ function DashboardPage() {
   return <DashboardView report={result.report} />;
 }
 
-function DashboardView({ report }: { report: CompositionReport }) {
+function DashboardView({ report }: { report: ProjectionReport }) {
   return (
     <Shell>
       <SummaryCard
