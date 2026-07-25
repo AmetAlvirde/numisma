@@ -25,10 +25,15 @@ under Node while the terminal glue stays isolated in a Bun-only layer.
 - `review-file.ts` — fund-review path resolution and loading
   (`review-file.test.ts`). Kept for the fold↔snapshot parity check; no longer on
   the `pnpm dev` / `pnpm report` path, which read the event store.
-- `event-store.ts` — the durable event-store IO: path resolution, genesis load,
-  log load with quarantine, the validated ingest boundary (dedup / atomic append
-  / archive), and `loadFoldedReview`. The reliability core
-  (`event-store.test.ts`).
+- `event-store.ts` — the write/ingest half of the durable event-store IO: the
+  validated ingest boundary (dedup / atomic append / archive), legacy-log
+  migration, inbox archival, magnitude-threshold env plumbing, and
+  `parseAsOfArg`. The read path — path resolution, genesis load, log load with
+  quarantine, and `loadFoldedReview` — was lifted out into
+  [`@numisma/event-store`](../../packages/event-store) so `apps/web`'s push can
+  fold the durable log without depending on the TUI. The reliability core
+  (`event-store.test.ts`; the read path's own unit tests live in the package's
+  `event-store.test.ts`).
 - `startup.ts` — `prepareStartup`, the data path that runs before the renderer
   (`--as-of` → ingest → surface report → fold), shared by `app.ts` and the
   openTUI verification harness (`startup.test.ts`).

@@ -2,11 +2,8 @@ import {
   buildCompositionReport,
   formatCompositionReport,
 } from "@numisma/engine";
-import {
-  loadFoldedReview,
-  parseAsOfArg,
-  resolveEventStorePaths,
-} from "./event-store.js";
+import { loadFoldedReview, resolveEventStorePaths } from "@numisma/event-store";
+import { parseAsOfArg } from "./event-store.js";
 
 // Single source of truth (ADR-003 slice 4): `pnpm report` renders the FOLD over
 // the durable genesis + event log, the same read model `pnpm dev` (app.ts) and the

@@ -9,15 +9,17 @@ import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/
 import { dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import {
-  ingestInbox,
   loadEventLog,
   loadFoldedReview,
-  migrateLegacyLog,
-  parseMagnitudeThresholdArg,
   quarantineLogPath,
   resolveEventStorePaths,
-  SPINE_MAGNITUDE_THRESHOLD_ENV,
   type EventStorePaths,
+} from "@numisma/event-store";
+import {
+  ingestInbox,
+  migrateLegacyLog,
+  parseMagnitudeThresholdArg,
+  SPINE_MAGNITUDE_THRESHOLD_ENV,
 } from "./event-store.js";
 import type { SuppliedCashLeg } from "@numisma/engine";
 import { afterEach, describe, expect, it } from "vitest";
@@ -402,48 +404,6 @@ describe("appendEvents — atomic append (temp + rename)", () => {
     }
     // The temp image is renamed away, never left behind.
     expect(await exists(`${paths.log}.tmp`)).toBe(false);
-  });
-});
-
-describe("loadEventLog — log-line quarantine", () => {
-  it("quarantines one corrupt line, loads the rest, and surfaces the bad line", async () => {
-    const good = JSON.stringify(openBtc());
-    const later = JSON.stringify(markAapl(160));
-    const log = `${good}\nthis is not json\n${later}\n`;
-    const paths = await makeStore({ log });
-
-    const { events, quarantined } = await loadEventLog(paths.log);
-
-    expect(events.map((event) => event.id)).toEqual(["open-btc", "mark-aapl"]);
-    expect(quarantined).toHaveLength(1);
-    expect(quarantined[0]).toMatchObject({ lineNumber: 2, line: "this is not json" });
-    // The bad line is durably surfaced to the side lane for the user to fix.
-    const lane = await readFile(quarantineLogPath(paths.log), "utf8");
-    expect(lane).toContain("this is not json");
-  });
-
-  it("fails loud on the fold path when any line is unloadable (never a partial fold)", async () => {
-    // ADR-003 amendment (M1): the fold/ingest read no longer degrades gracefully —
-    // a dropped line would silently skew NAV, so loadFoldedReview refuses to fold a
-    // partial log. The quarantine side lane is still surfaced for diagnostics.
-    const log = `${JSON.stringify(openBtc())}\n{ broken\n`;
-    const paths = await makeStore({ log });
-
-    await expect(loadFoldedReview(paths)).rejects.toThrow(/unloadable line/i);
-
-    // The bad line is still surfaced to the side lane for the operator to fix.
-    const lane = await readFile(quarantineLogPath(paths.log), "utf8");
-    expect(lane).toContain("{ broken");
-  });
-
-  it("self-heals: a clean log removes a stale quarantine lane", async () => {
-    const paths = await makeStore({ log: `${JSON.stringify(openBtc())}\n` });
-    await writeFile(quarantineLogPath(paths.log), "stale\n", "utf8");
-
-    const { quarantined } = await loadEventLog(paths.log);
-
-    expect(quarantined).toHaveLength(0);
-    expect(await exists(quarantineLogPath(paths.log))).toBe(false);
   });
 });
 
