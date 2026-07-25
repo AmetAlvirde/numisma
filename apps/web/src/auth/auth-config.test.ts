@@ -41,11 +41,25 @@ describe("D5: rate limiting is DB-backed and on everywhere", () => {
     // successful permanent denial of the fund view, remediable only by DB
     // surgery. If a future change introduces account-locking config here, this
     // assertion is the place that argues with it.
-    expect(
-      Object.keys(auth.options.rateLimit ?? {}).some((k) =>
-        /lock/i.test(k),
-      ),
-    ).toBe(false);
+    //
+    // Asserted as the EXACT key set, the way the session test below does — not as
+    // a `/lock/i` scan over the same keys. That scan could not fail for the reason
+    // it documented: Better Auth's `rateLimit` options are
+    // enabled/window/max/customRules/storage/modelName/customStorage, and not one
+    // of them is lock-shaped, so the namespace it searched is one where lockout
+    // config cannot live. Anyone actually adding account locking would reach for a
+    // plugin, an `emailAndPassword` hook, or a `before` handler — all three left
+    // that assertion green. An exact key set at least fails on ANY unreviewed
+    // addition to this block, which is a real (if narrower) claim rather than a
+    // decorative one. The load-bearing defence is the long rationale comment in
+    // `lib/auth.ts` and the ADR-011 prose; this only stops silent drift.
+    expect(Object.keys(auth.options.rateLimit ?? {}).sort()).toEqual([
+      "customRules",
+      "enabled",
+      "max",
+      "storage",
+      "window",
+    ]);
   });
 });
 
