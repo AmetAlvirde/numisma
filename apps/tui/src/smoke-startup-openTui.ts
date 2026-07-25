@@ -27,7 +27,7 @@ import {
   loadFoldedReview,
   resolveEventStorePaths,
   type EventStorePaths,
-} from "./event-store.js"
+} from "@numisma/event-store"
 import { prepareStartup } from "./startup.js"
 
 const FIXED_NOW = "2026-06-29T14:03:22.000Z"

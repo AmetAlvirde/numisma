@@ -14,7 +14,8 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { buildCompositionReport, formatCompositionReport } from "@numisma/engine";
-import { ingestInbox, loadFoldedReview, resolveEventStorePaths } from "./event-store.js";
+import { loadFoldedReview, resolveEventStorePaths } from "@numisma/event-store";
+import { ingestInbox } from "./event-store.js";
 import { loadFundReview } from "./review-file.js";
 import { afterEach, describe, expect, it } from "vitest";
 

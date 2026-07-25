@@ -7,17 +7,13 @@
  * fold loader + source label the renderer mounts.
  *
  * Per ADR-001 this is access-surface orchestration over `@numisma/engine`: the
- * fold and event validation stay in the engine; the IO (`ingestInbox`,
- * `loadFoldedReview`) stays in `event-store.ts`; this only sequences them.
+ * fold and event validation stay in the engine; the write IO (`ingestInbox`)
+ * stays in `event-store.ts` and the read IO (`loadFoldedReview`) in
+ * `@numisma/event-store`; this only sequences them.
  */
 import type { FundReviewData } from "@numisma/engine";
-import {
-  ingestInbox,
-  loadFoldedReview,
-  parseAsOfArg,
-  type EventStorePaths,
-  type IngestReport,
-} from "./event-store.js";
+import { loadFoldedReview, type EventStorePaths } from "@numisma/event-store";
+import { ingestInbox, parseAsOfArg, type IngestReport } from "./event-store.js";
 
 /** What the renderer needs after the startup data path runs. */
 export interface StartupPlan {

@@ -21,12 +21,12 @@ import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { buildCompositionReport } from "@numisma/engine";
 import {
-  ingestInbox,
   loadEventLog,
   loadFoldedReview,
   resolveEventStorePaths,
   type EventStorePaths,
-} from "./event-store.js";
+} from "@numisma/event-store";
+import { ingestInbox } from "./event-store.js";
 import { afterEach, describe, expect, it } from "vitest";
 
 const GENESIS_AS_OF = "2026-06-01";

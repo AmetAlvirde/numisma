@@ -10,7 +10,8 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { formatIngestCommitMessage } from "@numisma/engine";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ingestInbox, resolveEventStorePaths } from "./event-store.js";
+import { resolveEventStorePaths } from "@numisma/event-store";
+import { ingestInbox } from "./event-store.js";
 import { GENESIS, git, initGitRepo, MARK } from "./ingest-commit.fixtures.js";
 
 // Each case spawns several real `git` children (plus a workspace-version read); under
