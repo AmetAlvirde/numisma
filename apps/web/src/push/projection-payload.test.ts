@@ -19,13 +19,32 @@
  * deliberately WIDE report through the real `deriveSnapshot` path and deep-scans
  * every key at every depth of the resulting payload.
  *
- * Two properties keep it honest:
- *  - the scan is recursive over objects AND arrays, and matches forbidden markers
- *    as case-insensitive substrings, so a renamed variant (`invalidationWatch` →
+ * TWO SCANS, DIFFERENT POLARITIES — and the allow-list is the load-bearing one:
+ *
+ *  - ALLOW-LIST (`keyPathsOf` vs `ALLOWED_KEY_PATHS`) — the payload's full
+ *    recursive key-PATH set must equal a checked-in list exactly. Closed-world:
+ *    any key appearing anywhere under `totals`/`dashboard` that nobody wrote down
+ *    fails, including one nobody anticipated. This is the runtime twin of
+ *    `contract.ts`'s `ProjectionKeyAllowList`, which enforces the same closed
+ *    world over the engine TYPES at compile time. The two catch different halves:
+ *    the type guard catches the engine growing a field the fixture does not carry;
+ *    this catches a runtime value carrying a key its type never declared (a cast,
+ *    a spread, a hand-built object).
+ *
+ *  - BLOCKLIST (`scanForbiddenKeys`) — retained underneath as a NAMED-SUSPECT
+ *    check. It is strictly weaker (it only ever catches leaks somebody already
+ *    thought of) and the allow-list subsumes it, but it survives because it fails
+ *    with a far more legible message: "`strategy` leaked at $.x.y" reads better in
+ *    CI than a 60-line set diff, and the five markers are the specific fields D8
+ *    argued about.
+ *
+ * Two properties keep both honest:
+ *  - the scans recurse over objects AND arrays; the blocklist matches markers as
+ *    case-insensitive substrings, so a renamed variant (`invalidationWatch` →
  *    `invalidationLevels`) is still caught;
- *  - a false-pass guard asserts the scanner genuinely FINDS those keys in the wide
- *    INPUT report. A recursive scanner with a bug reports "clean" for everything;
- *    without that assertion this file would be decoration.
+ *  - false-pass guards assert each scanner genuinely FINDS what it looks for in
+ *    the wide INPUT report. A recursive scanner with a bug reports "clean" for
+ *    everything; without those assertions this file would be decoration.
  */
 import { describe, expect, it } from "vitest";
 import type { CompositionReport } from "@numisma/engine";
@@ -70,6 +89,105 @@ function scanForbiddenKeys(value: unknown, path = "$"): string[] {
   }
   return hits;
 }
+
+/**
+ * Every key PATH in `value`, walking objects and arrays to arbitrary depth.
+ *
+ * Array indices collapse to a single `[]` segment on purpose: the question is
+ * "which keys may leave the machine", which is a property of the payload's SHAPE,
+ * not of how many rows the fixture happens to hold. Without the collapse this set
+ * would churn on every fixture edit and the allow-list would be abandoned as
+ * noise within two increments.
+ */
+function keyPathsOf(value: unknown, path = "$", out = new Set<string>()): Set<string> {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      keyPathsOf(item, `${path}[]`, out);
+    }
+    return out;
+  }
+  if (value === null || typeof value !== "object") {
+    return out;
+  }
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    const here = `${path}.${key}`;
+    out.add(here);
+    keyPathsOf(child, here, out);
+  }
+  return out;
+}
+
+/**
+ * THE ALLOW-LIST: every key path the pushed payload is permitted to contain.
+ *
+ * Adding a line here is the act of deciding a field may leave the machine. Do not
+ * regenerate this list to make a red build green — read the new path, decide, and
+ * if it may go out, bump `COMPOSITION_SNAPSHOT_SCHEMA_VERSION` alongside.
+ *
+ * Note this is derived from the FIXTURE, so it is a subset of what the engine
+ * types permit — an optional field the fixture omits is absent here. That gap is
+ * precisely why `contract.ts`'s `ProjectionKeyAllowList` exists at the type level;
+ * neither guard is sufficient alone.
+ */
+const ALLOWED_KEY_PATHS = [
+  "$.dashboard",
+  "$.dashboard.sections",
+  "$.dashboard.sections[].id",
+  "$.dashboard.sections[].rows",
+  "$.dashboard.sections[].rows[].costBasisUsd",
+  "$.dashboard.sections[].rows[].id",
+  "$.dashboard.sections[].rows[].kind",
+  "$.dashboard.sections[].rows[].label",
+  "$.dashboard.sections[].rows[].percentOfFund",
+  "$.dashboard.sections[].rows[].unrealizedPnlUsd",
+  "$.dashboard.sections[].rows[].usdValue",
+  "$.dashboard.sections[].title",
+  "$.dashboard.summary",
+  "$.dashboard.summary.asOf",
+  "$.dashboard.summary.dataSafety",
+  "$.dashboard.summary.dataSafety.hasWarnings",
+  "$.dashboard.summary.dataSafety.invalidExcluded",
+  "$.dashboard.summary.dataSafety.nonLiveExcluded",
+  "$.dashboard.summary.dataSafety.shortDeferredExcluded",
+  "$.dashboard.summary.fundName",
+  "$.dashboard.summary.fundValueUsd",
+  "$.dashboard.summary.largestAccount",
+  "$.dashboard.summary.largestAccount.kind",
+  "$.dashboard.summary.largestAccount.label",
+  "$.dashboard.summary.largestAccount.percentOfFund",
+  "$.dashboard.summary.largestAccount.rowId",
+  "$.dashboard.summary.largestAccount.usdValue",
+  "$.dashboard.summary.largestInstrument",
+  "$.dashboard.summary.largestInstrument.kind",
+  "$.dashboard.summary.largestInstrument.label",
+  "$.dashboard.summary.largestInstrument.percentOfFund",
+  "$.dashboard.summary.largestInstrument.rowId",
+  "$.dashboard.summary.largestInstrument.usdValue",
+  "$.dashboard.summary.largestPortfolio",
+  "$.dashboard.summary.largestPortfolio.kind",
+  "$.dashboard.summary.largestPortfolio.label",
+  "$.dashboard.summary.largestPortfolio.percentOfFund",
+  "$.dashboard.summary.largestPortfolio.rowId",
+  "$.dashboard.summary.largestPortfolio.usdValue",
+  "$.dashboard.summary.largestTempo",
+  "$.dashboard.summary.largestTempo.kind",
+  "$.dashboard.summary.largestTempo.label",
+  "$.dashboard.summary.largestTempo.percentOfFund",
+  "$.dashboard.summary.largestTempo.rowId",
+  "$.dashboard.summary.largestTempo.usdValue",
+  "$.dashboard.summary.reserve",
+  "$.dashboard.summary.reserve.kind",
+  "$.dashboard.summary.reserve.label",
+  "$.dashboard.summary.reserve.percentOfFund",
+  "$.dashboard.summary.reserve.rowId",
+  "$.dashboard.summary.reserve.usdValue",
+  "$.dashboard.summary.totalUnrealizedPnlUsd",
+  "$.dashboard.summary.usdMxn",
+  "$.totals",
+  "$.totals.baseCurrency",
+  "$.totals.fundValueUsd",
+  "$.totals.usdMxn",
+];
 
 /**
  * The shipped fixture, widened so it actually CARRIES every forbidden marker.
@@ -159,6 +277,51 @@ describe("D8 forbidden-key contract (what may not reach the cloud)", () => {
     // The markers must also be reachable at NESTED depth, not only top level, or
     // the recursion itself is untested.
     expect(hits.some((h) => h.includes("closedBook.rows[0]"))).toBe(true);
+  });
+
+  it("sees the wide report's extra paths — the path scanner has teeth", async () => {
+    // False-pass guard for the ALLOW-LIST, mirroring the blocklist's above. If
+    // `keyPathsOf` under-walked, the payload would look like a subset of the
+    // allow-list for the wrong reason and the equality assertion below would pass
+    // vacuously. Prove it reaches the dropped branches in the un-narrowed report
+    // first, INCLUDING nested-in-array depth.
+    const paths = keyPathsOf(await loadWideReport());
+    for (const dropped of [
+      "$.invalidationWatch[].level",
+      "$.closedBook.rows[].strategy",
+      "$.closedBook.rows[].tierAttribution[].strategy",
+      "$.priceJourneys[].points[].price",
+    ]) {
+      expect(
+        [...paths],
+        `path scanner never reached ${dropped} in the wide report — it is ` +
+          `under-walking, which would make the allow-list assertion vacuous.`,
+      ).toContain(dropped);
+    }
+  });
+
+  it("contains EXACTLY the allow-listed key paths and nothing else", async () => {
+    // The load-bearing assertion. Unlike the marker blocklist, this fails on a key
+    // nobody predicted — which is the entire drift class ADR-007's amendment
+    // documents. See ALLOWED_KEY_PATHS before "fixing" a failure here.
+    const wide = await loadWideReport();
+    const actual = [...keyPathsOf(deriveSnapshot(wide).report)].sort();
+    const allowed = [...ALLOWED_KEY_PATHS].sort();
+
+    const unlisted = actual.filter((p) => !allowed.includes(p));
+    expect(
+      unlisted,
+      `payload carries key paths NOBODY ALLOWED — decide whether each may leave ` +
+        `the machine, then either drop it in toProjectionReport or add it to ` +
+        `ALLOWED_KEY_PATHS and bump the schema version:\n${unlisted.join("\n")}`,
+    ).toEqual([]);
+
+    const missing = allowed.filter((p) => !actual.includes(p));
+    expect(
+      missing,
+      `ALLOWED_KEY_PATHS names paths the payload no longer produces — a stale ` +
+        `allow-list stops being a guard:\n${missing.join("\n")}`,
+    ).toEqual([]);
   });
 
   it("pushes no forbidden key at any depth of the derived payload", async () => {

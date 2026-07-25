@@ -167,18 +167,39 @@ trusting the type system alone — a type assertion over the wide object would
 still satisfy the compiler while serializing every dropped field into JSONB.
 `COMPOSITION_SNAPSHOT_SCHEMA_VERSION` bumps 1 → 2 so a v1 row read by the v2
 reader yields a clean `status: "stale"` refusal rather than a mis-render.
-`apps/web/src/push/projection-payload.test.ts` is a forbidden-key contract
-test — a recursive, case-insensitive deep scan of the actual pushed payload
-that fails on `strategy`, any `invalidation*` key, `closedBook`,
-`entryThesis`, and `riskBudget`, with a guard proving the scanner is not
-vacuous (it must find those keys in the wide input before it can be trusted
-to find their absence in the narrowed output).
+Neither of those is by itself durable, and saying so plainly matters more
+than the reassurance: a `Pick` tracks only the TOP-LEVEL key set, and
+`toProjectionReport()` copies `report.dashboard` wholesale by reference. A
+later engine increment that adds `DashboardSummary.entryNote` or
+`CompositionRow.strategyLabel` still compiles, is still copied, and still
+serializes into JSONB — this amendment's own history, one level deeper.
+
+**What makes it durable is an ALLOW-LIST, in both halves.** A blocklist of
+known-bad key names is the wrong polarity for a "what may leave the machine"
+decision: it only ever catches leaks somebody already anticipated. So the
+guard is closed-world on both sides of the compile/runtime line:
+
+- `ProjectionKeyAllowList` in `apps/web/src/projection/contract.ts` names
+  every permitted key of every type in the payload's transitive closure and
+  fails `pnpm --filter @numisma/web typecheck` — naming the offending key —
+  if the engine grows ANY field under `totals` or `dashboard`, or if the
+  allow-list names a key the engine has since dropped.
+- `apps/web/src/push/projection-payload.test.ts` asserts the actual derived
+  payload's full recursive key-PATH set equals a checked-in list exactly,
+  catching a runtime value that carries a key its type never declared. It
+  retains the older `strategy` / `invalidation*` / `closedBook` /
+  `entryThesis` / `riskBudget` marker scan underneath, not because it adds
+  coverage — the allow-list subsumes it — but because it names the specific
+  fields D8 argued about and fails far more legibly. Both scanners carry a
+  guard proving they are not vacuous (each must find what it looks for in the
+  wide input before it can be trusted to report its absence in the narrowed
+  output).
 
 This is a **narrowing, not a contradiction:** the blast-radius paragraph
 above is restored to literal truth — the cloud again holds only derived
 dashboard values, not stop levels, strategy tags, or trade history — and the
-forbidden-key test is what keeps it true across the next engine increment,
-the way this amendment's own history proves a `Pick` alone would not.
+two allow-lists are what keep it true across the next engine increment, the
+way this amendment's own history proves a `Pick` alone would not.
 
 **Widening later stays cheap, exactly as this ADR promised.** "A read-model
 schema change is a re-push, never a data migration" holds unchanged: widen
