@@ -53,9 +53,18 @@ if (!hasBuild) {
  * asset, whatever a future refactor does.
  *
  * DELIBERATELY NOT LISTED: `VITE_NEON_AUTH_URL`. Its `VITE_` prefix means Vite
- * INLINES it into the client bundle by design — it is a URL, not a credential,
- * and it is EXPECTED to ship. Adding it here would assert against a working
- * feature. What must not ship is a credential, which is what this list names.
+ * would INLINE it into the client bundle by design — it is a URL, not a
+ * credential — so listing it here would assert against Vite's documented
+ * behavior rather than against a leak. What must not ship is a credential,
+ * which is what this list names.
+ *
+ * As of 2026-07-25 the variable no longer exists in any environment: it was one
+ * of the 18 auto-injected by the Neon Marketplace integration, which was
+ * DISCONNECTED from this project (ADR-011 amendment, D9). Nothing in this app
+ * ever read it — there is no Neon Auth feature here; auth is Better Auth
+ * (ADR-010) against a separate `numisma_auth` DB. The exclusion is kept as a
+ * standing rule in case a `VITE_`-prefixed var is ever added, not because a
+ * feature depends on one shipping.
  *
  * DELIBERATELY REDUNDANT: matching is by `includes()`, so the bare `DATABASE_URL`
  * added for the Neon set already subsumes `PROJECTION_DATABASE_URL`,
