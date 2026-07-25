@@ -35,17 +35,29 @@ import type { CompositionReport } from "@numisma/engine";
  *    use case.
  *
  * WHY A `Pick` AND NOT A HAND-ROLLED INTERFACE: a `Pick` tracks the engine's own
- * types. If `totals` or `dashboard` is renamed or reshaped upstream, this line
- * stops compiling and `pnpm --filter @numisma/web typecheck` goes red. A
- * hand-rolled mirror would keep compiling against a stale copy of the shape and
- * let writer and reader drift apart silently — which is exactly the failure that
- * produced D8 in the first place (the engine grew, the projection inherited the
- * growth, and nothing said so).
+ * types. If `totals` or `dashboard` is RENAMED upstream, this line stops
+ * compiling and `pnpm --filter @numisma/web typecheck` goes red. A hand-rolled
+ * mirror would keep compiling against a stale copy of the shape and let writer
+ * and reader drift apart silently — which is exactly the failure that produced D8
+ * in the first place (the engine grew, the projection inherited the growth, and
+ * nothing said so).
+ *
+ * WHAT THE `Pick` DOES NOT DO — read this before trusting it: a `Pick` tracks
+ * only the TOP-LEVEL key set. It says nothing about growth *inside* `totals` or
+ * `dashboard`. Add `DashboardSummary.entryNote` or `CompositionRow.strategyLabel`
+ * upstream and this line still compiles, {@link toProjectionReport} still copies
+ * `report.dashboard` wholesale by reference, and the new field serializes
+ * straight into the hosted JSONB — the identical drift D8 exists to stop, one
+ * level deeper. {@link ProjectionKeyAllowList} is what closes that; it, not the
+ * `Pick`, is the durable guard.
  *
  * A `Pick` narrows the TYPE only. The runtime narrowing is
  * {@link toProjectionReport}, which builds the payload key-by-key; a type
  * assertion over the wide object would still serialize every extra key into
- * JSONB. `push/projection-payload.test.ts` is the durable guard on that.
+ * JSONB. `push/projection-payload.test.ts` is the durable guard on THAT half —
+ * it walks the actually-derived payload and allow-lists every key path it finds,
+ * so a cast that smuggles the wide object through fails at runtime the same way
+ * {@link ProjectionKeyAllowList} fails at compile time.
  *
  * Widening later is cheap by design: widen this `Pick`, bump
  * {@link COMPOSITION_SNAPSHOT_SCHEMA_VERSION}, re-push, deploy. The reader's
@@ -53,6 +65,128 @@ import type { CompositionReport } from "@numisma/engine";
  * snapshot is a clean refusal, never a mis-render.
  */
 export type ProjectionReport = Pick<CompositionReport, "totals" | "dashboard">;
+
+/** Resolves to `T` only when `T` is `true`; otherwise the alias itself errors. */
+type Assert<T extends true> = T;
+
+/** Element type of an array type — used to reach INTO `sections` and `rows`. */
+type ElementOf<T> = T extends readonly (infer E)[] ? E : never;
+
+/**
+ * Compile-time proof that `T`'s key set is EXACTLY `Allowed` — neither side
+ * carrying a key the other lacks.
+ *
+ * Resolves to `true` when they match. When they do not it resolves to an object
+ * type whose single SHOUTING property name is the diagnosis and whose value type
+ * is the offending key, so the `Assert<...>` below fails with the actual key
+ * named in the compiler error rather than a bare `true`/`false` mismatch.
+ *
+ * Both directions matter. Unlisted keys are the leak this exists to stop; listed
+ * keys the type no longer has are how an allow-list rots into decoration.
+ */
+type KeysAreExactly<T, Allowed extends string> = [
+  Exclude<keyof T, Allowed>,
+] extends [never]
+  ? [Exclude<Allowed, keyof T>] extends [never]
+    ? true
+    : {
+        ALLOW_LIST_NAMES_A_KEY_THE_ENGINE_TYPE_NO_LONGER_HAS: Exclude<
+          Allowed,
+          keyof T
+        >;
+      }
+  : {
+      ENGINE_GREW_A_KEY_THE_PROJECTION_ALLOW_LIST_DOES_NOT_NAME: Exclude<
+        keyof T,
+        Allowed
+      >;
+    };
+
+type ProjectionSummary = ProjectionReport["dashboard"]["summary"];
+type ProjectionFocus = NonNullable<ProjectionSummary["largestPortfolio"]>;
+type ProjectionSection = ElementOf<ProjectionReport["dashboard"]["sections"]>;
+type ProjectionRow = ElementOf<ProjectionSection["rows"]>;
+
+/**
+ * THE DURABLE NARROWING GUARD (D8) — an exhaustive ALLOW-LIST over every key at
+ * every depth of {@link ProjectionReport}, checked by the compiler.
+ *
+ * WHY AN ALLOW-LIST AND NOT A BLOCKLIST: "what may leave the machine" is a
+ * closed question, so it needs closed-world enforcement. A blocklist of known-bad
+ * key names (`strategy`, `invalidation`, …) only ever catches the leaks somebody
+ * already thought of; a field nobody anticipated passes it by construction. This
+ * inverts the polarity — every key must be named HERE to be allowed out, so an
+ * engine increment that adds ANY field under `totals` or `dashboard` fails
+ * `pnpm --filter @numisma/web typecheck` and forces a deliberate re-decision
+ * instead of silently inheriting it.
+ *
+ * WHEN THIS GOES RED: do not reflexively paste the new key in. Decide whether it
+ * may leave the machine at all. If yes, add it here and bump
+ * {@link COMPOSITION_SNAPSHOT_SCHEMA_VERSION}. If no, drop it in
+ * {@link toProjectionReport} — which then has to stop copying its parent
+ * wholesale and construct that level key-by-key too.
+ *
+ * Exported so it can never be dead-code-eliminated or flagged unused; it carries
+ * no runtime value and is erased at build.
+ */
+export type ProjectionKeyAllowList = {
+  totals: Assert<
+    KeysAreExactly<
+      ProjectionReport["totals"],
+      "baseCurrency" | "fundValueUsd" | "usdMxn"
+    >
+  >;
+  dashboard: Assert<
+    KeysAreExactly<ProjectionReport["dashboard"], "summary" | "sections">
+  >;
+  summary: Assert<
+    KeysAreExactly<
+      ProjectionSummary,
+      | "fundName"
+      | "asOf"
+      | "fundValueUsd"
+      | "usdMxn"
+      | "totalUnrealizedPnlUsd"
+      | "largestPortfolio"
+      | "largestTempo"
+      | "largestAccount"
+      | "largestInstrument"
+      | "reserve"
+      | "dataSafety"
+    >
+  >;
+  summaryDataSafety: Assert<
+    KeysAreExactly<
+      ProjectionSummary["dataSafety"],
+      | "nonLiveExcluded"
+      | "invalidExcluded"
+      | "shortDeferredExcluded"
+      | "hasWarnings"
+    >
+  >;
+  /** Shared by every `largest*` field and `reserve` on the summary. */
+  summaryFocus: Assert<
+    KeysAreExactly<
+      ProjectionFocus,
+      "rowId" | "kind" | "label" | "usdValue" | "percentOfFund"
+    >
+  >;
+  section: Assert<
+    KeysAreExactly<ProjectionSection, "id" | "title" | "rows">
+  >;
+  sectionRow: Assert<
+    KeysAreExactly<
+      ProjectionRow,
+      | "id"
+      | "kind"
+      | "label"
+      | "usdValue"
+      | "percentOfFund"
+      | "costBasisUsd"
+      | "unrealizedPnlUsd"
+    >
+  >;
+};
 
 /**
  * Build the pushed payload BY EXPLICIT CONSTRUCTION — the runtime half of the
