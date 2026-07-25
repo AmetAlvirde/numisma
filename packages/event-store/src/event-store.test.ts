@@ -15,47 +15,8 @@ import {
   resolveEventStorePaths,
   type EventStorePaths,
 } from "./event-store.js";
+import { genesisSeed } from "./genesis-seed.testkit.js";
 import { afterEach, describe, expect, it } from "vitest";
-
-const GENESIS_AS_OF = "2026-06-01";
-
-function genesisSeed() {
-  return {
-    fund: { id: "fund-1", name: "Accumulus", baseCurrency: "USD" },
-    review: { asOf: GENESIS_AS_OF, usdMxn: 20 },
-    portfolios: [{ id: "core", name: "Core" }],
-    accounts: [{ id: "xtb-usd", name: "Main Broker", platform: "XTB", currency: "USD" }],
-    instruments: [
-      { id: "aapl-usd", name: "Apple Inc.", symbol: "AAPL", currency: "USD" },
-      { id: "btc-usd", name: "Bitcoin", symbol: "BTC", currency: "USD" },
-    ],
-    reserves: [
-      {
-        id: "cash-core",
-        portfolioId: "core",
-        tempo: "Reserve",
-        executionMode: "live",
-        accountId: "xtb-usd",
-        currency: "USD",
-        amount: 1000,
-      },
-    ],
-    positions: [
-      {
-        id: "aapl-core",
-        portfolioId: "core",
-        tempo: "Capital",
-        executionMode: "live",
-        accountId: "xtb-usd",
-        instrumentId: "aapl-usd",
-        direction: "long",
-        markPrice: 150,
-        currency: "USD",
-        lots: [{ quantity: 2, cost: 100, tier: "c1" }],
-      },
-    ],
-  };
-}
 
 const DECISION = {
   entryThesis: "thesis",

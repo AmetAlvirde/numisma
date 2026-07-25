@@ -48,9 +48,14 @@ function sourceFiles(dir: string): string[] {
  * (`from "…"`, `import "…"`, `import("…")`, `require("…")`) rather than by bare
  * substring, so a file that merely mentions the name in prose or in a constant —
  * this guard itself, for one — is not a false positive.
+ *
+ * ANY SUBPATH counts, not just the bare package name. `@numisma/event-store` now
+ * also exports `./testkit`, and a guard that only matched the root entry would let
+ * `@numisma/event-store/testkit` — or any subpath added later — walk straight past
+ * a confinement rule that is about the DEPENDENCY, not about one entry point.
  */
 const IMPORT_RE = new RegExp(
-  `(?:\\bfrom|\\bimport|\\brequire\\s*\\(|\\bimport\\s*\\()\\s*["']${PACKAGE.replace("/", "\\/")}["']`,
+  `(?:\\bfrom|\\bimport|\\brequire\\s*\\(|\\bimport\\s*\\()\\s*["']${PACKAGE.replace("/", "\\/")}(?:\\/[^"']*)?["']`,
 );
 
 function importsEventStore(file: string): boolean {

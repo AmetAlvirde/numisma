@@ -23,6 +23,11 @@ import {
   resolveEventStorePaths,
   type EventStorePaths,
 } from "@numisma/event-store";
+import {
+  GENESIS_SEED_AS_OF,
+  GENESIS_SEED_FUND_NAME,
+  genesisSeed,
+} from "@numisma/event-store/testkit";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -38,52 +43,19 @@ export async function loadFixture(): Promise<CompositionReport> {
   return JSON.parse(raw) as CompositionReport;
 }
 
-/** The genesis seed's t0 date — every temp-store fold starts here. */
-export const TEMP_GENESIS_AS_OF = "2026-06-01";
+/**
+ * The genesis seed's t0 date — every temp-store fold starts here.
+ *
+ * Re-exported under the local names the push tests already read, rather than
+ * duplicated: the seed itself now lives in `@numisma/event-store/testkit`, beside
+ * the read path it seeds. This file used to carry a byte-identical copy of it.
+ */
+export const TEMP_GENESIS_AS_OF = GENESIS_SEED_AS_OF;
 
 /** The fund name the temp genesis seed carries (slugged into the row's fund_id). */
-export const TEMP_FUND_NAME = "Accumulus";
+export const TEMP_FUND_NAME = GENESIS_SEED_FUND_NAME;
 
-/** A small, legible genesis seed: one live position, one reserve, two instruments. */
-export function tempGenesisSeed(): unknown {
-  return {
-    fund: { id: "fund-1", name: TEMP_FUND_NAME, baseCurrency: "USD" },
-    review: { asOf: TEMP_GENESIS_AS_OF, usdMxn: 20 },
-    portfolios: [{ id: "core", name: "Core" }],
-    accounts: [
-      { id: "xtb-usd", name: "Main Broker", platform: "XTB", currency: "USD" },
-    ],
-    instruments: [
-      { id: "aapl-usd", name: "Apple Inc.", symbol: "AAPL", currency: "USD" },
-      { id: "btc-usd", name: "Bitcoin", symbol: "BTC", currency: "USD" },
-    ],
-    reserves: [
-      {
-        id: "cash-core",
-        portfolioId: "core",
-        tempo: "Reserve",
-        executionMode: "live",
-        accountId: "xtb-usd",
-        currency: "USD",
-        amount: 1000,
-      },
-    ],
-    positions: [
-      {
-        id: "aapl-core",
-        portfolioId: "core",
-        tempo: "Capital",
-        executionMode: "live",
-        accountId: "xtb-usd",
-        instrumentId: "aapl-usd",
-        direction: "long",
-        markPrice: 150,
-        currency: "USD",
-        lots: [{ quantity: 2, cost: 100, tier: "c1" }],
-      },
-    ],
-  };
-}
+export { genesisSeed as tempGenesisSeed };
 
 /** A `PriceMarked` event line for the genesis AAPL position, dated `asOf`. */
 export function priceMarkedLine(
@@ -110,7 +82,7 @@ export async function makeTempStore(
 ): Promise<{ dir: string; paths: EventStorePaths }> {
   const dir = await mkdtemp(resolve(tmpdir(), "numisma-push-"));
   const paths = resolveEventStorePaths(dir);
-  await writeFile(paths.genesis, JSON.stringify(tempGenesisSeed()), "utf8");
+  await writeFile(paths.genesis, JSON.stringify(genesisSeed()), "utf8");
   await writeFile(paths.log, log, "utf8");
   return { dir, paths };
 }
