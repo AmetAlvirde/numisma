@@ -26,11 +26,12 @@ dishonest.
 | `apps/tui/src/mount-app.ts` | Bun-only openTUI wiring (`@opentui/core` import, keypress subscription, `requestRender`). Never runs under Node. | `pnpm smoke:tui` drives real `j`/`k`/`enter` through it on the real openTUI test renderer. |
 | `apps/tui/src/smoke-openTui.ts` | The keypress Bun smoke harness itself. | It *is* the test; running it (`pnpm smoke:tui`) is the assertion. |
 | `apps/tui/src/smoke-startup-openTui.ts` | The startup Bun smoke harness itself: drives `prepareStartup` + `mountApp` through the real openTUI renderer against an on-disk store. | It *is* the test; running it (`pnpm smoke:startup`) is the assertion. |
-| `apps/tui/src/report.ts` | A `tsx` CLI script: a top-level `try/catch` that folds genesis + log (`loadFoldedReview`) and renders the already-tested composition report. No unit to assert beyond a `process.stdout.write`. | Its constituent functions are unit-tested directly (`event-store.test.ts`, `report-fold.test.ts`, `fund-composition.test.ts`). |
-| `apps/tui/src/spine.ts` | The `tsx` Node tracer (`pnpm spine`): a top-level `try/catch` orchestrating already-tested `ingestInbox` / `loadFoldedReview` / `buildCompositionReport` / `formatCompositionReport`. Same script category — no unit to assert. | Its constituent functions are unit-tested (`event-store.test.ts`, `report-fold.test.ts`); the end-to-end path is also driven by `pnpm spine` / `pnpm smoke:startup`. |
+| `apps/tui/src/report.ts` | A `tsx` CLI script: a top-level `try/catch` that folds genesis + log (`loadFoldedReview`) and renders the already-tested composition report. No unit to assert beyond a `process.stdout.write`. | Its constituent functions are unit-tested directly (`loadFoldedReview` by `packages/event-store/src/event-store.test.ts`, `report-fold.test.ts`, `fund-composition.test.ts`). |
+| `apps/tui/src/spine.ts` | The `tsx` Node tracer (`pnpm spine`): a top-level `try/catch` orchestrating already-tested `ingestInbox` / `loadFoldedReview` / `buildCompositionReport` / `formatCompositionReport`. Same script category — no unit to assert. | Its constituent functions are unit-tested (`ingestInbox` by `apps/tui/src/event-store.test.ts`, `loadFoldedReview` by `packages/event-store/src/event-store.test.ts`, `report-fold.test.ts`); the end-to-end path is also driven by `pnpm spine` / `pnpm smoke:startup`. |
 | `apps/tui/src/spine-reset.ts` | A `tsx` dev iteration helper (`pnpm spine:reset`): clear the log, restore the most recent archived inbox. A throwaway utility, not product behavior — no unit to assert. | Manual: it exists to re-run `pnpm spine` against an edited inbox. |
-| `apps/web/src/push/push.ts` | Self-executing `tsx` script (`pnpm push` / `db:init`): top-level `main().then(..., process.exit)` — argv + credential + `process.exit` wiring only. Importing it runs `main()`, so there is no unit to assert as written. Slice #127 extracted the two pieces worth asserting into the measured `push/push-core.ts` (see below), leaving this a thin wrapper. | `push-core.ts` is measured: `deriveSnapshot` / `loadFixture` by `push-core.test.ts`, the real upsert (`upsertSnapshot`) by the gated `push-core.integration.test.ts`. The DDL `push.ts` applies via `--init` is the tested `readSchemaDdl()` from `provision.ts`. |
-| `apps/web/src/push/push-core.ts` | **Measured**, not excluded — listed here only for the map. The importable, self-exec-free half of the push shell. | `deriveSnapshot` (pure fixture→derivation) and `loadFixture` are unit-tested (`push-core.test.ts`); `upsertSnapshot` (the real `ON CONFLICT ... DO UPDATE`) is exercised by the gated `push-core.integration.test.ts` against a throwaway Postgres. With the test DB present it is 100% covered; without it, `upsertSnapshot`'s `pool.query` shows uncovered (the integration test skips) — flagged honestly, same posture as `provision.ts`. |
+| `apps/web/src/push/push.ts` | Self-executing `tsx` script (`pnpm push` / `db:init`): top-level `main().then(..., process.exit)` — argv + credential + `process.exit` wiring only. Importing it runs `main()`, so there is no unit to assert as written. Slice #127 extracted the two pieces worth asserting into the measured `push/push-core.ts` (see below), leaving this a thin wrapper. PRD #134 slice 2 then moved `push.ts` off the committed fixture onto `loadCurrentReport()` (the real fold of the durable log). | `push-core.ts` is measured: `deriveSnapshot` / `loadCurrentReport` by `push-core.test.ts`, the real upsert (`upsertSnapshot`) by the gated `push-core.integration.test.ts`. The DDL `push.ts` applies via `--init` is the tested `readSchemaDdl()` from `provision.ts`. |
+| `apps/web/src/push/push-core.ts` | **Measured**, not excluded — listed here only for the map. The importable, self-exec-free half of the push shell. | `deriveSnapshot` (pure report→derivation) and `loadCurrentReport` (the real genesis+log fold, via `@numisma/event-store`) are unit-tested (`push-core.test.ts`); `upsertSnapshot` (the real `ON CONFLICT ... DO UPDATE`) is exercised by the gated `push-core.integration.test.ts` against a throwaway Postgres. With the test DB present it is 100% covered; without it, `upsertSnapshot`'s `pool.query` shows uncovered (the integration test skips) — flagged honestly, same posture as `provision.ts`. |
+| `apps/web/src/push/push-core.fixtures.ts` | Test-only fixtures extracted from `push-core.ts` when the push stopped publishing the committed fixture (PRD #134 slice 2): `FIXTURE_PATH` / `loadFixture` (the retired committed fixture, now a test input only) and `makeTempStore` (a throwaway data dir for exercising `loadCurrentReport` over a real log). Excluded via the repo's `**/*.fixtures.ts` glob. | Exercised by `push-core.test.ts` / `push-core.integration.test.ts`, the tests that import it — it is test infrastructure, not product code to measure. |
 | `apps/web/src/projection/provision-projection.ts` | Self-executing `tsx` provisioning CLI (`pnpm db:provision`): top-level `main().then(..., process.exit)` over the tested `provision.ts` builders. Same script category as `push.ts` — no unit to assert as written. | Its pure inputs (`readSchemaDdl`, `buildGrantStatements`, `rolesFromEnv`, `assertValidRoleName`) are unit-tested (`provision.test.ts`); the DB-applying `provisionProjection()` it calls is exercised by the gated integration test (`provision.integration.test.ts`). |
 | `apps/web/src/auth/apply-auth-schema.ts` | Self-executing `tsx` auth-schema applier (`pnpm auth:apply`): top-level `main().then(..., process.exit)` that reads the vendored `better-auth.schema.sql` and applies it idempotently to `AUTH_DATABASE_URL`. Same script category as `push.ts`. | The vendored artifact is generated by the pinned `@better-auth/cli@1.4.21`; idempotency (already-exists → no-op) is demonstrated in the provisioning runbook (`docs/projection-provisioning.md`). |
 | `apps/web/src/auth/seed-account.ts` (slice #125) | Self-executing `tsx` single-tenant seed CLI (`pnpm auth:seed`): top-level `main().then(..., process.exit)` that writes the ONE account through Better Auth's internal adapter (`auth.$context`) keyed on `NUMISMA_SEED_EMAIL` (idempotent — a second run no-ops). Same script category as `apply-auth-schema.ts`; importing it runs `main()`, so there is no unit to assert as written. | The single-tenant invariant it exists to serve — server-side signup disabled (`emailAndPassword.disableSignUp`) with sign-in still enabled — IS asserted (`lib/single-tenant.test.ts`), along with the anonymous-leaks-nothing gate behavior. |
@@ -141,14 +142,23 @@ a regression could break while the suite stayed green. It is now unit-tested:
 What remains uncovered after #72 is only the §2 defensive guards and the §3
 tie-break — each listed there with a concrete reason.
 
-## 5. Event-sourcing spine (ADR-003) — newly added, ~94% lines
+## 5. Event-sourcing spine (ADR-003) — newly added
 
-The engine event modules (`events/*.ts`) and `event-store.ts` (TUI) are the
-persistence spine added in the portfolio-history increment. Both sit at ~94%
-lines, and the remainder is
-**real, reachable behavior that is partially — not yet exhaustively — covered**.
-It is listed here honestly, not dressed up as unreachable; closing it is a
-follow-up, tracked against the spine's reliable-conversion work.
+The engine event modules (`events/*.ts`) and the durable event-store are the
+persistence spine added in the portfolio-history increment, and the remainder
+across both is **real, reachable behavior that is partially — not yet
+exhaustively — covered**. It is listed here honestly, not dressed up as
+unreachable; closing it is a follow-up, tracked against the spine's
+reliable-conversion work.
+
+PRD #134 slice 1 split the event-store's *read path* — path resolution,
+genesis load, log load with quarantine, `loadFoldedReview` — out of
+`apps/tui/src/event-store.ts` into the new **`@numisma/event-store`** package
+(`packages/event-store/src/event-store.ts`), so `apps/web`'s push can fold the
+durable log without depending on the TUI. `apps/tui/src/event-store.ts` now
+holds only the write/ingest half (`ingestInbox`, `migrateLegacyLog`, inbox
+archival, magnitude-threshold env plumbing, `parseAsOfArg`); its read-path unit
+tests moved with the code into `packages/event-store/src/event-store.test.ts`.
 
 - **`packages/engine/src/events/*.ts`** (94% lines) — the covered core is the
   fold itself (`events/fold.ts`) and the ingest cross-reference
@@ -160,13 +170,22 @@ follow-up, tracked against the spine's reliable-conversion work.
   exists yet; plus two real branches in `events/fold.ts` — a `PriceMarked`
   carrying `usdMxn` updating the fold's FX (~L223), and the zero-`totalQuantity`
   guard in the weighted-average helper (~L281).
-- **`apps/tui/src/event-store.ts`** (94% lines) — the covered core is the
-  validated ingest boundary, dedup, atomic append, archive, and quarantine
-  (`event-store.test.ts`). Uncovered: the inbox **invalid-JSON** and
-  **non-array** rejection throws, the `--as-of=<date>` (equals-form) arg variant
-  (the space-separated form is tested), the genesis-validation-failure throw (a
-  corrupt `genesis.json`, defensive), and the `readOptional` non-`ENOENT` rethrow
-  (an unexpected fs error the call path does not otherwise produce — defensive).
+- **`packages/event-store/src/event-store.ts`** (the read path, 96% lines) — the
+  covered core is `loadEventLog`'s quarantine handling and `loadFoldedReview`'s
+  fail-loud fold, exercised by `packages/event-store/src/event-store.test.ts`.
+  Uncovered: `loadGenesis`'s validation-failure throw (a corrupt `genesis.json`,
+  defensive) and `readOptional`'s non-`ENOENT` rethrow (an unexpected fs error
+  the call path does not otherwise produce — defensive).
+- **`apps/tui/src/event-store.ts`** (the write/ingest path, 89% lines) — the
+  covered core is the validated ingest boundary, dedup, atomic append, archive,
+  and quarantine (`event-store.test.ts`). Uncovered: the inbox **invalid-JSON**
+  and **non-array** rejection throws, and the `--as-of=<date>` (equals-form) arg
+  variant (the space-separated form is tested). The file's measured percentage
+  dropped from the pre-split ~94% because the read path it used to also contain
+  was more thoroughly covered; splitting it out left a higher proportion of this
+  file's remaining lines in less-exhaustively-tested rejection branches
+  (`migrateLegacyLog`'s abort paths, the ingest-commit-capture warn branch) —
+  real, reachable behavior, not yet individually itemized here.
 
 `startup.ts` is at 100% (`startup.test.ts`).
 
@@ -218,18 +237,30 @@ for what that number measures.
   (`pg-substrate.testkit.ts`, via the `**/*.testkit.ts` exclude) are excluded per
   §1.
 
-- **`apps/web/src/push/push-core.ts`** (slice #127) — the importable, self-exec-free
-  half of the push shell, extracted from `push.ts` so the derivation and the real
-  upsert are assertable without running the script. `deriveSnapshot` (fixture →
-  `fundId` / `asOf` / `schemaVersion`, delegating to the shared contract) and
-  `loadFixture` are unit-tested (`push-core.test.ts`, no DB). `upsertSnapshot` — the
+- **`apps/web/src/push/push-core.ts`** (slice #127; real fold since PRD #134
+  slice 2) — the importable, self-exec-free half of the push shell, extracted
+  from `push.ts` so the derivation and the real upsert are assertable without
+  running the script. `deriveSnapshot` (report → `fundId` / `asOf` /
+  `schemaVersion`, delegating to the shared contract) is unit-tested
+  (`push-core.test.ts`, no DB). `loadCurrentReport` — the real fold of the
+  durable log (resolve event-store paths via `@numisma/event-store`, fold
+  genesis + `events.jsonl` to current state, `buildCompositionReport`) — is
+  also unit-tested there against a throwaway on-disk store built by the
+  coverage-excluded `push-core.fixtures.ts`; the retired committed fixture
+  (`FIXTURE_PATH` / `loadFixture`) now lives in that same fixtures module as a
+  test input only, no longer read by the push itself. `upsertSnapshot` — the
   exact `INSERT ... ON CONFLICT (fund_id, as_of) DO UPDATE` the script runs — is
   exercised by the gated `push-core.integration.test.ts`: two pushes of the same
   key yield exactly one row with `pushed_at` refreshed and `report` /
   `schema_version` updated (no delete, no duplicate), pushed through the WRITER cred
   on the #123 throwaway-Postgres substrate. With the test DB present, 100% covered;
   without it, `upsertSnapshot`'s `pool.query` shows uncovered (integration test
-  skips) — flagged honestly, same posture as `provision.ts`.
+  skips) — flagged honestly, same posture as `provision.ts`. Measured at 58%
+  lines with the test DB absent (only `upsertSnapshot` uncovered); the blast
+  radius this real fold opens — `apps/web` now depends on `@numisma/event-store`,
+  the reader for the whole private event log — is guarded structurally, not by
+  a coverage number: `apps/web/src/event-store-import-guard.test.ts` asserts no
+  `apps/web` source file outside `src/push/` imports that package.
 
 **Excluded (`.ts` dead weight — see §1 table):** `push/push.ts` (self-executing
 script — now a thin argv/credential wrapper over the measured `push-core.ts`) and
