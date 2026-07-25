@@ -7,7 +7,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { resolveEventStorePaths, type EventStorePaths } from "./event-store.js";
+import { resolveEventStorePaths, type EventStorePaths } from "@numisma/event-store";
 import { formatIngestReport, prepareStartup } from "./startup.js";
 import { afterEach, describe, expect, it } from "vitest";
 

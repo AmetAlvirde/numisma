@@ -23,7 +23,8 @@
  */
 import { readFile } from "node:fs/promises";
 import type { SuppliedCashLeg } from "@numisma/engine";
-import { migrateLegacyLog, resolveEventStorePaths } from "./event-store.js";
+import { resolveEventStorePaths } from "@numisma/event-store";
+import { migrateLegacyLog } from "./event-store.js";
 
 const MAPPING_PATH = "data/migration-cash-legs.json";
 
