@@ -200,23 +200,94 @@ says.
 
 ## 8. First real push by hand, then soak
 
-Push real fund data **once, manually**. Look at it on the phone. Live with
-it for a few days before automating anything.
+`pnpm --filter @numisma/web push` folds the durable genesis + event log into
+a `CompositionReport` and upserts it — that is the **only** thing it can do.
+The fixture path has left the command entirely: no `--fixture` flag, no env
+toggle, no fallback. There is no "am I looking at the fixture?" question left
+to resolve at the console. (Step 1's fixture cleanup removed a *database
+row*; the fixture JSON itself remains on disk as a test fixture, loaded only
+by the test suite — the two are unrelated after this step.)
 
 ```sh
 pnpm --filter @numisma/web push
 ```
 
+**Preconditions, as checkable facts, not hopes:**
+
+- `NUMISMA_DATA_DIR` points at the real durable-data store (the accumulus
+  checkout), not a scratch or test directory.
+- `PROJECTION_WRITE_DATABASE_URL` (the no-DELETE writer credential) is set in
+  the shell the push runs from.
+- The durable log is well-formed. A corrupt, partial, or legacy-shape log
+  line makes the push **fail loud**: non-zero exit, no database write. That
+  failure is the system working as designed — the fix is the log (re-run
+  ingest, repair the offending line), never the push. Do not work around a
+  failed push here; find out why the log is malformed first.
+
+**Where `asOf` comes from.** The pushed row's `asOf` is the **last applied
+event's date** (seeded from genesis), never the date the push happens to run
+on. Three consequences follow directly, and an operator should expect all
+three rather than treat any of them as a bug:
+
+- **One row per `asOf`.** A second push the same day updates that same row —
+  `report` and `schema_version` refresh, `pushed_at` bumps — it does not add
+  a row.
+- **A quiet day refreshes yesterday's row, not today's.** If no new marks
+  landed since the last push, `asOf` is unchanged, so the push refreshes the
+  *previous* date's row rather than creating a new one — and the dashboard
+  correctly continues to show that earlier date. This is expected on a
+  weekend or a market holiday, not a fault to chase.
+- **Staleness on the reader is version-mismatch only — there is no age
+  check.** The dashboard's `stale` state fires only when a stored row's
+  schema version disagrees with what the reader expects. An `asOf` that
+  hasn't moved in days is not staleness; it renders exactly as "ok" as a
+  same-day push does.
+
 **Why here, and why not automated yet:** doing the first real push and
 wiring it into a schedule at the same time means a broken push either
 silently overwrites a good snapshot on a timer, or starts publishing before
-a real fund has ever been seen to render correctly. The first real push is
-the moment the ADR-007 gate actually closes — it deserves direct attention,
-not cron.
+a real fund has ever been seen to render correctly (Decision D10). The first
+real push must be manual, watched, and lived with before step 9 is even
+considered.
 
-**Verify:** the deployed dashboard shows real composition data, correctly,
-on a phone — not the fixture, not a stale/empty state, and the numbers match
-the local fold.
+**Two success signals — do not report one for the other.**
+
+1. **Push-side (code half):** the command exits `0` and prints
+   `fundId=<slug> asOf=<the log's last event date> schemaVersion=2`; exactly
+   one row exists for that `(fund_id, as_of)`; the row's `report` JSONB
+   carries exactly the two keys `totals` and `dashboard`. This is verifiable
+   from the shell alone and says nothing about what a browser shows.
+2. **Gate-closing (the actual signal, map 8.1):** the deployed URL, opened on
+   the phone away from the desk, shows that same composition with that same
+   `asOf`. This depends on the console/cutover track completing in
+   parallel — step 1's fixture-row deletion, step 2's owner-credential
+   rotation, step 4's deploy, step 5's auth schema, step 6's password
+   rotation — and cannot happen from the push command alone. Exit `0` on
+   the push is **not** the gate closing; only the phone check is.
+
+**The soak — a condition to check, not a mood.** After the first push
+verifies clean (both signals above), keep running the push **by hand, once a
+day** — the cadence step 9 will eventually automate — and watch the dashboard
+for **at least one week** spanning at least one weekend:
+
+- Each day's `asOf` matches the durable log's actual last-event date — never
+  the run date, never frozen on a stale value while the log keeps growing.
+- A weekend or no-new-marks day shows the previous trading day's `asOf`
+  unchanged, per the second bullet above, and this is *not* logged as an
+  incident.
+- No push during the week fails, and no push writes more than one row per
+  day.
+- The numbers on the phone match the local fold by hand-checking at least
+  once mid-week.
+
+Only once all four hold across the full week does step 9 become something to
+consider — the soak is the acceptance gate step 9 is conditioned on, not a
+suggestion to automate immediately after the first clean push.
+
+**Verify:** record both signals from the section above, separately, with
+their dates — the push-side signal after each manual push during the soak
+week, and the gate-closing signal (phone, away from the desk) at least once
+after the console/cutover track has completed.
 
 ## 9. Automate the push into the existing daily schedule
 
