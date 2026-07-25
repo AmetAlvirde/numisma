@@ -2,7 +2,7 @@
  * Verify the D5 rate limit BY ATTACK, not by inspection (D10).
  *
  *   pnpm --filter @numisma/web auth:verify-limit
- *   pnpm --filter @numisma/web auth:verify-limit -- --url https://<preview>.vercel.app
+ *   pnpm --filter @numisma/web auth:verify-limit -- --url https://<deployed-url>
  *   pnpm --filter @numisma/web auth:verify-limit -- --requests 200 --concurrency 16
  *
  * Fires repeated `POST /api/auth/sign-in/email` attempts with a deliberately
@@ -19,7 +19,38 @@
  * exactly the failure this script defends against, so "nothing happened" is an
  * error, never a success.
  *
- * DO NOT run this against production.
+ * RUNNING THIS AGAINST PRODUCTION IS CORRECT — it is runbook step 7, and it is
+ * the only run that proves anything. This header used to say "DO NOT run this
+ * against production", written when the script was a local pre-deploy tool. D10
+ * then made deployed verification mandatory and the warning never caught up,
+ * leaving the tool forbidding exactly what the runbook mandates. It also
+ * contradicted `formatReport`'s own output, which tells the operator that only a
+ * deployed multi-instance run shows whether the counter is shared.
+ *
+ * WHAT A PRODUCTION RUN ACTUALLY COSTS, so the decision is made on facts:
+ * Better Auth keys the limit as `${ip}|${path}` (`createRateLimitKey` in
+ * @better-auth/core), and `customRules` REPLACES the global rule rather than
+ * stacking with it. So one run consumes exactly one bucket — `<your-ip>|
+ * /sign-in/email`, at window 300 / max 10 — and the cost is that NEW SIGN-INS
+ * from the running machine's IP get 429 for up to five minutes. Nothing else is
+ * touched: `/get-session` is a separate key, so an existing session (and the
+ * phone view) keeps working straight through the run; `/change-password` is a
+ * separate key, so the runbook's rotation step is unaffected; and the fake
+ * `.invalid` probe address cannot collide with the real account, which has no
+ * lockout to trigger in the first place (D5).
+ *
+ * PREFER A SECONDARY IP — a phone hotspot or tether. The self-limit then lands
+ * on a bucket the cutover is not using, and the only real cost above disappears.
+ *
+ * NOT A PREVIEW DEPLOYMENT, despite previews being the intuitive "safe" target.
+ * ADR-011 D2 puts Deployment Protection on previews and scopes the five app
+ * secrets Production-only, "verified unresolvable on Preview" — `AUTH_DATABASE_URL`
+ * among them. A preview therefore cannot reach `numisma_auth`, so the DB-backed
+ * counter this script exists to prove has no table to live in, and the protection
+ * layer answers 401 before the request reaches Better Auth at all. Both failures
+ * surface here as a plain non-429, indistinguishable from a genuinely dead
+ * limiter — a FALSE FAIL that reads exactly like a true one. Preview is not the
+ * cautious choice; it is the misleading one.
  */
 import {
   formatReport,
@@ -27,7 +58,12 @@ import {
   type VerifyConfig,
 } from "./verify-rate-limit-core.ts";
 
-/** Local dev server default: this script is a pre-deploy/preview tool. */
+/**
+ * Local dev server default — a convenience for a smoke run while iterating, NOT
+ * the intended target. A localhost PASS proves the limit is enabled and biting
+ * and proves nothing about the counter being shared across instances; pass
+ * `--url` to verify for real. `formatReport` prints that caveat on every run.
+ */
 const DEFAULT_BASE_URL = "http://localhost:3000";
 
 /**

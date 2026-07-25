@@ -180,6 +180,28 @@ RFC-2606-reserved, can never collide with a real account) and succeeds only
 when it observes an HTTP `429`. It cannot lock out or affect the real seeded
 account.
 
+**Run this from a phone hotspot or tether, not your usual connection.** Better
+Auth keys the limit as `${ip}|${path}`, and `customRules` replaces the global
+rule rather than stacking with it, so the run consumes exactly one bucket:
+`<the running machine's IP>|/sign-in/email`, at window 300 / max 10. The cost
+is that **new sign-ins from that IP get `429` for up to five minutes.** Using a
+secondary IP puts that bucket somewhere the rest of the cutover is not, and the
+cost disappears. Running it from your primary connection is still fine — it just
+means waiting out the window if you need to sign in again.
+
+What is **not** affected either way: `/get-session` is a separate key, so an
+existing session and the phone view keep working straight through the run;
+`/change-password` is a separate key, so step 6's rotation is untouched; and the
+real account has no lockout to trigger (D5).
+
+**Not a preview deployment.** Previews carry Deployment Protection and the five
+app secrets are Production-only, "verified unresolvable on Preview" (ADR-011 D2)
+— `AUTH_DATABASE_URL` among them. A preview cannot reach `numisma_auth`, so the
+DB-backed counter has no table to live in, and the protection layer answers
+`401` before the request reaches Better Auth. Both surface as a non-`429`, which
+this script cannot distinguish from a genuinely dead limiter: a preview run
+produces a **false `exit 1`** that reads exactly like a real one.
+
 **Why this step cannot be replaced by reading the config.** Better Auth
 resolves `rateLimit.enabled` to `isProduction` when unset, and defaults
 `storage` to `"memory"` — in-memory storage on Vercel is per-instance, so an
