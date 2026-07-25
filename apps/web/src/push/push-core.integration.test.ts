@@ -10,6 +10,7 @@
  * `pnpm test` still passes on machines without Postgres. To actually run it:
  *   NUMISMA_TEST_DATABASE_URL=postgres://amet@localhost:5432/numisma pnpm test
  */
+import { rm } from "node:fs/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Pool } from "pg";
 import type { CompositionReport } from "@numisma/engine";
@@ -20,7 +21,16 @@ import {
   TEST_DATABASE_URL_ENV,
   type ThrowawayDb,
 } from "../projection/pg-substrate.testkit.ts";
-import { deriveSnapshot, loadFixture, upsertSnapshot } from "./push-core.ts";
+import {
+  deriveSnapshot,
+  loadCurrentReport,
+  upsertSnapshot,
+} from "./push-core.ts";
+import {
+  loadFixture,
+  makeTempStore,
+  priceMarkedLine,
+} from "./push-core.fixtures.ts";
 
 const runIntegration = hasTestDatabase();
 if (!runIntegration) {
@@ -150,3 +160,83 @@ describe.skipIf(!runIntegration)(
     });
   },
 );
+
+/**
+ * The REAL-FOLD push, proven at the database (PRD #134 slice 2). The block above
+ * pushes the committed fixture; this one folds a throwaway durable log through
+ * `loadCurrentReport` — the exact source the `push` command now uses — and
+ * asserts the two properties the fixture block never did:
+ *
+ *  - R4: the pushed `report` JSONB carries EXACTLY `totals` and `dashboard`. The
+ *    payload's WIDTH, asserted on the stored row rather than on the derivation,
+ *    so the narrowing is proven where it matters — in the cloud.
+ *  - R3: a second push over the SAME unchanged log leaves exactly one row with an
+ *    identical payload; only `pushed_at` moves.
+ */
+describe.skipIf(!runIntegration)("real-fold push (folds the durable log)", () => {
+  let db: ThrowawayDb;
+  let writerPool: Pool;
+  let tempDir: string;
+  const savedDataDir = process.env.NUMISMA_DATA_DIR;
+
+  beforeAll(async () => {
+    db = await createThrowawayDb();
+    const writer = await db.createLoginRole("writer");
+    const reader = await db.createLoginRole("reader");
+    await provisionProjection(db.adminPool, {
+      writerRole: writer.role,
+      readerRole: reader.role,
+    });
+    writerPool = writer.pool();
+
+    const store = await makeTempStore(
+      `${priceMarkedLine("mark-1", "2026-06-05", 160)}\n` +
+        `${priceMarkedLine("mark-2", "2026-06-09", 175)}\n`,
+    );
+    tempDir = store.dir;
+    process.env.NUMISMA_DATA_DIR = store.dir;
+  }, 60_000);
+
+  afterAll(async () => {
+    if (savedDataDir === undefined) {
+      delete process.env.NUMISMA_DATA_DIR;
+    } else {
+      process.env.NUMISMA_DATA_DIR = savedDataDir;
+    }
+    await rm(tempDir, { recursive: true, force: true });
+    await db?.drop();
+  });
+
+  it("R4: the pushed report JSONB carries exactly `totals` and `dashboard`", async () => {
+    const report = await loadCurrentReport();
+    // Sanity: the fold really ran — asOf is the LATER event's date, not genesis.
+    expect(report.dashboard.summary.asOf).toBe("2026-06-09");
+    // And the wide report carries more than the payload is allowed to.
+    expect(Object.keys(report).length).toBeGreaterThan(2);
+
+    const { fundId, asOf } = await upsertSnapshot(writerPool, report);
+    expect(asOf).toBe("2026-06-09");
+
+    const stored = await readRow(writerPool, fundId, asOf);
+    expect(Object.keys(stored.report).sort()).toEqual(["dashboard", "totals"]);
+  });
+
+  it("R3: a second push over the unchanged log — one row, same payload, later pushed_at", async () => {
+    const first = await loadCurrentReport();
+    const { fundId, asOf } = await upsertSnapshot(writerPool, first);
+    expect(await rowCount(writerPool)).toBe(1);
+    const before = await readRow(writerPool, fundId, asOf);
+
+    await new Promise((r) => setTimeout(r, 25));
+
+    // Fold the SAME log again (no new events) and push again.
+    const second = await loadCurrentReport();
+    await upsertSnapshot(writerPool, second);
+
+    expect(await rowCount(writerPool)).toBe(1);
+    const after = await readRow(writerPool, fundId, asOf);
+    expect(after.as_of).toBe(before.as_of);
+    expect(after.report).toEqual(before.report);
+    expect(after.pushed_at.getTime()).toBeGreaterThan(before.pushed_at.getTime());
+  });
+});

@@ -29,7 +29,8 @@
  */
 import { describe, expect, it } from "vitest";
 import type { CompositionReport } from "@numisma/engine";
-import { deriveSnapshot, loadFixture } from "./push-core.ts";
+import { deriveSnapshot } from "./push-core.ts";
+import { loadFixture } from "./push-core.fixtures.ts";
 import { toProjectionReport } from "../projection/contract.ts";
 
 /**
@@ -190,7 +191,7 @@ describe("D8 forbidden-key contract (what may not reach the cloud)", () => {
     ]);
   });
 
-  it("narrows the shipped fixture the same way (the real push input)", async () => {
+  it("narrows the shipped fixture the same way (a wide real-shaped report)", async () => {
     const fixture = await loadFixture();
     expect(Object.keys(toProjectionReport(fixture)).sort()).toEqual([
       "dashboard",

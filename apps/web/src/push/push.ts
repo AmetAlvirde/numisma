@@ -1,14 +1,16 @@
 /**
  * Push shell (Deliverable C) — headless, price-feed-style script (NOT a package).
  *
- * Loads the fixture CompositionReport and idempotently upserts it into the
- * projection DB using the WRITE credential (PROJECTION_WRITE_DATABASE_URL). The
+ * Folds the REAL durable event log (`NUMISMA_DATA_DIR`) into a CompositionReport
+ * and idempotently upserts it into the projection DB using the WRITE credential
+ * (PROJECTION_WRITE_DATABASE_URL). There is no fixture path and no flag that
+ * restores one: this command can only push real data. The
  * pure derivation and the actual upsert SQL live in `push-core.ts` (importable,
  * unit- and integration-tested); this file is just the argv + credential +
  * process-exit wiring around them, so importing `push-core.ts` never runs the
  * script.
  *
- *   pnpm --filter @numisma/web push            # upsert the fixture snapshot
+ *   pnpm --filter @numisma/web push            # fold the log, upsert the snapshot
  *   pnpm --filter @numisma/web push -- --init  # create table first, then upsert
  *   pnpm --filter @numisma/web db:init         # create table only (no upsert)
  *
@@ -16,7 +18,7 @@
  */
 import { Pool } from "pg";
 import { readSchemaDdl } from "../projection/provision.ts";
-import { loadFixture, upsertSnapshot } from "./push-core.ts";
+import { loadCurrentReport, upsertSnapshot } from "./push-core.ts";
 
 /**
  * Apply the DDL (composition_snapshot table) through the driver for one-command
@@ -37,7 +39,10 @@ async function main(): Promise<void> {
     throw new Error("PROJECTION_WRITE_DATABASE_URL is not set");
   }
 
-  const report = await loadFixture();
+  // Fold BEFORE the Pool exists. A partial/corrupt log throws here, so the
+  // process exits non-zero having opened no connection and written nothing —
+  // including on the `--init` path. Do not move this below `new Pool(...)`.
+  const report = await loadCurrentReport();
 
   const pool = new Pool({ connectionString });
   try {
