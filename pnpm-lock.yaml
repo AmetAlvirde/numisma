@@ -53,6 +53,9 @@ importers:
       '@numisma/event-store':
         specifier: workspace:*
         version: link:../../packages/event-store
+      '@numisma/preferences':
+        specifier: workspace:*
+        version: link:../../packages/preferences
       '@tanstack/react-query':
         specifier: 5.101.2
         version: 5.101.2(react@19.2.7)
@@ -100,6 +103,12 @@ importers:
   packages/engine: {}
 
   packages/event-store:
+    dependencies:
+      '@numisma/engine':
+        specifier: workspace:*
+        version: link:../engine
+
+  packages/preferences:
     dependencies:
       '@numisma/engine':
         specifier: workspace:*
