@@ -79,15 +79,12 @@ describe("blast radius: @numisma/preferences is confined to the push path", () =
     ).toEqual([]);
   });
 
-  // SKIPPED UNTIL #148. The teeth assertion below is the exact counterpart of
-  // event-store-import-guard.test.ts's second case, and it is written now rather than
-  // deferred so the guard's vacuity is a KNOWN, NAMED gap instead of an invisible one.
-  // It cannot pass in slice #147: this slice only makes reading the sidecar from
-  // `apps/web` POSSIBLE — the dependency is declared and the confinement is enforced,
-  // but nothing under `push/` reads it until slice #148 stamps `reserveTargetPct` onto
-  // the glance block. Faking an import to turn this green would defeat the purpose of
-  // the check. #148 un-skips this line; nothing else about it should need to change.
-  it.skip("guards a tree where the import actually occurs (assertion has teeth) — un-skip in #148", () => {
+  // UN-SKIPPED BY #148, exactly as slice #147 said it would be and with nothing else
+  // about it changed. It is the counterpart of event-store-import-guard.test.ts's
+  // second case: slice #147 only made reading the sidecar from `apps/web` POSSIBLE,
+  // so the confinement above was vacuously true; #148's `loadReserveFloorAsOf` in
+  // `push/push-core.ts` is the first real reader, which is what gives the guard teeth.
+  it("guards a tree where the import actually occurs (assertion has teeth)", () => {
     // Guard against a false pass: if the push path stopped importing the reader
     // (or the scan stopped matching import syntax), the check above would pass
     // vacuously while proving nothing.

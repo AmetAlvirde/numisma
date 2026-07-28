@@ -46,7 +46,10 @@ function DashboardPage() {
     );
   }
 
-  return <DashboardView report={result.report} />;
+  // Slice #148 widened the reader to return `{ latest, anchors }`. This page keeps
+  // rendering exactly what it always did, off `latest`; `anchors` is delivery for
+  // D4's named reference and is consumed by slice 4's glance, not here.
+  return <DashboardView report={result.latest.report} />;
 }
 
 function DashboardView({ report }: { report: ProjectionReport }) {

@@ -30,6 +30,7 @@ import {
   loadFixture,
   makeTempStore,
   priceMarkedLine,
+  TEST_GLANCE,
 } from "./push-core.fixtures.ts";
 
 const runIntegration = hasTestDatabase();
@@ -104,11 +105,11 @@ describe.skipIf(!runIntegration)(
     });
 
     it("two pushes of the same snapshot yield exactly ONE row, pushed_at refreshed", async () => {
-      const { fundId, asOf } = deriveSnapshot(report);
+      const { fundId, asOf } = deriveSnapshot(report, TEST_GLANCE);
 
       // First push: empty table → one row.
       expect(await rowCount(writerPool)).toBe(0);
-      await upsertSnapshot(writerPool, report);
+      await upsertSnapshot(writerPool, report, TEST_GLANCE);
       expect(await rowCount(writerPool)).toBe(1);
       const first = await readRow(writerPool, fundId, asOf);
 
@@ -119,7 +120,7 @@ describe.skipIf(!runIntegration)(
 
       // Second push of the SAME (fund_id, as_of): still exactly one row (no
       // duplicate), and pushed_at is bumped by the DO UPDATE.
-      await upsertSnapshot(writerPool, report);
+      await upsertSnapshot(writerPool, report, TEST_GLANCE);
       expect(await rowCount(writerPool)).toBe(1);
       const second = await readRow(writerPool, fundId, asOf);
 
@@ -129,7 +130,7 @@ describe.skipIf(!runIntegration)(
     });
 
     it("DO UPDATE refreshes report + schema_version on conflict (no delete, no dup)", async () => {
-      const { fundId, asOf } = deriveSnapshot(report);
+      const { fundId, asOf } = deriveSnapshot(report, TEST_GLANCE);
 
       // Seed a row on the SAME conflict key but with a STALE report + bogus
       // schema_version, so the upsert's UPDATE branch has something observable
@@ -147,7 +148,7 @@ describe.skipIf(!runIntegration)(
       expect(await rowCount(writerPool)).toBe(1);
 
       // Now push the real fixture through upsertSnapshot: same key → UPDATE.
-      const derived = await upsertSnapshot(writerPool, report);
+      const derived = await upsertSnapshot(writerPool, report, TEST_GLANCE);
       expect(await rowCount(writerPool)).toBe(1); // still one row: no duplicate
 
       const after = await readRow(writerPool, fundId, asOf);
@@ -207,23 +208,27 @@ describe.skipIf(!runIntegration)("real-fold push (folds the durable log)", () =>
     await db?.drop();
   });
 
-  it("R4: the pushed report JSONB carries exactly `totals` and `dashboard`", async () => {
+  it("R4: the pushed report JSONB carries exactly `totals`, `dashboard` and `glance`", async () => {
     const report = await loadCurrentReport();
     // Sanity: the fold really ran — asOf is the LATER event's date, not genesis.
     expect(report.dashboard.summary.asOf).toBe("2026-06-09");
     // And the wide report carries more than the payload is allowed to.
-    expect(Object.keys(report).length).toBeGreaterThan(2);
+    expect(Object.keys(report).length).toBeGreaterThan(3);
 
-    const { fundId, asOf } = await upsertSnapshot(writerPool, report);
+    const { fundId, asOf } = await upsertSnapshot(writerPool, report, TEST_GLANCE);
     expect(asOf).toBe("2026-06-09");
 
     const stored = await readRow(writerPool, fundId, asOf);
-    expect(Object.keys(stored.report).sort()).toEqual(["dashboard", "totals"]);
+    expect(Object.keys(stored.report).sort()).toEqual([
+      "dashboard",
+      "glance",
+      "totals",
+    ]);
   });
 
   it("R3: a second push over the unchanged log — one row, same payload, later pushed_at", async () => {
     const first = await loadCurrentReport();
-    const { fundId, asOf } = await upsertSnapshot(writerPool, first);
+    const { fundId, asOf } = await upsertSnapshot(writerPool, first, TEST_GLANCE);
     expect(await rowCount(writerPool)).toBe(1);
     const before = await readRow(writerPool, fundId, asOf);
 
@@ -231,7 +236,7 @@ describe.skipIf(!runIntegration)("real-fold push (folds the durable log)", () =>
 
     // Fold the SAME log again (no new events) and push again.
     const second = await loadCurrentReport();
-    await upsertSnapshot(writerPool, second);
+    await upsertSnapshot(writerPool, second, TEST_GLANCE);
 
     expect(await rowCount(writerPool)).toBe(1);
     const after = await readRow(writerPool, fundId, asOf);
