@@ -209,6 +209,21 @@ describe("per-row suppression, rendered as absence", () => {
     // …and the rows themselves still stand: a suppressed NAV is not a suppressed row.
     expect(view.rows.get(rowIds(latest)[0]!)!.rendered).toBe(true);
   });
+
+  it("withholds the FUND VALUE ITSELF, as a fact of its own", async () => {
+    // THE ALTITUDE TRAP, stated so it cannot be re-collapsed later. This is the same
+    // boolean as `percentOfFundRendered` today by coincidence of CAUSE, not of
+    // MEANING: one governs the NAV slot on the card, the other a column of ratios
+    // that merely happen to share NAV as a denominator. Naming the NAV slot after the
+    // percentage column would bake the coincidence in, and the first cause that took
+    // one without the other would find the surface lying. Two facts, one check.
+    const anchors = await historyThrough("2026-07-27");
+    const latest = anchors[anchors.length - 1]!;
+    expect(composeBigPicture(latest, anchors).fundValueRendered).toBe(true);
+
+    latest.report.glance.suppressed.push("summary.fundValueUsd");
+    expect(composeBigPicture(latest, anchors).fundValueRendered).toBe(false);
+  });
 });
 
 describe("the real history, after the push learned to suppress rows", () => {
@@ -264,5 +279,24 @@ describe("the /big-picture wiring", () => {
     expect(table).toMatch(/vs \{view\.costBasisLabel\}/);
     // And the percentage column is gated on the page-level NAV fact.
     expect(table).toMatch(/view\.percentOfFundRendered/);
+  });
+
+  it("withholds the NAV, and the P&L that divides by it, on the card above", () => {
+    // `SummaryCard` was the ONE renderer in the app that never consulted
+    // `glance.suppressed`, and it sits directly ABOVE tables that do. On 2026-06-30 —
+    // 13 of 13 marks missing, 27 rows suppressed — it printed a fund value of
+    // $98,321.96 while every `% of fund` cell beneath it was an em dash. The glance
+    // showed no current mark; this card showed the number the glance refused to.
+    const page = read("routes/big-picture.tsx");
+    expect(page).toMatch(/<SummaryCard[\s\S]*?fundValueRendered=\{view\.fundValueRendered\}/);
+
+    const card = read("components/SummaryCard.tsx");
+    // BOTH metrics gate on the one fact — the NAV, and the unrealized P&L that
+    // divides by it. The P&L is worse than the NAV, not better: it carries no
+    // suppression key of its own, so nothing upstream could ever withhold it, and it
+    // renders a wrong numerator over a wrong denominator. It is derived, so the
+    // reader derives its absence. More than one mention, so this cannot pass on the
+    // prop merely being received and ignored.
+    expect(card.match(/fundValueRendered/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
   });
 });
