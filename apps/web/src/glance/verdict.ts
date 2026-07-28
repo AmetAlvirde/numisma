@@ -476,6 +476,23 @@ function reserveSlot(
  * launchd anchors daily. Across the log's sparse first fortnight this under-counts —
  * a breach spanning 06-26 → 06-30 reads as "2nd day". Naming the ANCHOR count is the
  * honest number available: the surface cannot claim a day it never observed.
+ *
+ * A SUPPRESSED RESERVE ENDS THE RUN, which is the second and sharper instance of that
+ * same rule. The first is a day that produced no anchor at all; this is a day whose
+ * anchor exists but whose Reserve number the surface refused to show. Suppression is a
+ * KEY LIST, not a redaction — `toProjectionReport` copies `report.dashboard` wholesale,
+ * so a suppressed anchor still carries a real `percentOfFund` on the wire — so a
+ * counter that did not check would extend the breach through a number R8 forbids the
+ * surface from asserting off.
+ *
+ * BOTH DIRECTIONS OF ERROR WERE WEIGHED. Counting the suppressed day overstates the
+ * breach. Breaking risks the opposite: if that day's wire value happened to sit at or
+ * above the floor, the run would have broken there anyway — but where it was genuinely
+ * below, a real multi-day breach now reads as day one, the "a `no` that isn't" class R3
+ * exists to prevent. Breaking is still the honest floor, because the understatement is
+ * bounded and visible (the trigger still FIRES today, only the duration shrinks) while
+ * the overstatement asserts a fact off a number nobody was shown. The count therefore
+ * means consecutive OBSERVED breach days.
  */
 function breachDurationDays(
   anchors: readonly SnapshotAnchor[],
@@ -490,7 +507,8 @@ function breachDurationDays(
   for (const anchor of history) {
     const floor = anchor.report.glance.reserveTargetPct;
     const pct = anchor.report.dashboard.summary.reserve?.percentOfFund;
-    if (floor === undefined || pct === undefined || pct >= floor) break;
+    const withheld = anchor.report.glance.suppressed.includes("summary.reserve");
+    if (floor === undefined || pct === undefined || withheld || pct >= floor) break;
     days += 1;
   }
   return days;
