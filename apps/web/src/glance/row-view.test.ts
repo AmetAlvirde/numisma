@@ -279,6 +279,13 @@ describe("the /big-picture wiring", () => {
     expect(table).toMatch(/vs \{view\.costBasisLabel\}/);
     // And the percentage column is gated on the page-level NAV fact.
     expect(table).toMatch(/view\.percentOfFundRendered/);
+    // …naming the PAGE's cause, not the row's. The suppressed percentage prints
+    // beside rows whose own mark arrived — on 2026-07-04, 14 of 31 rows rendered
+    // their value perfectly — so "no current mark" would be false of exactly the
+    // rows most likely to be read. An absence earns its place by carrying diagnostic
+    // information; one carrying WRONG information is worse than a bare em dash.
+    expect(table).toMatch(/<Absent reason="no-fund-value" \/>/);
+    expect(table).not.toMatch(/<Absent reason="unexpected-absence" \/>/);
   });
 
   it("withholds the NAV, and the P&L that divides by it, on the card above", () => {

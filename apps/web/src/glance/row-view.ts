@@ -56,13 +56,21 @@ import { referenceLabel, resolveReferenceAnchor } from "./verdict.ts";
  * altitude, not a parallel vocabulary. The two that are new are genuinely new:
  * `no-cost-basis` is a reference this row never had, and `no-reference-row` is a row
  * the reference anchor never had.
+ *
+ * `no-fund-value` is the PAGE-LEVEL cause, and it is the only one here that is not
+ * about the row. A `% of fund` cell in a row whose own mark arrived perfectly well is
+ * blank because the DENOMINATOR is missing, not because the row is — so saying "no
+ * current mark" there states a cause that is false of that row. An absence earns its
+ * place by carrying diagnostic information; one carrying wrong information is worse
+ * than a bare em dash.
  */
 export type RowAbsenceReason =
   | "unexpected-absence"
   | "reference-withheld"
   | "no-earlier-anchor"
   | "no-reference-row"
-  | "no-cost-basis";
+  | "no-cost-basis"
+  | "no-fund-value";
 
 /** A delta that renders, or an absence that names its cause. */
 export interface RowDelta {
