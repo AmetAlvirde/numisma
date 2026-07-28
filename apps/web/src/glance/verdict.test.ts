@@ -227,10 +227,12 @@ describe("R3/R4 — the synthesized Reserve floor breach", () => {
     );
   });
 
-  it("declines when the Reserve number itself is suppressed", async () => {
-    // Not composition rule 1 (which governs COMPARATIVE triggers only) — this is the
-    // simpler rule that a trigger may not assert a breach off a number the surface
-    // refuses to show.
+  it("R8: declines when the Reserve number itself is suppressed", async () => {
+    // R8 — a trigger may not assert a breach off a number the surface refuses to
+    // show. NOT composition rule 1 and not a generalization of it: rule 1 is
+    // comparative and governs the REFERENCE anchor, while R8 is about the CURRENT
+    // anchor's own number. It is the join of two things #146 already says — "suppress
+    // the slot, decline the trigger" (R5) and "an absent mark suppresses Reserve %".
     const anchors = await historyThrough("2026-07-27");
     const breached = withReserve(anchors[anchors.length - 1]!, 8.2);
     breached.report.glance.suppressed = [

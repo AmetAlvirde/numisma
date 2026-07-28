@@ -228,6 +228,26 @@ export function resolveNearestAnchor(
   return best;
 }
 
+/**
+ * THE reference anchor for `latest` — the nearest anchor at or before the day BEFORE
+ * it. On a daily-anchored history that is simply yesterday; across the log's sparse
+ * first fortnight it steps back further, and the caller names wherever it landed.
+ *
+ * Factored out of {@link computeVerdict} (slice #151) because `/big-picture`'s
+ * per-row deltas resolve the SAME reference: the Change slot and the rows below it
+ * disagreeing about which day they compare against would be a surface that contradicts
+ * itself, and one function is a cheaper guarantee than two tests.
+ */
+export function resolveReferenceAnchor(
+  anchors: readonly SnapshotAnchor[],
+  latest: SnapshotAnchor,
+): SnapshotAnchor | undefined {
+  return resolveNearestAnchor(
+    anchors.filter((anchor) => asOfSortKey(anchor.asOf) < asOfSortKey(latest.asOf)),
+    addDays(latest.asOf, -1),
+  );
+}
+
 /* ────────────────────────────────── the verdict ───────────────────────────────── */
 
 /**
@@ -254,13 +274,8 @@ export function computeVerdict(
   // pushed "staleness" would be stale itself the moment the push finished.
   const staleDays = daysBetween(summary.asOf, calendarDateOf(now));
 
-  // The reference: the nearest anchor at or before the day BEFORE this one. On a
-  // daily-anchored history that is simply yesterday; on the log's sparse first
-  // fortnight it steps back further, and the slot names wherever it landed.
-  const reference = resolveNearestAnchor(
-    anchors.filter((anchor) => asOfSortKey(anchor.asOf) < asOfSortKey(latest.asOf)),
-    addDays(latest.asOf, -1),
-  );
+  // The reference — the same one `/big-picture`'s per-row deltas resolve.
+  const reference = resolveReferenceAnchor(anchors, latest);
 
   const slots = {
     fundValue: fundValueSlot(summary, suppressed),
@@ -299,10 +314,21 @@ export function computeVerdict(
   // every assertion behind this branch is against a SYNTHESIZED anchor. Say so rather
   // than leaning on a prototype for validation it cannot give.
   //
-  // Composition rule 1 does NOT govern this trigger: it is a level test against the
-  // current anchor with no reference anchor to withhold. What does govern it is the
-  // simpler rule that a trigger may not assert a breach off a number the surface
-  // refuses to show — hence the `slots.reserve.rendered` gate.
+  // Composition rule 1 does NOT govern this trigger, and must not be described as
+  // doing so: rule 1 is COMPARATIVE and is about the REFERENCE anchor, while a level
+  // test has no reference anchor to withhold. What governs it is R8, which until
+  // slice #151 was an unnamed "simpler rule" in this comment:
+  //
+  //   R8 — A TRIGGER MAY NOT ASSERT A BREACH OFF A NUMBER THE SURFACE REFUSES TO
+  //   SHOW. It is about the CURRENT anchor's own number, and it is the
+  //   `slots.reserve.rendered` gate below.
+  //
+  // R8 COMPLETES THE SPEC RATHER THAN DEPARTING FROM IT. #146 already says "suppress
+  // the slot, decline the trigger" for the missing-policy cause (R5), and separately
+  // says an unexpected mark absence suppresses Reserve % (because its denominator is
+  // NAV). R8 is the JOIN of those two: whatever the cause, if the Reserve slot does
+  // not render, the trigger does not fire. Without it, the second cause would print
+  // "Reserve is 8.2%, below its 10% floor" beside an em dash where the 8.2% should be.
   if (slots.reserve.rendered && slots.reserve.floorPct !== undefined) {
     const pct = slots.reserve.percentOfFund!;
     if (pct < slots.reserve.floorPct) {

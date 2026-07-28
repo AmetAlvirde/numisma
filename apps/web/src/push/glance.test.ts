@@ -19,7 +19,11 @@
 import { describe, expect, it } from "vitest";
 import { access } from "node:fs/promises";
 import type { CompositionReport, FundReviewData } from "@numisma/engine";
-import { buildCompositionReport, instrumentsForSource } from "@numisma/engine";
+import {
+  buildCompositionReport,
+  instrumentsForSource,
+  parseFundReview,
+} from "@numisma/engine";
 import { loadFoldedReview, resolveEventStorePaths } from "@numisma/event-store";
 import { anchorAt, loadAnchorFixture } from "./anchor-fixture.ts";
 import { NAV_JITTER_PP } from "./fixture-synthesis.ts";
@@ -70,6 +74,15 @@ function constructedAnchor(
       name: `Test ${id}`,
     })),
     closes: markedIds.map((id) => ({ instrumentId: id, asOf, price: 1 })),
+    // Empty rather than absent (slice #151): the builder now also composes the row
+    // dependency map, which walks the fold's positions and reserves. A fund with no
+    // canonical lines has no ROWS to suppress, which is exactly right for these
+    // cases — they are about the three HEADER keys, and they keep asserting the
+    // header key list alone.
+    positions: [],
+    reserves: [],
+    portfolios: [],
+    accounts: [],
   } as unknown as FundReviewData;
 
   const report = {
@@ -481,5 +494,215 @@ describe("the venue calendar", () => {
     const glance = buildGlanceBlock(data, report, 10);
     expect(glance.feedGap.expected).toBe(13);
     expect(glance.feedGap.missing).toHaveLength(9);
+  });
+});
+
+/**
+ * PER-ROW SUPPRESSION (slice #151) — the load-bearing case of the whole slice, and
+ * the one the acceptance criteria name: *a missing crypto mark suppresses the
+ * instrument row AND the tempo / account / tier rows that aggregate it, and leaves
+ * the rows that do not.*
+ *
+ * WHY THE FIXTURE IS SHAPED THE WAY IT IS. The claim under test is that suppression
+ * comes from `composeRowDependencies` — a real map over the fold — and not from
+ * matching an instrument id against a row id. So the fixture is built to make a
+ * name-prefix implementation fail in BOTH directions at once:
+ *
+ *  - `account:btc` is an account LITERALLY NAMED `btc` that holds no BTC (only ETH).
+ *    A prefix guess suppresses it. The map must not: its number is fine.
+ *  - `tempo:Storage`, `account:vault`, `portfolio:alpha` and `tier:c1` hold nothing
+ *    BUT BTC and say so nowhere in their ids. A prefix guess leaves them standing —
+ *    which is the worse error: a number rendered off a mark that never arrived.
+ *
+ * The mechanical anti-coincidence assertion is spelled out at the end: of the eleven
+ * row ids in play, EXACTLY ONE contains the substring "btc" that is not the
+ * instrument row, and it is the one row that must NOT be suppressed.
+ */
+describe("per-row suppression: a missing crypto mark, and what it poisons", () => {
+  /** A Tuesday — every venue is open, so all thirteen instruments are expected. */
+  const ANCHOR = "2026-07-28";
+  /** Every registered instrument marks on the anchor EXCEPT btc. */
+  const MARKED = ALL_IDS.filter((id) => id !== "btc");
+
+  const lots = (quantity: number, cost: number, tier: string) => [
+    { quantity, cost, tier },
+  ];
+
+  const REVIEW: unknown = {
+    fund: { id: "row-suppression", name: "Row Suppression Fund", baseCurrency: "USD" },
+    review: { asOf: ANCHOR, usdMxn: 17.31 },
+    portfolios: [
+      { id: "alpha", name: "Alpha" },
+      { id: "beta", name: "Beta" },
+    ],
+    accounts: [
+      // THE DECOY. Named `btc`, holds ETH.
+      { id: "btc", name: "Confusingly Named Desk", platform: "XTB", currency: "USD" },
+      { id: "vault", name: "Vault", platform: "T1", currency: "USD" },
+      { id: "desk", name: "Equities Desk", platform: "GBM", currency: "USD" },
+      { id: "cashbox", name: "Cash", platform: "XTB", currency: "USD" },
+    ],
+    instruments: ALL_IDS.map((id) => ({
+      id,
+      name: `Test ${id}`,
+      symbol: id.toUpperCase(),
+      currency: "USD",
+    })),
+    reserves: [
+      {
+        id: "cash-beta",
+        portfolioId: "beta",
+        tempo: "Reserve",
+        executionMode: "live",
+        accountId: "cashbox",
+        currency: "USD",
+        amount: 5000,
+      },
+    ],
+    positions: [
+      {
+        id: "btc-in-the-vault",
+        portfolioId: "alpha",
+        tempo: "Storage",
+        executionMode: "live",
+        accountId: "vault",
+        instrumentId: "btc",
+        direction: "long",
+        markPrice: 100000,
+        currency: "USD",
+        lots: lots(0.1, 8000, "c1"),
+      },
+      {
+        id: "eth-in-the-btc-account",
+        portfolioId: "beta",
+        tempo: "Trading",
+        executionMode: "live",
+        accountId: "btc",
+        instrumentId: "eth",
+        direction: "long",
+        markPrice: 3000,
+        currency: "USD",
+        lots: lots(2, 5000, "c2"),
+      },
+      {
+        id: "aapl-on-the-desk",
+        portfolioId: "beta",
+        tempo: "Trading",
+        executionMode: "live",
+        accountId: "desk",
+        instrumentId: "aapl",
+        direction: "long",
+        markPrice: 200,
+        currency: "USD",
+        lots: lots(10, 1500, "c2"),
+      },
+    ],
+    closes: MARKED.map((id) => ({ instrumentId: id, asOf: ANCHOR, price: 1 })),
+  };
+
+  function fold(): { data: FundReviewData; report: CompositionReport } {
+    const parsed = parseFundReview(REVIEW);
+    if (parsed.kind !== "ok") {
+      throw new Error(`the per-row fixture does not parse: ${parsed.kind}`);
+    }
+    return { data: parsed.value, report: buildCompositionReport(parsed.value) };
+  }
+
+  const { data, report } = fold();
+  const glance = buildGlanceBlock(data, report, 10);
+  const suppressed = new Set(glance.suppressed);
+
+  it("names btc, and only btc, as the shortfall", () => {
+    // False-pass guard: if a second instrument were also missing, the split below
+    // would be about something other than the case the criteria name.
+    expect(glance.feedGap.missing.map((m) => m.rowId)).toEqual(["instrument:btc"]);
+  });
+
+  it("suppresses the instrument row AND every aggregate row that holds it", () => {
+    for (const rowId of [
+      "instrument:btc",
+      "tempo:Storage",
+      "account:vault",
+      "portfolio:alpha",
+      "tier:c1",
+    ]) {
+      expect([...suppressed], rowId).toContain(rowId);
+    }
+  });
+
+  it("leaves every row that does NOT hold it — including the decoy account", () => {
+    for (const rowId of [
+      "account:btc", // named for it, holds none of it
+      "instrument:eth",
+      "instrument:aapl",
+      "instrument:reserve",
+      "tempo:Trading",
+      "tempo:Reserve",
+      "account:desk",
+      "account:cashbox",
+      "portfolio:beta",
+      "tier:c2",
+    ]) {
+      expect([...suppressed], rowId).not.toContain(rowId);
+    }
+  });
+
+  it("cannot be passing by name coincidence — the ids say so mechanically", () => {
+    // THE ANTI-COINCIDENCE ASSERTION. Every SUPPRESSED aggregate row id is free of
+    // the string "btc", so no substring rule could have produced them; and the ONE
+    // row id that does contain "btc" while not being the instrument row is precisely
+    // the row left standing. A prefix implementation fails this test in both
+    // directions, which is the only way to prove the map is doing the work.
+    const aggregates = [...suppressed].filter(
+      (id) => id !== "instrument:btc" && !id.startsWith("summary."),
+    );
+    expect(aggregates.length).toBeGreaterThan(0);
+    for (const rowId of aggregates) {
+      expect(rowId, `${rowId} must not name the instrument`).not.toContain("btc");
+    }
+    const rowIds = report.dashboard.sections.flatMap((s) => s.rows.map((r) => r.id));
+    expect(rowIds.filter((id) => id.includes("btc")).sort()).toEqual([
+      "account:btc",
+      "instrument:btc",
+    ]);
+    expect(suppressed.has("account:btc")).toBe(false);
+  });
+
+  it("keeps the three header keys first, then the rows — one flat key list, no v4", () => {
+    // Slice 2 chose a key LIST over N booleans precisely so this slice costs no
+    // schema change. Assert the encoding, not just the contents.
+    expect(glance.suppressed.slice(0, 3)).toEqual([
+      SUPPRESSION_KEYS.fundValue,
+      SUPPRESSION_KEYS.change,
+      SUPPRESSION_KEYS.reserve,
+    ]);
+    expect(new Set(glance.suppressed).size).toBe(glance.suppressed.length);
+    expect(glance.suppressed.every((key) => typeof key === "string")).toBe(true);
+  });
+
+  it("suppresses NO row when every mark arrived", () => {
+    // The other half of the claim: row suppression is caused by the absence, not by
+    // the presence of a dependency map. Mark btc too and the whole table stands.
+    const complete = {
+      ...(REVIEW as Record<string, unknown>),
+      closes: ALL_IDS.map((id) => ({ instrumentId: id, asOf: ANCHOR, price: 1 })),
+    };
+    const parsed = parseFundReview(complete);
+    if (parsed.kind !== "ok") throw new Error(parsed.kind);
+    const clean = buildGlanceBlock(parsed.value, buildCompositionReport(parsed.value), 10);
+    expect(clean.feedGap.missing).toEqual([]);
+    expect(clean.suppressed).toEqual([]);
+  });
+
+  it("every suppressed row id is a row the payload actually carries", () => {
+    // A key naming a row the reader will never see is dead weight the reader cannot
+    // act on — and would hide a drift between the map and the report.
+    const rowIds = new Set(
+      report.dashboard.sections.flatMap((s) => s.rows.map((r) => r.id)),
+    );
+    for (const key of glance.suppressed) {
+      if (key.startsWith("summary.")) continue;
+      expect([...rowIds], key).toContain(key);
+    }
   });
 });

@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import type { ProjectionReport } from "../projection/contract.ts";
+import type { SnapshotAnchor } from "../projection/contract.ts";
+import { composeBigPicture } from "../glance/row-view.ts";
 import { getDashboard } from "../lib/dashboard.ts";
 import { Shell } from "../components/Shell.tsx";
 import { SummaryCard } from "../components/SummaryCard.tsx";
@@ -56,10 +57,27 @@ function BigPicturePage() {
     );
   }
 
-  return <BigPictureView report={result.latest.report} />;
+  return <BigPictureView latest={result.latest} anchors={result.anchors} />;
 }
 
-function BigPictureView({ report }: { report: ProjectionReport }) {
+/**
+ * The composition tables, with slice #151's two additions: per-row provenance and
+ * named-reference deltas.
+ *
+ * Both come from ONE pure call. `composeBigPicture` reads the push's `glance.suppressed`
+ * list — which is where the per-row dependency map's CONCLUSIONS arrive, the map itself
+ * having stayed on the machine (D8) — and resolves the same reference anchor the glance
+ * header names, so the two surfaces can never claim different days.
+ */
+function BigPictureView({
+  latest,
+  anchors,
+}: {
+  latest: SnapshotAnchor;
+  anchors: SnapshotAnchor[];
+}) {
+  const report = latest.report;
+  const view = composeBigPicture(latest, anchors);
   return (
     <Shell>
       <p className="crumb">
@@ -70,7 +88,7 @@ function BigPictureView({ report }: { report: ProjectionReport }) {
         usdMxn={report.totals.usdMxn}
       />
       {report.dashboard.sections.map((section) => (
-        <SectionTable key={section.id} section={section} />
+        <SectionTable key={section.id} section={section} view={view} />
       ))}
     </Shell>
   );
