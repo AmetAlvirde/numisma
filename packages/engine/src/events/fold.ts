@@ -349,6 +349,44 @@ export function foldEvents(
         applyToReserve(reserves, event.fromReserveId, [{ tier: event.tier, amount: -event.amount }]);
         applyToReserve(reserves, event.toReserveId, [{ tier: event.tier, amount: event.amount }]);
         break;
+      case "ReserveOpened":
+        // Birth an EMPTY Reserve. NAV-neutral BY CONSTRUCTION: the event carries no
+        // amount and no lots, so there is nothing here that could move the fund — the
+        // zero is not a validated default, it is the only value expressible.
+        //
+        // `lots: []` is deliberate and is NOT the same as omitting `lots`.
+        // `applyReserveDelta` early-returns on a falsy `lots` ("untiered: amount is the
+        // whole truth"), so a lots-LESS Reserve would swallow the `tier` of every
+        // incoming Deposit/Transfer — laundering exactly the provenance the Transfer
+        // verb exists to preserve. An EMPTY ARRAY is truthy, so the first credit pushes
+        // a real tier lot. Canonical normalization reads length-0 as untiered, so a
+        // Reserve that is born and never funded still rolls up correctly.
+        //
+        // This switch has no `default` and no return obligation: omitting this arm
+        // compiles clean and silently drops the Reserve at fold.
+        reserves.set(event.reserve.id, { ...event.reserve, amount: 0, lots: [] });
+        break;
+      default: {
+        // EXHAUSTIVENESS LATCH — compile-time first, fail-loud second. The fold's
+        // switch has no return obligation, so a forgotten verb used to compile clean
+        // and silently drop the event from the fold — the read path, where a dropped
+        // event is invisible rather than loud. The `never` ASSIGNMENT is the latch
+        // proper and makes verb eleven a COMPILE ERROR here; `pnpm typecheck` is its
+        // proof, and no test can reach this arm while the switch stays exhaustive.
+        //
+        // It THROWS rather than returning, because the only ways here are a cast, a
+        // hand-rolled event object, or a `@ts-expect-error` — and `return _never`
+        // then handed `foldEvents`'s callers `undefined`, so the TUI, the web push
+        // and the daily price-feed job would each die on an opaque property access
+        // far from the cause. Naming the verb at the point of failure is ADR-003's
+        // fail-loud posture applied to the one path type-checking cannot cover.
+        const _never: never = event;
+        throw new Error(
+          `foldEvents reached its exhaustiveness latch on event type ` +
+            `'${(_never as PortfolioEvent).type}'. A verb exists that this fold does not ` +
+            `handle — add its arm to the switch above.`,
+        );
+      }
     }
   }
 

@@ -3,12 +3,16 @@
 Numisma builds a canonical Fund composition read model and renders it for review
 — both as a one-shot text report and as an interactive terminal dashboard. The
 durable source of truth is an append-only **event log** of material actions —
-nine verbs (`PositionOpened` / `PositionClosed` / `PositionTrimmed` /
+ten verbs (`PositionOpened` / `PositionClosed` / `PositionTrimmed` /
 `PositionAddedTo` / `PriceMarked` / `Deposit` / `Withdraw` / `Transfer` /
-`InvalidationMarked`) layered on an immutable **genesis seed**; current state and
-any as-of view are a pure **fold** of the log into the read model
+`InvalidationMarked` / `ReserveOpened`) layered on an immutable **genesis
+seed**; current state and any as-of view are a pure **fold** of the log into
+the read model
 ([ADR-003](./context/adr/ADR-003-event-log-genesis-fold-persistence.md), amended
-for the trim/add verbs). The two new position verbs move an already-open
+for the trim/add verbs; the tenth verb is
+[ADR-012](./context/adr/ADR-012-reserve-opened-tenth-event-verb.md), currently
+`assurance: prototype` on an unmerged branch). The two new position verbs move
+an already-open
 Position: **`PositionTrimmed`** partially takes profit — it names
 `removals: [{tier, quantity}]` plus an atomic `settlement` cash leg, removes
 pro-rata within each named Tier, and emits a **partial** `ClosedPositionRecord`
