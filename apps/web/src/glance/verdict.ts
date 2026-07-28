@@ -76,8 +76,10 @@ export const RESERVE_FLOOR_WIRE_KEY = "glance.reserveTargetPct" as const;
  * the step is one day; the sparse stretch (06-26 → 06-30, and 07-03's three-day step
  * back to 06-30) is historical only.
  *
- * 1.5% picks the tails of the measured month honestly: the day-over-day range across
- * the log is −1.72% to +1.85%, and 1.5% takes three of those days and leaves 25.
+ * 1.5% picks the tails of the measured month honestly: it takes three of the 28
+ * anchored days and leaves 25. The measured day-over-day range that justifies the
+ * choice is deliberately not quoted here — this repository is public, and the range
+ * is the fund's best and worst days. It is recorded in the private notes vault.
  */
 export const NAV_MOVE_THRESHOLD_PCT = 1.5;
 
