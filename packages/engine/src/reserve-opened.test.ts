@@ -232,7 +232,7 @@ describe("ReserveOpened — cross-reference", () => {
     expect(crossReferenceEvent(transfer, reference).kind).toBe("ok");
   });
 
-  // The reason `EventReference.accountIds` was widened from a bare id Set to an
+  // The reason `EventReference.accountCurrencies` was widened from a bare id Set to an
   // account→currency Map. Canonical normalization EXCLUDES a currency-mismatched
   // Reserve, so admitting one here would put a Reserve in the durable log that the
   // read model silently drops.
@@ -453,6 +453,42 @@ describe("ReserveOpened — parse", () => {
       expect(result.message).toContain("EMPTY");
     }
   });
+
+  // THE ENVELOPE, SEALED. The guarantee above was true one level down and FALSE here:
+  // `parseEvent({ ...openReserve(), amount: 5000 })` returned `kind: "ok"` with the
+  // 5000 silently dropped. Nothing corrupted — the Reserve still opens at $0, the
+  // verb's NAV-neutrality is structural — but what the author believed and what the
+  // log honored had parted, and this repo's named hazard IS that parting. A doc
+  // comment overstating its guarantee is itself the defect.
+  it.each(["amount", "lots"] as const)(
+    "rejects a TOP-LEVEL '%s' on the envelope, not just inside the reserve payload",
+    (banned) => {
+      const result = parseEvent({
+        ...openReserve(),
+        [banned]: banned === "amount" ? 5000 : [{ quantity: 5000, tier: "c1" }],
+      });
+
+      expect(result.kind).toBe("event-error");
+      if (result.kind === "event-error") {
+        expect(result.path).toBe(banned);
+        expect(result.message).toContain("EMPTY");
+      }
+    },
+  );
+
+  // Presence, not truthiness — at the envelope too, for the same reason it is presence
+  // inside the payload.
+  it.each(["amount", "lots"] as const)(
+    "rejects a top-level '%s' present but undefined",
+    (banned) => {
+      const result = parseEvent({ ...openReserve(), [banned]: undefined });
+
+      expect(result.kind).toBe("event-error");
+      if (result.kind === "event-error") {
+        expect(result.path).toBe(banned);
+      }
+    },
+  );
 
   // The banned-key check is `banned in reserve`, which is STRICTER than it reads: a
   // key PRESENT but `undefined` is rejected too. Do not "simplify" it to a truthiness

@@ -407,7 +407,8 @@ function parseInvalidationMarked(
  * `currency`. Existence of the portfolio/account, id collision, and the
  * currency-matches-account rule are the cross-ref gate's job.
  *
- * BALANCE KEYS ARE REJECTED, NOT IGNORED. A payload carrying `amount` or `lots`
+ * BALANCE KEYS ARE REJECTED, NOT IGNORED — AT THE ENVELOPE AS WELL AS INSIDE THE
+ * NESTED `reserve`. A payload carrying `amount` or `lots` at EITHER level
  * fails loud rather than being silently stripped. The verb's NAV-neutrality is
  * structural — the fold always inserts at zero — so an author who wrote an opening
  * balance believes something the log will not honor. Silently dropping it is this
@@ -435,14 +436,21 @@ function parseReserveOpened(
   if (!isSupportedCurrency(reserve.currency)) {
     return eventError("reserve.currency", "Unsupported currency.");
   }
-  for (const banned of ["amount", "lots"] as const) {
-    if (banned in reserve) {
-      return eventError(
-        `reserve.${banned}`,
-        `ReserveOpened births an EMPTY Reserve and cannot carry '${banned}' — it always ` +
-          `opens at zero. Fund it with a Deposit (capital from outside) or a Transfer ` +
-          `(cash from a sibling Reserve, carrying its tier); do not state an opening balance.`,
-      );
+  // BOTH LEVELS. The envelope was the hole: `{ ...openReserve(), amount: 5000 }` parsed
+  // `ok` with the 5000 silently dropped, while the comment above claimed otherwise.
+  for (const [scope, prefix] of [
+    [input, ""],
+    [reserve, "reserve."],
+  ] as const) {
+    for (const banned of ["amount", "lots"] as const) {
+      if (banned in scope) {
+        return eventError(
+          `${prefix}${banned}`,
+          `ReserveOpened births an EMPTY Reserve and cannot carry '${banned}' — it always ` +
+            `opens at zero. Fund it with a Deposit (capital from outside) or a Transfer ` +
+            `(cash from a sibling Reserve, carrying its tier); do not state an opening balance.`,
+        );
+      }
     }
   }
   const value: ReserveOpenedEvent = {

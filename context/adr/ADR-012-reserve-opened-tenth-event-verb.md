@@ -110,8 +110,8 @@ verb's naive reading would have collided with).
   path that admits such a Reserve into the *durable log* only to have it vanish
   from the read model downstream. `crossReferenceReserveOpened`
   (`packages/engine/src/events/crossref.ts:394-437`) rejects the mismatch loud
-  at ingest instead, which is why `EventReference.accountIds` widened from a
-  bare id `Set<string>` to a `Map<string, Currency>` — the check needs the
+  at ingest instead, which is why `EventReference`'s account lookup widened from
+  a bare id `Set<string>` to a `Map<string, Currency>` — the check needs the
   account's currency, not just its existence. Rejecting keeps the tenth verb
   inside ADR-003's fail-loud posture: **the log never holds a Reserve the
   dashboard cannot show.**
@@ -130,7 +130,18 @@ verb's naive reading would have collided with).
   only `.has()`, which a `Map` preserves identically to a `Set`. Worth
   recording as evidence that `EventReference`'s fields are consumed narrowly
   enough to widen freely — useful the next time a verb wants genesis context
-  that isn't there yet.
+  that isn't there yet. *(The field was **renamed `accountIds` →
+  `accountCurrencies`** later in this same increment: a `Map<string, Currency>`
+  under a name saying "set of ids" is a Mysterious Name that misleads at every
+  read. The widening above genuinely happened as `accountIds`; the current
+  symbol is `accountCurrencies`.)*
+- **`EventReference` widened twice more, and the precedent above is why that was
+  cheap.** `reserveBalances` entries gained `bornAsOf` and the reference gained
+  `genesisAsOf`, so the ingest gate can answer *"does this Reserve exist **as of
+  this date**"* — a question that was total before this verb (every approved
+  reserve id was a genesis reserve present in the fold from t0) and is partial
+  after it. Eight sites that each asked half of it now route through one
+  `requireReserveBornBy`.
 - **Two switches admitted a silent no-op if a case was forgotten — CLOSED.**
   `foldEvents`'s event-type switch and `applyEventToReference` have no
   return-type obligation, so a forgotten case used to compile clean and silently
