@@ -367,14 +367,25 @@ export function foldEvents(
         reserves.set(event.reserve.id, { ...event.reserve, amount: 0, lots: [] });
         break;
       default: {
-        // EXHAUSTIVENESS LATCH (no runtime surface, by design). The fold's switch
-        // has no return obligation either, so a forgotten verb used to compile
-        // clean and silently drop the event from the fold — the read path, where a
-        // dropped event is invisible rather than loud. The `never` assignment makes
-        // verb eleven a COMPILE ERROR here. Nothing reaches this arm at runtime; no
-        // test can observe it. `pnpm typecheck` is its only proof.
+        // EXHAUSTIVENESS LATCH — compile-time first, fail-loud second. The fold's
+        // switch has no return obligation, so a forgotten verb used to compile clean
+        // and silently drop the event from the fold — the read path, where a dropped
+        // event is invisible rather than loud. The `never` ASSIGNMENT is the latch
+        // proper and makes verb eleven a COMPILE ERROR here; `pnpm typecheck` is its
+        // proof, and no test can reach this arm while the switch stays exhaustive.
+        //
+        // It THROWS rather than returning, because the only ways here are a cast, a
+        // hand-rolled event object, or a `@ts-expect-error` — and `return _never`
+        // then handed `foldEvents`'s callers `undefined`, so the TUI, the web push
+        // and the daily price-feed job would each die on an opaque property access
+        // far from the cause. Naming the verb at the point of failure is ADR-003's
+        // fail-loud posture applied to the one path type-checking cannot cover.
         const _never: never = event;
-        return _never;
+        throw new Error(
+          `foldEvents reached its exhaustiveness latch on event type ` +
+            `'${(_never as PortfolioEvent).type}'. A verb exists that this fold does not ` +
+            `handle — add its arm to the switch above.`,
+        );
       }
     }
   }

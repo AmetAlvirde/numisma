@@ -292,6 +292,23 @@ describe("ReserveOpened — cross-reference", () => {
     }
   });
 
+  // The account gate's twin, and untested until now. `portfolioId` is the other id the
+  // Reserve inherits from the seed rather than mints, and a dangling one produces a
+  // Reserve that belongs to no portfolio — invisible in every per-portfolio rollup
+  // while still counting toward fund NAV. The account check happens to be guarded by
+  // the currency lookup it shares; this one has nothing else standing behind it, so
+  // deleting `portfolioIds.has` was caught by nothing.
+  it("rejects an unknown portfolioId", () => {
+    const reference = buildEventReference(genesis());
+    const result = crossReferenceEvent(accepted(openReserve({ portfolioId: "ghost" })), reference);
+
+    expect(result.kind).toBe("event-error");
+    if (result.kind === "event-error") {
+      expect(result.path).toBe("reserve.portfolioId");
+      expect(result.message).toContain("ghost");
+    }
+  });
+
   // The same reject as the currency one, for a WORSE asymmetry. Canonical
   // normalization excludes a currency-mismatched Reserve WITH a warning; it drops a
   // non-live one with `excluded.nonLive += 1` and no warning at all. So the message
@@ -349,11 +366,14 @@ describe("ReserveOpened — the gate learns time", () => {
    * the first rejection. All-or-nothing — a partially-applied batch is the failure
    * mode the ledger exists to remove.
    */
-  function ingestBatch(inputs: Record<string, unknown>[]): {
+  function ingestBatch(
+    inputs: Record<string, unknown>[],
+    seed: FundReviewData = genesis(),
+  ): {
     committed: PortfolioEvent[];
     rejection: { path: string; message: string } | null;
   } {
-    const reference = buildEventReference(genesis());
+    const reference = buildEventReference(seed);
     const committed: PortfolioEvent[] = [];
     for (const input of inputs) {
       const parsed = parseEvent(input);
@@ -438,6 +458,208 @@ describe("ReserveOpened — the gate learns time", () => {
     expect(
       crossReferenceEvent(accepted({ ...openReserve(), asOf: GENESIS_AS_OF }), reference).kind,
     ).toBe("ok");
+  });
+
+  // THE REMEDY MUST BE ONE THE OPERATOR CAN ACTUALLY PERFORM. `bornAsOf` covers two
+  // populations that read identically at the error site: a log-born Reserve, whose
+  // birth IS an event and can be redated, and a genesis-SEEDED one, born at
+  // `genesis.review.asOf` with no event behind it at all. Nine of the fund's ten
+  // reserves are seeded, so "or open the Reserve earlier" was the advice the COMMON
+  // case got — and it sends the operator hunting for a `ReserveOpened` that does not
+  // exist. The clause must appear for exactly one of the two.
+  it("offers 'open the Reserve earlier' only for a log-born Reserve, never a seeded one", () => {
+    // Seeded: `pulse-cash` is born with the world, so its only fix is the date.
+    const seeded = ingestBatch([
+      {
+        id: "evt-early-deposit",
+        asOf: "2026-05-15", // before the genesis review, so before `pulse-cash` exists.
+        type: "Deposit",
+        reserveId: "pulse-cash",
+        amount: 100,
+        tier: "c1",
+      },
+    ]);
+    expect(seeded.rejection?.message).toContain("not born until");
+    expect(seeded.rejection?.message).not.toContain("open the Reserve earlier");
+    expect(seeded.rejection?.message).toContain(GENESIS_AS_OF);
+    // The fold-order explanation is the valuable half and survives in both branches.
+    expect(seeded.rejection?.message).toContain("date order");
+
+    // Log-born: `capital-cash` has a `ReserveOpened` behind it, so both fixes are real.
+    const logBorn = ingestBatch(backdatedBatch());
+    expect(logBorn.rejection?.message).toContain("open the Reserve earlier");
+    expect(logBorn.rejection?.message).toContain("date order");
+  });
+
+  // BORN-BY REGRESSION SUITE. `requireReserveBornBy` collapsed eight scattered
+  // existence checks into one, and every call site passes `event.asOf` today. The
+  // failure this suite exists to catch is a LATER edit passing `reference.genesisAsOf`
+  // at one of them instead — which restores the pre-fix behaviour (every Reserve looks
+  // as old as the world) at exactly one verb, while the whole rest of the suite stays
+  // green because no other test dates an event before a Reserve's birth. Mutating any
+  // single site must redden exactly one case below.
+  describe("every collapsed call site rejects a movement dated before the Reserve's birth", () => {
+    /** Genesis plus one open position, for the three verbs that need one to reference. */
+    function genesisWithPosition(): FundReviewData {
+      return {
+        ...genesis(),
+        positions: [
+          {
+            id: "btc-core",
+            portfolioId: "core",
+            tempo: "Capital",
+            executionMode: "live",
+            accountId: "bitget-usd",
+            instrumentId: "btc-usd",
+            direction: "long",
+            markPrice: 100,
+            currency: "USD",
+            lots: [{ quantity: 2, cost: 100, tier: "c1" }],
+          },
+        ],
+      };
+    }
+
+    /** `[ReserveOpened, <movement backdated before it>]` — the audit's shape, per verb. */
+    function afterOpening(
+      movement: Record<string, unknown>,
+      seed?: FundReviewData,
+    ): { path: string; message: string } | null {
+      return ingestBatch([openReserve(), { asOf: BACKDATED_AS_OF, ...movement }], seed).rejection;
+    }
+
+    /** Every rejection must name BOTH dates, or the operator cannot see the ordering. */
+    function expectBornByRejection(
+      rejection: { path: string; message: string } | null,
+      path: string,
+    ): void {
+      expect(rejection).not.toBeNull();
+      expect(rejection?.path).toBe(path);
+      expect(rejection?.message).toContain("not born until");
+      expect(rejection?.message).toContain(BACKDATED_AS_OF);
+      expect(rejection?.message).toContain(OPENED_AS_OF);
+    }
+
+    it("Deposit — reserveId", () => {
+      expectBornByRejection(
+        afterOpening({
+          id: "evt-deposit",
+          type: "Deposit",
+          reserveId: "capital-cash",
+          amount: 250,
+          tier: "c1",
+        }),
+        "reserveId",
+      );
+    });
+
+    // The one verb with no OTHER existence check: before this PR's refactor its birth
+    // gate lived inside `checkDebit`, so it is the site where removing the id-based
+    // lookup would delete the gate rather than de-duplicate it.
+    it("Withdraw — amount", () => {
+      expectBornByRejection(
+        afterOpening({
+          id: "evt-withdraw",
+          type: "Withdraw",
+          reserveId: "capital-cash",
+          amount: 100,
+          tier: "c1",
+        }),
+        "amount",
+      );
+    });
+
+    // The destination leg is covered above; this is the SOURCE, which had no test.
+    // The destination here is the seeded `pulse-cash`, so only the source can trip.
+    it("Transfer — fromReserveId (the source leg)", () => {
+      expectBornByRejection(
+        afterOpening({
+          id: "evt-move-out",
+          type: "Transfer",
+          fromReserveId: "capital-cash",
+          toReserveId: "pulse-cash",
+          amount: 100,
+          tier: "c1",
+        }),
+        "fromReserveId",
+      );
+    });
+
+    it("PositionOpened — funding.reserveId", () => {
+      expectBornByRejection(
+        afterOpening({
+          id: "evt-open-position",
+          type: "PositionOpened",
+          position: {
+            id: "btc-new",
+            portfolioId: "core",
+            tempo: "Capital",
+            executionMode: "live",
+            accountId: "bitget-usd",
+            instrumentId: "btc-usd",
+            direction: "long",
+            currency: "USD",
+            lots: [{ quantity: 1, cost: 100, tier: "c1" }],
+          },
+          decision: {
+            entryThesis: "thesis",
+            invalidationCondition: "invalidation",
+            riskBudget: "1R",
+            plannedHoldingHorizon: "weeks",
+            strategy: "trend",
+          },
+          funding: { reserveId: "capital-cash", amount: 100 },
+        }),
+        "funding.reserveId",
+      );
+    });
+
+    it("PositionAddedTo — funding.reserveId", () => {
+      expectBornByRejection(
+        afterOpening(
+          {
+            id: "evt-add",
+            type: "PositionAddedTo",
+            positionId: "btc-core",
+            lot: { quantity: 1, cost: 100, tier: "c1" },
+            funding: { reserveId: "capital-cash", amount: 100 },
+          },
+          genesisWithPosition(),
+        ),
+        "funding.reserveId",
+      );
+    });
+
+    it("PositionClosed — settlement.reserveId", () => {
+      expectBornByRejection(
+        afterOpening(
+          {
+            id: "evt-close",
+            type: "PositionClosed",
+            positionId: "btc-core",
+            settlement: { reserveId: "capital-cash", proceeds: 200 },
+          },
+          genesisWithPosition(),
+        ),
+        "settlement.reserveId",
+      );
+    });
+
+    it("PositionTrimmed — settlement.reserveId", () => {
+      expectBornByRejection(
+        afterOpening(
+          {
+            id: "evt-trim",
+            type: "PositionTrimmed",
+            positionId: "btc-core",
+            removals: [{ quantity: 1, tier: "c1" }],
+            settlement: { reserveId: "capital-cash", proceeds: 100 },
+          },
+          genesisWithPosition(),
+        ),
+        "settlement.reserveId",
+      );
+    });
   });
 });
 
