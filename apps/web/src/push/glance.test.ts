@@ -17,8 +17,12 @@
  * and R2 cases are constructed, so they run everywhere.
  */
 import { describe, expect, it } from "vitest";
+import { access } from "node:fs/promises";
 import type { CompositionReport, FundReviewData } from "@numisma/engine";
 import { buildCompositionReport, instrumentsForSource } from "@numisma/engine";
+import { loadFoldedReview, resolveEventStorePaths } from "@numisma/event-store";
+import { anchorAt, loadAnchorFixture } from "./anchor-fixture.ts";
+import { NAV_JITTER_PP } from "./fixture-synthesis.ts";
 import { buildGlanceBlock, SUPPRESSION_KEYS } from "./glance.ts";
 
 /** The measured quiet Sunday. Marks that day: btc, eth, render, gram — the 4 crypto. */
@@ -31,6 +35,22 @@ const TWELVEDATA_IDS = instrumentsForSource("twelvedata").map(
   (e) => e.instrumentId,
 );
 const ALL_IDS = [...CRYPTO_IDS, ...TWELVEDATA_IDS];
+
+/**
+ * Is the operator's real durable log present on this machine? The real-log cases
+ * skip rather than fail without it — a machine that does not hold the private log
+ * is a normal machine, not a broken one.
+ */
+async function realLogAvailable(): Promise<boolean> {
+  try {
+    const paths = resolveEventStorePaths();
+    await access(paths.genesis);
+    await access(paths.log);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * A synthetic fold + report carrying exactly what the builder reads: the anchor
@@ -96,6 +116,138 @@ function anchorWithMarkHistory(
     report: base.report,
   };
 }
+
+describe("the quiet Sunday (the case V1 exists to protect)", () => {
+  it("counts all 13 fresh on 2026-07-26 and suppresses nothing", async () => {
+    // RE-POINTED AT THE COMMITTED FIXTURE (slice #149), AND THAT IS THE FIX. This
+    // case used to fold the private log directly and SELF-SKIP when the log was
+    // absent — so the one worked example the spec names, on the one measured day
+    // V1 exists for, silently did not run on any machine but the operator's. The
+    // fixture is that same day's glance block, produced by THIS builder in a real
+    // backfill against the real log and checked in, so the case now runs
+    // unconditionally, everywhere.
+    const glance = anchorAt(await loadAnchorFixture(), QUIET_SUNDAY).report.glance;
+
+    // THIRTEEN EXPECTED, THIRTEEN ARRIVED — and the 13 is carry-forward's doing, not
+    // a weakening. Every registered instrument owes a current mark on every anchor;
+    // the nine twelvedata ones are FRESH here because their last expected mark was
+    // Friday 2026-07-24 and that is what they carry. The case is unchanged in what it
+    // proves: the Sunday is silent.
+    expect(glance.feedGap).toEqual({ expected: 13, arrived: 13, missing: [] });
+    // 9 of 13 instruments did not QUOTE that day and the header still renders in
+    // full. That absence is EXPECTED — twelvedata's venues are shut on a Sunday, so
+    // Friday's mark is still the current one — and expected absence suppresses
+    // nothing (V1).
+    expect(glance.suppressed).toEqual([]);
+    expect(glance.reserveTargetPct).toBe(10);
+  });
+
+  it("agrees with a live fold of the real log, when the log is present", async ({
+    skip,
+  }) => {
+    // THE HONESTY GATE, NARROWED TO WHAT IS STILL COMPARABLE. The fixture is a
+    // RECORDING, and this is the case that keeps it from drifting away from the log
+    // it was recorded from: when the private log IS on the machine, rebuild the same
+    // anchor live and require the two to agree.
+    //
+    // It compares the TRIGGER-RELEVANT PROJECTIONS ONLY — the glance block, the
+    // Reserve percentage, and the structural shape — because the fixture is
+    // SYNTHESIZED (`fixture-synthesis.ts`) and its magnitudes deliberately differ
+    // from the real fold's. Comparing payloads wholesale would fail by design and
+    // teach the next reader to delete the check. What it still catches is the failure
+    // that matters: a fixture whose SHAPE no longer matches the real log — a row
+    // added, renamed, re-kinded, or a cost basis that appeared or vanished.
+    //
+    // It self-skips without the log — correctly, because a machine that does not hold
+    // the private log is a normal machine — and the unconditional case above no
+    // longer depends on it.
+    if (!(await realLogAvailable())) {
+      skip();
+      return;
+    }
+
+    const data = await loadFoldedReview(resolveEventStorePaths(), QUIET_SUNDAY);
+    const report = buildCompositionReport(data);
+    // Guard against the fold silently answering a different question than the one
+    // asked: every assertion below is about THIS anchor.
+    expect(report.dashboard.summary.asOf).toBe(QUIET_SUNDAY);
+    const recorded = anchorAt(await loadAnchorFixture(), QUIET_SUNDAY).report;
+
+    // 1. The glance block, verbatim — synthesis copies it, so this is a true equality.
+    expect(buildGlanceBlock(data, report, 10)).toEqual(recorded.glance);
+
+    // 2. The Reserve percentage, verbatim — `reserveFloor` is a level test on it.
+    expect(recorded.dashboard.summary.reserve?.percentOfFund).toBe(
+      report.dashboard.summary.reserve?.percentOfFund,
+    );
+
+    // 3. The structural shape: section ids/titles/order, row ids/kinds/labels/order,
+    // and — spec open question 3 — exactly which rows carry a cost basis and a P&L.
+    const shape = (sections: CompositionReport["dashboard"]["sections"]): string =>
+      sections
+        .map(
+          (section) =>
+            `${section.id}|${section.title}|` +
+            section.rows
+              .map(
+                (row) =>
+                  `${row.id}:${row.kind}:${row.label}:` +
+                  `${row.costBasisUsd !== undefined}:${row.unrealizedPnlUsd !== undefined}`,
+              )
+              .join(","),
+        )
+        .join("//");
+    expect(shape(recorded.dashboard.sections)).toBe(shape(report.dashboard.sections));
+
+    // 4. NAV moves, not NAV levels — TO WITHIN THE JITTER, and the tolerance is the
+    // sanitization rather than sloppiness.
+    //
+    // WHY THE EXACTNESS WAS TRADED AWAY, so nobody "tightens" this back and silently
+    // re-opens the leak: a day-over-day series preserved EXACTLY is the real NAV
+    // series up to one unknown factor, and issues #146/#149 publish three real NAVs,
+    // so dividing recovers the factor and unscales all 28 days. `NAV_JITTER_PP`
+    // displaces every move by up to ±0.05 PERCENTAGE POINTS to close that, which
+    // moves this ratio by at most `NAV_JITTER_PP / 100`. A tighter bound here would
+    // fail; a looser one would stop catching the drift this case exists to catch.
+    const anchors = await loadAnchorFixture();
+    const previous = anchors[anchors.findIndex((a) => a.asOf === QUIET_SUNDAY) - 1];
+    expect(previous).toBeDefined();
+    const priorFold = buildCompositionReport(
+      await loadFoldedReview(resolveEventStorePaths(), previous!.asOf),
+    );
+    const recordedRatio =
+      anchorAt(anchors, QUIET_SUNDAY).report.totals.fundValueUsd /
+      previous!.report.totals.fundValueUsd;
+    const realRatio = report.totals.fundValueUsd / priorFold.totals.fundValueUsd;
+    expect(Math.abs(recordedRatio - realRatio)).toBeLessThanOrEqual(
+      NAV_JITTER_PP / 100,
+    );
+
+    // False-pass guard: the fixture must NOT be a verbatim copy of the real fold.
+    // If synthesis were ever bypassed, everything above would still pass.
+    expect(recorded.totals.fundValueUsd).not.toBe(report.totals.fundValueUsd);
+  });
+
+  it("is the same 9-of-13 shortfall that WOULD be an outage on a weekday", async ({
+    skip,
+  }) => {
+    // False-pass guard for the case above. If the fold at 2026-07-26 actually
+    // carried all thirteen marks, `missing: []` would be true for the wrong reason
+    // and the V1 rule would be untested. Prove the shortfall is real first.
+    if (!(await realLogAvailable())) {
+      skip();
+      return;
+    }
+    const data = await loadFoldedReview(resolveEventStorePaths(), QUIET_SUNDAY);
+    const marked = new Set(
+      (data.closes ?? [])
+        .filter((c) => c.asOf === QUIET_SUNDAY)
+        .map((c) => c.instrumentId),
+    );
+    expect([...marked].sort()).toEqual([...CRYPTO_IDS].sort());
+    expect(ALL_IDS.filter((id) => !marked.has(id))).toHaveLength(9);
+  });
+});
 
 describe("a real outage: the same 9-of-13 shortfall on a Tuesday", () => {
   const { data, report } = constructedAnchor(OPEN_TUESDAY, CRYPTO_IDS);

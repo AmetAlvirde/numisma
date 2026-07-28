@@ -56,6 +56,10 @@ export default defineConfig({
         "apps/web/src/lib/query.ts",
         "apps/web/src/routes/api/auth/$.ts",
         "apps/web/src/push/push.ts",
+        // Same category as push.ts: the self-exec `backfill` shell is argv +
+        // credential + console + exit-code wiring over `backfill-core.ts`, which
+        // IS measured (backfill-core.test.ts drives the whole loop with no DB).
+        "apps/web/src/push/backfill.ts",
         // Self-executing provisioning/auth CLI scripts (same category as
         // push.ts): top-level main().then(..., process.exit) over the tested
         // provision.ts builders / vendored SQL. No unit to assert as written;
