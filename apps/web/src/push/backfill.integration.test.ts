@@ -19,6 +19,7 @@
  *   NUMISMA_TEST_DATABASE_URL=postgres://amet@localhost:5432/numisma pnpm test
  */
 import { access, readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Pool } from "pg";
 import { resolveEventStorePaths } from "@numisma/event-store";
@@ -62,12 +63,32 @@ if (!runIntegration) {
   );
 }
 
-/** The three folds with independently known answers (07-25 is the lost Saturday). */
-const KNOWN_NAVS: [asOf: string, nav: number][] = [
-  ["2026-07-24", 19590.01],
-  ["2026-07-25", 19619.62],
-  ["2026-07-26", 19753.61],
-];
+/**
+ * The folds with independently known answers (07-25 is the lost Saturday).
+ *
+ * THE VALUES ARE NOT IN THIS REPOSITORY, WHICH IS PUBLIC. They are the real fund's
+ * NAV on three real dates — an external oracle, and the only thing in this test that
+ * could not be replaced by a fiction without making the assertion meaningless. They
+ * live beside the private log, in `known-navs.json` under the data directory:
+ *
+ *   [["2026-07-24", 12345.67], ...]   // shape only — not the real values
+ *
+ * That costs nothing in reach: this test is ALREADY gated on the private log being
+ * present, so the oracle is available on exactly the machines that can run it. When
+ * the file is absent the NAV assertion self-skips and says so; every other claim —
+ * row count, schema version, idempotency — still runs.
+ */
+async function loadKnownNavs(): Promise<[asOf: string, nav: number][] | null> {
+  try {
+    const raw = await readFile(
+      join(dirname(resolveEventStorePaths().log), "known-navs.json"),
+      "utf8",
+    );
+    return JSON.parse(raw) as [asOf: string, nav: number][];
+  } catch {
+    return null;
+  }
+}
 
 interface StoredRow {
   fund_id: string;
@@ -130,15 +151,26 @@ describe.skipIf(!runIntegration)("backfill → the projection DB", () => {
     expect(COMPOSITION_SNAPSHOT_SCHEMA_VERSION).toBe(3);
   });
 
-  it("reproduces the three known-good NAVs exactly, Saturday included", () => {
-    for (const [asOf, nav] of KNOWN_NAVS) {
-      const row = first.find((r) => r.as_of === asOf);
-      expect(row, `no row for ${asOf}`).toBeDefined();
-      expect(row!.report.totals.fundValueUsd, asOf).toBeCloseTo(nav, 2);
+  it("reproduces the known-good NAVs exactly, Saturday included", async () => {
+    const knownNavs = await loadKnownNavs();
+    if (knownNavs === null) {
+      console.warn(
+        `\n[backfill.integration] NAV oracle SKIPPED: no 'known-navs.json' beside the ` +
+          `private log.\n  The real NAVs are the one thing here that cannot live in a ` +
+          `public repository, so they are read from the private side.\n  Every other ` +
+          `claim in this test still ran.\n`,
+      );
+    } else {
+      for (const [asOf, nav] of knownNavs) {
+        const row = first.find((r) => r.as_of === asOf);
+        expect(row, `no row for ${asOf}`).toBeDefined();
+        expect(row!.report.totals.fundValueUsd, asOf).toBeCloseTo(nav, 2);
+      }
     }
     // 07-25 is the Saturday NO PUSH EVER CAPTURED. Before this command the
     // projection held 07-24 and 07-26 with a hole between them, so a delta against
-    // "the previous row" compared Sunday to Friday.
+    // "the previous row" compared Sunday to Friday. This holds with or without the
+    // oracle, so it is asserted outside the branch.
     expect(first.map((r) => r.as_of)).toContain("2026-07-25");
   });
 

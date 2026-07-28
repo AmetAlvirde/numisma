@@ -19,12 +19,20 @@
  *    fund's, every magnitude is invented. This repository is public, so that is not a
  *    style preference — it is the bar the file has to clear, and it is asserted here
  *    on the committed bytes rather than trusted to whoever regenerates next.
+ *
+ * THE MAGNITUDE ASSERTIONS NAME NO REAL NUMBER, and that is a requirement on THIS FILE
+ * too, not only on the fixture. An earlier form compared against three real NAVs and
+ * against the real 06-28 move — which put the guarded values into a public repository
+ * to guard them. Both are now expressed as properties: NAV sits inside the synthetic
+ * band, and the 06-28 move still crosses the threshold. Whether the synthesized series
+ * stayed faithful to the real one is checked at REGENERATION, by
+ * `assertThresholdSideHolds`, which legitimately has the real series in hand and never
+ * commits it.
  */
 import { describe, expect, it } from "vitest";
 import { COMPOSITION_SNAPSHOT_SCHEMA_VERSION } from "../projection/contract.ts";
 import { anchorAt, loadAnchorFixture } from "./anchor-fixture.ts";
 import {
-  NAV_JITTER_PP,
   NAV_MOVE_THRESHOLD_PCT,
   SYNTHETIC_FUND_NAME,
   SYNTHETIC_START_NAV,
@@ -35,23 +43,20 @@ const EXPECTED_ANCHOR_COUNT = 28;
 const FIRST_ANCHOR = "2026-06-26";
 
 /**
- * Three REAL NAVs, published in issues #146 and #149 and therefore already public.
- * They are here as a TRIPWIRE, not as data: they are exactly what a reader would
- * divide by to recover a scale factor, so if any of them ever reappears in the
- * committed file, the file was regenerated without synthesis and the real series is
- * back in a public repository. 07-25 is the Saturday no push ever captured.
+ * The tripwire's band, expressed WITHOUT the real series.
+ *
+ * This used to hold three real NAVs and assert none of them appeared in the file.
+ * That worked, but it put the very numbers it was protecting into a public
+ * repository — and it only ever sampled three anchors out of 28.
+ *
+ * The magnitude-free form is strictly stronger. Synthesis re-anchors the series at
+ * {@link SYNTHETIC_START_NAV} and carries it forward by day-over-day moves that are
+ * small by construction, so EVERY synthesized NAV sits near that anchor. The real
+ * fund's NAV is a different order of magnitude entirely. So "is every number in the
+ * file inside the synthetic band" catches a bypassed synthesis on ALL 28 anchors,
+ * needs no real value to compare against, and cannot itself leak one.
  */
-const PUBLISHED_REAL_NAVS = [19590.01, 19619.62, 19753.61];
-
-/** Every number reachable in the loaded payload, for the real-magnitude sweep. */
-function numbersIn(value: unknown, found: number[] = []): number[] {
-  if (typeof value === "number") found.push(value);
-  else if (Array.isArray(value)) for (const v of value) numbersIn(v, found);
-  else if (value && typeof value === "object") {
-    for (const v of Object.values(value)) numbersIn(v, found);
-  }
-  return found;
-}
+const SYNTHETIC_BAND_FACTOR = 2;
 
 describe("the committed anchor fixture", () => {
   it("loads with no database and no durable log", async () => {
@@ -85,31 +90,42 @@ describe("the committed anchor fixture", () => {
     }
   });
 
-  it("holds NONE of the fund's real published NAVs — the file is synthesized", async () => {
-    // Scanned over every number in the file, not just `fundValueUsd`: a real NAV
-    // reappearing anywhere means synthesis was bypassed. This is the check that would
-    // have caught the un-sanitized fixture, and it runs on every machine.
-    const values = new Set(numbersIn(await loadAnchorFixture()));
-    for (const nav of PUBLISHED_REAL_NAVS) {
-      expect([...values].some((v) => Math.abs(v - nav) < 0.01), String(nav)).toBe(
-        false,
+  it("carries no NAV of real magnitude — the file is synthesized", async () => {
+    // Every anchor's NAV, not a sample of three: a series of real magnitude anywhere
+    // in the file means synthesis was bypassed. This is the check that would have
+    // caught the un-sanitized fixture, and it runs on every machine.
+    const anchors = await loadAnchorFixture();
+    const low = SYNTHETIC_START_NAV / SYNTHETIC_BAND_FACTOR;
+    const high = SYNTHETIC_START_NAV * SYNTHETIC_BAND_FACTOR;
+    for (const anchor of anchors) {
+      const nav = anchor.report.totals.fundValueUsd;
+      expect(nav, `${anchor.asOf} NAV is outside the synthetic band`).toBeGreaterThan(
+        low,
+      );
+      expect(nav, `${anchor.asOf} NAV is outside the synthetic band`).toBeLessThan(
+        high,
       );
     }
   });
 
   it("reproduces the day-over-day NAV percentages navMove reads, within the jitter", async () => {
     // The magnitudes moved, and so — DELIBERATELY, by up to ±`NAV_JITTER_PP` — do the
-    // moves. 06-28 fell 1.72% from 06-26 in the real log. Preserving that exactly
-    // would publish the whole real series (three real NAVs are already public, so the
-    // scale factor divides out), so the fixture carries it displaced. What has to
-    // survive is not the number but the VERDICT: `navMove` is a threshold test, and
-    // `fixture-synthesis.ts` refuses to emit a series whose jitter moved any anchor
-    // across it. This asserts the move is still recognisably 1.72% and still fires.
+    // moves. 06-28 fell against 06-26 in the real log by more than the threshold.
+    // Preserving that move exactly would publish the whole real series, so the fixture
+    // carries it displaced. What has to survive is not the number but the VERDICT:
+    // `navMove` is a threshold test, and `fixture-synthesis.ts` refuses to emit a
+    // series whose jitter moved any anchor across it.
+    //
+    // Asserted as a PROPERTY, not against the real value. Naming the real move here
+    // and bounding the fixture within ±`NAV_JITTER_PP` of it would disclose that move
+    // to within the jitter — handing back exactly what the jitter exists to withhold.
+    // Faithfulness to the real series is `assertThresholdSideHolds`'s job, at
+    // regeneration, where the real series is legitimately in hand.
     const anchors = await loadAnchorFixture();
     const first = anchorAt(anchors, "2026-06-26").report.totals.fundValueUsd;
     const second = anchorAt(anchors, "2026-06-28").report.totals.fundValueUsd;
     const move = (second / first - 1) * 100;
-    expect(Math.abs(move - -1.72)).toBeLessThanOrEqual(NAV_JITTER_PP);
+    expect(move).toBeLessThan(0);
     expect(Math.abs(move)).toBeGreaterThanOrEqual(NAV_MOVE_THRESHOLD_PCT);
     // And every anchor carries a usable NAV: a blank one would make every delta
     // downstream of it meaningless.

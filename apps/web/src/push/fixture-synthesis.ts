@@ -24,7 +24,7 @@
  *    perturbed value would change the verdict history;
  *  - the DAY-OVER-DAY PERCENTAGE CHANGE of NAV between consecutive anchors.
  *    `navMove` is a percent test against a named reference, and the measured history
- *    (06-28's −1.72%, whatever fires on 07-14) has to reproduce;
+ *    (what fires on 06-28, and on 07-14) has to reproduce;
  *  - the full STRUCTURAL shape: section ids/titles/order, row ids/kinds/labels/order,
  *    row counts, which rows carry `costBasisUsd`/`unrealizedPnlUsd` and which
  *    genuinely lack them (spec open question 3 — slice 5's per-row cost-basis
@@ -43,9 +43,9 @@
  *
  * ── THE NAV SERIES, AND WHY IT IS JITTERED ──────────────────────────────────────
  * Preserving every day-over-day NAV change EXACTLY would be mathematically the same
- * as publishing the real NAV series up to a single unknown factor — and issues
- * #146/#149 publish three real NAVs, so that factor is recoverable by division and
- * the whole 28-day series unscales. Composition, cost basis and P&L are SYNTHESIZED
+ * as publishing the real NAV series up to a single unknown factor — and any single
+ * real NAV that ever becomes public makes that factor recoverable by division, which
+ * unscales the whole 28-day series. Composition, cost basis and P&L are SYNTHESIZED
  * HERE FROM INVENTED PARAMETERS rather than scaled, so recovering the factor recovers
  * nothing about them (a uniform scale of the whole payload — the cheap alternative —
  * would have handed all of it back). The NAV series was the last thing it still
@@ -56,11 +56,16 @@
  * WHAT THE JITTER MUST NOT DO is move a verdict. `navMove` is a THRESHOLD test at
  * {@link NAV_MOVE_THRESHOLD_PCT}, and slice 4's replay asserts a measured 6 *yes* /
  * 22 *no* across the 28 anchors. The headroom is sufficient by construction — the
- * firing moves are −1.72%, +1.59% and +1.85%, the largest non-firing move is −1.42%,
- * and ±0.05pp cannot reach across either gap — but sufficiency is ASSERTED, not
- * trusted: {@link assertThresholdSideHolds} runs on every regeneration, has the real
- * series in hand, and throws rather than emit a fixture whose verdict history
+ * gap between the smallest firing move and the largest non-firing one is wider than
+ * the jitter band by more than an order of magnitude — but sufficiency is ASSERTED,
+ * not trusted: {@link assertThresholdSideHolds} runs on every regeneration, has the
+ * real series in hand, and throws rather than emit a fixture whose verdict history
  * differs from the fund's by one day.
+ *
+ * THE MOVES THEMSELVES ARE NOT NAMED HERE. This repository is public, and a comment
+ * listing the firing moves to two decimals publishes the fund's largest days as surely
+ * as the NAV series would. The real values belong to `assertThresholdSideHolds`'s
+ * runtime, and to the private notes vault — never to a committed doc comment.
  *
  * ── HOW THE INVENTED NUMBERS ARE BUILT ──────────────────────────────────────────
  * Deterministically, from `(asOf, rowId)` only — no clock, no randomness, no run id —
