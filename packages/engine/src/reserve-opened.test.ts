@@ -285,6 +285,29 @@ describe("ReserveOpened — cross-reference", () => {
       expect(result.path).toBe("reserve.accountId");
     }
   });
+
+  // The same reject as the currency one, for a WORSE asymmetry. Canonical
+  // normalization excludes a currency-mismatched Reserve WITH a warning; it drops a
+  // non-live one with `excluded.nonLive += 1` and no warning at all. So the message
+  // must name the read-model exclusion as the cause, not merely say "not live".
+  it.each(["paper", "back-test", "forward-test"] as const)(
+    "rejects a Reserve opened in %s mode, naming the silent read-model exclusion",
+    (mode) => {
+      const reference = buildEventReference(genesis());
+      const result = crossReferenceEvent(
+        accepted(openReserve({ executionMode: mode })),
+        reference,
+      );
+
+      expect(result.kind).toBe("event-error");
+      if (result.kind === "event-error") {
+        expect(result.path).toBe("reserve.executionMode");
+        expect(result.message).toContain(mode);
+        expect(result.message).toContain("read model");
+        expect(result.message).toContain("NO warning");
+      }
+    },
+  );
 });
 
 describe("ReserveOpened — parse", () => {
@@ -299,4 +322,71 @@ describe("ReserveOpened — parse", () => {
       expect(result.message).toContain("EMPTY");
     }
   });
+
+  // The banned-key check is `banned in reserve`, which is STRICTER than it reads: a
+  // key PRESENT but `undefined` is rejected too. Do not "simplify" it to a truthiness
+  // check — `lots: undefined` would then slip through and birth a lots-LESS Reserve,
+  // the exact provenance-laundering shape `lots: []` exists to prevent.
+  it.each(["amount", "lots"] as const)(
+    "rejects '%s' present but undefined — the key check is presence, not truthiness",
+    (banned) => {
+      const result = parseEvent(openReserve({ [banned]: undefined }));
+
+      expect(result.kind).toBe("event-error");
+      if (result.kind === "event-error") {
+        expect(result.path).toBe(`reserve.${banned}`);
+      }
+    },
+  );
+
+  // `executionMode` became LOAD-BEARING when the cross-ref gate started rejecting a
+  // non-live Reserve, so the shape gate below it has to hold: an unsupported mode
+  // must never reach cross-reference to be compared against "live".
+  it("rejects an unsupported executionMode", () => {
+    const result = parseEvent(openReserve({ executionMode: "simulated" }));
+
+    expect(result.kind).toBe("event-error");
+    if (result.kind === "event-error") {
+      expect(result.path).toBe("reserve.executionMode");
+      expect(result.message).toContain("Unsupported");
+    }
+  });
+
+  it("rejects an unsupported currency", () => {
+    const result = parseEvent(openReserve({ currency: "EUR" }));
+
+    expect(result.kind).toBe("event-error");
+    if (result.kind === "event-error") {
+      expect(result.path).toBe("reserve.currency");
+    }
+  });
+
+  // Every required field, one at a time. An empty string is the shape a hand-authored
+  // inbox entry actually arrives in (a template with the value not filled in), and it
+  // is NOT caught by a bare `typeof === "string"` — so each field is pinned.
+  it.each(["id", "portfolioId", "tempo", "accountId"] as const)(
+    "rejects an empty string in reserve.%s",
+    (field) => {
+      const result = parseEvent(openReserve({ [field]: "" }));
+
+      expect(result.kind).toBe("event-error");
+      if (result.kind === "event-error") {
+        expect(result.path).toBe(`reserve.${field}`);
+      }
+    },
+  );
+
+  // Whitespace-only is the same defect wearing a disguise; `requireNonEmptyString`
+  // trims, and this pins that it does.
+  it.each(["id", "portfolioId", "tempo", "accountId"] as const)(
+    "rejects a whitespace-only reserve.%s",
+    (field) => {
+      const result = parseEvent(openReserve({ [field]: "   " }));
+
+      expect(result.kind).toBe("event-error");
+      if (result.kind === "event-error") {
+        expect(result.path).toBe(`reserve.${field}`);
+      }
+    },
+  );
 });
