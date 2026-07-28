@@ -107,7 +107,7 @@ describe("navMove", () => {
   });
 
   it("declines when its own reference anchor has withheld provenance (rule 1)", async () => {
-    // 2026-06-28 moved −1.68% in the fixture (−1.72% real), comfortably past the
+    // 2026-06-28 moved −1.68% in the fixture, comfortably past the
     // threshold — and does NOT fire, because its reference 06-26 is withheld. This
     // is the reason `anchor-fixture.ts`'s header can say "navMove on 07-14 only"
     // while three anchors cross 1.5%: the header describes the SUPPRESSION
