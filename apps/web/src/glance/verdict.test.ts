@@ -227,6 +227,38 @@ describe("R3/R4 — the synthesized Reserve floor breach", () => {
     );
   });
 
+  it("R8 extends to the count: a suppressed anchor inside the run ends it", async () => {
+    // The duration is a claim about DAYS THE SURFACE OBSERVED, and R8's gate belongs
+    // on every one of them — not only on the current anchor. Suppression is a KEY
+    // LIST, not a redaction: `toProjectionReport` copies `report.dashboard` wholesale,
+    // so an anchor carrying "summary.reserve" in `glance.suppressed` still has a real
+    // `percentOfFund` on the wire. A counter that reads it walks straight past the
+    // very number the surface refused to show, and asserts the breach continued
+    // through a day it never observed.
+    //
+    // So: 07-25 and 07-27 are clean breach days; 07-26 breaches BY VALUE but its
+    // Reserve is suppressed. The run must END at 07-26 — today is day one, and the
+    // sentence names no duration. This is the same altitude `breachDurationDays`
+    // already accepts in its own doc comment ("the surface cannot claim a day it
+    // never observed"), which is why it already tolerates under-counting across
+    // sparse anchors; an unobservable anchor is that same case.
+    const anchors = await historyThrough("2026-07-27");
+    const twoDaysBack = withReserve(anchorAt(anchors, "2026-07-25"), 8.4);
+    const suppressedDay = withReserve(anchorAt(anchors, "2026-07-26"), 8.3);
+    suppressedDay.report.glance.suppressed = ["summary.reserve"];
+    const today = withReserve(anchorAt(anchors, "2026-07-27"), 8.2);
+    const history = [...anchors.slice(0, -3), twoDaysBack, suppressedDay, today];
+
+    // Guard: the middle day really is a breach BY VALUE, so a count that reaches it
+    // would tick — this test cannot pass because the scenario was built toothless.
+    expect(suppressedDay.report.dashboard.summary.reserve?.percentOfFund).toBe(8.3);
+    expect(suppressedDay.report.glance.reserveTargetPct).toBe(10);
+
+    const verdict = computeVerdict(today, history, at("2026-07-27"));
+    expect(verdict.fired.map((t) => t.name)).toEqual(["reserveFloor"]);
+    expect(verdict.sentence).toBe("Reserve is 8.2%, below its 10% floor");
+  });
+
   it("R8: declines when the Reserve number itself is suppressed", async () => {
     // R8 — a trigger may not assert a breach off a number the surface refuses to
     // show. NOT composition rule 1 and not a generalization of it: rule 1 is
