@@ -28,6 +28,7 @@ import type {
   PositionOpenedEvent,
   PositionTrimmedEvent,
   PriceMarkedEvent,
+  ReserveOpenedEvent,
   TierRemoval,
 } from "./types.js";
 import { eventError } from "./types.js";
@@ -139,6 +140,8 @@ export function parseEvent(input: unknown): EventParseResult {
       return parseTransfer(input, id, asOf);
     case "InvalidationMarked":
       return parseInvalidationMarked(input, id, asOf);
+    case "ReserveOpened":
+      return parseReserveOpened(input, id, asOf);
     default:
       return eventError("type", `Unsupported event type: ${String(input.type)}`);
   }
@@ -396,6 +399,74 @@ function parseInvalidationMarked(
       direction: input.direction,
     },
   };
+}
+
+/**
+ * Validate a `ReserveOpened` in isolation: a nested `reserve` object with non-empty
+ * `id`/`portfolioId`/`tempo`/`accountId`, a supported `executionMode` and
+ * `currency`. Existence of the portfolio/account, id collision, and the
+ * currency-matches-account rule are the cross-ref gate's job.
+ *
+ * BALANCE KEYS ARE REJECTED, NOT IGNORED — AT THE ENVELOPE AS WELL AS INSIDE THE
+ * NESTED `reserve`. A payload carrying `amount` or `lots` at EITHER level
+ * fails loud rather than being silently stripped. The verb's NAV-neutrality is
+ * structural — the fold always inserts at zero — so an author who wrote an opening
+ * balance believes something the log will not honor. Silently dropping it is this
+ * repo's named hazard (ADR-003, fail-loud-at-ingest); the message points at the
+ * movement verbs that actually fund a Reserve.
+ */
+function parseReserveOpened(
+  input: Record<string, unknown>,
+  id: string,
+  asOf: string,
+): EventParseResult {
+  const reserve = input.reserve;
+  if (!isRecord(reserve)) {
+    return eventError("reserve", "ReserveOpened requires a reserve object.");
+  }
+  for (const field of ["id", "portfolioId", "tempo", "accountId"] as const) {
+    const error = requireNonEmptyString(reserve[field], `reserve.${field}`);
+    if (error) {
+      return eventError(`reserve.${field}`, error.message);
+    }
+  }
+  if (!isExecutionMode(reserve.executionMode)) {
+    return eventError("reserve.executionMode", "Unsupported executionMode.");
+  }
+  if (!isSupportedCurrency(reserve.currency)) {
+    return eventError("reserve.currency", "Unsupported currency.");
+  }
+  // BOTH LEVELS. The envelope was the hole: `{ ...openReserve(), amount: 5000 }` parsed
+  // `ok` with the 5000 silently dropped, while the comment above claimed otherwise.
+  for (const [scope, prefix] of [
+    [input, ""],
+    [reserve, "reserve."],
+  ] as const) {
+    for (const banned of ["amount", "lots"] as const) {
+      if (banned in scope) {
+        return eventError(
+          `${prefix}${banned}`,
+          `ReserveOpened births an EMPTY Reserve and cannot carry '${banned}' — it always ` +
+            `opens at zero. Fund it with a Deposit (capital from outside) or a Transfer ` +
+            `(cash from a sibling Reserve, carrying its tier); do not state an opening balance.`,
+        );
+      }
+    }
+  }
+  const value: ReserveOpenedEvent = {
+    id,
+    asOf,
+    type: "ReserveOpened",
+    reserve: {
+      id: reserve.id as string,
+      portfolioId: reserve.portfolioId as string,
+      tempo: reserve.tempo as string,
+      executionMode: reserve.executionMode,
+      accountId: reserve.accountId as string,
+      currency: reserve.currency,
+    },
+  };
+  return { kind: "ok", value };
 }
 
 function parsePriceMarked(

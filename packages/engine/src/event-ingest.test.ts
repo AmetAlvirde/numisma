@@ -258,7 +258,11 @@ describe("buildEventReference — derives the known world from the seed", () => 
     expect([...reference.positionIds]).toEqual(["aapl-core"]);
     expect([...reference.reserveIds]).toEqual(["cash-core"]);
     expect([...reference.portfolioIds]).toEqual(["core"]);
-    expect([...reference.accountIds]).toEqual(["xtb-usd"]);
+    // `accountCurrencies` widened from a bare id Set to an account→currency Map so the
+    // `ReserveOpened` gate can hard-reject a Reserve denominated differently from
+    // its account. Existence still reads `.has()`; the currency is the new payload.
+    expect([...reference.accountCurrencies.keys()]).toEqual(["xtb-usd"]);
+    expect(reference.accountCurrencies.get("xtb-usd")).toBe("USD");
     expect([...reference.instrumentIds].sort()).toEqual(["aapl-usd", "btc-usd"]);
   });
 
