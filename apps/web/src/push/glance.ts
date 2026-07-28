@@ -15,10 +15,21 @@
  * construction.
  *
  * R5 — THE CALENDAR'S NAMED BLIND SPOT. The venue cadence below is weekday-only:
- * it has NO holiday awareness. 2026-07-03 (a Friday, US observed holiday) will flag
- * 9 equities missing and fire a false `feedGap`. That is accepted for v1 on R3's own
- * logic — a false *yes* costs a glance at the desk; a false *no* is the one failure
- * a triage surface cannot have. It is named here rather than discovered later.
+ * it has NO holiday awareness. A US market holiday that falls on a weekday is still
+ * a day this file expects a mark on, so the alarm can ring on a day the venue was
+ * legitimately closed. Under carry-forward (below) that false *yes* does not last a
+ * single day — it PERSISTS until the venue next marks, because an unfilled
+ * expectation is only cleared by a fill.
+ *
+ * That is accepted for v1 on R3's own logic — a false *yes* costs a glance at the
+ * desk; a false *no* is the one failure a triage surface cannot have. And
+ * carry-forward is robust to holiday ignorance in the direction that matters: a
+ * holiday shifts WHICH DAY the alarm rings, never WHETHER it rings. The venue reopens,
+ * marks, and the expectation is filled.
+ *
+ * (An earlier version of this note claimed 2026-07-03 fires a *false* gap because of
+ * the Jul-4 holiday. Checked against the real log, 07-03 is a TRUE gap: the equity
+ * feed had already been dark since Tue 06-30. No holiday was involved.)
  */
 import type {
   CompositionReport,
@@ -71,19 +82,48 @@ function allRegisteredInstruments(): InstrumentRegistryEntry[] {
 }
 
 /**
- * Is a mark from this venue EXPECTED on this calendar date?
- *
  * The weekday is read in UTC from the plain `YYYY-MM-DD` anchor. A local-time
  * `new Date("2026-07-26")` is parsed as UTC midnight and then rendered in local
  * time, which west of Greenwich lands on the PREVIOUS day — enough to call a Monday
  * a Sunday and silently expect nothing.
  */
-function isExpectedOn(source: PriceSource, asOf: string): boolean {
-  if (VENUE_CADENCE[source] === "daily") {
-    return true;
-  }
+function isWeekend(asOf: string): boolean {
   const weekday = new Date(`${asOf}T00:00:00Z`).getUTCDay();
-  return weekday >= 1 && weekday <= 5;
+  return weekday === 0 || weekday === 6;
+}
+
+function addDays(asOf: string, delta: number): string {
+  const date = new Date(`${asOf}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + delta);
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * The most recent date <= `asOf` on which this venue was expected to mark.
+ *
+ * CARRY-FORWARD, AND WHY IT REPLACED A SAME-DATE TEST. The original builder asked
+ * "is a mark expected TODAY, and did one arrive TODAY" — so an obligation that went
+ * unfilled on its due day simply EVAPORATED the next morning. Against the real log
+ * the equity feed marked on 2026-06-26 and went dark until 07-06; on Sat 07-04 and
+ * Sun 07-05 nothing is expected of a weekday venue, so the builder emitted
+ * `{expected: 4, arrived: 4, missing: []}` with nothing suppressed and rendered a
+ * full NAV whose nine of thirteen legs were priced eight days earlier. That is a
+ * false *no* — the one failure a triage surface cannot have.
+ *
+ * An unfilled expectation now PERSISTS UNTIL IT IS FILLED. The question asked of each
+ * instrument is not "did you quote today" but "is your newest mark at least as recent
+ * as the last mark you owed me". The weekend walk is bounded by a guard rather than
+ * unbounded, so a malformed anchor cannot spin.
+ */
+function lastExpectedMarkDate(source: PriceSource, asOf: string): string {
+  if (VENUE_CADENCE[source] === "daily") {
+    return asOf;
+  }
+  let cursor = asOf;
+  for (let guard = 0; guard < 10 && isWeekend(cursor); guard += 1) {
+    cursor = addDays(cursor, -1);
+  }
+  return cursor;
 }
 
 /**
@@ -102,16 +142,21 @@ export function buildGlanceBlock(
   const asOf = report.dashboard.summary.asOf;
 
   // ARRIVAL, from the fold's own per-instrument mark record. `data.closes` carries
-  // one entry per `PriceMarked` the fold applied (plus the t0 genesis anchors), so
-  // "did instrument X quote on this anchor" is an exact-date membership test. This
-  // is read from the FOLD rather than from `report.priceJourneys` on purpose: the
-  // journey builder drops any instrument with fewer than two points, which would
-  // report a genuinely-marked instrument as missing on the genesis anchor.
-  const arrivedIds = new Set(
-    (data.closes ?? [])
-      .filter((close) => close.asOf === asOf)
-      .map((close) => close.instrumentId),
-  );
+  // one entry per `PriceMarked` the fold applied (plus the t0 genesis anchors), so it
+  // is the whole mark HISTORY, not just this anchor's row — which is what makes
+  // carry-forward computable here with no change to this function's signature and no
+  // new data crossing the seam. This is read from the FOLD rather than from
+  // `report.priceJourneys` on purpose: the journey builder drops any instrument with
+  // fewer than two points, which would report a genuinely-marked instrument as
+  // missing on the genesis anchor.
+  const lastMarkById = new Map<string, string>();
+  for (const close of data.closes ?? []) {
+    if (close.asOf > asOf) continue;
+    const seen = lastMarkById.get(close.instrumentId);
+    if (seen === undefined || close.asOf > seen) {
+      lastMarkById.set(close.instrumentId, close.asOf);
+    }
+  }
 
   // Labels, preferring the string ALREADY ON THE WIRE (the composition row), falling
   // back to the instrument catalog — which produces the byte-identical
@@ -131,11 +176,22 @@ export function buildGlanceBlock(
     }
   }
 
-  const expectedEntries = allRegisteredInstruments().filter((entry) =>
-    isExpectedOn(entry.source, asOf),
-  );
+  // EVERY registered instrument is expected on EVERY anchor, and that is a deliberate
+  // consequence of carry-forward rather than an oversight. `lastExpectedMarkDate`
+  // always resolves to some date <= `asOf`, so on any anchor all thirteen instruments
+  // owe a current mark; `arrived` is the count of instruments that are FRESH against
+  // that date. The reading is "thirteen instruments should have a current mark; N do".
+  // Keeping `expected` at "due today" while `missing` carried forward absences from
+  // previous days would make `arrived = expected - missing.length` go NEGATIVE.
+  const expectedEntries = allRegisteredInstruments();
   const missing: GlanceMissingMark[] = expectedEntries
-    .filter((entry) => !arrivedIds.has(entry.instrumentId))
+    .filter((entry) => {
+      const lastMark = lastMarkById.get(entry.instrumentId);
+      return (
+        lastMark === undefined ||
+        lastMark < lastExpectedMarkDate(entry.source, asOf)
+      );
+    })
     .map((entry) => ({
       rowId: `instrument:${entry.instrumentId}`,
       label: labels.get(entry.instrumentId) ?? entry.instrumentId,
