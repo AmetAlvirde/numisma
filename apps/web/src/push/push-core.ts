@@ -31,9 +31,27 @@ import { buildGlanceBlock } from "./glance.ts";
  * fund. There is no `--fixture` flag, no env toggle and no fallback — a flag
  * would preserve the exact ambiguity this change exists to remove.
  *
- * Takes NO date argument, by decision: it always folds current state. An
- * `--as-of` fold would write a SECOND row keyed to that historical date and
- * quietly change what "latest" means to the reader.
+ * `asOf` IS OPTIONAL, AND THE DEFAULT IS THE CONTRACT: called with no argument
+ * this folds CURRENT state, exactly as it always did, and that is the only form
+ * the daily `push` command uses. The parameter exists for the `backfill` command
+ * (PRD #146 seam D / V4), which replays the log's own anchored dates.
+ *
+ * THIS COMMENT USED TO READ "Takes NO date argument, by decision", on the grounds
+ * that an `--as-of` fold "would write a SECOND row keyed to that historical date
+ * and quietly change what 'latest' means to the reader". Writing a second row is
+ * true and is now the POINT — `composition_snapshot` is `PRIMARY KEY (fund_id,
+ * as_of)`, one row per anchor, history-shaped by construction. The second half was
+ * never true: `getSnapshotHistory` arbitrates "latest" on a TYPED NUMERIC date key
+ * (`asOfSortKey`), never on lexical TEXT order and never on `pushed_at`, so a
+ * backfilled 2026-06-30 row cannot out-date 2026-07-26 no matter when it was
+ * written. That typed key is what protects the reader, and it is the whole
+ * mechanism.
+ *
+ * What DID survive the fear is operator confusion — a date argument on the command
+ * launchd runs nightly is how a cron job eventually writes the wrong date — and V4
+ * answers it with a SEPARATE COMMAND rather than a flag. `push.ts` therefore never
+ * passes `asOf`; `backfill.ts` is the only caller that does. Do not add an
+ * `--as-of` flag to the daily push.
  *
  * FAILS LOUD on a partial log: `loadFoldedReview` asserts the log fully loaded,
  * so an unparseable or legacy-shape line throws here rather than upserting a
@@ -44,8 +62,10 @@ import { buildGlanceBlock } from "./glance.ts";
  * The `load` provenance block matches the TUI's report path — and is one of the
  * keys `toProjectionReport` drops, so it never reaches the cloud.
  */
-export async function loadCurrentReport(): Promise<CompositionReport> {
-  return (await loadCurrentFold()).report;
+export async function loadCurrentReport(
+  asOf?: string,
+): Promise<CompositionReport> {
+  return (await loadCurrentFold(asOf)).report;
 }
 
 /** The folded read model AND the report built from it, for one anchor. */
@@ -62,10 +82,23 @@ export interface FoldedAnchor {
 /**
  * {@link loadCurrentReport}'s source, returning the FOLD as well as the report.
  * Everything in that function's contract applies here verbatim; it delegates.
+ *
+ * `asOf` threads straight through to `loadFoldedReview(paths, asOf?)` and from
+ * there to the pure `foldEvents(genesis, events, asOf?)`, which filters
+ * `event.asOf <= asOf`, applies the latest mark <= that date per instrument, and
+ * returns `review.asOf = asOf` — which IS the row key `deriveSnapshot` reads. Zero
+ * engine work; the as-of fold has existed end to end all along (C1).
+ *
+ * GENESIS IS THE FLOOR. `foldEvents` THROWS for an `asOf` strictly before the
+ * genesis seed's own date, because there is no honest portfolio state before t0.
+ * The backfill never trips this because it enumerates the log's OWN anchors, which
+ * are at or after genesis by construction — see `enumerateAnchors`, which filters
+ * explicitly rather than relying on that. Noted here so a future caller passing an
+ * arbitrary date does not rediscover the throw as a mystery failure.
  */
-export async function loadCurrentFold(): Promise<FoldedAnchor> {
+export async function loadCurrentFold(asOf?: string): Promise<FoldedAnchor> {
   const paths = resolveEventStorePaths();
-  const data = await loadFoldedReview(paths);
+  const data = await loadFoldedReview(paths, asOf);
   const report = buildCompositionReport(data, {
     load: {
       status: "loaded",

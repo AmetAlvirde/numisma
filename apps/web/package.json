@@ -9,6 +9,7 @@
     "start": "node .output/server/index.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "push": "tsx src/push/push.ts",
+    "backfill": "tsx src/push/backfill.ts",
     "db:init": "tsx src/push/push.ts --init-only",
     "db:provision": "tsx src/projection/provision-projection.ts",
     "auth:generate": "npx @better-auth/cli@1.4.21 generate --config src/lib/auth.ts --output src/auth/better-auth.schema.sql -y",

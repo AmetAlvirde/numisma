@@ -62,11 +62,24 @@ describe("loadFixture → deriveSnapshot (a TEST input, no longer the push input
 });
 
 /**
- * The real fold over a throwaway durable log — the source line this slice
- * changed. No DB, no network: genesis seed + an events.jsonl on disk, folded to
- * CURRENT state (loadCurrentReport takes no date argument by decision — an
- * `--as-of` fold would write a SECOND row keyed to that date and quietly change
- * what "latest" means to the reader).
+ * The real fold over a throwaway durable log — the source line PRD #134 slice 2
+ * changed. No DB, no network: genesis seed + an events.jsonl on disk.
+ *
+ * `loadCurrentReport()` called with NO argument folds CURRENT state, and every
+ * case below asserts that default, because it is what the daily `push` command
+ * uses. This comment used to say the function "takes no date argument by decision"
+ * — that an `--as-of` fold "would write a SECOND row keyed to that date and quietly
+ * change what 'latest' means to the reader". PRD #146 slice 3 corrected both halves
+ * and this copy with them. A second row per historical anchor is the POINT
+ * (`PRIMARY KEY (fund_id, as_of)` is history-shaped by construction), and "latest"
+ * is arbitrated by `getSnapshotHistory` on a TYPED NUMERIC date key
+ * (`asOfSortKey`), never on TEXT order and never on `pushed_at` — so a backfilled
+ * 2026-06-30 row cannot out-date 2026-07-26 whenever it was written.
+ *
+ * The surviving concern is operator confusion, and V4 answers it with a SEPARATE
+ * `backfill` command, not a flag: a date argument on the command launchd runs
+ * nightly is how a cron job eventually writes the wrong date. The as-of form is
+ * covered in `backfill-core.test.ts`; the no-argument default is covered here.
  */
 describe("loadCurrentReport (the real fold of the durable log)", () => {
   const dirs: string[] = [];
