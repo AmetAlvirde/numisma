@@ -28,7 +28,15 @@ export type SplitBasis = "highWaterMark" | "perClose";
  * wealth 60 / reserve 40 — configurable, never hardcoded outside the sidecar
  * default). `routingReserveId` names the RESERVE-tempo profit sink (the target of the
  * deferred routing fast-follow; v1 is obligation-only and does not infer flow into it).
- * `reserveTargetPct` is the Reserve's target share of NAV.
+ * `reserveTargetPct` is the FLOOR under the Reserve's share of NAV — a lower bound, not
+ * a band midpoint and not a level to converge on. Sitting ABOVE it is the designed
+ * steady state, because the 60/40 split routes 40% of every gain into Reserve; only
+ * dropping BELOW it is a condition worth speaking about. The code has always read it
+ * this way (`format.ts` buckets at/above vs below, and there is no upper-bound
+ * comparison anywhere in the engine); only this sentence said otherwise. The field name
+ * says `target` because the append-only sidecar is on the wire and renaming it would
+ * mean migrating history or supporting two keys for zero behavioral gain — the wire
+ * says `target`, the UI says `floor`, and the divergence is deliberate.
  */
 export interface ProfitPolicy {
   split: { wealth: number; reserve: number };
