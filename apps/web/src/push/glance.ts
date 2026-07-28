@@ -37,14 +37,17 @@ import type {
   InstrumentRegistryEntry,
   PriceSource,
 } from "@numisma/engine";
-import { instrumentsForSource } from "@numisma/engine";
+import { composeRowDependencies, instrumentsForSource } from "@numisma/engine";
 import type { GlanceBlock, GlanceMissingMark } from "../projection/contract.ts";
 
 /**
- * The three header keys this slice can suppress — the closed set of standing
- * numbers D3 names. Slice 5 adds `CompositionRow.id`s to the same array; that
- * costs no schema change, which is the whole reason `suppressed` is a key list and
- * not N booleans.
+ * The three header keys — the closed set of standing numbers D3 names.
+ *
+ * Slice #151 adds `CompositionRow.id`s to the SAME array (see
+ * {@link suppressedRowIds}), which costs no schema change: that is the whole reason
+ * `suppressed` was a key list and not N booleans, and it is why v3 is still v3.
+ * A reader therefore tells the two apart by the key itself — the header keys are
+ * these three literals, everything else is a row id.
  */
 export const SUPPRESSION_KEYS = {
   fundValue: "summary.fundValueUsd",
@@ -208,8 +211,58 @@ export function buildGlanceBlock(
       arrived: expectedEntries.length - missing.length,
       missing,
     },
-    suppressed: suppressionKeysFor(missing.length > 0, reserveTargetPct === undefined),
+    suppressed: [
+      ...suppressionKeysFor(missing.length > 0, reserveTargetPct === undefined),
+      ...suppressedRowIds(data, report, missing),
+    ],
   };
+}
+
+/**
+ * D7 AT ROW ALTITUDE (slice #151) — which composition rows descend from a mark that
+ * did not arrive.
+ *
+ * THE MAP IS COMPUTED HERE AND ONLY ITS CONCLUSION SHIPS. `composeRowDependencies`
+ * answers *which instruments does this row descend from*, and the answer is exactly
+ * the fund's instrument-to-grouping structure — pushing it would be D8 re-opened.
+ * What crosses the wire is a list of row ids, which `sections` already carries.
+ *
+ * WHY A MAP AND NOT THE ROW ID. 19 of the fund's rows name no instrument — invariant
+ * across all 28 anchors, while the row total is not (31 or 33, depending on whether the
+ * late-opened instruments exist on that anchor). The 19 are the
+ * tempo, account, tier and portfolio rows aggregate instruments without disclosing
+ * which. Matching on the id is not merely imprecise, it is wrong in both directions
+ * — an account someone named after a coin it does not hold would suppress, and every
+ * aggregate that genuinely holds the missing instrument would stand. The second is
+ * the failure that matters: a number rendered off a mark that never arrived.
+ *
+ * `data` and `report` are the SAME fold by construction (the caller derived one from
+ * the other), so every row in the report has an entry in the map. That correspondence
+ * is asserted in `row-dependencies.test.ts` at the engine seam and again here on the
+ * emitted keys, rather than defended with a runtime throw on the daily push path.
+ *
+ * Emitted in the report's own row order, so the key list reads down the page.
+ */
+function suppressedRowIds(
+  data: FundReviewData,
+  report: CompositionReport,
+  missing: readonly GlanceMissingMark[],
+): string[] {
+  if (missing.length === 0) return [];
+  const absent = new Set(
+    missing.map((entry) => entry.rowId.slice("instrument:".length)),
+  );
+  const dependencies = composeRowDependencies(data);
+  const suppressed: string[] = [];
+  for (const section of report.dashboard.sections) {
+    for (const row of section.rows) {
+      const dependsOn = dependencies.get(row.id) ?? [];
+      if (dependsOn.some((instrumentId) => absent.has(instrumentId))) {
+        suppressed.push(row.id);
+      }
+    }
+  }
+  return suppressed;
 }
 
 /**
