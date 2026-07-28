@@ -15,6 +15,7 @@
  */
 import { Pool } from "pg";
 import type { CompositionReport } from "@numisma/engine";
+import { asOfSortKey } from "./as-of.ts";
 
 /**
  * The ONLY slice of the engine's `CompositionReport` that is allowed to leave
@@ -411,34 +412,22 @@ export function setReaderPoolForTests(pool?: Pool): void {
 }
 
 /**
- * Chronologically-comparable sort key for an `as_of` calendar date.
- *
- * `as_of` is stored as TEXT (schema.sql), so a SQL `ORDER BY as_of` is a *lexical*
- * TEXT sort — correct ONLY while every value is strict zero-padded ISO
- * (`YYYY-MM-DD`). It silently picks the wrong "latest" the moment a value is not
- * zero-padded: lexically `"2026-10-01" < "2026-9-1"` (because `'1' < '9'` at the
- * fifth character), yet October is chronologically *after* September. We therefore
- * arbitrate "latest" on a *typed* numeric key (year*10000 + month*100 + day)
- * rather than trusting TEXT order.
- *
- * Throwing on an unparseable `as_of` keeps the contract honest: a value we cannot
- * order chronologically must not silently win or lose under a lexical fallback.
+ * Chronologically-comparable sort key for an `as_of` calendar date — see
+ * {@link asOfSortKey} in `./as-of.ts` for why the ordering is typed rather than
+ * lexical.
  *
  * EXPORTED (it was module-private) so `anchors` can be ordered THROUGH the same key
  * the "latest" arbitration uses, and so slice 4's nearest-anchor resolution can too.
  * Re-deriving date ordering by string comparison anywhere else would re-introduce
- * exactly the lexical trap described above, in a second place.
+ * exactly the lexical trap it exists to stop, in a second place.
+ *
+ * IT LIVES IN A SEPARATE, PG-FREE MODULE and is re-exported here. The reader/writer
+ * contract is unchanged — every existing importer still gets it from `contract.ts` —
+ * but slice 4's verdict module runs in the BROWSER, and a value import of THIS file
+ * would pull the `pg` driver and the `composition_snapshot` literal into the client
+ * bundle and fail `client-bundle.integration.test.ts`.
  */
-export function asOfSortKey(asOf: string): number {
-  const match = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(asOf);
-  if (!match) {
-    throw new Error(
-      `getSnapshotHistory: as_of ${JSON.stringify(asOf)} is not a sortable ISO calendar date`,
-    );
-  }
-  const [, year, month, day] = match;
-  return Number(year) * 10000 + Number(month) * 100 + Number(day);
-}
+export { asOfSortKey };
 
 /**
  * Read the projection's ANCHOR HISTORY. Returns a refusal result rather than throwing

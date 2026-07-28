@@ -101,6 +101,7 @@ import type {
   DashboardSection,
 } from "@numisma/engine";
 import type { SnapshotAnchor } from "../projection/contract.ts";
+import { NAV_MOVE_THRESHOLD_PCT } from "../glance/verdict.ts";
 
 /** The round, obviously fictional NAV the synthetic series starts at. */
 export const SYNTHETIC_START_NAV = 100_000;
@@ -118,10 +119,16 @@ export const NAV_JITTER_PP = 0.05;
 
 /**
  * The `navMove` trigger's threshold, in percent. This module does not implement the
- * trigger; it holds the number so it can PROVE the jitter never carries a move
- * across it.
+ * trigger — it re-exports the READER'S OWN constant so it can prove the jitter never
+ * carries a move across it.
+ *
+ * Re-exported rather than re-declared (slice #150): a second copy of `1.5` here could
+ * drift from the one the verdict actually tests against, and the generator's whole
+ * claim is that the committed fixture reproduces the verdict history. Importing the
+ * real constant makes "no move crossed the threshold" a statement about the threshold
+ * that ships, not about a number that agreed with it once.
  */
-export const NAV_MOVE_THRESHOLD_PCT = 1.5;
+export { NAV_MOVE_THRESHOLD_PCT };
 
 /**
  * The fund name every synthetic anchor carries. Deliberately the same posture as the
