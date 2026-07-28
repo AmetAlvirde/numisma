@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isRedirect } from "@tanstack/react-router";
 import { loadDashboard, type SessionGateDeps } from "./dashboard.ts";
-import type { LatestSnapshot } from "../projection/contract.ts";
+import type { SnapshotHistory } from "../projection/contract.ts";
 
 /**
  * The exact cookie a real browser carries after login. The prototype's one real
@@ -12,7 +12,7 @@ import type { LatestSnapshot } from "../projection/contract.ts";
 const SESSION_COOKIE = "numisma.session_token=abc123.sig456";
 
 /** A distinctive snapshot so the assertions prove the value came from getSnapshot. */
-const SNAPSHOT: LatestSnapshot = {
+const SNAPSHOT: SnapshotHistory = {
   status: "stale",
   storedVersion: 99,
   expectedVersion: 1,

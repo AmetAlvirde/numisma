@@ -9,15 +9,17 @@
  * a copy of it. `push.ts` now just wires argv + credentials around these.
  */
 import type { Pool } from "pg";
-import type { CompositionReport } from "@numisma/engine";
-import { buildCompositionReport } from "@numisma/engine";
+import type { CompositionReport, FundReviewData } from "@numisma/engine";
+import { buildCompositionReport, pickPolicyAsOf } from "@numisma/engine";
 import { loadFoldedReview, resolveEventStorePaths } from "@numisma/event-store";
-import type { ProjectionReport } from "../projection/contract.ts";
+import { loadPreferences, resolvePreferencesPath } from "@numisma/preferences";
+import type { GlanceBlock, ProjectionReport } from "../projection/contract.ts";
 import {
   COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
   fundIdOf,
   toProjectionReport,
 } from "../projection/contract.ts";
+import { buildGlanceBlock } from "./glance.ts";
 
 /**
  * THE SOURCE of what gets pushed: the real fold of the durable log, in the same
@@ -43,15 +45,73 @@ import {
  * keys `toProjectionReport` drops, so it never reaches the cloud.
  */
 export async function loadCurrentReport(): Promise<CompositionReport> {
+  return (await loadCurrentFold()).report;
+}
+
+/** The folded read model AND the report built from it, for one anchor. */
+export interface FoldedAnchor {
+  /**
+   * The fold output. Kept alongside the report because the glance builder needs the
+   * per-instrument mark record (`closes`) that `toProjectionReport` deliberately
+   * never lets out of the machine (D14) — the conclusion is pushed, the input is not.
+   */
+  data: FundReviewData;
+  report: CompositionReport;
+}
+
+/**
+ * {@link loadCurrentReport}'s source, returning the FOLD as well as the report.
+ * Everything in that function's contract applies here verbatim; it delegates.
+ */
+export async function loadCurrentFold(): Promise<FoldedAnchor> {
   const paths = resolveEventStorePaths();
   const data = await loadFoldedReview(paths);
-  return buildCompositionReport(data, {
+  const report = buildCompositionReport(data, {
     load: {
       status: "loaded",
       sourcePath: paths.log,
       loadedAt: new Date().toISOString(),
     },
   });
+  return { data, report };
+}
+
+/**
+ * The Reserve FLOOR in force on `asOf`, read from the ADR-004 preferences sidecar —
+ * the push's second privileged input, and the only place in `apps/web` allowed to
+ * touch it (`preferences-import-guard.test.ts`).
+ *
+ * R1 — NO FLOOR IS EVER INVENTED. `loadPreferences` quarantines a malformed line
+ * (dropping it) and returns `[]` for a missing file; `pickPolicyAsOf` returns
+ * `undefined` when nothing is in effect as-of the anchor. Every one of those paths
+ * ends here as `undefined`, which the glance block encodes as an ABSENT
+ * `reserveTargetPct` and the reader renders as a suppressed Reserve slot.
+ *
+ * `defaultProfitPolicyEntry` (which is 10) is deliberately NOT imported. It is a
+ * SEED FOR A NEW SIDECAR, not a read-gap filler, and `seedDefaultPreferences` sits
+ * one import away in the package this module already depends on. Silently rendering
+ * a floor the operator never set is precisely what V2/R1 forbid. Do not reach for it.
+ *
+ * `pickPolicyAsOf` time-travels — it sorts internally and takes the latest entry
+ * with `effectiveAt <= asOf` — so a non-monotonic sidecar replays deterministically
+ * and slice 3's backfilled rows get the policy in force on their OWN date for free.
+ */
+export async function loadReserveFloorAsOf(
+  asOf: string,
+): Promise<number | undefined> {
+  const prefs = await loadPreferences(resolvePreferencesPath());
+  return pickPolicyAsOf(prefs, asOf)?.reserveTargetPct;
+}
+
+/**
+ * The whole push-side glance derivation for one folded anchor: read the floor
+ * as-of, then build the block. The single call the push shell makes.
+ */
+export async function buildGlanceForAnchor(
+  fold: FoldedAnchor,
+): Promise<GlanceBlock> {
+  const asOf = fold.report.dashboard.summary.asOf;
+  return buildGlanceBlock(fold.data, fold.report, await loadReserveFloorAsOf(asOf));
 }
 
 /** The three projected identity/versioning columns derived from a report. */
@@ -80,12 +140,15 @@ export interface SnapshotDerivation {
  * serializes exactly this and nothing else, so a test over `deriveSnapshot` is a
  * test over what reaches the cloud.
  */
-export function deriveSnapshot(report: CompositionReport): SnapshotDerivation {
+export function deriveSnapshot(
+  report: CompositionReport,
+  glance: GlanceBlock,
+): SnapshotDerivation {
   return {
     fundId: fundIdOf(report),
     asOf: report.dashboard.summary.asOf,
     schemaVersion: COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
-    report: toProjectionReport(report),
+    report: toProjectionReport(report, glance),
   };
 }
 
@@ -102,8 +165,9 @@ export function deriveSnapshot(report: CompositionReport): SnapshotDerivation {
 export async function upsertSnapshot(
   pool: Pool,
   report: CompositionReport,
+  glance: GlanceBlock,
 ): Promise<SnapshotDerivation> {
-  const derived = deriveSnapshot(report);
+  const derived = deriveSnapshot(report, glance);
   await pool.query(
     `INSERT INTO composition_snapshot (fund_id, as_of, schema_version, report)
      VALUES ($1, $2, $3, $4::jsonb)

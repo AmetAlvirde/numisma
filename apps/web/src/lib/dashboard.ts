@@ -2,7 +2,7 @@
  * Session-gated dashboard server function (Deliverable E).
  *
  * Runs SERVER-SIDE ONLY. It (1) checks the Better Auth session and redirects to
- * /login when unauthenticated, then (2) reads the latest snapshot through the
+ * /login when unauthenticated, then (2) reads the snapshot history through the
  * READ-ONLY projection pool. The read credential and raw `pg` access live only
  * in this server function — they never reach the browser bundle.
  *
@@ -19,9 +19,9 @@ import { getRequest } from "@tanstack/react-start/server";
 import { redirect } from "@tanstack/react-router";
 import { auth } from "./auth.ts";
 import {
-  getLatestSnapshot,
   getReaderPool,
-  type LatestSnapshot,
+  getSnapshotHistory,
+  type SnapshotHistory,
 } from "../projection/contract.ts";
 
 /**
@@ -41,14 +41,18 @@ export interface SessionGateDeps {
   getHeaders: () => Headers;
   /** The auth surface consulted for the session; only `api.getSession` is used. */
   auth: { api: Pick<typeof auth.api, "getSession"> };
-  /** Reads the latest snapshot once the session is verified. */
-  getSnapshot: () => Promise<LatestSnapshot>;
+  /**
+   * Reads the projection's anchor history once the session is verified. Widened
+   * from a single latest snapshot in slice #148 — D4's named reference needs more
+   * than one day, and the query always read them all anyway.
+   */
+  getSnapshot: () => Promise<SnapshotHistory>;
 }
 
 /**
  * Session gate core. Forwards the incoming request headers (session cookie
  * included) to `auth.api.getSession`, redirects to `/login` (zero-byte body)
- * when there is no session, else returns the latest snapshot.
+ * when there is no session, else returns the snapshot history.
  *
  * The `getHeaders()` -> `getSession({ headers })` hand-off is the reliability
  * seam: if the forwarded headers ever drop the cookie, an authenticated caller
@@ -58,7 +62,7 @@ export interface SessionGateDeps {
  */
 export async function loadDashboard(
   deps: SessionGateDeps,
-): Promise<LatestSnapshot> {
+): Promise<SnapshotHistory> {
   // getHeaders() yields the underlying web Request's `.headers` — a real Headers
   // carrying the incoming cookie. (getRequestHeaders() returns a Headers instance
   // too — do NOT Object.entries() it, that yields nothing.)
@@ -71,10 +75,10 @@ export async function loadDashboard(
 }
 
 export const getDashboard = createServerFn({ method: "GET" }).handler(
-  async (): Promise<LatestSnapshot> =>
+  async (): Promise<SnapshotHistory> =>
     loadDashboard({
       getHeaders: () => getRequest().headers,
       auth,
-      getSnapshot: () => getLatestSnapshot(getReaderPool()),
+      getSnapshot: () => getSnapshotHistory(getReaderPool()),
     }),
 );
