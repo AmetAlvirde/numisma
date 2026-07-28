@@ -45,7 +45,11 @@ export function SummaryCard({
           <h1>{summary.fundName}</h1>
           <p className="muted">as of {summary.asOf}</p>
         </div>
-        <DataSafetyBadge clean={clean} safety={safety} />
+        <DataSafetyBadge
+          clean={clean}
+          safety={safety}
+          fundValueRendered={fundValueRendered}
+        />
       </header>
 
       <dl className="metrics">
@@ -93,14 +97,30 @@ function Absent() {
   );
 }
 
+/**
+ * TWO CAUSES, ONE BADGE, AND THEY ARE JOINED ONLY HERE. `clean` answers *did the
+ * fold exclude any records?*; `fundValueRendered` answers *did the marks arrive?*
+ * Those are genuinely different questions, and they stay apart upstream — folding
+ * mark-absence into `dataSafety` would destroy the distinction that makes either
+ * useful. But a badge is an ASSERTION, and this one is the card's only global one,
+ * so it is the one place that has to speak for both: a green `Data OK` above `Fund
+ * value — no current mark` certifies data the same card refuses to state.
+ *
+ * Mark absence folds into the existing warn state rather than earning a third
+ * visual state, because a third colour costs a vocabulary the card does not
+ * otherwise need. The causes stay distinguishable where distinctions belong — in
+ * the TEXT, which names each one.
+ */
 function DataSafetyBadge({
   clean,
   safety,
+  fundValueRendered,
 }: {
   clean: boolean;
   safety: DashboardSummary["dataSafety"];
+  fundValueRendered: boolean;
 }) {
-  if (clean) {
+  if (clean && fundValueRendered) {
     return <span className="badge badge-ok">Data OK</span>;
   }
   const parts: string[] = [];
@@ -116,8 +136,15 @@ function DataSafetyBadge({
   if (safety.hasWarnings && parts.length === 0) {
     parts.push("warnings");
   }
+  // Last, so the `hasWarnings` fallback above is still judged on the exclusion
+  // counts alone — and first in the text, because this is the cause that explains
+  // the em dashes directly beneath. The words are `Absent`'s, deliberately: one
+  // cause named two ways would read as two.
+  if (!fundValueRendered) {
+    parts.unshift("no current mark");
+  }
   return (
-    <span className="badge badge-warn" title="Excluded / flagged records">
+    <span className="badge badge-warn" title="Withheld or excluded data">
       ⚠ {parts.join(" · ")}
     </span>
   );
