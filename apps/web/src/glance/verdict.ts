@@ -95,7 +95,10 @@ export const NAV_MOVE_THRESHOLD_PCT = 1.5;
  *
  * The verdict renders ONE line — `fired[0]` — and D6's "a freshness failure replaces
  * the verdict" is not a special case in the code: it is what being first in this
- * array means. `/big-picture` lists the whole array.
+ * array means. The REST of `fired` is computed, returned, and currently rendered
+ * NOWHERE: no component reads it. That is the honest state, not a gap to paper over
+ * — D9's ceiling governs what may go below the tap, and a second firing trigger has
+ * to earn its place there rather than arrive because the array happened to exist.
  */
 export const TRIGGER_PRECEDENCE = [
   "freshness",
@@ -106,7 +109,16 @@ export const TRIGGER_PRECEDENCE = [
 
 export type TriggerName = (typeof TRIGGER_PRECEDENCE)[number];
 
-/** The four triggers with their thresholds, as one readable inventory. */
+/**
+ * THE EXHAUSTIVENESS LATCH for {@link TRIGGER_PRECEDENCE}, which is its whole job.
+ *
+ * NOTHING READS THIS AT RUNTIME, and the framing is deliberate: an earlier comment
+ * called it "one readable inventory", which described an inventory no reader had — no
+ * surface renders it and no code imports it. What it actually does is fail the BUILD
+ * when a fifth trigger joins `TRIGGER_PRECEDENCE` without declaring its threshold
+ * here, and that is worth keeping on its own. Deleting it as an unused export would
+ * silently remove that latch, which is the failure mode it exists to prevent.
+ */
 export const TRIGGERS = {
   freshness: { name: "freshness", staleAfterDays: STALE_ANCHOR_DAYS },
   feedGap: { name: "feedGap", minMissingMarks: FEED_GAP_MIN_MISSING_MARKS },
