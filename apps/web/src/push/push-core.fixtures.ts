@@ -12,7 +12,7 @@
  *    a *test* fixture, loaded directly by the unit and integration tests.
  *  - `makeTempStore` — builds a throwaway data dir (genesis seed + an events.jsonl
  *    of the caller's choosing) so the real-fold tests can exercise
- *    `loadCurrentReport` over an actual log without touching the operator's store.
+ *    `loadCurrentFold` over an actual log without touching the operator's store.
  */
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";

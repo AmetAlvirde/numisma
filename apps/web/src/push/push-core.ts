@@ -21,20 +21,42 @@ import {
 } from "../projection/contract.ts";
 import { buildGlanceBlock } from "./glance.ts";
 
+/** The folded read model AND the report built from it, for one anchor. */
+export interface FoldedAnchor {
+  /**
+   * The fold output. Kept alongside the report because the glance builder needs the
+   * per-instrument mark record (`closes`) that `toProjectionReport` deliberately
+   * never lets out of the machine (D14) — the conclusion is pushed, the input is not.
+   */
+  data: FundReviewData;
+  report: CompositionReport;
+}
+
 /**
  * THE SOURCE of what gets pushed: the real fold of the durable log, in the same
  * three calls `apps/tui/src/report.ts` makes — resolve the event-store paths
- * (honoring `NUMISMA_DATA_DIR`), fold genesis + `events.jsonl` to CURRENT state,
- * build the composition report. This replaced `loadFixture()` (PRD #134 slice 2):
- * the push shell used to publish a committed JSON fixture, so the row was
- * well-formed, the reader rendered it, and the number on the phone was not the
- * fund. There is no `--fixture` flag, no env toggle and no fallback — a flag
- * would preserve the exact ambiguity this change exists to remove.
+ * (honoring `NUMISMA_DATA_DIR`), fold genesis + `events.jsonl`, build the
+ * composition report. This replaced `loadFixture()` (PRD #134 slice 2): the push
+ * shell used to publish a committed JSON fixture, so the row was well-formed, the
+ * reader rendered it, and the number on the phone was not the fund. There is no
+ * `--fixture` flag, no env toggle and no fallback — a flag would preserve the exact
+ * ambiguity this change exists to remove.
  *
- * `asOf` IS OPTIONAL, AND THE DEFAULT IS THE CONTRACT: called with no argument
- * this folds CURRENT state, exactly as it always did, and that is the only form
- * the daily `push` command uses. The parameter exists for the `backfill` command
- * (PRD #146 seam D / V4), which replays the log's own anchored dates.
+ * RETURNS THE FOLD AS WELL AS THE REPORT, which is why this is the one entry point
+ * and not a pair of them. The glance builder needs the per-instrument mark record
+ * the report does not carry, so a report-only wrapper could serve `push.ts` for
+ * exactly as long as the glance did not exist; it has since been deleted rather
+ * than left standing as an unused second door onto the same fold.
+ *
+ * `asOf` IS OPTIONAL, AND THE DEFAULT IS THE CONTRACT: called with no argument this
+ * folds CURRENT state, exactly as it always did, and that is the only form the
+ * daily `push` command uses. The parameter exists for the `backfill` command (PRD
+ * #146 seam D / V4), which replays the log's own anchored dates. It threads
+ * straight through to `loadFoldedReview(paths, asOf?)` and from there to the pure
+ * `foldEvents(genesis, events, asOf?)`, which filters `event.asOf <= asOf`, applies
+ * the latest mark <= that date per instrument, and returns `review.asOf = asOf` —
+ * which IS the row key `deriveSnapshot` reads. Zero engine work; the as-of fold has
+ * existed end to end all along (C1).
  *
  * THIS COMMENT USED TO READ "Takes NO date argument, by decision", on the grounds
  * that an `--as-of` fold "would write a SECOND row keyed to that historical date
@@ -50,44 +72,17 @@ import { buildGlanceBlock } from "./glance.ts";
  * What DID survive the fear is operator confusion — a date argument on the command
  * launchd runs nightly is how a cron job eventually writes the wrong date — and V4
  * answers it with a SEPARATE COMMAND rather than a flag. `push.ts` therefore never
- * passes `asOf`; `backfill.ts` is the only caller that does. Do not add an
+ * passes `asOf`; `backfill-core.ts` is the only caller that does. Do not add an
  * `--as-of` flag to the daily push.
  *
- * FAILS LOUD on a partial log: `loadFoldedReview` asserts the log fully loaded,
- * so an unparseable or legacy-shape line throws here rather than upserting a
- * silently-skewed NAV. `push.ts` calls this BEFORE it constructs the Pool, so
- * that throw happens before any connection or write. It never mutates the log
- * (only the read path's quarantine sidecar beside it moves).
+ * FAILS LOUD on a partial log: `loadFoldedReview` asserts the log fully loaded, so
+ * an unparseable or legacy-shape line throws here rather than upserting a
+ * silently-skewed NAV. `push.ts` calls this BEFORE it constructs the Pool, so that
+ * throw happens before any connection or write. It never mutates the log (only the
+ * read path's quarantine sidecar beside it moves).
  *
  * The `load` provenance block matches the TUI's report path — and is one of the
  * keys `toProjectionReport` drops, so it never reaches the cloud.
- */
-export async function loadCurrentReport(
-  asOf?: string,
-): Promise<CompositionReport> {
-  return (await loadCurrentFold(asOf)).report;
-}
-
-/** The folded read model AND the report built from it, for one anchor. */
-export interface FoldedAnchor {
-  /**
-   * The fold output. Kept alongside the report because the glance builder needs the
-   * per-instrument mark record (`closes`) that `toProjectionReport` deliberately
-   * never lets out of the machine (D14) — the conclusion is pushed, the input is not.
-   */
-  data: FundReviewData;
-  report: CompositionReport;
-}
-
-/**
- * {@link loadCurrentReport}'s source, returning the FOLD as well as the report.
- * Everything in that function's contract applies here verbatim; it delegates.
- *
- * `asOf` threads straight through to `loadFoldedReview(paths, asOf?)` and from
- * there to the pure `foldEvents(genesis, events, asOf?)`, which filters
- * `event.asOf <= asOf`, applies the latest mark <= that date per instrument, and
- * returns `review.asOf = asOf` — which IS the row key `deriveSnapshot` reads. Zero
- * engine work; the as-of fold has existed end to end all along (C1).
  *
  * GENESIS IS THE FLOOR. `foldEvents` THROWS for an `asOf` strictly before the
  * genesis seed's own date, because there is no honest portfolio state before t0.

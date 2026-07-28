@@ -23,7 +23,7 @@ import {
 } from "../projection/pg-substrate.testkit.ts";
 import {
   deriveSnapshot,
-  loadCurrentReport,
+  loadCurrentFold,
   upsertSnapshot,
 } from "./push-core.ts";
 import {
@@ -165,7 +165,7 @@ describe.skipIf(!runIntegration)(
 /**
  * The REAL-FOLD push, proven at the database (PRD #134 slice 2). The block above
  * pushes the committed fixture; this one folds a throwaway durable log through
- * `loadCurrentReport` — the exact source the `push` command now uses — and
+ * `loadCurrentFold` — the exact source the `push` command now uses — and
  * asserts the two properties the fixture block never did:
  *
  *  - R4: the pushed `report` JSONB carries EXACTLY `totals` and `dashboard`. The
@@ -209,7 +209,7 @@ describe.skipIf(!runIntegration)("real-fold push (folds the durable log)", () =>
   });
 
   it("R4: the pushed report JSONB carries exactly `totals`, `dashboard` and `glance`", async () => {
-    const report = await loadCurrentReport();
+    const { report } = await loadCurrentFold();
     // Sanity: the fold really ran — asOf is the LATER event's date, not genesis.
     expect(report.dashboard.summary.asOf).toBe("2026-06-09");
     // And the wide report carries more than the payload is allowed to.
@@ -227,7 +227,7 @@ describe.skipIf(!runIntegration)("real-fold push (folds the durable log)", () =>
   });
 
   it("R3: a second push over the unchanged log — one row, same payload, later pushed_at", async () => {
-    const first = await loadCurrentReport();
+    const { report: first } = await loadCurrentFold();
     const { fundId, asOf } = await upsertSnapshot(writerPool, first, TEST_GLANCE);
     expect(await rowCount(writerPool)).toBe(1);
     const before = await readRow(writerPool, fundId, asOf);
@@ -235,7 +235,7 @@ describe.skipIf(!runIntegration)("real-fold push (folds the durable log)", () =>
     await new Promise((r) => setTimeout(r, 25));
 
     // Fold the SAME log again (no new events) and push again.
-    const second = await loadCurrentReport();
+    const { report: second } = await loadCurrentFold();
     await upsertSnapshot(writerPool, second, TEST_GLANCE);
 
     expect(await rowCount(writerPool)).toBe(1);
