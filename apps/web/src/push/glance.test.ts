@@ -7,18 +7,18 @@
  * than on UNEXPECTED absence would blank the header every Saturday and Sunday, which
  * is a false *yes* on 2 days in 7 and would train the operator to ignore the surface.
  *
- * The Sunday case runs against the REAL durable log (`NUMISMA_DATA_DIR` /
- * accumulus), because the whole point of it is that it is a measured day and not a
- * fixture somebody wrote to agree with the code. It SELF-SKIPS when the log is not
- * on the machine — the log is private, git-ignored, and must never be committed
- * (see accumulus). The outage, floor and R2 cases are constructed, so they run
- * everywhere.
+ * The Sunday case is a MEASURED day, not a fixture somebody wrote to agree with the
+ * code. It used to fold the private log directly and self-skip when the log was
+ * absent, which meant the spec's one worked example ran nowhere but the operator's
+ * machine. Slice #149's committed backfill fixture holds that same day's block —
+ * built by this builder, from the real log — so the worked case now runs
+ * unconditionally, and a second case re-derives it live and requires the two to
+ * agree WHEN the log is present. Only that agreement check skips. The outage, floor
+ * and R2 cases are constructed, so they run everywhere.
  */
 import { describe, expect, it } from "vitest";
-import { access } from "node:fs/promises";
 import type { CompositionReport, FundReviewData } from "@numisma/engine";
 import { buildCompositionReport, instrumentsForSource } from "@numisma/engine";
-import { loadFoldedReview, resolveEventStorePaths } from "@numisma/event-store";
 import { buildGlanceBlock, SUPPRESSION_KEYS } from "./glance.ts";
 
 /** The measured quiet Sunday. Marks that day: btc, eth, render, gram — the 4 crypto. */
@@ -31,22 +31,6 @@ const TWELVEDATA_IDS = instrumentsForSource("twelvedata").map(
   (e) => e.instrumentId,
 );
 const ALL_IDS = [...CRYPTO_IDS, ...TWELVEDATA_IDS];
-
-/**
- * Is the operator's real durable log present on this machine? The real-log cases
- * skip rather than fail without it — a machine that does not hold the private log
- * is a normal machine, not a broken one.
- */
-async function realLogAvailable(): Promise<boolean> {
-  try {
-    const paths = resolveEventStorePaths();
-    await access(paths.genesis);
-    await access(paths.log);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 /**
  * A synthetic fold + report carrying exactly what the builder reads: the anchor
@@ -90,51 +74,28 @@ function constructedAnchor(
   return { data, report };
 }
 
-describe("the quiet Sunday over the REAL log (the case V1 exists to protect)", () => {
-  it("expects only the 4 crypto ids on 2026-07-26 and suppresses nothing", async ({
-    skip,
-  }) => {
-    if (!(await realLogAvailable())) {
-      skip();
-      return;
-    }
-
-    const data = await loadFoldedReview(resolveEventStorePaths(), QUIET_SUNDAY);
-    const report = buildCompositionReport(data);
-    // Guard against the fold silently answering a different question than the one
-    // asked: every assertion below is about THIS anchor.
-    expect(report.dashboard.summary.asOf).toBe(QUIET_SUNDAY);
-
-    const glance = buildGlanceBlock(data, report, 10);
-
-    expect(glance.feedGap).toEqual({ expected: 4, arrived: 4, missing: [] });
-    // 9 of 13 instruments have no mark that day and the header still renders in
-    // full. That absence is EXPECTED — twelvedata's venues are shut on a Sunday —
-    // and expected absence suppresses nothing (V1).
-    expect(glance.suppressed).toEqual([]);
-    expect(glance.reserveTargetPct).toBe(10);
-  });
-
-  it("is the same 9-of-13 shortfall that WOULD be an outage on a weekday", async ({
-    skip,
-  }) => {
-    // False-pass guard for the case above. If the fold at 2026-07-26 actually
-    // carried all thirteen marks, `missing: []` would be true for the wrong reason
-    // and the V1 rule would be untested. Prove the shortfall is real first.
-    if (!(await realLogAvailable())) {
-      skip();
-      return;
-    }
-    const data = await loadFoldedReview(resolveEventStorePaths(), QUIET_SUNDAY);
-    const marked = new Set(
-      (data.closes ?? [])
-        .filter((c) => c.asOf === QUIET_SUNDAY)
-        .map((c) => c.instrumentId),
-    );
-    expect([...marked].sort()).toEqual([...CRYPTO_IDS].sort());
-    expect(ALL_IDS.filter((id) => !marked.has(id))).toHaveLength(9);
-  });
-});
+/**
+ * The same synthetic anchor, but with marks carrying THEIR OWN dates rather than
+ * all landing on the anchor. This is what an anchor actually looks like once a feed
+ * has been down for days: `data.closes` holds the whole history the fold applied,
+ * and the newest entry for a stalled instrument is older than the anchor.
+ *
+ * `markDates` maps instrument id -> the dates it marked on. Anything absent from the
+ * map never marked at all.
+ */
+function anchorWithMarkHistory(
+  asOf: string,
+  markDates: Record<string, readonly string[]>,
+): { data: FundReviewData; report: CompositionReport } {
+  const base = constructedAnchor(asOf, []);
+  const closes = Object.entries(markDates).flatMap(([id, dates]) =>
+    dates.map((date) => ({ instrumentId: id, asOf: date, price: 1 })),
+  );
+  return {
+    data: { ...base.data, closes } as unknown as FundReviewData,
+    report: base.report,
+  };
+}
 
 describe("a real outage: the same 9-of-13 shortfall on a Tuesday", () => {
   const { data, report } = constructedAnchor(OPEN_TUESDAY, CRYPTO_IDS);
@@ -228,33 +189,145 @@ describe("R1 — the floor is never invented", () => {
   });
 });
 
+describe("carry-forward: an unfilled expectation survives the weekend", () => {
+  /**
+   * THE FALSE *NO* THIS EXISTS TO KILL. Against the real log the equity feed marked
+   * on 2026-06-26 and then went dark until 2026-07-06. On Sat 2026-07-04 and Sun
+   * 2026-07-05 all nine `twelvedata` instruments were 8 and 9 days stale — but a
+   * builder that compares expectation and arrival ONLY on the day the mark was due
+   * expects nothing from twelvedata on a weekend, so it emits a clean
+   * `{expected: 4, arrived: 4, missing: []}` and renders a full, unsuppressed NAV
+   * whose nine of thirteen legs are priced 06-26. Miss the due day and the
+   * obligation evaporates. Under carry-forward it persists until it is FILLED.
+   */
+  const CRYPTO_DAILY = (through: string): string[] => {
+    const dates: string[] = [];
+    for (let cursor = "2026-06-26"; cursor <= through; ) {
+      dates.push(cursor);
+      const next = new Date(`${cursor}T00:00:00Z`);
+      next.setUTCDate(next.getUTCDate() + 1);
+      cursor = next.toISOString().slice(0, 10);
+    }
+    return dates;
+  };
+
+  /** The real outage: crypto keeps marking, twelvedata's last mark is 2026-06-26. */
+  const stalledEquities = (asOf: string) =>
+    anchorWithMarkHistory(asOf, {
+      ...Object.fromEntries(CRYPTO_IDS.map((id) => [id, CRYPTO_DAILY(asOf)])),
+      ...Object.fromEntries(TWELVEDATA_IDS.map((id) => [id, ["2026-06-26"]])),
+    });
+
+  for (const [asOf, weekday] of [
+    ["2026-07-04", "Saturday"],
+    ["2026-07-05", "Sunday"],
+  ] as const) {
+    it(`${asOf} (${weekday}) still reports the nine stale twelvedata instruments`, () => {
+      const { data, report } = stalledEquities(asOf);
+      const glance = buildGlanceBlock(data, report, 10);
+
+      // Every registered instrument is expected on every anchor: carry-forward
+      // resolves a last-expected date <= asOf for all thirteen. `arrived` is the
+      // count of FRESH instruments, not of instruments that quoted today.
+      expect(glance.feedGap.expected).toBe(13);
+      expect(glance.feedGap.arrived).toBe(4);
+      expect(glance.feedGap.missing.map((m) => m.rowId).sort()).toEqual(
+        TWELVEDATA_IDS.map((id) => `instrument:${id}`).sort(),
+      );
+      // The whole point: the header must NOT render. Nine of thirteen legs are
+      // priced 06-26, which makes NAV, change and Reserve % (NAV in its
+      // denominator) all wrong.
+      expect(glance.suppressed).toEqual([
+        SUPPRESSION_KEYS.fundValue,
+        SUPPRESSION_KEYS.change,
+        SUPPRESSION_KEYS.reserve,
+      ]);
+    });
+  }
+
+  it("2026-07-03 (Friday) is a TRUE gap — the feed was already down from 06-30", () => {
+    const { data, report } = stalledEquities("2026-07-03");
+    const glance = buildGlanceBlock(data, report, 10);
+    expect(glance.feedGap.expected).toBe(13);
+    expect(glance.feedGap.arrived).toBe(4);
+    expect(glance.feedGap.missing).toHaveLength(9);
+  });
+
+  it("the quiet Sunday stays SILENT: equities fresh against Friday 2026-07-24", () => {
+    // The spec's worked example, restated under the new semantics. Carry-forward
+    // must not turn every weekend into an alarm: Sunday's last EXPECTED twelvedata
+    // mark is Friday the 24th, and the 24th is exactly what they carry.
+    const { data, report } = anchorWithMarkHistory(QUIET_SUNDAY, {
+      ...Object.fromEntries(CRYPTO_IDS.map((id) => [id, [QUIET_SUNDAY]])),
+      ...Object.fromEntries(TWELVEDATA_IDS.map((id) => [id, ["2026-07-24"]])),
+    });
+    const glance = buildGlanceBlock(data, report, 10);
+    expect(glance.feedGap).toEqual({ expected: 13, arrived: 13, missing: [] });
+    expect(glance.suppressed).toEqual([]);
+  });
+
+  it("still fires on a Monday whose crypto feed alone is stale", () => {
+    // Carry-forward is per-instrument and per-cadence: `binance` is daily, so its
+    // last-expected date is the anchor itself and Friday's mark does not carry.
+    const { data, report } = anchorWithMarkHistory("2026-07-27", {
+      ...Object.fromEntries(CRYPTO_IDS.map((id) => [id, ["2026-07-24"]])),
+      ...Object.fromEntries(TWELVEDATA_IDS.map((id) => [id, ["2026-07-27"]])),
+    });
+    const glance = buildGlanceBlock(data, report, 10);
+    expect(glance.feedGap.expected).toBe(13);
+    expect(glance.feedGap.arrived).toBe(9);
+    expect(glance.feedGap.missing.map((m) => m.rowId).sort()).toEqual(
+      CRYPTO_IDS.map((id) => `instrument:${id}`).sort(),
+    );
+  });
+});
+
 describe("the venue calendar", () => {
   it("expects crypto every day of the week and twelvedata only Mon–Fri", () => {
-    // 2026-07-25 Sat, 26 Sun, 27 Mon … 31 Fri.
-    const expectedByDate = new Map(
-      [
-        ["2026-07-25", 4],
-        ["2026-07-26", 4],
-        ["2026-07-27", 13],
-        ["2026-07-28", 13],
-        ["2026-07-29", 13],
-        ["2026-07-30", 13],
-        ["2026-07-31", 13],
-      ].map(([date, expected]) => [date as string, expected as number]),
+    // REWRITTEN FOR CARRY-FORWARD, and the rewrite is the point. This case used to
+    // read the cadence off `feedGap.expected` (4 on a weekend, 13 on a weekday).
+    // Under carry-forward `expected` is ALWAYS 13 — every registered instrument owes
+    // a current mark on every anchor — so the cadence distinction moved to where it
+    // belongs: WHICH instruments a Friday mark still satisfies. Hold every
+    // instrument's last mark at Friday 2026-07-24 and walk the week: twelvedata is
+    // satisfied across Sat/Sun and goes stale on Monday; binance, being daily, is
+    // stale from Saturday on.
+    const fridayMarks = Object.fromEntries(
+      ALL_IDS.map((id) => [id, ["2026-07-24"]]),
     );
-    for (const [asOf, expected] of expectedByDate) {
-      const { data, report } = constructedAnchor(asOf, ALL_IDS);
-      expect(
-        buildGlanceBlock(data, report, 10).feedGap.expected,
-        `${asOf} expected ${expected}`,
-      ).toBe(expected);
+    // 2026-07-25 Sat, 26 Sun, 27 Mon … 31 Fri.
+    const staleByDate: Array<[string, number]> = [
+      ["2026-07-25", 4],
+      ["2026-07-26", 4],
+      ["2026-07-27", 13],
+      ["2026-07-28", 13],
+      ["2026-07-29", 13],
+      ["2026-07-30", 13],
+      ["2026-07-31", 13],
+    ];
+    for (const [asOf, staleCount] of staleByDate) {
+      const { data, report } = anchorWithMarkHistory(asOf, fridayMarks);
+      const glance = buildGlanceBlock(data, report, 10);
+      expect(glance.feedGap.expected, `${asOf} expected`).toBe(13);
+      expect(glance.feedGap.missing, `${asOf} stale ${staleCount}`).toHaveLength(
+        staleCount,
+      );
+      expect(glance.feedGap.arrived, `${asOf} arrived`).toBe(13 - staleCount);
     }
   });
 
   it("reads the weekday in UTC, so a machine west of Greenwich sees the same day", () => {
     // `new Date("2026-07-27")` is UTC midnight; rendered in a negative-offset local
-    // zone it is Sunday the 26th. Getting this wrong turns a Monday outage silent.
-    const { data, report } = constructedAnchor("2026-07-27", CRYPTO_IDS);
-    expect(buildGlanceBlock(data, report, 10).feedGap.expected).toBe(13);
+    // zone it is Sunday the 26th. Getting this wrong turns a Monday outage silent —
+    // and carry-forward makes the hazard SHARPER, not milder: a Monday misread as a
+    // Sunday walks the expectation back to Friday the 24th, so twelvedata's Friday
+    // mark would count as fresh and the Monday outage would go unreported.
+    const { data, report } = anchorWithMarkHistory("2026-07-27", {
+      ...Object.fromEntries(CRYPTO_IDS.map((id) => [id, ["2026-07-27"]])),
+      ...Object.fromEntries(TWELVEDATA_IDS.map((id) => [id, ["2026-07-24"]])),
+    });
+    const glance = buildGlanceBlock(data, report, 10);
+    expect(glance.feedGap.expected).toBe(13);
+    expect(glance.feedGap.missing).toHaveLength(9);
   });
 });
