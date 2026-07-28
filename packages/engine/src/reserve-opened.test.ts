@@ -18,6 +18,7 @@ import {
   crossReferenceEvent,
   foldEvents,
   parseEvent,
+  type CapitalTier,
   type FundReviewData,
   type PortfolioEvent,
 } from "./index.js";
@@ -25,6 +26,8 @@ import { describe, expect, it } from "vitest";
 
 const GENESIS_AS_OF = "2026-06-01";
 const OPENED_AS_OF = "2026-06-15";
+/** Before the Reserve is born, after the genesis review: the audit's measured case. */
+const BACKDATED_AS_OF = "2026-06-10";
 
 /** Genesis with one USD account, one MXN account, and one funded USD Reserve. */
 function genesis(): FundReviewData {
@@ -196,6 +199,9 @@ describe("ReserveOpened — the three registration sites", () => {
       // so the sufficiency gate agrees with the balances the fold will produce.
       tiers: new Map(),
       currency: "USD",
+      // The third thing the arm registers: the birth date the existence gate reads,
+      // taken from the event's OWN asOf, not from the batch's arrival order.
+      bornAsOf: OPENED_AS_OF,
     });
 
     // Site 3 — fold.ts's `foldEvents` arm.
@@ -308,6 +314,131 @@ describe("ReserveOpened — cross-reference", () => {
       }
     },
   );
+});
+
+// M2 + D4 — "does this Reserve exist AS OF THIS DATE".
+//
+// Cross-reference validates in LOG order; the fold applies in (asOf, then log)
+// order, and nothing reconciled the two — `asOf` appeared nowhere in the ingest
+// path. Before this verb every cross-ref-approved reserve id was a genesis reserve
+// present in the fold from t0, so "does this Reserve exist" was a TOTAL question.
+// `ReserveOpened` makes it PARTIAL, and the audit measured the consequence:
+// `[ReserveOpened asOf 06-15, Transfer asOf 06-10 into it]` passed BOTH gates,
+// the Transfer sorted FIRST at fold, `applyToReserve` silently skipped the
+// not-yet-born destination, and cash went 1000 → 600 with `warnings: []`.
+describe("ReserveOpened — the gate learns time", () => {
+  /** The audit's measured pair, in the log order an inbox would hand them over. */
+  function backdatedBatch(): Record<string, unknown>[] {
+    return [
+      openReserve(),
+      {
+        id: "evt-move",
+        asOf: BACKDATED_AS_OF, // BEFORE `capital-cash` is born on 2026-06-15.
+        type: "Transfer",
+        fromReserveId: "pulse-cash",
+        toReserveId: "capital-cash",
+        amount: 400,
+        tier: "c2",
+      },
+    ];
+  }
+
+  /**
+   * The ingest contract in miniature: parse then cross-reference each event in LOG
+   * order, extending the reference as each is accepted, and ABORT THE WHOLE BATCH on
+   * the first rejection. All-or-nothing — a partially-applied batch is the failure
+   * mode the ledger exists to remove.
+   */
+  function ingestBatch(inputs: Record<string, unknown>[]): {
+    committed: PortfolioEvent[];
+    rejection: { path: string; message: string } | null;
+  } {
+    const reference = buildEventReference(genesis());
+    const committed: PortfolioEvent[] = [];
+    for (const input of inputs) {
+      const parsed = parseEvent(input);
+      if (parsed.kind !== "ok") {
+        return { committed: [], rejection: { path: parsed.path, message: parsed.message } };
+      }
+      const checked = crossReferenceEvent(parsed.value, reference);
+      if (checked.kind !== "ok") {
+        return { committed: [], rejection: { path: checked.path, message: checked.message } };
+      }
+      applyEventToReference(reference, parsed.value);
+      committed.push(parsed.value);
+    }
+    return { committed, rejection: null };
+  }
+
+  const totalCash = (fund: FundReviewData): number =>
+    fund.reserves.reduce((sum, reserve) => sum + reserve.amount, 0);
+
+  const tierQuantity = (fund: FundReviewData, reserveId: string, tier: CapitalTier): number =>
+    fund.reserves
+      .find((reserve) => reserve.id === reserveId)
+      ?.lots?.find((lot) => lot.tier === tier)?.quantity ?? 0;
+
+  it("rejects a Transfer dated before the Reserve it moves into was born", () => {
+    const { rejection } = ingestBatch(backdatedBatch());
+
+    expect(rejection).not.toBeNull();
+    expect(rejection?.path).toBe("toReserveId");
+    // Names the offending field's own dates, so the operator can see the ordering.
+    expect(rejection?.message).toContain(BACKDATED_AS_OF);
+    expect(rejection?.message).toContain(OPENED_AS_OF);
+  });
+
+  // Z2 — THE ASSERTION IS THE DELTA, NOT THE RESTING STATE. The prototype run passed
+  // seven of nine assertions purely because the world already looked post-transfer, so
+  // a test that asserts absolute balances passes this bug and does not count. Every
+  // claim below is of the form "nothing moved": after MINUS before, exactly zero.
+  it("moves no cash at all when the batch is rejected — every delta exactly 0", () => {
+    const before = foldEvents(genesis(), []);
+    const { committed } = ingestBatch(backdatedBatch());
+    const after = foldEvents(genesis(), committed);
+
+    // Fund-wide: pre-fix the Transfer sorted first, debited `pulse-cash`, and credited
+    // a Reserve that did not exist yet — a −400 delta with `warnings: []`.
+    expect(totalCash(after) - totalCash(before)).toBe(0);
+    // The source's c2 lot specifically: pre-fix it drained to zero.
+    expect(
+      tierQuantity(after, "pulse-cash", "c2") - tierQuantity(before, "pulse-cash", "c2"),
+    ).toBe(0);
+    // And the batch is all-or-nothing: the legal `ReserveOpened` does not land either.
+    expect(after.reserves.length - before.reserves.length).toBe(0);
+  });
+
+  it("accepts a Transfer dated on the Reserve's own birth date", () => {
+    const [opened, transfer] = backdatedBatch();
+    const { rejection } = ingestBatch([opened!, { ...transfer!, asOf: OPENED_AS_OF }]);
+
+    expect(rejection).toBeNull();
+  });
+
+  // D4 — the same question asked of the CONTAINER instead of the movement. A Reserve
+  // born before the genesis review it is born into is the mint-side twin of a movement
+  // dated before its Reserve: the fold would apply it ahead of the world it belongs to.
+  it("rejects a ReserveOpened dated before the genesis review", () => {
+    const reference = buildEventReference(genesis());
+    const result = crossReferenceEvent(
+      accepted({ ...openReserve(), asOf: "2026-05-01" }),
+      reference,
+    );
+
+    expect(result.kind).toBe("event-error");
+    if (result.kind === "event-error") {
+      expect(result.path).toBe("asOf");
+      expect(result.message).toContain(GENESIS_AS_OF);
+    }
+  });
+
+  it("accepts a ReserveOpened dated on the genesis review date itself", () => {
+    const reference = buildEventReference(genesis());
+
+    expect(
+      crossReferenceEvent(accepted({ ...openReserve(), asOf: GENESIS_AS_OF }), reference).kind,
+    ).toBe("ok");
+  });
 });
 
 describe("ReserveOpened — parse", () => {
