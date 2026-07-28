@@ -386,8 +386,21 @@ export function crossReferenceEvent(
 /**
  * A `ReserveOpened` must mint a genuinely new id (colliding with neither an
  * existing Reserve nor an existing Position — capital ids share one namespace),
- * cite a portfolio and an account the genesis seed knows, and be denominated in
- * THAT ACCOUNT'S currency.
+ * be `live`, cite a portfolio and an account the genesis seed knows, and be
+ * denominated in THAT ACCOUNT'S currency.
+ *
+ * THE EXECUTION-MODE CHECK IS THE SAME REJECT AS THE CURRENCY ONE, ONLY WORSE
+ * UNGUARDED. `compose/canonical.ts` drops a non-live Reserve with
+ * `excluded.nonLive += 1` and NO warning, where a currency mismatch at least emits
+ * one. Measured: `[ReserveOpened(paper), Transfer 400 into it]` against a 1000-unit
+ * genesis passed both gates, moved the cash, took NAV to 600, and reported
+ * `warnings: []`. This is NEW with this verb — every genesis reserve is `live`, so
+ * a non-live Reserve was previously unmintable.
+ *
+ * THE GATE GOES AT THE MINT, NOT AT THE MOVEMENT. `crossReferenceTransfer` skips
+ * `executionMode` too, but once no non-live Reserve can be minted the movement path
+ * has nothing left to catch; a redundant gate at every movement site would defend
+ * against a state that can no longer exist.
  *
  * The currency check is a HARD REJECT, not a warning, and it is the reason
  * {@link EventReference.accountIds} carries currencies at all. Canonical
@@ -417,6 +430,17 @@ function crossReferenceReserveOpened(
     return eventError(
       "reserve.id",
       `ReserveOpened id '${reserve.id}' collides with an existing position id.`,
+    );
+  }
+  if (reserve.executionMode !== "live") {
+    return eventError(
+      "reserve.executionMode",
+      `ReserveOpened opens reserve '${reserve.id}' in ${reserve.executionMode} mode. ` +
+        `Canonical normalization DROPS a non-live Reserve outright — counted in ` +
+        `excluded.nonLive with NO warning at all, unlike a currency mismatch, which at ` +
+        `least warns — so it would be durably logged and then never reach the read ` +
+        `model. Cash transferred into it would leave the fund's NAV silently. Open it ` +
+        `in live mode.`,
     );
   }
   if (!reference.portfolioIds.has(reserve.portfolioId)) {
