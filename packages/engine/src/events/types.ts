@@ -24,7 +24,8 @@ export type PortfolioEventType =
   | "Deposit"
   | "Withdraw"
   | "Transfer"
-  | "InvalidationMarked";
+  | "InvalidationMarked"
+  | "ReserveOpened";
 
 /**
  * The side a price must cross to breach a
@@ -193,6 +194,39 @@ export interface InvalidationMarkedEvent extends BaseEvent {
   direction: InvalidationDirection;
 }
 
+/**
+ * Birth an EMPTY cash Reserve after t0 — the verb that lets a new venue (or a new
+ * Tempo's cash pocket at an existing venue) enter the fund without editing the
+ * immutable genesis seed. Before this, only genesis could mint a Reserve.
+ *
+ * NAV-NEUTRAL BY CONSTRUCTION, not by validation rule. The payload carries NO
+ * amount and NO lots, and there is no field on it that could say otherwise — the
+ * fold inserts the Reserve at `amount: 0` with an empty lot list. A mandatory
+ * opening balance was deliberately rejected: it would make a Reserve birthable only
+ * by draining another, which is false for a genuinely new venue. Capital arrives
+ * afterwards through the existing movement verbs (`Deposit` from outside,
+ * `Transfer` from a sibling Reserve — `tier` rides across either way, so a
+ * newly-born Reserve can never launder provenance). {@link InvalidationMarkedEvent}
+ * is the precedent for a verb that moves no capital.
+ *
+ * The payload NESTS under `reserve` mirroring {@link PositionOpenedEvent}, because
+ * the envelope already owns an `id` (the event's dedup identity) distinct from the
+ * Reserve's own id. `currency` must match the named account's currency — a mismatch
+ * is a HARD REJECT at cross-ref, since a mismatched Reserve is excluded by canonical
+ * normalization and would otherwise be admitted here only to vanish downstream.
+ */
+export interface ReserveOpenedEvent extends BaseEvent {
+  type: "ReserveOpened";
+  reserve: {
+    id: string;
+    portfolioId: string;
+    tempo: string;
+    executionMode: ExecutionMode;
+    accountId: string;
+    currency: Currency;
+  };
+}
+
 export type PortfolioEvent =
   | PositionOpenedEvent
   | PositionClosedEvent
@@ -202,7 +236,8 @@ export type PortfolioEvent =
   | DepositEvent
   | WithdrawEvent
   | TransferEvent
-  | InvalidationMarkedEvent;
+  | InvalidationMarkedEvent
+  | ReserveOpenedEvent;
 
 export interface EventOk {
   kind: "ok";
