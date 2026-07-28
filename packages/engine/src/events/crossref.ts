@@ -599,6 +599,16 @@ function requireReserveBornBy(
     };
   }
   if (asOf < balance.bornAsOf) {
+    // The remedy branches on WHICH KIND of Reserve this is, because one of the two
+    // fixes is impossible for a seeded one. A genesis-seeded Reserve is born at
+    // `genesis.review.asOf` — it has no `ReserveOpened` to move, so "open the Reserve
+    // earlier" would send the operator hunting for an event that does not exist (and
+    // nine of the fund's ten reserves are seeded, so that is the COMMON case). Only a
+    // log-born Reserve has a birth the operator can actually redate.
+    const seeded = balance.bornAsOf === reference.genesisAsOf;
+    const remedy = seeded
+      ? `Date it on or after the genesis review date, ${balance.bornAsOf}.`
+      : `Date it ${balance.bornAsOf} or later, or open the Reserve earlier.`;
     return {
       kind: "event-error",
       error: eventError(
@@ -606,7 +616,7 @@ function requireReserveBornBy(
         `references reserve '${reserveId}' as of ${asOf}, but that Reserve is not born ` +
           `until ${balance.bornAsOf}. The fold applies events in date order, so this one ` +
           `would run BEFORE the Reserve exists and its cash leg would vanish silently. ` +
-          `Date it ${balance.bornAsOf} or later, or open the Reserve earlier.`,
+          remedy,
       ),
     };
   }
@@ -614,25 +624,25 @@ function requireReserveBornBy(
 }
 
 /**
- * Reserve existence + per-Tier sufficiency for a debit. Returns null on success.
+ * Per-Tier SUFFICIENCY for a debit, and nothing else. Returns null on success.
  * `amount` here is the cash leaving; an untiered reserve is checked against its
  * total balance, a tiered one against the named Tier's available quantity. Fails
- * loud rather than letting a debit drive a balance silently negative. Existence —
- * including the as-of-this-date half — is {@link requireReserveBornBy}'s job.
+ * loud rather than letting a debit drive a balance silently negative.
+ *
+ * Takes an ALREADY-RESOLVED {@link ReserveShadow}, not a reserve id: existence —
+ * including the as-of-this-date half — is {@link requireReserveBornBy}'s job and
+ * only its job, and every caller has already asked it. Re-resolving here duplicated
+ * that lookup once per tier delta inside the open/add funding loops, and split one
+ * question across two functions. `reserveId` is carried only to name the reserve in
+ * the message.
  */
 function checkDebit(
-  reference: EventReference,
+  balance: ReserveShadow,
   reserveId: string,
   tier: CapitalTier,
   amount: number,
-  asOf: string,
   path: string,
 ): EventError | null {
-  const lookup = requireReserveBornBy(reference, reserveId, asOf, path);
-  if (lookup.kind === "event-error") {
-    return lookup.error;
-  }
-  const balance = lookup.balance;
   const available = balance.tiers ? balance.tiers.get(tier) ?? 0 : balance.amount;
   // Tolerance absorbs float dust from prior proportional splits; a real overdraft
   // is far larger than this.
@@ -825,11 +835,10 @@ function crossReferenceAddedTo(
   }
   for (const delta of reserveDeltasForOpen([event.lot], event.funding.amount)) {
     const error = checkDebit(
-      reference,
+      addFundedBy.balance,
       event.funding.reserveId,
       delta.tier,
       -delta.amount,
-      event.asOf,
       "funding.amount",
     );
     if (error) {
@@ -848,14 +857,15 @@ function crossReferenceDeposit(event: DepositEvent, reference: EventReference): 
 }
 
 function crossReferenceWithdraw(event: WithdrawEvent, reference: EventReference): EventParseResult {
-  const error = checkDebit(
-    reference,
-    event.reserveId,
-    event.tier,
-    event.amount,
-    event.asOf,
-    "amount",
-  );
+  // EXPLICIT, and load-bearing: `checkDebit` used to be this verb's ONLY existence and
+  // birth check, so it is the one call site where dropping the id-based lookup from
+  // `checkDebit` would silently delete the gate rather than merely de-duplicate it.
+  // Keeps the `"amount"` path this verb has always reported for a bad reserve.
+  const outOf = requireReserveBornBy(reference, event.reserveId, event.asOf, "amount");
+  if (outOf.kind === "event-error") {
+    return { ...outOf.error, message: `Withdraw ${outOf.error.message}` };
+  }
+  const error = checkDebit(outOf.balance, event.reserveId, event.tier, event.amount, "amount");
   if (error) {
     return { ...error, message: `Withdraw ${error.message}` };
   }
@@ -888,11 +898,10 @@ function crossReferenceTransfer(event: TransferEvent, reference: EventReference)
     );
   }
   const error = checkDebit(
-    reference,
+    from.balance,
     event.fromReserveId,
     event.tier,
     event.amount,
-    event.asOf,
     "fromReserveId",
   );
   if (error) {
@@ -952,11 +961,10 @@ function crossReferenceOpen(
   }
   for (const delta of reserveDeltasForOpen(position.lots, event.funding.amount)) {
     const error = checkDebit(
-      reference,
+      fundedBy.balance,
       event.funding.reserveId,
       delta.tier,
       -delta.amount,
-      event.asOf,
       "funding.amount",
     );
     if (error) {
