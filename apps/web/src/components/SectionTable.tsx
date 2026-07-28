@@ -69,6 +69,7 @@ const REASON_COPY: Record<RowAbsenceReason, string> = {
   "no-earlier-anchor": "no earlier anchor",
   "no-reference-row": "not held then",
   "no-cost-basis": "no cost basis",
+  "no-fund-value": "fund value unavailable",
 };
 
 /** An em dash is not a zero — and the cause says which absence this is. */
@@ -115,11 +116,15 @@ function Row({ row, view }: { row: CompositionRow; view: BigPictureView }) {
       <td className="num">{formatUsd(row.usdValue)}</td>
       <td className="num">
         {/* NAV is the denominator of every percentage on the page, so this column
-            stands or falls as one — see `row-view.ts`'s header. */}
+            stands or falls as one — see `row-view.ts`'s header. The cause is the
+            PAGE's, not this row's: reaching here means the row itself rendered its
+            value fine, and what is missing is the denominator. Naming the row's cause
+            would be false of the majority of the rows that print it — on 2026-07-04,
+            17 of 31 rows were suppressed and the other 14 rendered perfectly. */}
         {view.percentOfFundRendered ? (
           formatPercent(row.percentOfFund)
         ) : (
-          <Absent reason="unexpected-absence" />
+          <Absent reason="no-fund-value" />
         )}
       </td>
       <td className="num">
