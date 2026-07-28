@@ -58,15 +58,6 @@ export const PRICE_MARK_MAGNITUDE_THRESHOLD = 0.5;
 export const SETTLEMENT_MAGNITUDE_THRESHOLD = 0.5;
 
 /**
- * The known world an event is cross-referenced against: every id the genesis seed
- * and the durable log have introduced, plus the last known close per instrument
- * for the magnitude guard. Built from genesis (and optionally the existing log) by
- * {@link buildEventReference}; extended in-place by {@link applyEventToReference}
- * as a batch is accepted, so an event opened earlier in the same inbox can be
- * referenced by a later one. Per ADR-001 the TUI owns loading these ids off disk;
- * this engine code owns the validation logic that consumes them.
- */
-/**
  * One Reserve as the cross-reference gate sees it: the running balance shadow the
  * sufficiency gate checks debits against, plus the two facts that make the Reserve
  * itself checkable — the currency it is denominated in, and the date it was born.
@@ -79,6 +70,15 @@ export interface ReserveShadow {
   bornAsOf: string;
 }
 
+/**
+ * The known world an event is cross-referenced against: every id the genesis seed
+ * and the durable log have introduced, plus the last known close per instrument
+ * for the magnitude guard. Built from genesis (and optionally the existing log) by
+ * {@link buildEventReference}; extended in-place by {@link applyEventToReference}
+ * as a batch is accepted, so an event opened earlier in the same inbox can be
+ * referenced by a later one. Per ADR-001 the TUI owns loading these ids off disk;
+ * this engine code owns the validation logic that consumes them.
+ */
 export interface EventReference {
   positionIds: Set<string>;
   reserveIds: Set<string>;
@@ -93,7 +93,7 @@ export interface EventReference {
    * read `.has()` on this map exactly as they read the old Set, so the widening is
    * source-compatible for every other verb.
    */
-  accountIds: Map<string, Currency>;
+  accountCurrencies: Map<string, Currency>;
   instrumentIds: Set<string>;
   /**
    * The genesis review's own date — the instant the whole known world begins.
@@ -101,7 +101,7 @@ export interface EventReference {
    * Read by {@link crossReferenceReserveOpened} to reject a Reserve born BEFORE the
    * seed it is born into: the container-side twin of a movement dated before its
    * Reserve. Added for `ReserveOpened`, the first verb whose events can predate a
-   * record they depend on; the `accountIds` widening is the precedent that says
+   * record they depend on; the `accountCurrencies` widening is the precedent that says
    * widening this type is cheap here (all consumption is in-repo and narrow).
    */
   genesisAsOf: string;
@@ -154,7 +154,7 @@ export function buildEventReference(
     positionIds: new Set(genesis.positions.map((position) => position.id)),
     reserveIds: new Set(genesis.reserves.map((reserve) => reserve.id)),
     portfolioIds: new Set(genesis.portfolios.map((portfolio) => portfolio.id)),
-    accountIds: new Map(genesis.accounts.map((account) => [account.id, account.currency])),
+    accountCurrencies: new Map(genesis.accounts.map((account) => [account.id, account.currency])),
     instrumentIds: new Set(genesis.instruments.map((instrument) => instrument.id)),
     // Genesis positions are all open; the log fills this via `PositionClosed` below.
     closedPositionIds: new Set(),
@@ -439,7 +439,7 @@ export function crossReferenceEvent(
  * against a state that can no longer exist.
  *
  * The currency check is a HARD REJECT, not a warning, and it is the reason
- * {@link EventReference.accountIds} carries currencies at all. Canonical
+ * {@link EventReference.accountCurrencies} carries currencies at all. Canonical
  * normalization already excludes a currency-mismatched Reserve with a
  * `currency-mismatch` warning; without this gate the new verb would be the one path
  * that admits such a Reserve into the durable log, where it would fold into a
@@ -498,7 +498,7 @@ function crossReferenceReserveOpened(
         `genesis seed does not contain.`,
     );
   }
-  const accountCurrency = reference.accountIds.get(reserve.accountId);
+  const accountCurrency = reference.accountCurrencies.get(reserve.accountId);
   if (accountCurrency === undefined) {
     return eventError(
       "reserve.accountId",
@@ -925,7 +925,7 @@ function crossReferenceOpen(
         `genesis seed does not contain.`,
     );
   }
-  if (!reference.accountIds.has(position.accountId)) {
+  if (!reference.accountCurrencies.has(position.accountId)) {
     return eventError(
       "position.accountId",
       `PositionOpened references account id '${position.accountId}', which the ` +
