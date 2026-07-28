@@ -168,8 +168,16 @@ export async function appendPreference(path: string, entry: ProfitPolicyEntry): 
 }
 
 /**
- * Seed the sidecar with this fund's locked default policy if it holds no valid entry
+ * Seed a NEW sidecar with this fund's locked default policy if it holds no valid entry
  * yet. Uses the append-only writer so seeding, like every write, preserves history.
+ *
+ * This is a SEED FOR A NEW SIDECAR, and it is NOT a read-gap fallback — the distinction
+ * is load-bearing. It writes `defaultProfitPolicyEntry`, whose `reserveTargetPct` is
+ * `10`, so a reader that reached for it on a MISSING or QUARANTINED policy would render
+ * a `10%` floor the user never set. That is exactly what V2/R1 forbid. On a read gap the
+ * correct behavior is the opposite of this function: `pickPolicyAsOf` returns
+ * `undefined`, `reserveTargetPct` is ABSENT from the payload, and the Reserve number
+ * suppresses. Call this only to initialize a sidecar that does not exist yet.
  */
 export async function seedDefaultPreferences(
   path: string,

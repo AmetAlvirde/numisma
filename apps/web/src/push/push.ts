@@ -28,7 +28,11 @@
  */
 import { Pool } from "pg";
 import { readSchemaDdl } from "../projection/provision.ts";
-import { loadCurrentReport, upsertSnapshot } from "./push-core.ts";
+import {
+  buildGlanceForAnchor,
+  loadCurrentFold,
+  upsertSnapshot,
+} from "./push-core.ts";
 
 /**
  * Apply the DDL (composition_snapshot table) through the driver for one-command
@@ -59,7 +63,14 @@ async function main(): Promise<void> {
   // invariant that matters is "a corrupt log never reaches the upsert", and DDL is
   // not an upsert. Provisioning must not need a durable log to exist at all — see
   // the header. `CREATE TABLE IF NOT EXISTS` makes re-running it harmless.
-  const report = initOnly ? undefined : await loadCurrentReport();
+  //
+  // The glance block is built here too, BEFORE the Pool, for the same reason: it
+  // reads the preferences sidecar off local disk (the push's second privileged
+  // input), and a disk failure must fail the process without having connected or
+  // written. An ABSENT floor is not a failure — it is R1's answer, carried onto the
+  // wire as an absent `reserveTargetPct`.
+  const fold = initOnly ? undefined : await loadCurrentFold();
+  const glance = fold ? await buildGlanceForAnchor(fold) : undefined;
 
   const pool = new Pool({ connectionString });
   try {
@@ -67,15 +78,22 @@ async function main(): Promise<void> {
       await initSchema(pool);
     }
 
-    if (!report) {
+    if (!fold || !glance) {
       console.log("[push] --init-only: schema applied, no snapshot pushed");
       return;
     }
 
-    const { fundId, asOf, schemaVersion } = await upsertSnapshot(pool, report);
+    const { fundId, asOf, schemaVersion } = await upsertSnapshot(
+      pool,
+      fold.report,
+      glance,
+    );
 
     console.log(
-      `[push] pushed snapshot fundId=${fundId} asOf=${asOf} schemaVersion=${schemaVersion}`,
+      `[push] pushed snapshot fundId=${fundId} asOf=${asOf} schemaVersion=${schemaVersion} ` +
+        `feedGap=${glance.feedGap.arrived}/${glance.feedGap.expected} ` +
+        `reserveFloor=${glance.reserveTargetPct ?? "absent"} ` +
+        `suppressed=[${glance.suppressed.join(",")}]`,
     );
   } finally {
     await pool.end();

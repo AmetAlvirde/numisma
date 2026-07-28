@@ -9,49 +9,137 @@
  * a copy of it. `push.ts` now just wires argv + credentials around these.
  */
 import type { Pool } from "pg";
-import type { CompositionReport } from "@numisma/engine";
-import { buildCompositionReport } from "@numisma/engine";
+import type { CompositionReport, FundReviewData } from "@numisma/engine";
+import { buildCompositionReport, pickPolicyAsOf } from "@numisma/engine";
 import { loadFoldedReview, resolveEventStorePaths } from "@numisma/event-store";
-import type { ProjectionReport } from "../projection/contract.ts";
+import { loadPreferences, resolvePreferencesPath } from "@numisma/preferences";
+import type { GlanceBlock, ProjectionReport } from "../projection/contract.ts";
 import {
   COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
   fundIdOf,
   toProjectionReport,
 } from "../projection/contract.ts";
+import { buildGlanceBlock } from "./glance.ts";
+
+/** The folded read model AND the report built from it, for one anchor. */
+export interface FoldedAnchor {
+  /**
+   * The fold output. Kept alongside the report because the glance builder needs the
+   * per-instrument mark record (`closes`) that `toProjectionReport` deliberately
+   * never lets out of the machine (D14) — the conclusion is pushed, the input is not.
+   */
+  data: FundReviewData;
+  report: CompositionReport;
+}
 
 /**
  * THE SOURCE of what gets pushed: the real fold of the durable log, in the same
  * three calls `apps/tui/src/report.ts` makes — resolve the event-store paths
- * (honoring `NUMISMA_DATA_DIR`), fold genesis + `events.jsonl` to CURRENT state,
- * build the composition report. This replaced `loadFixture()` (PRD #134 slice 2):
- * the push shell used to publish a committed JSON fixture, so the row was
- * well-formed, the reader rendered it, and the number on the phone was not the
- * fund. There is no `--fixture` flag, no env toggle and no fallback — a flag
- * would preserve the exact ambiguity this change exists to remove.
+ * (honoring `NUMISMA_DATA_DIR`), fold genesis + `events.jsonl`, build the
+ * composition report. This replaced `loadFixture()` (PRD #134 slice 2): the push
+ * shell used to publish a committed JSON fixture, so the row was well-formed, the
+ * reader rendered it, and the number on the phone was not the fund. There is no
+ * `--fixture` flag, no env toggle and no fallback — a flag would preserve the exact
+ * ambiguity this change exists to remove.
  *
- * Takes NO date argument, by decision: it always folds current state. An
- * `--as-of` fold would write a SECOND row keyed to that historical date and
- * quietly change what "latest" means to the reader.
+ * RETURNS THE FOLD AS WELL AS THE REPORT, which is why this is the one entry point
+ * and not a pair of them. The glance builder needs the per-instrument mark record
+ * the report does not carry, so a report-only wrapper could serve `push.ts` for
+ * exactly as long as the glance did not exist; it has since been deleted rather
+ * than left standing as an unused second door onto the same fold.
  *
- * FAILS LOUD on a partial log: `loadFoldedReview` asserts the log fully loaded,
- * so an unparseable or legacy-shape line throws here rather than upserting a
- * silently-skewed NAV. `push.ts` calls this BEFORE it constructs the Pool, so
- * that throw happens before any connection or write. It never mutates the log
- * (only the read path's quarantine sidecar beside it moves).
+ * `asOf` IS OPTIONAL, AND THE DEFAULT IS THE CONTRACT: called with no argument this
+ * folds CURRENT state, exactly as it always did, and that is the only form the
+ * daily `push` command uses. The parameter exists for the `backfill` command (PRD
+ * #146 seam D / V4), which replays the log's own anchored dates. It threads
+ * straight through to `loadFoldedReview(paths, asOf?)` and from there to the pure
+ * `foldEvents(genesis, events, asOf?)`, which filters `event.asOf <= asOf`, applies
+ * the latest mark <= that date per instrument, and returns `review.asOf = asOf` —
+ * which IS the row key `deriveSnapshot` reads. Zero engine work; the as-of fold has
+ * existed end to end all along (C1).
+ *
+ * THIS COMMENT USED TO READ "Takes NO date argument, by decision", on the grounds
+ * that an `--as-of` fold "would write a SECOND row keyed to that historical date
+ * and quietly change what 'latest' means to the reader". Writing a second row is
+ * true and is now the POINT — `composition_snapshot` is `PRIMARY KEY (fund_id,
+ * as_of)`, one row per anchor, history-shaped by construction. The second half was
+ * never true: `getSnapshotHistory` arbitrates "latest" on a TYPED NUMERIC date key
+ * (`asOfSortKey`), never on lexical TEXT order and never on `pushed_at`, so a
+ * backfilled 2026-06-30 row cannot out-date 2026-07-26 no matter when it was
+ * written. That typed key is what protects the reader, and it is the whole
+ * mechanism.
+ *
+ * What DID survive the fear is operator confusion — a date argument on the command
+ * launchd runs nightly is how a cron job eventually writes the wrong date — and V4
+ * answers it with a SEPARATE COMMAND rather than a flag. `push.ts` therefore never
+ * passes `asOf`; `backfill-core.ts` is the only caller that does. Do not add an
+ * `--as-of` flag to the daily push.
+ *
+ * FAILS LOUD on a partial log: `loadFoldedReview` asserts the log fully loaded, so
+ * an unparseable or legacy-shape line throws here rather than upserting a
+ * silently-skewed NAV. `push.ts` calls this BEFORE it constructs the Pool, so that
+ * throw happens before any connection or write. It never mutates the log (only the
+ * read path's quarantine sidecar beside it moves).
  *
  * The `load` provenance block matches the TUI's report path — and is one of the
  * keys `toProjectionReport` drops, so it never reaches the cloud.
+ *
+ * GENESIS IS THE FLOOR. `foldEvents` THROWS for an `asOf` strictly before the
+ * genesis seed's own date, because there is no honest portfolio state before t0.
+ * The backfill never trips this because it enumerates the log's OWN anchors, which
+ * are at or after genesis by construction — see `enumerateAnchors`, which filters
+ * explicitly rather than relying on that. Noted here so a future caller passing an
+ * arbitrary date does not rediscover the throw as a mystery failure.
  */
-export async function loadCurrentReport(): Promise<CompositionReport> {
+export async function loadCurrentFold(asOf?: string): Promise<FoldedAnchor> {
   const paths = resolveEventStorePaths();
-  const data = await loadFoldedReview(paths);
-  return buildCompositionReport(data, {
+  const data = await loadFoldedReview(paths, asOf);
+  const report = buildCompositionReport(data, {
     load: {
       status: "loaded",
       sourcePath: paths.log,
       loadedAt: new Date().toISOString(),
     },
   });
+  return { data, report };
+}
+
+/**
+ * The Reserve FLOOR in force on `asOf`, read from the ADR-004 preferences sidecar —
+ * the push's second privileged input, and the only place in `apps/web` allowed to
+ * touch it (`preferences-import-guard.test.ts`).
+ *
+ * R1 — NO FLOOR IS EVER INVENTED. `loadPreferences` quarantines a malformed line
+ * (dropping it) and returns `[]` for a missing file; `pickPolicyAsOf` returns
+ * `undefined` when nothing is in effect as-of the anchor. Every one of those paths
+ * ends here as `undefined`, which the glance block encodes as an ABSENT
+ * `reserveTargetPct` and the reader renders as a suppressed Reserve slot.
+ *
+ * `defaultProfitPolicyEntry` (which is 10) is deliberately NOT imported. It is a
+ * SEED FOR A NEW SIDECAR, not a read-gap filler, and `seedDefaultPreferences` sits
+ * one import away in the package this module already depends on. Silently rendering
+ * a floor the operator never set is precisely what V2/R1 forbid. Do not reach for it.
+ *
+ * `pickPolicyAsOf` time-travels — it sorts internally and takes the latest entry
+ * with `effectiveAt <= asOf` — so a non-monotonic sidecar replays deterministically
+ * and slice 3's backfilled rows get the policy in force on their OWN date for free.
+ */
+export async function loadReserveFloorAsOf(
+  asOf: string,
+): Promise<number | undefined> {
+  const prefs = await loadPreferences(resolvePreferencesPath());
+  return pickPolicyAsOf(prefs, asOf)?.reserveTargetPct;
+}
+
+/**
+ * The whole push-side glance derivation for one folded anchor: read the floor
+ * as-of, then build the block. The single call the push shell makes.
+ */
+export async function buildGlanceForAnchor(
+  fold: FoldedAnchor,
+): Promise<GlanceBlock> {
+  const asOf = fold.report.dashboard.summary.asOf;
+  return buildGlanceBlock(fold.data, fold.report, await loadReserveFloorAsOf(asOf));
 }
 
 /** The three projected identity/versioning columns derived from a report. */
@@ -80,12 +168,15 @@ export interface SnapshotDerivation {
  * serializes exactly this and nothing else, so a test over `deriveSnapshot` is a
  * test over what reaches the cloud.
  */
-export function deriveSnapshot(report: CompositionReport): SnapshotDerivation {
+export function deriveSnapshot(
+  report: CompositionReport,
+  glance: GlanceBlock,
+): SnapshotDerivation {
   return {
     fundId: fundIdOf(report),
     asOf: report.dashboard.summary.asOf,
     schemaVersion: COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
-    report: toProjectionReport(report),
+    report: toProjectionReport(report, glance),
   };
 }
 
@@ -102,8 +193,9 @@ export function deriveSnapshot(report: CompositionReport): SnapshotDerivation {
 export async function upsertSnapshot(
   pool: Pool,
   report: CompositionReport,
+  glance: GlanceBlock,
 ): Promise<SnapshotDerivation> {
-  const derived = deriveSnapshot(report);
+  const derived = deriveSnapshot(report, glance);
   await pool.query(
     `INSERT INTO composition_snapshot (fund_id, as_of, schema_version, report)
      VALUES ($1, $2, $3, $4::jsonb)

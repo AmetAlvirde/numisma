@@ -15,6 +15,7 @@
  */
 import { Pool } from "pg";
 import type { CompositionReport } from "@numisma/engine";
+import { asOfSortKey } from "./as-of.ts";
 
 /**
  * The ONLY slice of the engine's `CompositionReport` that is allowed to leave
@@ -64,7 +65,84 @@ import type { CompositionReport } from "@numisma/engine";
  * `status: "stale"` branch refuses a version it does not expect, so a stale
  * snapshot is a clean refusal, never a mis-render.
  */
-export type ProjectionReport = Pick<CompositionReport, "totals" | "dashboard">;
+export interface GlanceMissingMark {
+  /**
+   * The composition row id the absent mark belongs to — `instrument:<id>`, the
+   * engine's own row-id convention. Slice 5's per-row suppression matches on it.
+   */
+  rowId: string;
+  /** The row's display label (`SYMBOL (Name)`) — the same string `sections` carries. */
+  label: string;
+}
+
+/**
+ * The glance block (PRD #146 seam B) — the conclusions the READER cannot reach on
+ * its own, computed push-side and shipped as conclusions rather than as inputs.
+ *
+ * THE RULE THAT PLACES EVERY FIELD HERE: *does this computation need data D8 keeps
+ * off the wire?* If yes the push computes it and ships the answer; if no the reader
+ * computes it from the wire plus the wall clock. Freshness is therefore NOT here —
+ * it is `summary.asOf` against the clock, a render-time derivation. Expectation-vs-
+ * arrival IS here, because it needs per-instrument mark dates that must never leave
+ * the machine (D14).
+ */
+export interface GlanceBlock {
+  /**
+   * The Reserve FLOOR in force on THIS anchor, stamped by the push from the
+   * as-of preferences sidecar (R5).
+   *
+   * ABSENT means no policy was in effect as-of this anchor (or the governing line
+   * was quarantined). It is NEVER defaulted and NEVER `10` (V2/R1): rendering a
+   * floor the operator never set is precisely the failure the invariant forbids.
+   * `defaultProfitPolicyEntry` is a SEED FOR A NEW SIDECAR, not a read-gap filler.
+   *
+   * C4: the wire says `target`, the UI says `floor`. The divergence is deliberate
+   * (renaming would mean migrating an append-only sidecar) — do not "fix" it.
+   */
+  reserveTargetPct?: number;
+  /**
+   * D14 — the CONCLUSION of expectation-vs-arrival, never the mark dates it was
+   * computed from. `expected` is how many instruments the venue calendar says
+   * should have quoted on this anchor; `arrived` how many did; `missing` names the
+   * shortfall by row id + label, BOTH of which `sections` already carries, so this
+   * block adds zero new classes of data.
+   *
+   * Rejected: `markAsOf?` on every `CompositionRow`. That ships a per-instrument
+   * observation timeline — materially closer to the `priceJourneys` D8 dropped on
+   * purpose — and discloses which instruments are actively traded.
+   */
+  feedGap: {
+    expected: number;
+    arrived: number;
+    missing: GlanceMissingMark[];
+  };
+  /**
+   * V5 — every number whose input was UNEXPECTEDLY absent, named by key. A key
+   * present here means "this number would be wrong, so it is not rendered".
+   *
+   * A LIST OF KEYS, NOT N BOOLEANS, and that encoding is the point: this slice
+   * emits the three header keys (`summary.fundValueUsd`, `summary.change`,
+   * `summary.reserve`); slice 5 adds `CompositionRow.id`s to the SAME array, at no
+   * schema cost. There is no v4 for that extension (C5).
+   */
+  suppressed: string[];
+}
+
+/**
+ * The pushed payload: the engine `Pick` above PLUS a third top-level branch the
+ * PROJECTION authors.
+ *
+ * WHY A THIRD BRANCH AND NOT NEW `DashboardSummary` FIELDS. Putting `glance` on
+ * `dashboard` means widening an engine type — which drags the TUI along, re-opens
+ * D8's "what may leave the machine" one level down, and makes the engine aware a
+ * cloud exists. This module's own header states the opposite principle. A block
+ * authored here keeps the engine at ZERO contract change (C1) and passes the
+ * deletion test cleanly: delete `glance` and the glance feature dies; nothing else
+ * notices.
+ */
+export type ProjectionReport = Pick<CompositionReport, "totals" | "dashboard"> & {
+  glance: GlanceBlock;
+};
 
 /** Resolves to `T` only when `T` is `true`; otherwise the alias itself errors. */
 type Assert<T extends true> = T;
@@ -186,6 +264,23 @@ export type ProjectionKeyAllowList = {
       | "unrealizedPnlUsd"
     >
   >;
+  /**
+   * The glance branch. The compile-time half is weaker here BY NATURE — the
+   * projection owns `GlanceBlock`, so widening the type and widening the allow-list
+   * are one edit away from each other, where the engine branches above are guarded
+   * across a package boundary. The RUNTIME guard is not weaker:
+   * `push/projection-payload.test.ts` walks the actually-derived payload and
+   * allow-lists every key path it finds, so a wider block fails there the same way
+   * an engine growth fails here. These three lines still earn their keep as the
+   * place a reviewer sees the block's shape declared as closed.
+   */
+  glance: Assert<
+    KeysAreExactly<GlanceBlock, "reserveTargetPct" | "feedGap" | "suppressed">
+  >;
+  glanceFeedGap: Assert<
+    KeysAreExactly<GlanceBlock["feedGap"], "expected" | "arrived" | "missing">
+  >;
+  glanceMissing: Assert<KeysAreExactly<GlanceMissingMark, "rowId" | "label">>;
 };
 
 /**
@@ -196,11 +291,20 @@ export type ProjectionKeyAllowList = {
  * while the value at runtime is still the whole wide report, and every dropped
  * field would serialize straight into the `report` JSONB column. The type is the
  * intent; this function is the enforcement.
+ *
+ * `glance` is a REQUIRED argument, not an optional one with a default. There is no
+ * honest empty glance: an all-zero `feedGap` asserts "nothing was expected and
+ * nothing is missing", which on a real Tuesday outage is the false *no* a triage
+ * surface cannot have. A caller that has no glance to give must not push.
  */
-export function toProjectionReport(report: CompositionReport): ProjectionReport {
+export function toProjectionReport(
+  report: CompositionReport,
+  glance: GlanceBlock,
+): ProjectionReport {
   return {
     totals: report.totals,
     dashboard: report.dashboard,
+    glance,
   };
 }
 
@@ -215,8 +319,20 @@ export function toProjectionReport(report: CompositionReport): ProjectionReport 
  *    `closedBook` (and its `strategy` tags), `priceJourneys`,
  *    `reserveReconciliation` and the fold diagnostics no longer leave the
  *    machine. A v1 row read by a v2 reader yields `status: "stale"`.
+ *  - v3 — the third top-level `glance` branch (PRD #146 seam B): the as-of Reserve
+ *    floor, the derived `feedGap` conclusion, and the `suppressed` key list. The
+ *    engine's contract is UNCHANGED by this bump (C1) — the block is authored here.
+ *    A v2 row read by a v3 reader is `status: "stale"`, and v2 rows are dropped
+ *    from `anchors` entirely (see {@link getSnapshotHistory}), which is what makes
+ *    the cutover graceful: the next daily push writes a v3 row that renders
+ *    immediately, and leftover v2 rows are simply unresolvable as references until
+ *    the backfill upgrades them.
+ *
+ * C5: a two-sided Reserve range, if it ever ships, arrives as an additive optional
+ * `reserveCeilingPct?` — and `suppressed` absorbs new numbers without a shape
+ * change. Neither is a v4.
  */
-export const COMPOSITION_SNAPSHOT_SCHEMA_VERSION = 2;
+export const COMPOSITION_SNAPSHOT_SCHEMA_VERSION = 3;
 
 /**
  * Deterministic fund id: slug of the fund name — lowercased, every run of
@@ -230,11 +346,29 @@ export function fundIdOf(report: CompositionReport): string {
     .replace(/^-+|-+$/g, "");
 }
 
-/** Discriminated result of {@link getLatestSnapshot}. */
-export type LatestSnapshot =
+/** One stored anchor: a single `(fund_id, as_of)` row's identity plus its payload. */
+export interface SnapshotAnchor {
+  fundId: string;
+  asOf: string;
+  report: ProjectionReport;
+}
+
+/**
+ * Discriminated result of {@link getSnapshotHistory}.
+ *
+ * Same `empty | stale | ok` union the single-day reader always returned, widened on
+ * the `ok` branch to carry BOTH `latest` and the full `anchors` history. D4's named
+ * reference — the entire change/delta feature — has no delivery mechanism without
+ * it, because the app could previously only ever see one day.
+ *
+ * Nearest-anchor resolution (V3) deliberately does NOT live here. It is a pure
+ * function over `anchors` and belongs to slice 4's verdict module: this query
+ * returns the anchors, it does not interpret them.
+ */
+export type SnapshotHistory =
   | { status: "empty" }
   | { status: "stale"; storedVersion: number; expectedVersion: number }
-  | { status: "ok"; fundId: string; asOf: string; report: ProjectionReport };
+  | { status: "ok"; latest: SnapshotAnchor; anchors: SnapshotAnchor[] };
 
 interface SnapshotRow {
   fund_id: string;
@@ -278,32 +412,25 @@ export function setReaderPoolForTests(pool?: Pool): void {
 }
 
 /**
- * Chronologically-comparable sort key for an `as_of` calendar date.
+ * Chronologically-comparable sort key for an `as_of` calendar date — see
+ * {@link asOfSortKey} in `./as-of.ts` for why the ordering is typed rather than
+ * lexical.
  *
- * `as_of` is stored as TEXT (schema.sql), so a SQL `ORDER BY as_of` is a *lexical*
- * TEXT sort — correct ONLY while every value is strict zero-padded ISO
- * (`YYYY-MM-DD`). It silently picks the wrong "latest" the moment a value is not
- * zero-padded: lexically `"2026-10-01" < "2026-9-1"` (because `'1' < '9'` at the
- * fifth character), yet October is chronologically *after* September. We therefore
- * arbitrate "latest" on a *typed* numeric key (year*10000 + month*100 + day)
- * rather than trusting TEXT order.
+ * EXPORTED (it was module-private) so `anchors` can be ordered THROUGH the same key
+ * the "latest" arbitration uses, and so slice 4's nearest-anchor resolution can too.
+ * Re-deriving date ordering by string comparison anywhere else would re-introduce
+ * exactly the lexical trap it exists to stop, in a second place.
  *
- * Throwing on an unparseable `as_of` keeps the contract honest: a value we cannot
- * order chronologically must not silently win or lose under a lexical fallback.
+ * IT LIVES IN A SEPARATE, PG-FREE MODULE and is re-exported here. The reader/writer
+ * contract is unchanged — every existing importer still gets it from `contract.ts` —
+ * but slice 4's verdict module runs in the BROWSER, and a value import of THIS file
+ * would pull the `pg` driver and the `composition_snapshot` literal into the client
+ * bundle and fail `client-bundle.integration.test.ts`.
  */
-function asOfSortKey(asOf: string): number {
-  const match = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(asOf);
-  if (!match) {
-    throw new Error(
-      `getLatestSnapshot: as_of ${JSON.stringify(asOf)} is not a sortable ISO calendar date`,
-    );
-  }
-  const [, year, month, day] = match;
-  return Number(year) * 10000 + Number(month) * 100 + Number(day);
-}
+export { asOfSortKey };
 
 /**
- * Read the most recent snapshot. Returns a refusal result rather than throwing
+ * Read the projection's ANCHOR HISTORY. Returns a refusal result rather than throwing
  * for the two "expected" bad states:
  *  - no rows yet            -> { status: "empty" }
  *  - stored schema mismatch -> { status: "stale", storedVersion, expectedVersion }
@@ -323,8 +450,22 @@ function asOfSortKey(asOf: string): number {
  * all candidate rows anyway, and a `LIMIT` would have to follow a (lexically
  * unsafe) SQL sort. If funds ever coexist, add a `fund_id` parameter + filter
  * here so one fund's snapshots can't out-date another's.
+ *
+ * THIS IS A RETURN-SHAPE WIDENING, NOT A NEW QUERY AND NOT A PAYLOAD CHANGE. The
+ * SELECT below is byte-identical to the one the single-day reader ran: no WHERE, no
+ * LIMIT. It has ALWAYS pulled full history into memory and thrown all but the newest
+ * away. The AAR's "apps/web can only ever show a single day" was true of the return
+ * TYPE, never of the query. Measured cost: 3,093 bytes/row — 28 anchors ≈ 87 KB, a
+ * year ≈ 1.1 MB.
+ *
+ * `anchors` is filtered to `COMPOSITION_SNAPSHOT_SCHEMA_VERSION` and ordered
+ * ASCENDING through {@link asOfSortKey}. The version filter is not defensive
+ * decoration — it is what makes the v2→v3 cutover graceful: leftover v2 rows stay in
+ * the table (no credential in this system can DELETE one, V6) and are simply
+ * unresolvable as references until the backfill upgrades them, instead of being
+ * handed to a v3 reader that would mis-render them.
  */
-export async function getLatestSnapshot(pool: Pool): Promise<LatestSnapshot> {
+export async function getSnapshotHistory(pool: Pool): Promise<SnapshotHistory> {
   const { rows } = await pool.query<SnapshotRow>(
     `SELECT fund_id, as_of, schema_version, report
        FROM composition_snapshot`,
@@ -344,6 +485,9 @@ export async function getLatestSnapshot(pool: Pool): Promise<LatestSnapshot> {
     return { status: "empty" };
   }
 
+  // Staleness is judged on the LATEST row, not on an older ok one: if the newest
+  // thing the projection holds is a version this build does not understand, the
+  // honest answer is a refusal, not a render of some older row that happens to fit.
   if (latest.schema_version !== COMPOSITION_SNAPSHOT_SCHEMA_VERSION) {
     return {
       status: "stale",
@@ -351,10 +495,16 @@ export async function getLatestSnapshot(pool: Pool): Promise<LatestSnapshot> {
       expectedVersion: COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
     };
   }
-  return {
-    status: "ok",
-    fundId: latest.fund_id,
-    asOf: latest.as_of,
-    report: latest.report,
-  };
+
+  const anchors = rows
+    .filter((row) => row.schema_version === COMPOSITION_SNAPSHOT_SCHEMA_VERSION)
+    .map((row) => ({ key: asOfSortKey(row.as_of), row }))
+    .sort((a, b) => a.key - b.key)
+    .map(({ row }) => toAnchor(row));
+
+  return { status: "ok", latest: toAnchor(latest), anchors };
+}
+
+function toAnchor(row: SnapshotRow): SnapshotAnchor {
+  return { fundId: row.fund_id, asOf: row.as_of, report: row.report };
 }

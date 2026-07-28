@@ -12,13 +12,14 @@
  *    a *test* fixture, loaded directly by the unit and integration tests.
  *  - `makeTempStore` — builds a throwaway data dir (genesis seed + an events.jsonl
  *    of the caller's choosing) so the real-fold tests can exercise
- *    `loadCurrentReport` over an actual log without touching the operator's store.
+ *    `loadCurrentFold` over an actual log without touching the operator's store.
  */
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import type { CompositionReport } from "@numisma/engine";
+import type { GlanceBlock } from "../projection/contract.ts";
 import {
   resolveEventStorePaths,
   type EventStorePaths,
@@ -86,3 +87,26 @@ export async function makeTempStore(
   await writeFile(paths.log, log, "utf8");
   return { dir, paths };
 }
+
+/**
+ * A representative v3 `GlanceBlock` for tests that need a well-formed payload but
+ * are not testing the glance derivation itself (the upsert path, the D8 key-path
+ * contract). Deliberately NOT an empty block: it carries a floor, a real shortfall
+ * and the resulting suppression, so a key-path allow-list walking it sees every
+ * branch — including the optional `reserveTargetPct` an empty block would hide.
+ *
+ * `buildGlanceBlock` is what the PUSH uses; this is a fixture, and the two are
+ * asserted against each other in `glance.test.ts`.
+ */
+export const TEST_GLANCE: GlanceBlock = {
+  reserveTargetPct: 10,
+  feedGap: {
+    expected: 13,
+    arrived: 4,
+    missing: [
+      { rowId: "instrument:aapl", label: "AAPL (Apple Inc.)" },
+      { rowId: "instrument:googl", label: "GOOGL (Alphabet Inc.)" },
+    ],
+  },
+  suppressed: ["summary.fundValueUsd", "summary.change", "summary.reserve"],
+};
