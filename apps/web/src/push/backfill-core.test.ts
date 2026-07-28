@@ -29,7 +29,7 @@ import {
   toSnapshotAnchors,
   writeAnchorFixture,
 } from "./backfill-core.ts";
-import { loadCurrentReport } from "./push-core.ts";
+import { loadCurrentFold } from "./push-core.ts";
 import {
   makeTempStore,
   priceMarkedLine,
@@ -187,7 +187,7 @@ describe("runBackfill — a loop plus the existing upsert", () => {
     const navs = results.map((r) => r.report.totals.fundValueUsd);
     expect(navs[0]).toBeLessThan(navs[1]!);
     expect(navs[1]).toBeLessThan(navs[2]!);
-    const current = await loadCurrentReport();
+    const { report: current } = await loadCurrentFold();
     expect(navs[2]).toBe(current.totals.fundValueUsd);
     expect(current.dashboard.summary.asOf).toBe("2026-06-12");
   });

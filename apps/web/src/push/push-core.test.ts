@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { CompositionReport } from "@numisma/engine";
 import { quarantineLogPath } from "@numisma/event-store";
 import { COMPOSITION_SNAPSHOT_SCHEMA_VERSION } from "../projection/contract.ts";
-import { deriveSnapshot, loadCurrentReport } from "./push-core.ts";
+import { deriveSnapshot, loadCurrentFold } from "./push-core.ts";
 import {
   loadFixture,
   makeTempStore,
@@ -65,7 +65,7 @@ describe("loadFixture → deriveSnapshot (a TEST input, no longer the push input
  * The real fold over a throwaway durable log — the source line PRD #134 slice 2
  * changed. No DB, no network: genesis seed + an events.jsonl on disk.
  *
- * `loadCurrentReport()` called with NO argument folds CURRENT state, and every
+ * `loadCurrentFold()` called with NO argument folds CURRENT state, and every
  * case below asserts that default, because it is what the daily `push` command
  * uses. This comment used to say the function "takes no date argument by decision"
  * — that an `--as-of` fold "would write a SECOND row keyed to that date and quietly
@@ -81,7 +81,7 @@ describe("loadFixture → deriveSnapshot (a TEST input, no longer the push input
  * nightly is how a cron job eventually writes the wrong date. The as-of form is
  * covered in `backfill-core.test.ts`; the no-argument default is covered here.
  */
-describe("loadCurrentReport (the real fold of the durable log)", () => {
+describe("loadCurrentFold (the real fold of the durable log)", () => {
   const dirs: string[] = [];
   const savedDataDir = process.env.NUMISMA_DATA_DIR;
 
@@ -109,7 +109,7 @@ describe("loadCurrentReport (the real fold of the durable log)", () => {
         `${priceMarkedLine("mark-2", "2026-06-09", 175)}\n`,
     );
 
-    const report = await loadCurrentReport();
+    const { report } = await loadCurrentFold();
 
     // The later of the two events wins — not genesis, not the earlier mark.
     expect(report.dashboard.summary.asOf).toBe("2026-06-09");
@@ -123,7 +123,7 @@ describe("loadCurrentReport (the real fold of the durable log)", () => {
       `${priceMarkedLine("mark-1", "2026-06-05", 160)}\n`,
     );
 
-    const report = await loadCurrentReport();
+    const { report } = await loadCurrentFold();
 
     expect(report.load?.status).toBe("loaded");
     expect(report.load?.sourcePath).toBe(log);
@@ -137,7 +137,7 @@ describe("loadCurrentReport (the real fold of the durable log)", () => {
     const { log } = await useStore(body);
     const before = await readFile(log);
 
-    await expect(loadCurrentReport()).rejects.toThrow(/unloadable line/i);
+    await expect(loadCurrentFold()).rejects.toThrow(/unloadable line/i);
 
     // R2: the durable log itself is never written. (The quarantine SIDECAR
     // beside it is expected — the read path writes it as a consequence of

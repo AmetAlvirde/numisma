@@ -29,9 +29,9 @@ dishonest.
 | `apps/tui/src/report.ts` | A `tsx` CLI script: a top-level `try/catch` that folds genesis + log (`loadFoldedReview`) and renders the already-tested composition report. No unit to assert beyond a `process.stdout.write`. | Its constituent functions are unit-tested directly (`loadFoldedReview` by `packages/event-store/src/event-store.test.ts`, `report-fold.test.ts`, `fund-composition.test.ts`). |
 | `apps/tui/src/spine.ts` | The `tsx` Node tracer (`pnpm spine`): a top-level `try/catch` orchestrating already-tested `ingestInbox` / `loadFoldedReview` / `buildCompositionReport` / `formatCompositionReport`. Same script category — no unit to assert. | Its constituent functions are unit-tested (`ingestInbox` by `apps/tui/src/event-store.test.ts`, `loadFoldedReview` by `packages/event-store/src/event-store.test.ts`, `report-fold.test.ts`); the end-to-end path is also driven by `pnpm spine` / `pnpm smoke:startup`. |
 | `apps/tui/src/spine-reset.ts` | A `tsx` dev iteration helper (`pnpm spine:reset`): clear the log, restore the most recent archived inbox. A throwaway utility, not product behavior — no unit to assert. | Manual: it exists to re-run `pnpm spine` against an edited inbox. |
-| `apps/web/src/push/push.ts` | Self-executing `tsx` script (`pnpm push` / `db:init`): top-level `main().then(..., process.exit)` — argv + credential + `process.exit` wiring only. Importing it runs `main()`, so there is no unit to assert as written. Slice #127 extracted the two pieces worth asserting into the measured `push/push-core.ts` (see below), leaving this a thin wrapper. PRD #134 slice 2 then moved `push.ts` off the committed fixture onto `loadCurrentReport()` (the real fold of the durable log). | `push-core.ts` is measured: `deriveSnapshot` / `loadCurrentReport` by `push-core.test.ts`, the real upsert (`upsertSnapshot`) by the gated `push-core.integration.test.ts`. The DDL `push.ts` applies via `--init` / `--init-only` is the tested `readSchemaDdl()` from `provision.ts`. |
-| `apps/web/src/push/push-core.ts` | **Measured**, not excluded — listed here only for the map. The importable, self-exec-free half of the push shell. | `deriveSnapshot` (pure report→derivation) and `loadCurrentReport` (the real genesis+log fold, via `@numisma/event-store`) are unit-tested (`push-core.test.ts`); `upsertSnapshot` (the real `ON CONFLICT ... DO UPDATE`) is exercised by the gated `push-core.integration.test.ts` against a throwaway Postgres. With the test DB present it is 100% covered; without it, `upsertSnapshot`'s `pool.query` shows uncovered (the integration test skips) — flagged honestly, same posture as `provision.ts`. |
-| `apps/web/src/push/push-core.fixtures.ts` | Test-only fixtures extracted from `push-core.ts` when the push stopped publishing the committed fixture (PRD #134 slice 2): `FIXTURE_PATH` / `loadFixture` (the retired committed fixture, now a test input only) and `makeTempStore` (a throwaway data dir for exercising `loadCurrentReport` over a real log). Excluded via the repo's `**/*.fixtures.ts` glob. | Exercised by `push-core.test.ts` / `push-core.integration.test.ts`, the tests that import it — it is test infrastructure, not product code to measure. |
+| `apps/web/src/push/push.ts` | Self-executing `tsx` script (`pnpm push` / `db:init`): top-level `main().then(..., process.exit)` — argv + credential + `process.exit` wiring only. Importing it runs `main()`, so there is no unit to assert as written. Slice #127 extracted the two pieces worth asserting into the measured `push/push-core.ts` (see below), leaving this a thin wrapper. PRD #134 slice 2 then moved `push.ts` off the committed fixture onto `loadCurrentFold()` (the real fold of the durable log). | `push-core.ts` is measured: `deriveSnapshot` / `loadCurrentFold` by `push-core.test.ts`, the real upsert (`upsertSnapshot`) by the gated `push-core.integration.test.ts`. The DDL `push.ts` applies via `--init` / `--init-only` is the tested `readSchemaDdl()` from `provision.ts`. |
+| `apps/web/src/push/push-core.ts` | **Measured**, not excluded — listed here only for the map. The importable, self-exec-free half of the push shell. | `deriveSnapshot` (pure report→derivation) and `loadCurrentFold` (the real genesis+log fold, via `@numisma/event-store` — the single entry point both `push.ts` and `backfill-core.ts` call, with no report-only wrapper beside it) are unit-tested (`push-core.test.ts`); `upsertSnapshot` (the real `ON CONFLICT ... DO UPDATE`) is exercised by the gated `push-core.integration.test.ts` against a throwaway Postgres. Statements/lines/functions measure 100% with or WITHOUT the test DB — `backfill-core.test.ts` runs `upsertSnapshot` through a fake pool, so the SQL executes but is never parsed by Postgres, and only the gated test proves the `ON CONFLICT` clause is real. Branches are 85.71%: the gap is `loadReserveFloorAsOf`'s no-policy arm. Spelled out rather than rounded up — same posture as `provision.ts`. |
+| `apps/web/src/push/push-core.fixtures.ts` | Test-only fixtures extracted from `push-core.ts` when the push stopped publishing the committed fixture (PRD #134 slice 2): `FIXTURE_PATH` / `loadFixture` (the retired committed fixture, now a test input only) and `makeTempStore` (a throwaway data dir for exercising `loadCurrentFold` over a real log). Excluded via the repo's `**/*.fixtures.ts` glob. | Exercised by `push-core.test.ts` / `push-core.integration.test.ts`, the tests that import it — it is test infrastructure, not product code to measure. |
 | `apps/web/src/projection/provision-projection.ts` | Self-executing `tsx` provisioning CLI (`pnpm db:provision`): top-level `main().then(..., process.exit)` over the tested `provision.ts` builders. Same script category as `push.ts` — no unit to assert as written. | Its pure inputs (`readSchemaDdl`, `buildGrantStatements`, `rolesFromEnv`, `assertValidRoleName`) are unit-tested (`provision.test.ts`); the DB-applying `provisionProjection()` it calls is exercised by the gated integration test (`provision.integration.test.ts`). |
 | `apps/web/src/auth/apply-auth-schema.ts` | Self-executing `tsx` auth-schema applier (`pnpm auth:apply`): top-level `main().then(..., process.exit)` that reads the vendored `better-auth.schema.sql` and applies it idempotently to `AUTH_DATABASE_URL`. Same script category as `push.ts`. | The vendored artifact is generated by the pinned `@better-auth/cli@1.4.21`; idempotency (already-exists → no-op) is demonstrated in the provisioning runbook (`docs/projection-provisioning.md`). |
 | `apps/web/src/auth/seed-account.ts` (slice #125) | Self-executing `tsx` single-tenant seed CLI (`pnpm auth:seed`): top-level `main().then(..., process.exit)` that writes the ONE account through Better Auth's internal adapter (`auth.$context`) keyed on `NUMISMA_SEED_EMAIL` (idempotent — a second run no-ops). Same script category as `apply-auth-schema.ts`; importing it runs `main()`, so there is no unit to assert as written. | The single-tenant invariant it exists to serve — server-side signup disabled (`emailAndPassword.disableSignUp`) with sign-in still enabled — IS asserted (`lib/single-tenant.test.ts`), along with the anonymous-leaks-nothing gate behavior. |
@@ -242,10 +242,11 @@ for what that number measures.
   from `push.ts` so the derivation and the real upsert are assertable without
   running the script. `deriveSnapshot` (report → `fundId` / `asOf` /
   `schemaVersion`, delegating to the shared contract) is unit-tested
-  (`push-core.test.ts`, no DB). `loadCurrentReport` — the real fold of the
+  (`push-core.test.ts`, no DB). `loadCurrentFold` — the real fold of the
   durable log (resolve event-store paths via `@numisma/event-store`, fold
-  genesis + `events.jsonl` to current state, `buildCompositionReport`) — is
-  also unit-tested there against a throwaway on-disk store built by the
+  genesis + `events.jsonl`, `buildCompositionReport`), returning the fold
+  alongside the report and called directly by both `push.ts` and
+  `backfill-core.ts` — is also unit-tested there against a throwaway on-disk store built by the
   coverage-excluded `push-core.fixtures.ts`; the retired committed fixture
   (`FIXTURE_PATH` / `loadFixture`) now lives in that same fixtures module as a
   test input only, no longer read by the push itself. `upsertSnapshot` — the
@@ -253,10 +254,16 @@ for what that number measures.
   exercised by the gated `push-core.integration.test.ts`: two pushes of the same
   key yield exactly one row with `pushed_at` refreshed and `report` /
   `schema_version` updated (no delete, no duplicate), pushed through the WRITER cred
-  on the #123 throwaway-Postgres substrate. With the test DB present, 100% covered;
-  without it, `upsertSnapshot`'s `pool.query` shows uncovered (integration test
-  skips) — flagged honestly, same posture as `provision.ts`. Measured at 58%
-  lines with the test DB absent (only `upsertSnapshot` uncovered); the blast
+  on the #123 throwaway-Postgres substrate. Measured 100% statements / 100% lines
+  / 100% functions EVEN WITH THE TEST DB ABSENT, which is not the reassurance it
+  looks like and is why the number is spelled out: `backfill-core.test.ts` drives
+  `upsertSnapshot` through a fake pool, so the SQL string is executed but never
+  parsed by Postgres. Only the gated integration test proves the `ON CONFLICT`
+  clause is valid and idempotent against a real server; a green line count here
+  says the branch ran, not that the statement is correct SQL. Branches sit at
+  85.71%, the one gap being `loadReserveFloorAsOf`'s no-policy-in-effect arm
+  (`pickPolicyAsOf(...)?.reserveTargetPct` returning `undefined`) — R1's absent
+  floor, asserted at the reader instead (`verdict.test.ts`'s R5 case). The blast
   radius this real fold opens — `apps/web` now depends on `@numisma/event-store`,
   the reader for the whole private event log — is guarded structurally, not by
   a coverage number: `apps/web/src/event-store-import-guard.test.ts` asserts no
@@ -283,13 +290,35 @@ self-executing script (above).
 **`.tsx` render components — documented exclusion, not RTL (Open Question
 resolved):** `SummaryCard` and `SectionTable` (and the route/router `.tsx` files)
 are outside instrumentation because the include glob is `*.ts`, not `*.tsx`. This
-is deliberate: they are pure render surfaces over already-tested engine data
-(`@numisma/engine/format` + the four dashboard types, whose formatting is locked
-by `packages/engine/src/format.test.ts`), and the `CompositionReport` type import
-in `contract.ts` is the compile-time drift guard for their inputs. This increment
-does **not** add a React Testing Library toolchain (jsdom + RTL + the react vite
-plugin in the test path) for two thin read-only components — the reliability payoff
-does not justify the toolchain weight and maintenance surface. Mirrors the
+is deliberate: they render already-tested engine data (`@numisma/engine/format` +
+the four dashboard types, whose formatting is locked by
+`packages/engine/src/format.test.ts`), and the `CompositionReport` type import in
+`contract.ts` is the compile-time drift guard for their inputs.
+
+**They are no longer *pure* render surfaces, and this paragraph used to say they
+were.** PRD #146 gave both a decision to make: whether a number may be shown at
+all. `SummaryCard` gates the fund value and the unrealized P&L on
+`fundValueRendered`, and `SectionTable` gates the `% of fund` column on
+`percentOfFundRendered` and every cell on its row's `RowView`. That is exactly the
+kind of logic an uninstrumented file hides — review finding 1 was an unguarded
+`SummaryCard` printing a NAV the glance refused to show, and no coverage number
+would have caught it, because the file reports none.
+
+What compensates is **not** the coverage glob but the source-level assertions in
+`glance/row-view.test.ts` (and `routes/route-move.test.ts`): the decisions
+themselves live in the pure, fully instrumented `glance/row-view.ts`, and the tests
+assert that the components actually consult them. That is a weaker guarantee than
+rendering the component, and it is named here rather than implied — it catches a
+surface silently reverting to the raw payload; it cannot catch a layout mistake or
+a wrong branch inside JSX. **The reader must open the page to judge that.**
+
+This increment still does **not** add a React Testing Library toolchain (jsdom +
+RTL + the react vite plugin in the test path) — the reliability payoff does not
+yet justify the toolchain weight and maintenance surface, and the decisions worth
+asserting were extractable to `.ts` instead. But the honest trigger below has
+moved closer: a third component gating on suppression, or any branch that cannot
+be lifted into a pure module, should buy the toolchain rather than widen this
+exemption again. Mirrors the
 `apps/tui/src/app.ts` Bun-only split: instrument what Node's `vitest run` actually
 executes, and account for the rest here rather than reporting dead 0%. If a later
 slice adds interactive `.tsx` behavior (sort/filter/drill-down — all D4 non-goals
