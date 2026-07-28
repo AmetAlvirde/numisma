@@ -1,19 +1,26 @@
-import { createFileRoute } from "@tanstack/react-router";
-import type { ProjectionReport } from "../projection/contract.ts";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { getDashboard } from "../lib/dashboard.ts";
-import { SummaryCard } from "../components/SummaryCard.tsx";
-import { SectionTable } from "../components/SectionTable.tsx";
+import { Shell } from "../components/Shell.tsx";
+import { GlanceCard } from "../components/GlanceCard.tsx";
+import { computeVerdict } from "../glance/verdict.ts";
+import type { SnapshotAnchor } from "../projection/contract.ts";
 
 /**
- * Dashboard route. The loader calls the session-gated server function, which
- * redirects unauthenticated users to /login before any data is read.
+ * `/` — THE TRIAGE SURFACE (D1): *does anything need me before I next sit at the
+ * desk?* The composition dashboard that used to live here moved to `/big-picture`
+ * (D11), which is also D9's below-the-tap layer. The login route still lands here,
+ * because the phone should land on triage.
+ *
+ * The loader is unchanged: the same session-gated server function, redirecting
+ * unauthenticated users to /login before any data is read, now consuming slice
+ * #148's `getSnapshotHistory` — `anchors` is what D4's named reference needs.
  */
 export const Route = createFileRoute("/")({
-  component: DashboardPage,
+  component: GlancePage,
   loader: () => getDashboard(),
 });
 
-function DashboardPage() {
+function GlancePage() {
   const result = Route.useLoaderData();
 
   if (result.status === "empty") {
@@ -46,23 +53,27 @@ function DashboardPage() {
     );
   }
 
-  return <DashboardView report={result.report} />;
+  return <GlanceView latest={result.latest} anchors={result.anchors} />;
 }
 
-function DashboardView({ report }: { report: ProjectionReport }) {
+function GlanceView({
+  latest,
+  anchors,
+}: {
+  latest: SnapshotAnchor;
+  anchors: SnapshotAnchor[];
+}) {
+  // The wall clock is READ HERE and injected, never taken inside the module: freshness
+  // is a render-time derivation (D6) over `latest.asOf`, and `computeVerdict` stays
+  // pure — which is what lets the same call be replayed over 28 anchors in a test.
+  const verdict = computeVerdict(latest, anchors, new Date());
+
   return (
     <Shell>
-      <SummaryCard
-        summary={report.dashboard.summary}
-        usdMxn={report.totals.usdMxn}
-      />
-      {report.dashboard.sections.map((section) => (
-        <SectionTable key={section.id} section={section} />
-      ))}
+      <GlanceCard verdict={verdict} />
+      <p className="crumb">
+        <Link to="/big-picture">Big picture →</Link>
+      </p>
     </Shell>
   );
-}
-
-function Shell({ children }: { children: React.ReactNode }) {
-  return <main className="dashboard">{children}</main>;
 }

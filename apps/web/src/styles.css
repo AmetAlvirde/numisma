@@ -194,3 +194,58 @@ thead th {
   color: var(--neg);
   margin: 0;
 }
+
+/* ── the glance (PRD #146 D1/D3) ────────────────────────────────────────────
+   The verdict is the only thing above 20px and it lands before the eye reaches
+   the numbers: the surface is judged on how fast the *no* reads, on a phone, in
+   a queue. The three standing numbers reuse `.metrics`, so the glance and the
+   big picture stay one visual system. */
+.verdict {
+  margin: 0;
+  font-size: 1.5rem;
+  line-height: 1.25;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.verdict-no {
+  color: var(--pos);
+}
+
+.verdict-yes {
+  color: var(--neg);
+}
+
+/* An absent number is NOT a zero (V1/D7): an em dash plus its cause, so the
+   absence is readable as a diagnosis rather than as a value. */
+.absent {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.absent-why {
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
+.metrics .muted {
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin: 0;
+}
+
+.crumb {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.crumb a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.crumb a:hover {
+  color: var(--text);
+}

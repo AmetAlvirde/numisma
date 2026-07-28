@@ -6,7 +6,7 @@ _Made during: MVI — web-app leg discovery / 2026-07-07 maps + grills
 yet; ratified as **the gate** that freezes the regime before any real fund data
 leaves the local machine and a tracer slice is sliced against it._
 _Scope: product_
-_Status: accepted (amended 2026-07-24 — see "Amendment: payload narrowed to restore the blast-radius paragraph" below)_
+_Status: accepted (amended 2026-07-24 — see "Amendment: payload narrowed to restore the blast-radius paragraph"; amended again 2026-07-27 — see "Amendment: a third `glance` branch, and the payload stops being a bare `Pick`" — both below)_
 
 The web-app leg places a **read-only projection of private fund data** (positions,
 portfolio/fund USD values, realized/unrealized P&L) in an **internet-reachable,
@@ -209,3 +209,76 @@ refusal, never a mis-render, on the way in either direction. If a per-position
 stops view or a closed-book view later earns its place on the phone-glance
 surface, the blast-radius call is re-made at that moment, deliberately — not
 inherited silently the way it was this time.
+
+## Amendment: a third `glance` branch, and the payload stops being a bare `Pick`
+
+_Amended 2026-07-27, while building slice 2 of the dashboard-glance increment
+(PRD #146, issue #148). Filed in the same PR that makes it necessary — the
+amendment above names the pushed payload **literally** as
+`Pick<CompositionReport, "totals" | "dashboard">`, and that sentence goes stale
+the day this lands._
+
+**What changed.** The pushed payload is no longer a bare `Pick` of the engine's
+report. It is now:
+
+```ts
+Pick<CompositionReport, "totals" | "dashboard"> & { glance: GlanceBlock }
+```
+
+`GlanceBlock` carries three things, all of them **derived**: the Reserve floor in
+force on that anchor (a policy percentage from the ADR-004 preferences sidecar), a
+`feedGap` block of two counts plus the row ids and labels of the instruments whose
+mark did not arrive, and `suppressed` — a list of the keys whose underlying number
+would be wrong and is therefore not rendered.
+
+**This does not re-open the blast radius; it stays inside it.** Every item above
+is a *derived dashboard value* in the blast-radius paragraph's own terms:
+booleans-as-key-names, counts, labels and row ids that `dashboard.sections`
+already carries verbatim, and one policy percentage. No stop level, no strategy
+tag, no trade history, no prose. The amendment above's two allow-lists both grew
+to name the new keys — `ProjectionKeyAllowList` gains `glance`, `glanceFeedGap`
+and `glanceMissing`; `projection-payload.test.ts` gains the nine new key paths —
+so the closed world is still closed, and a wider block fails exactly the way an
+engine growth fails.
+
+**Why a third top-level branch rather than new `DashboardSummary` fields.** The
+alternative was to widen an engine type. That drags the TUI along, re-opens "what
+may leave the machine" one level *down* (inside a type the engine owns, where the
+next increment inherits the growth silently — this amendment's own history), and
+makes the engine aware a cloud exists, which `contract.ts` states as the thing it
+must never be. A block authored by the projection keeps **the engine's contract at
+zero change** and passes the deletion test: delete `glance` and the glance feature
+dies; nothing else notices.
+
+**Per-instrument mark dates were considered and rejected.** The obvious way to let
+the reader compute `feedGap` itself is `markAsOf?` on every `CompositionRow`. That
+ships a per-instrument observation timeline — materially closer to the
+`priceJourneys` this ADR's previous amendment dropped on purpose — and it
+discloses which instruments are actively traded. So the push computes the
+conclusion and ships **the conclusion**: expectation-vs-arrival needs data that
+stays on the machine, therefore it is computed on the machine. Freshness, by the
+same rule, is **not** on the wire at all — it is the row's own `as_of` against the
+wall clock, derived at render time. A test asserts no ISO-date-shaped value
+appears anywhere in the payload outside `dashboard.summary.asOf`.
+
+**`COMPOSITION_SNAPSHOT_SCHEMA_VERSION` bumps 2 → 3,** which this ADR already
+sanctions: *"a read-model schema change is a re-push, never a data migration."* A
+v2 row read by a v3 reader is a clean `status: "stale"` refusal, and the reader
+additionally drops off-version rows from the anchor history it now returns — so
+the cutover is graceful rather than a flag day: the next daily push writes a v3
+row that renders immediately, and leftover v2 rows are simply unresolvable as
+references until the backfill upgrades them.
+
+**Unbounded projection history stays accepted.** The reader now returns *every*
+anchor, not only the newest — a return-shape widening, not a new query: the SELECT
+has always had no `WHERE` and no `LIMIT` and always read full history into memory.
+This ADR already calls the projection DB *"a disposable, re-projectable view"*, and
+no credential in the system can `DELETE` a projection row (the writer holds
+INSERT/UPDATE only), so growth is bounded by re-projection, not by pruning.
+Measured: 3,093 bytes/row — 28 anchors ≈ 87 KB, a year ≈ 1.1 MB.
+
+**No credential change, no write path, no second route out of the machine.** The
+preferences sidecar is a second *local disk read* by the push shell, which this
+ADR already sanctions as the privileged reader; a guard test confines
+`@numisma/preferences` to `apps/web/src/push/` so no render surface can reach it.
+ADR-011's posture is untouched.

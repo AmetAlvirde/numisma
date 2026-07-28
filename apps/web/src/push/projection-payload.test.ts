@@ -49,7 +49,7 @@
 import { describe, expect, it } from "vitest";
 import type { CompositionReport } from "@numisma/engine";
 import { deriveSnapshot } from "./push-core.ts";
-import { loadFixture } from "./push-core.fixtures.ts";
+import { loadFixture, TEST_GLANCE } from "./push-core.fixtures.ts";
 import { toProjectionReport } from "../projection/contract.ts";
 
 /**
@@ -183,6 +183,20 @@ const ALLOWED_KEY_PATHS = [
   "$.dashboard.summary.reserve.usdValue",
   "$.dashboard.summary.totalUnrealizedPnlUsd",
   "$.dashboard.summary.usdMxn",
+  // The glance branch (v3, slice #148). Every path here is a DERIVED conclusion:
+  // a policy percentage, two counts, and row ids + labels `$.dashboard.sections`
+  // already carries — "derived dashboard values" in ADR-007's own terms. There is
+  // deliberately no mark date among them (D14); `no ISO-date-shaped value outside
+  // summary.asOf` below is the assertion that keeps it that way.
+  "$.glance",
+  "$.glance.feedGap",
+  "$.glance.feedGap.arrived",
+  "$.glance.feedGap.expected",
+  "$.glance.feedGap.missing",
+  "$.glance.feedGap.missing[].label",
+  "$.glance.feedGap.missing[].rowId",
+  "$.glance.reserveTargetPct",
+  "$.glance.suppressed",
   "$.totals",
   "$.totals.baseCurrency",
   "$.totals.fundValueUsd",
@@ -305,7 +319,7 @@ describe("D8 forbidden-key contract (what may not reach the cloud)", () => {
     // nobody predicted — which is the entire drift class ADR-007's amendment
     // documents. See ALLOWED_KEY_PATHS before "fixing" a failure here.
     const wide = await loadWideReport();
-    const actual = [...keyPathsOf(deriveSnapshot(wide).report)].sort();
+    const actual = [...keyPathsOf(deriveSnapshot(wide, TEST_GLANCE).report)].sort();
     const allowed = [...ALLOWED_KEY_PATHS].sort();
 
     const unlisted = actual.filter((p) => !allowed.includes(p));
@@ -326,21 +340,22 @@ describe("D8 forbidden-key contract (what may not reach the cloud)", () => {
 
   it("pushes no forbidden key at any depth of the derived payload", async () => {
     const wide = await loadWideReport();
-    const leaks = scanForbiddenKeys(deriveSnapshot(wide).report);
+    const leaks = scanForbiddenKeys(deriveSnapshot(wide, TEST_GLANCE).report);
     expect(leaks, `pushed payload leaks:\n${leaks.join("\n")}`).toEqual([]);
   });
 
-  it("narrows the payload to exactly { totals, dashboard }", async () => {
+  it("narrows the payload to exactly { totals, dashboard, glance }", async () => {
     const wide = await loadWideReport();
-    expect(Object.keys(deriveSnapshot(wide).report).sort()).toEqual([
+    expect(Object.keys(deriveSnapshot(wide, TEST_GLANCE).report).sort()).toEqual([
       "dashboard",
+      "glance",
       "totals",
     ]);
   });
 
   it("carries totals and dashboard through intact", async () => {
     const wide = await loadWideReport();
-    const { report } = deriveSnapshot(wide);
+    const { report } = deriveSnapshot(wide, TEST_GLANCE);
     expect(report.totals).toEqual(wide.totals);
     expect(report.dashboard).toEqual(wide.dashboard);
     // The narrowing must be by CONSTRUCTION, not a cast: a `report as
@@ -350,16 +365,81 @@ describe("D8 forbidden-key contract (what may not reach the cloud)", () => {
     expect(scanForbiddenKeys(serialized)).toEqual([]);
     expect(Object.keys(serialized as object).sort()).toEqual([
       "dashboard",
+      "glance",
       "totals",
     ]);
   });
 
   it("narrows the shipped fixture the same way (a wide real-shaped report)", async () => {
     const fixture = await loadFixture();
-    expect(Object.keys(toProjectionReport(fixture)).sort()).toEqual([
+    expect(Object.keys(toProjectionReport(fixture, TEST_GLANCE)).sort()).toEqual([
       "dashboard",
+      "glance",
       "totals",
     ]);
-    expect(scanForbiddenKeys(toProjectionReport(fixture))).toEqual([]);
+    expect(scanForbiddenKeys(toProjectionReport(fixture, TEST_GLANCE))).toEqual([]);
+  });
+});
+
+/**
+ * D14's runtime guard — NO MARK DATE ANYWHERE ON THE WIRE.
+ *
+ * The rejected design was `markAsOf?` on every `CompositionRow`: a per-instrument
+ * observation timeline, materially closer to the `priceJourneys` D8 dropped on
+ * purpose, and a disclosure of which instruments are actively traded. The glance
+ * block ships the CONCLUSION of expectation-vs-arrival instead. This test is what
+ * makes that survive the next increment — it does not care which key a date arrives
+ * under, only that none does.
+ *
+ * `summary.asOf` is the ONE date the payload has always carried: a single
+ * fold-level anchor, and the row's own primary key. It is named as the sole
+ * exception rather than the scan being loosened to "dates are fine".
+ */
+const ONLY_ALLOWED_DATE_PATH = "$.dashboard.summary.asOf";
+
+/** ISO-date-SHAPED string values, walked to arbitrary depth, reported as `path = value`. */
+function scanDateShapedValues(value: unknown, path = "$"): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, i) => scanDateShapedValues(item, `${path}[${i}]`));
+  }
+  if (typeof value === "string") {
+    return /\d{4}-\d{2}-\d{2}/.test(value) ? [`${path} = ${value}`] : [];
+  }
+  if (value === null || typeof value !== "object") {
+    return [];
+  }
+  return Object.entries(value as Record<string, unknown>).flatMap(([key, child]) =>
+    scanDateShapedValues(child, `${path}.${key}`),
+  );
+}
+
+describe("D14 date contract (no mark date reaches the cloud)", () => {
+  it("finds the dates in the WIDE input — the date scanner has teeth", async () => {
+    // False-pass guard, same polarity as the two above. The un-narrowed report is
+    // full of dates (closed-book open/close dates, price-journey points); if the
+    // scanner reported none of them, the assertion below would be decoration.
+    const hits = scanDateShapedValues(await loadWideReport());
+    expect(hits.some((h) => h.includes("closedBook.rows[0].openedAsOf"))).toBe(true);
+    expect(hits.some((h) => h.includes("priceJourneys"))).toBe(true);
+    expect(hits.length).toBeGreaterThan(2);
+  });
+
+  it("finds NO date-shaped value in the payload outside summary.asOf", async () => {
+    const wide = await loadWideReport();
+    const { report } = deriveSnapshot(wide, TEST_GLANCE);
+    const hits = scanDateShapedValues(report);
+
+    expect(
+      hits.map((h) => h.split(" = ")[0]),
+      `the payload carries date-shaped values outside ${ONLY_ALLOWED_DATE_PATH}. A ` +
+        `per-instrument mark date is exactly what D14 refuses to ship — push the ` +
+        `CONCLUSION, not the observation timeline:\n${hits.join("\n")}`,
+    ).toEqual([ONLY_ALLOWED_DATE_PATH]);
+  });
+
+  it("the glance block in particular carries no date at all", async () => {
+    const wide = await loadWideReport();
+    const { report } = deriveSnapshot(wide, TEST_GLANCE);
+    expect(scanDateShapedValues(report.glance, "$.glance")).toEqual([]);
   });
 });

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { isRedirect } from "@tanstack/react-router";
 import { auth } from "./auth.ts";
 import { loadDashboard, type SessionGateDeps } from "./dashboard.ts";
-import type { LatestSnapshot } from "../projection/contract.ts";
+import type { SnapshotHistory } from "../projection/contract.ts";
 
 /**
  * Single-tenant gate (ADR-007 / slice #125). Two invariants:
@@ -34,7 +34,7 @@ describe("single-tenant: an anonymous visitor reaches no fund data", () => {
     api: { getSession: async () => null },
   } as unknown as SessionGateDeps["auth"];
 
-  const SNAPSHOT: LatestSnapshot = {
+  const SNAPSHOT: SnapshotHistory = {
     status: "stale",
     storedVersion: 99,
     expectedVersion: 1,

@@ -17,9 +17,10 @@
     "smoke:tui": "bun apps/tui/src/smoke-openTui.ts",
     "smoke:startup": "bun apps/tui/src/smoke-startup-openTui.ts",
     "push": "tsx apps/web/src/push/push.ts",
+    "backfill": "tsx apps/web/src/push/backfill.ts",
     "db:init": "tsx apps/web/src/push/push.ts --init-only",
     "db:provision": "tsx apps/web/src/projection/provision-projection.ts",
-    "typecheck": "pnpm --filter @numisma/engine run typecheck && pnpm --filter @numisma/event-store run typecheck && pnpm --filter @numisma/price-feed run typecheck && pnpm --filter @numisma/tui run typecheck && pnpm --filter @numisma/web run typecheck",
+    "typecheck": "pnpm --filter @numisma/engine run typecheck && pnpm --filter @numisma/event-store run typecheck && pnpm --filter @numisma/preferences run typecheck && pnpm --filter @numisma/price-feed run typecheck && pnpm --filter @numisma/tui run typecheck && pnpm --filter @numisma/web run typecheck",
     "test": "vitest run",
     "coverage": "vitest run --coverage"
   },
