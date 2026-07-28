@@ -131,18 +131,48 @@ verb's naive reading would have collided with).
   recording as evidence that `EventReference`'s fields are consumed narrowly
   enough to widen freely — useful the next time a verb wants genesis context
   that isn't there yet.
-- **Two switches admit a silent no-op if a case is forgotten.**
-  `foldEvents`'s event-type switch (`fold.ts:198-369`) and
-  `applyEventToReference` (`crossref.ts:181-301`) have no `default` arm and no
-  return-type obligation, so a forgotten case compiles clean and silently does
-  nothing — unlike `crossReferenceEvent` (`crossref.ts:346-373`), where every
-  arm returns and a missing case is a compile error. The prototype's own
-  mutation-testing pass found this finer-grained than expected: removing
-  `reference.reserveIds.add(event.reserve.id)` alone, in the `ReserveOpened`
-  arm of `applyEventToReference`, was caught by nothing, because the same-batch
-  `Transfer` cross-reference check reads only `reserveBalances`, not
-  `reserveIds`. The two lines in that one arm guard different things and need
-  separate test coverage.
+- **Two switches admitted a silent no-op if a case was forgotten — CLOSED.**
+  `foldEvents`'s event-type switch and `applyEventToReference` have no
+  return-type obligation, so a forgotten case used to compile clean and silently
+  do nothing — unlike `crossReferenceEvent`, where every arm returns and a
+  missing case is a compile error. **Both now carry an exhaustive `default:` arm
+  asserting `const _never: never = event`**, so verb eleven is a compile error at
+  all three registration sites rather than a silent no-op at two of them. The
+  latch is behavior-free by design — zero runtime surface, unobservable to any
+  test — so its proof is a compile, not an assertion: removing the
+  `InvalidationMarked` arm from `applyEventToReference` fails with
+  `TS2322: Type 'InvalidationMarkedEvent' is not assignable to type 'never'`, and
+  removing the `Withdraw` arm from `foldEvents` fails with
+  `TS2322: Type 'WithdrawEvent' is not assignable to type 'never'`. Both verified
+  by deliberate removal and restored.
+
+  The finer-grained half of the finding is closed too. The prototype's mutation
+  pass showed the `ReserveOpened` cross-ref arm writes **two** id structures
+  guarding different questions, and that deleting
+  `reference.reserveIds.add(event.reserve.id)` alone was caught by nothing —
+  the same-batch `Transfer` check reads only `reserveBalances`. Each line now has
+  its own killer, re-verified by deleting one at a time: `reserveIds.add` reddens
+  *"rejects a second ReserveOpened reusing an id minted earlier in the batch"*,
+  `reserveBalances.set` reddens *"accepts a same-batch ReserveOpened + Transfer
+  into it"*, and either reddens the integration test that walks one event through
+  all three sites.
+
+  **A shared verb table replacing the three `event.type` switches remains the
+  deep fix and is deliberately not taken** — the exhaustive default is the cheap
+  one, and it buys the compile error the deep fix would also have bought.
+- **The non-live reject is the first precedent for the open question, not an
+  answer to it.** *Should the durable log accept capital records the read model
+  excludes?* is decided here for `ReserveOpened` only: a non-live Reserve is
+  rejected at ingest, because `compose/canonical.ts` drops it with
+  `excluded.nonLive += 1` and **no warning at all** — strictly worse than the
+  currency-mismatch case above, which at least warns. That follows this ADR's own
+  sentence — *the log never holds a Reserve the dashboard cannot show* — so it
+  decides nothing new; it makes the implementation honest to a decision already
+  taken. What stays **open**, and is deliberately not settled here: whether
+  canonical's `nonLive` lane should warn instead of dropping silently, whether
+  every verb should gate `executionMode`, and whether paper or back-test capital
+  may legitimately live in the durable log at all. The eventual repo-wide ADR
+  inherits this as a **worked case** rather than an argument.
 - **`apps/tui/src/event-store.ts` needed zero changes.** Confirmed by
   `git diff 56c8943 HEAD --stat` on the prototype branch — it dispatches events
   generically, so the write path stays verb-agnostic and the tenth verb reaches

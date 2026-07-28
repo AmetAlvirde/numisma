@@ -297,6 +297,17 @@ export function applyEventToReference(reference: EventReference, event: Portfoli
         currency: event.reserve.currency,
       });
       break;
+    default: {
+      // EXHAUSTIVENESS LATCH (no runtime surface, by design). This switch has no
+      // return obligation, so before this arm existed a forgotten verb compiled
+      // clean and silently no-opped — the event would never register its ids and a
+      // same-batch reference to it would fail with a bogus "does not exist". The
+      // `never` assignment makes verb eleven a COMPILE ERROR here instead. Nothing
+      // reaches this arm at runtime; no test can observe it. `pnpm typecheck` is
+      // its only proof.
+      const _never: never = event;
+      return _never;
+    }
   }
 }
 

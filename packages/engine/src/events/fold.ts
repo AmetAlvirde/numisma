@@ -366,6 +366,16 @@ export function foldEvents(
         // compiles clean and silently drops the Reserve at fold.
         reserves.set(event.reserve.id, { ...event.reserve, amount: 0, lots: [] });
         break;
+      default: {
+        // EXHAUSTIVENESS LATCH (no runtime surface, by design). The fold's switch
+        // has no return obligation either, so a forgotten verb used to compile
+        // clean and silently drop the event from the fold — the read path, where a
+        // dropped event is invisible rather than loud. The `never` assignment makes
+        // verb eleven a COMPILE ERROR here. Nothing reaches this arm at runtime; no
+        // test can observe it. `pnpm typecheck` is its only proof.
+        const _never: never = event;
+        return _never;
+      }
     }
   }
 
