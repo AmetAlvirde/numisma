@@ -12,6 +12,7 @@
 //     the difference between failing loud at ingest and admitting an event that
 //     quietly produces a Reserve the read model then drops.
 import {
+  buildCompositionReport,
   buildEventReference,
   applyEventToReference,
   crossReferenceEvent,
@@ -121,6 +122,85 @@ describe("ReserveOpened — the fold", () => {
     expect(born?.lots).toEqual([{ quantity: 400, tier: "c2" }]);
     // NAV still conserved across the pair, and the source is drained of c2.
     expect(folded.reserves.reduce((sum, reserve) => sum + reserve.amount, 0)).toBe(1000);
+  });
+
+  // The born-and-never-funded case, and the permanent regression the `lots: []`
+  // decision has owed since it was made. The empty ARRAY is the whole point: an
+  // ABSENT `lots` makes `applyReserveDelta` early-return ("untiered: amount is the
+  // whole truth"), so the Reserve would silently launder the tier of every later
+  // credit while NAV still looked perfect. Asserting `toEqual([])` fails on both
+  // `undefined` and on a "simplification" that drops the key.
+  it("births a Reserve with an EMPTY lots array, not an absent one", () => {
+    const folded = foldEvents(genesis(), [accepted(openReserve())]);
+    const born = folded.reserves.find((reserve) => reserve.id === "capital-cash");
+
+    expect(born?.lots).toEqual([]);
+    expect(Array.isArray(born?.lots)).toBe(true);
+  });
+
+  // A Reserve that is born and never funded must be INVISIBLE to the read model's
+  // complaint channels: no warning, every exclusion counter at zero, and NAV
+  // identical to the last digit — asserted against the same genesis composed
+  // WITHOUT the event, so the claim is the DELTA (exactly 0) and not a resting
+  // value that happens to look right.
+  it("composes a born-and-never-funded Reserve with no warnings and NAV unchanged", () => {
+    const before = buildCompositionReport(genesis());
+    const after = buildCompositionReport(
+      foldEvents(genesis(), [accepted(openReserve())]),
+    );
+
+    expect(after.warnings).toEqual([]);
+    expect(after.excluded).toEqual({ nonLive: 0, invalid: 0, shortDeferred: 0 });
+    // Zero tolerance: neutrality is the entire claim, so "close enough" defeats it.
+    expect(after.totals.fundValueUsd).toBe(before.totals.fundValueUsd);
+    expect(after.totals.fundValueUsd - before.totals.fundValueUsd).toBe(0);
+  });
+});
+
+// The verb registers at THREE sites — parse, the cross-ref reference, the fold —
+// and two of the three sit in switches with no return obligation. This block owns
+// the claim that one event reaches all three.
+//
+// The cross-ref arm writes TWO id structures guarding DIFFERENT questions, so each
+// needs its own killer. Mutation-tested, one line deleted at a time:
+//
+//   `reserveIds.add`       → kills this integration test AND
+//                            "rejects a second ReserveOpened reusing an id minted
+//                            earlier in the batch" (the collision gate reads
+//                            `reserveIds`, and only a SECOND ReserveOpened in the
+//                            batch exercises it).
+//   `reserveBalances.set`  → kills this integration test AND
+//                            "accepts a same-batch ReserveOpened + Transfer into
+//                            it" (existence/sufficiency reads `reserveBalances`).
+//
+// The integration test alone would NOT distinguish them; the two cross-reference
+// tests are what make each deletion identifiable.
+describe("ReserveOpened — the three registration sites", () => {
+  it("reaches parse, the cross-reference world, and the fold from one event", () => {
+    // Site 1 — parse.ts's `case "ReserveOpened"`. A missing arm lands in the
+    // `default:` and rejects with "Unsupported event type", so parse is the one
+    // site that already failed loud.
+    const parsed = parseEvent(openReserve());
+    expect(parsed.kind).toBe("ok");
+    if (parsed.kind !== "ok") return;
+    expect(parsed.value.type).toBe("ReserveOpened");
+
+    // Site 2 — crossref.ts's `applyEventToReference` arm, both of its lines.
+    const reference = buildEventReference(genesis());
+    expect(reference.reserveIds.has("capital-cash")).toBe(false);
+    applyEventToReference(reference, parsed.value);
+    expect(reference.reserveIds.has("capital-cash")).toBe(true);
+    expect(reference.reserveBalances.get("capital-cash")).toEqual({
+      amount: 0,
+      // An EMPTY tier map, not `null`: the shadow must mirror the fold's `lots: []`,
+      // so the sufficiency gate agrees with the balances the fold will produce.
+      tiers: new Map(),
+      currency: "USD",
+    });
+
+    // Site 3 — fold.ts's `foldEvents` arm.
+    const folded = foldEvents(genesis(), [parsed.value]);
+    expect(folded.reserves.map((reserve) => reserve.id)).toContain("capital-cash");
   });
 });
 
