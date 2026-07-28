@@ -15,7 +15,7 @@ No verb creates a Reserve. Every `reserveId` a `Deposit` / `Withdraw` / `Transfe
 the reserve set has been genesis-fixed since ADR-003. That is a real asymmetry
 nobody had named: **the log could birth a Position after t0 (`PositionOpened`)
 but not a Reserve.** It surfaced because the fund's operator needed to
-reclassify $3,699.86 of Bitget cash from Tempo Pulse to Tempo Capital and was
+reclassify a fixed sum of Bitget cash from Tempo Pulse to Tempo Capital and was
 being pushed toward editing the `"immutable t0 seed"` genesis file
 (`packages/event-store/src/event-store.ts:13`, `:79`) to do it — the only
 Reserve-creating path that existed.
@@ -84,7 +84,7 @@ the container is born with *"no lots."* Taken literally that is a
 `packages/engine/src/events/fold.ts:85` — `applyReserveDelta` **early-returns
 on a falsy `lots`** (documented there as `"untiered: amount is the whole
 truth"`). A Reserve born genuinely lots-less would **silently swallow the
-`tier` of every incoming `Transfer`**, so the reclassified $3,699.86 would have
+`tier` of every incoming `Transfer`**, so the reclassified sum would have
 landed in the new Reserve untiered and dropped straight out of the tier
 rollup — **while NAV still looked perfect**, because `amount` stays
 authoritative and the money did arrive. That is exactly the failure
@@ -155,10 +155,13 @@ verb's naive reading would have collided with).
   code over.
 
 **Validated, through the real ingest path, against a copy of the durable
-data** (never the durable data itself — `~/Dev/accumulus` was untouched):
-Capital 33.10% → 52.01%, Pulse 23.83% → 4.93%, Reserve unchanged, **NAV
-`19572.155712564956` before and after, delta exactly 0**, matching
-`head-digest.json`. `new=3 duplicate=0`, zero warnings; a replay of the same
+data** (never the durable data itself — `~/Dev/accumulus` was untouched). This
+repository is public, so the properties are recorded here and the values are
+not — they live in the private notes vault artifact
+[[2026-07-28-reserve-opened-spec]]. **Tempo Capital rose by exactly the
+transferred sum, Tempo Pulse fell by exactly the transferred sum, Tempo Reserve
+was unchanged, and NAV was identical before and after — delta exactly 0**,
+matching `head-digest.json`. `new=3 duplicate=0`, zero warnings; a replay of the same
 three events reports `duplicate=3`, so the verb participates correctly in the
 existing id-based dedup. `pnpm typecheck` clean across all six packages;
 `pnpm test` 731 passed, 0 failed, 19 skipped, no pre-existing failures hiding
