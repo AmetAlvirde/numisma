@@ -22,6 +22,7 @@ import type {
   PositionOpenedEvent,
   PositionTrimmedEvent,
   PriceMarkedEvent,
+  ReserveOpenedEvent,
   TierDelta,
   TransferEvent,
   WithdrawEvent,
@@ -69,7 +70,17 @@ export interface EventReference {
   positionIds: Set<string>;
   reserveIds: Set<string>;
   portfolioIds: Set<string>;
-  accountIds: Set<string>;
+  /**
+   * Every genesis account id → the currency that account is denominated in.
+   *
+   * Widened from a bare id `Set` for `ReserveOpened`: a Reserve whose currency
+   * disagrees with its account is EXCLUDED by canonical normalization
+   * (`compose/canonical.ts`, `currency-mismatch`), so admitting one at ingest would
+   * mint a Reserve that silently never appears in the read model. Existence checks
+   * read `.has()` on this map exactly as they read the old Set, so the widening is
+   * source-compatible for every other verb.
+   */
+  accountIds: Map<string, Currency>;
   instrumentIds: Set<string>;
   /**
    * Position ids the log has retired via a `PositionClosed`. A closed id stays in
@@ -118,7 +129,7 @@ export function buildEventReference(
     positionIds: new Set(genesis.positions.map((position) => position.id)),
     reserveIds: new Set(genesis.reserves.map((reserve) => reserve.id)),
     portfolioIds: new Set(genesis.portfolios.map((portfolio) => portfolio.id)),
-    accountIds: new Set(genesis.accounts.map((account) => account.id)),
+    accountIds: new Map(genesis.accounts.map((account) => [account.id, account.currency])),
     instrumentIds: new Set(genesis.instruments.map((instrument) => instrument.id)),
     // Genesis positions are all open; the log fills this via `PositionClosed` below.
     closedPositionIds: new Set(),
@@ -269,6 +280,23 @@ export function applyEventToReference(reference: EventReference, event: Portfoli
       // No id or balance effect: the position id already exists and no cash moves.
       // The level is a compose-time concern (breach derivation), not a reference one.
       break;
+    case "ReserveOpened":
+      // LOAD-BEARING, and the one arm whose omission compiles clean: this switch has
+      // no return obligation, so forgetting `ReserveOpened` here would silently no-op
+      // and a same-batch `[ReserveOpened, Transfer→it]` — the whole point of the verb —
+      // would fail cross-reference with a bogus "reserve does not exist".
+      //
+      // Register in BOTH id sets the gates read: `reserveIds` (collision checks) and
+      // `reserveBalances` (existence + sufficiency). Born at zero with an EMPTY tier
+      // map — not `null` — so the shadow matches the fold's empty `lots: []`: the
+      // Reserve is untiered-because-empty, and the first credit gives it real tiers.
+      reference.reserveIds.add(event.reserve.id);
+      reference.reserveBalances.set(event.reserve.id, {
+        amount: 0,
+        tiers: new Map(),
+        currency: event.reserve.currency,
+      });
+      break;
   }
 }
 
@@ -339,7 +367,73 @@ export function crossReferenceEvent(
       return crossReferenceTransfer(event, reference);
     case "InvalidationMarked":
       return crossReferenceInvalidation(event, reference);
+    case "ReserveOpened":
+      return crossReferenceReserveOpened(event, reference);
   }
+}
+
+/**
+ * A `ReserveOpened` must mint a genuinely new id (colliding with neither an
+ * existing Reserve nor an existing Position — capital ids share one namespace),
+ * cite a portfolio and an account the genesis seed knows, and be denominated in
+ * THAT ACCOUNT'S currency.
+ *
+ * The currency check is a HARD REJECT, not a warning, and it is the reason
+ * {@link EventReference.accountIds} carries currencies at all. Canonical
+ * normalization already excludes a currency-mismatched Reserve with a
+ * `currency-mismatch` warning; without this gate the new verb would be the one path
+ * that admits such a Reserve into the durable log, where it would fold into a
+ * record the read model then silently drops. Rejecting at ingest keeps the tenth
+ * verb inside ADR-003's fail-loud posture — the log never holds a Reserve the
+ * dashboard cannot show.
+ *
+ * There is deliberately no balance/NAV check: the event carries no amount and no
+ * lots, so NAV-neutrality is structural, not something a rule here could violate.
+ * Pure: reads `reference`, never mutates it.
+ */
+function crossReferenceReserveOpened(
+  event: ReserveOpenedEvent,
+  reference: EventReference,
+): EventParseResult {
+  const { reserve } = event;
+  if (reference.reserveIds.has(reserve.id)) {
+    return eventError(
+      "reserve.id",
+      `ReserveOpened id '${reserve.id}' collides with an existing reserve id.`,
+    );
+  }
+  if (reference.positionIds.has(reserve.id)) {
+    return eventError(
+      "reserve.id",
+      `ReserveOpened id '${reserve.id}' collides with an existing position id.`,
+    );
+  }
+  if (!reference.portfolioIds.has(reserve.portfolioId)) {
+    return eventError(
+      "reserve.portfolioId",
+      `ReserveOpened references portfolio id '${reserve.portfolioId}', which the ` +
+        `genesis seed does not contain.`,
+    );
+  }
+  const accountCurrency = reference.accountIds.get(reserve.accountId);
+  if (accountCurrency === undefined) {
+    return eventError(
+      "reserve.accountId",
+      `ReserveOpened references account id '${reserve.accountId}', which the ` +
+        `genesis seed does not contain.`,
+    );
+  }
+  if (accountCurrency !== reserve.currency) {
+    return eventError(
+      "reserve.currency",
+      `ReserveOpened opens a ${reserve.currency} reserve '${reserve.id}' on account ` +
+        `'${reserve.accountId}', which is denominated in ${accountCurrency}. A ` +
+        `currency-mismatched Reserve is excluded by canonical normalization, so it ` +
+        `would never reach the read model. Open it in ${accountCurrency}, or open it ` +
+        `on an account denominated in ${reserve.currency}.`,
+    );
+  }
+  return { kind: "ok", value: event };
 }
 
 /**

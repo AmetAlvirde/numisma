@@ -89,6 +89,7 @@ export type {
   TransferEvent,
   InvalidationMarkedEvent,
   InvalidationDirection,
+  ReserveOpenedEvent,
   PortfolioEvent,
   TierDelta,
   EventOk,
