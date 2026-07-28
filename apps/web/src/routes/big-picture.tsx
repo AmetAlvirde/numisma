@@ -86,6 +86,7 @@ function BigPictureView({
       <SummaryCard
         summary={report.dashboard.summary}
         usdMxn={report.totals.usdMxn}
+        fundValueRendered={view.fundValueRendered}
       />
       {report.dashboard.sections.map((section) => (
         <SectionTable key={section.id} section={section} view={view} />

@@ -32,6 +32,15 @@
  * is a ratio whose denominator is NAV) applied one altitude down. So the value column
  * survives per-row and the percentage column does not survive at all:
  * {@link BigPictureView.percentOfFundRendered} is a page-level fact.
+ *
+ * The NAV ITSELF is the second page-level fact ({@link BigPictureView.fundValueRendered}),
+ * and it is what the summary card above the tables renders. Suppression is a KEY
+ * LIST — `toProjectionReport` copies `dashboard` wholesale, so the suppressed number
+ * is still sitting on the wire — which means a renderer that does not consult the
+ * list prints it. The unrealized P&L goes with it: it has no suppression key of its
+ * own and divides BY that NAV, so an unguarded card shows a wrong numerator over a
+ * wrong denominator. Both are derivable here from the key list, so the reader derives
+ * them rather than the push shipping a key it would have to version.
  */
 import type { CompositionRow } from "@numisma/engine";
 import type { SnapshotAnchor } from "../projection/contract.ts";
@@ -87,6 +96,16 @@ export interface BigPictureView {
   costBasisLabel: string;
   /** False when NAV is suppressed — see this module's header. */
   percentOfFundRendered: boolean;
+  /**
+   * False when NAV is suppressed — the SLOT this time, not the column.
+   *
+   * A SIBLING of {@link BigPictureView.percentOfFundRendered}, never a synonym: they
+   * read the same key today by coincidence of cause, not of meaning. One governs the
+   * fund value itself, the other a column of ratios that merely share its
+   * denominator. Kept apart so the first cause that takes one without the other finds
+   * two facts to move rather than one overloaded boolean.
+   */
+  fundValueRendered: boolean;
   /** Keyed by `CompositionRow.id`, one entry per row the anchor carries. */
   rows: ReadonlyMap<string, RowView>;
 }
@@ -162,6 +181,7 @@ export function composeBigPicture(
     // See the header: the percentage descends from NAV for EVERY row, so it is a
     // page-level absence rather than a per-row one.
     percentOfFundRendered: !suppressed.has("summary.fundValueUsd"),
+    fundValueRendered: !suppressed.has("summary.fundValueUsd"),
     rows,
   };
 }
