@@ -306,4 +306,25 @@ describe("the /big-picture wiring", () => {
     // prop merely being received and ignored.
     expect(card.match(/fundValueRendered/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
   });
+
+  it("stops certifying the data the same card refuses to state", () => {
+    // FOUND BY RENDERING, NOT BY REVIEW. On 2026-07-04 — nine of thirteen marks
+    // missing, no record excluded — this card rendered a green `Data OK` directly
+    // above `Fund value — no current mark` and `Unrealized P&L — no current mark`.
+    // `clean` is drawn wholly from `dataSafety`, which counts EXCLUDED RECORDS and
+    // knows nothing about MARK ABSENCE, so the badge certified data the two lines
+    // beneath it were admitting ignorance of. A badge is an assertion too.
+    const card = read("components/SummaryCard.tsx");
+    expect(card).toMatch(
+      /<DataSafetyBadge[\s\S]*?fundValueRendered=\{fundValueRendered\}/,
+    );
+    // Green requires BOTH facts: the fold excluded nothing AND the marks arrived.
+    expect(card).toMatch(/clean && fundValueRendered/);
+    // Mark absence folds into the existing warn state, in the card's own words —
+    // the same phrase the em dash beneath uses, so one cause is not named two ways.
+    expect(card).toMatch(/"no current mark"/);
+    // …and it earns no third visual state. The card has a two-colour vocabulary and
+    // does not otherwise need a third; the two causes stay distinct in the TEXT.
+    expect(card).not.toMatch(/badge-(?!ok|warn)/);
+  });
 });
