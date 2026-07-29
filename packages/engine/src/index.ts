@@ -128,6 +128,31 @@ export {
   SETTLEMENT_MAGNITUDE_THRESHOLD,
 } from "./events/crossref.js";
 
+// PROTOTYPE (`prototype/plans-sidecar`) — the pure as-of selectors over the DCA plan
+// sidecar (`plans.jsonl`), whose IO half lives in `@numisma/preferences`. Per ADR-004
+// the selector is pure and the engine never touches the file. Descriptive-only: never
+// folded, never touching NAV. Specimen code — does not merge.
+export type {
+  PlanEnvelope,
+  DcaRung,
+  DcaLadderPlan,
+  DcaTimePlan,
+  NoPlanRecord,
+  ActivePlan,
+  PlanRecord,
+  PlanSkipReason,
+  SkippedPlanLine,
+  LoadedPlans,
+  PlanLookup,
+} from "./plans.js";
+export {
+  pickPlanAsOf,
+  listPlansAsOf,
+  isPlanIsoDate,
+  KNOWN_PLAN_KINDS,
+  PLAN_ISO_DATE,
+} from "./plans.js";
+
 // Pure derivations for the git-backed durable event log — a compact Head Digest
 // of a folded read model, and a deterministic ingest commit message.
 export type { HeadDigest, IngestCommitInput } from "./durable-log.js";
