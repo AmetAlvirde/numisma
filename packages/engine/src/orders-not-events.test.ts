@@ -86,6 +86,7 @@ describe("`S8` — the fill act introduces NO eleventh verb", () => {
       symbol: "TEST/USD",
       side: "buy",
       price: 100,
+      quantity: 1,
       remainingQuantity: 1,
       fundingReserveId: "reserve-synthetic",
       committed: 100,

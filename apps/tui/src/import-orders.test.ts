@@ -16,6 +16,7 @@ import {
   BITGET_OPEN_ORDERS_HEADER,
   parseBitgetOpenOrdersCsv,
   parseFundReview,
+  pickRestingOrdersAsOf,
   type FundReviewData,
 } from "@numisma/engine";
 import { afterEach, describe, expect, it } from "vitest";
@@ -52,6 +53,32 @@ function rung(price: string, quantity: string, at: string): string {
     total_quantity: quantity,
     filled_percent: "0.00%",
     status: "Unfilled",
+    action: "Cancel",
+  };
+  return BITGET_OPEN_ORDERS_HEADER.map((column) => fields[column] ?? "").join(",");
+}
+
+/** One synthetic rung the venue shows as PARTIALLY FILLED, with a remainder still open. */
+function partlyFilledRung(
+  price: string,
+  quantity: string,
+  filled: string,
+  at: string,
+): string {
+  const fields: Record<string, string> = {
+    timestamp: at,
+    pair: "XYZ/USDT",
+    time_in_force: "GTC",
+    order_type: "Limit",
+    side: "Buy",
+    price,
+    quantity,
+    trigger_price: "-- / --",
+    order_value: "0",
+    filled_quantity: filled,
+    total_quantity: quantity,
+    filled_percent: "60.00%",
+    status: "PartiallyFilled",
     action: "Cancel",
   };
   return BITGET_OPEN_ORDERS_HEADER.map((column) => fields[column] ?? "").join(",");
@@ -165,6 +192,13 @@ async function idsOnDisk(path: string): Promise<string[]> {
   return load.status === "loaded" ? load.records.map((record) => record.id) : [];
 }
 
+/** What each rung on disk STILL CLAIMS, through the selector rather than by hand. */
+async function remainingOnDisk(path: string): Promise<number[]> {
+  const load = await loadOrders(path, { warn: () => {} });
+  if (load.status !== "loaded") return [];
+  return pickRestingOrdersAsOf(load.records).map((order) => order.remainingQuantity);
+}
+
 describe("importBitgetOpenOrders — deterministic ids (testing decision 5)", () => {
   it("appends the ladder once and ZERO lines on a re-import of the same export", async () => {
     const first = await harness();
@@ -179,6 +213,33 @@ describe("importBitgetOpenOrders — deterministic ids (testing decision 5)", ()
     // The file is BYTE-IDENTICAL: not merely "no new orders", but no new lines at all.
     expect(await readFile(first.ordersPath, "utf8")).toBe(afterFirst);
     expect(await idsOnDisk(first.ordersPath)).toHaveLength(2);
+  });
+
+  it("stays idempotent over a PARTIALLY-FILLED rung — no double-counted partial", async () => {
+    // #173. The partial rides on the placement line, so a re-import is the same
+    // deterministic id and appends nothing. If it were a synthesized `orderFilled` line
+    // instead, the second import would subtract the same 6 units a second time and the
+    // rung would read 8 remaining of a 10-unit claim — free capital that does not exist.
+    const partial = ladder(partlyFilledRung("100", "10", "6", "2020-01-01 10:00:00"));
+    const first = await harness({ csv: partial });
+    expect(await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io })).toMatchObject({
+      status: "imported",
+      appended: 1,
+    });
+    const afterFirst = await readFile(first.ordersPath, "utf8");
+    expect(await remainingOnDisk(first.ordersPath)).toEqual([4]);
+
+    const again = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+    expect(again).toMatchObject({ status: "imported", appended: 0, alreadyKnown: 1 });
+
+    // Byte-identical, and the remainder is unmoved: counted once, on both readings.
+    expect(await readFile(first.ordersPath, "utf8")).toBe(afterFirst);
+    expect(await remainingOnDisk(first.ordersPath)).toEqual([4]);
+    // And no `orderFilled` line was ever synthesized — which would also read as a torn
+    // fill act, since no lot in `events.jsonl` answers for it.
+    const load = await loadOrders(first.ordersPath, { warn: () => {} });
+    if (load.status !== "loaded") throw new Error("expected a loaded sidecar");
+    expect(load.records.map((record) => record.kind)).toEqual(["orderPlaced"]);
   });
 
   it("carries the pair's quote currency onto every record, explicitly", async () => {

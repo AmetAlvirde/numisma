@@ -89,6 +89,8 @@ class Harness {
   failWrite: "log" | "orders" | "orders-and-rollback" | undefined;
   readonly out: string[] = [];
   readonly err: string[] = [];
+  /** Every question the flow put to the operator, in order — the prompt TEXT matters. */
+  readonly asked: string[] = [];
   private readonly answers: string[];
 
   constructor(options: {
@@ -145,7 +147,10 @@ class Harness {
       loadGenesis: async () => genesisSeed(),
       loadLogEvents: async () => this.logEvents(),
       loadFolded: async () => foldEvents(genesisSeed(), this.logEvents()),
-      ask: async () => this.answers.shift() ?? "",
+      ask: async (question) => {
+        this.asked.push(question);
+        return this.answers.shift() ?? "";
+      },
       out: (message) => this.out.push(message),
       err: (message) => this.err.push(message),
     };
@@ -428,6 +433,169 @@ describe("monotonicity refuses BEFORE any write", () => {
     expect(outcome.reason).toBe("impossible-verdict");
     expect(harness.ordersImage).toBe(ordersBefore);
     expect(harness.logImage).toBeUndefined();
+  });
+});
+
+// #176. `ObservedRungState.filledQuantity` is CUMULATIVE-SINCE-PLACEMENT, so this flow
+// must supply that basis for BOTH the rung it is recording and the rungs it asks about —
+// and the guard must compare it against the rung's ORIGINAL quantity.
+describe("`filled_quantity observed` is the venue's CUMULATIVE figure", () => {
+  /** rung-300 with 7 of its 10 already recorded as filled, and the lot that answers for it. */
+  function ladderWithRecordedPartial(): { records: OrderRecord[]; events: PortfolioEvent[] } {
+    return {
+      records: [
+        ...ladderRecords(),
+        {
+          id: "rung-300",
+          observedAt: "2026-01-03T09:00:00",
+          kind: "orderFilled",
+          currency: "USD",
+          filledQuantity: 7,
+        },
+      ],
+      events: [
+        {
+          id: "fill:rung-300@2026-01-03T09:00:00",
+          asOf: "2026-01-03",
+          type: "PositionOpened",
+          position: {
+            id: "position-synthetic",
+            portfolioId: "portfolio-synthetic",
+            tempo: "Capital",
+            executionMode: "live",
+            accountId: "account-synthetic",
+            instrumentId: "instrument-synthetic",
+            direction: "long",
+            currency: "USD",
+            lots: [{ quantity: 7, cost: 300, tier: "c1" }],
+          },
+          decision: {
+            entryThesis: "synthetic entry thesis",
+            invalidationCondition: "synthetic invalidation condition",
+            riskBudget: "synthetic risk budget",
+            plannedHoldingHorizon: "synthetic horizon",
+            strategy: "synthetic strategy",
+          },
+          funding: { reserveId: "reserve-synthetic", amount: 2100 },
+        } as PortfolioEvent,
+      ],
+    };
+  }
+
+  it("records an UNRELATED rung's fill while rung-300 reads its honest cumulative 7", async () => {
+    // rung-300 was placed for 10 and 7 are recorded, so it still claims 3. The operator
+    // honestly reports the venue's cumulative 7 for it while recording a fill on rung-400.
+    // Compared against the REMAINDER that would be `7 > 3` — an "arithmetic, not policy"
+    // refusal that discredits the whole book and refuses the operator's unrelated act.
+    const { records, events } = ladderWithRecordedPartial();
+    const harness = new Harness({
+      records,
+      events,
+      answers: [
+        "rung-400", // which rung filled
+        "2026-01-05T12:00:00", // fill timestamp
+        "", // filled quantity — the whole remaining claim, so rung-400 leaves the book
+        "t", // rung-300 touched
+        "7", //   filled_quantity observed — the venue's CUMULATIVE figure
+        "r", // rung-200 still resting untouched
+        "y", // confirm the derived verdicts
+        "", // append this lot to the ladder's existing Position
+        "", // cash debited — accept price x quantity
+        "y", // write BOTH
+      ],
+    });
+
+    const outcome = await recordFill(harness.io);
+
+    expectRecorded(outcome);
+    expect(reconcileFillActs(harness.logEvents(), harness.orderRecords())).toEqual([]);
+  });
+
+  it("pushes the rung's own state as a CUMULATIVE total, never as this fill's delta", async () => {
+    // rung-400 was placed for 10 with 4 already recorded, so it still claims 6. A further
+    // fill of 2 leaves it on the book: the venue's cumulative reading is 6, not 2.
+    const harness = new Harness({
+      records: [
+        ...ladderRecords(),
+        {
+          id: "rung-400",
+          observedAt: "2026-01-03T09:00:00",
+          kind: "orderFilled",
+          currency: "USD",
+          filledQuantity: 4,
+        },
+      ],
+      events: [
+        {
+          id: "fill:rung-400@2026-01-03T09:00:00",
+          asOf: "2026-01-03",
+          type: "PositionOpened",
+          position: {
+            id: "position-synthetic",
+            portfolioId: "portfolio-synthetic",
+            tempo: "Capital",
+            executionMode: "live",
+            accountId: "account-synthetic",
+            instrumentId: "instrument-synthetic",
+            direction: "long",
+            currency: "USD",
+            lots: [{ quantity: 4, cost: 400, tier: "c1" }],
+          },
+          decision: {
+            entryThesis: "synthetic entry thesis",
+            invalidationCondition: "synthetic invalidation condition",
+            riskBudget: "synthetic risk budget",
+            plannedHoldingHorizon: "synthetic horizon",
+            strategy: "synthetic strategy",
+          },
+          funding: { reserveId: "reserve-synthetic", amount: 1600 },
+        } as PortfolioEvent,
+      ],
+      answers: [
+        "rung-400",
+        "2026-01-05T12:00:00",
+        "2", // a partial — the rung keeps resting with 4 still claimed
+        "r", // rung-300 untouched
+        "r", // rung-200 untouched
+        "y",
+        "", // append to the ladder's existing Position
+        "", // cash debited
+        "y",
+      ],
+    });
+
+    expectRecorded(await recordFill(harness.io));
+    // The evidence the operator is shown is the CUMULATIVE reading, so it is the same
+    // number they can check against the venue's own column.
+    expect(harness.out.join("")).toContain("filled_quantity 6");
+    expect(harness.out.join("")).not.toContain("filled_quantity 2");
+  });
+
+  it("names the basis in the prompt, so the operator reads the right column", async () => {
+    const harness = new Harness({
+      answers: [
+        "rung-400",
+        "2026-01-05T12:00:00",
+        "", // the whole claim — rung-400 leaves the book
+        "t", // rung-300 touched, which is what triggers the quantity prompt
+        "5",
+        "r", // rung-200 untouched
+        "y",
+        "position-synthetic",
+        "",
+        "synthetic entry thesis",
+        "synthetic invalidation condition",
+        "synthetic risk budget",
+        "synthetic horizon",
+        "synthetic strategy",
+        "",
+        "y",
+      ],
+    });
+    await recordFill(harness.io);
+    const prompt = harness.asked.find((question) => question.includes("filled_quantity"));
+    expect(prompt).toBeDefined();
+    expect(prompt?.toLowerCase()).toContain("cumulative");
   });
 });
 

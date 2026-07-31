@@ -77,6 +77,13 @@ export interface CommittedRung {
   symbol: string;
   side: OrderSide;
   price: number;
+  /**
+   * The size the rung was PLACED for, before anything filled against it. Carried beside
+   * the remainder because a CUMULATIVE venue reading is compared against this and never
+   * against the remainder — the two are on different bases, and conflating them is what
+   * #176 was.
+   */
+  quantity: number;
   /** What is STILL claimed: `quantity − filled_quantity`, per `./select.ts`. */
   remainingQuantity: number;
   fundingReserveId: string;
@@ -87,12 +94,22 @@ export interface CommittedRung {
 /**
  * The encumbrance of ONE resting claim: `price × (quantity − filled_quantity)`.
  *
- * UNVERIFIED, and named as such (spec Open Questions): the remainder rule is believed
- * right but nothing has partially filled yet, so it has never been checked against a
- * real venue's behaviour. The first real partial is the verification event. It is
- * written this way rather than `price × quantity` because the alternative is knowably
- * wrong in the direction that matters — it would over-state committed and under-state
- * available, i.e. hide capital the fund actually has.
+ * THE REMAINDER RULE IS NOW WHAT ACTUALLY RUNS ON EVERY PATH, AND SAYING SO IS THE
+ * CORRECTION (#173). An earlier version of this docstring named the remainder rule as the
+ * correction to `price × quantity` while the import path computed `price × quantity` — the
+ * venue's `filled_quantity` was parsed, validated and then dropped, so no imported rung
+ * could satisfy `remainingQuantity`'s own definition. The file named its own defect and
+ * did not have it. It has it now: the partial rides on the placement line
+ * (`OrderPlacedRecord.observedFilledQuantity`) and `pickRestingOrdersAsOf` nets it out
+ * before anything reaches here.
+ *
+ * STILL UNVERIFIED AGAINST THE REAL VENUE, and that part stands (spec Open Questions):
+ * nothing has partially filled yet, so the rule has never been checked against a real
+ * venue's behaviour — including whether its own partial spelling is one this build reads.
+ * The first real partial is the verification event. The rule is written this way rather
+ * than `price × quantity` because the alternative is knowably wrong in the direction that
+ * matters — it would over-state committed and under-state available, i.e. hide capital the
+ * fund actually has.
  */
 function encumbranceOf(order: RestingOrder): number {
   return order.placed.price * order.remainingQuantity;
@@ -118,6 +135,7 @@ export function committedRungs(resting: readonly RestingOrder[]): CommittedRung[
       symbol: order.placed.symbol,
       side: order.placed.side,
       price: order.placed.price,
+      quantity: order.placed.quantity,
       remainingQuantity: order.remainingQuantity,
       fundingReserveId: order.placed.fundingReserveId,
       committed: encumbranceOf(order),
