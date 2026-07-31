@@ -12,8 +12,9 @@ import { describe, expect, it } from "vitest";
 import { buildCompositionReport } from "../index.js";
 import { parseFixture } from "../fund-composition.fixtures.js";
 import type { FundReviewData } from "../contracts.js";
+import { formatAvailableCapital } from "../format.js";
 import { composeAvailableCapital } from "./available.js";
-import { committedByReserve, committedRungs } from "./committed.js";
+import { committedByReserve, committedRungs, SLACK_EPSILON } from "./committed.js";
 import { checkFundingCoverage } from "./ingest.js";
 import type { OrderRecord } from "./records.js";
 import { pickRestingOrdersAsOf } from "./select.js";
@@ -24,6 +25,12 @@ const RUNG_QUANTITY = 2;
 const RUNG_VALUE = RUNG_PRICE * RUNG_QUANTITY; // 200
 const RUNG_COUNT = 5;
 const LADDER_VALUE = RUNG_VALUE * RUNG_COUNT; // 1000
+/**
+ * A rung price that is NOT exactly representable in binary. Every other figure in this
+ * file is chosen to be exact; this one is chosen to be inexact, so the two zero
+ * thresholds have something to disagree about.
+ */
+const RESIDUE_PRICE = 0.1;
 
 const CAPITAL_RESERVE = "reserve-capital";
 const WEALTH_RESERVE = "reserve-wealth";
@@ -280,6 +287,42 @@ describe("`slack < 0` REJECTS — and the report cannot disagree with the guard 
     expect(coverage.shortfalls[0]?.committed).toBe(capital.committed);
     expect(coverage.shortfalls[0]?.slack).toBe(capital.available);
     expect(capital.available).toBeLessThan(0);
+  });
+
+  it("the guard's epsilon and the report's banner agree about float residue", () => {
+    // The test above CANNOT catch this: `100 × 2 × 5 = 1000` is exactly representable in
+    // binary, so it never produces residue for the two thresholds to disagree over.
+    // `0.1` is not, so three rungs of `0.1 × 1` sum to a hair MORE than a balance of
+    // `0.3` — the exact case `checkFundingCoverage`'s epsilon exists to ACCEPT, and the
+    // exact case the report used to shout "available is NEGATIVE" over.
+    const residual = ladder(CAPITAL_RESERVE, 3).map((record) => ({
+      ...record,
+      price: RESIDUE_PRICE,
+      quantity: 1,
+    })) as OrderRecord[];
+    const balance = 0.3;
+    const resting = pickRestingOrdersAsOf(residual);
+
+    // Sanity: the fixture really does generate residue, or the rest proves nothing.
+    const { capital } = capitalOf(residual, syntheticFund(balance));
+    expect(capital.committed).not.toBe(balance); // 0.30000000000000004 ≠ 0.3
+    expect(capital.available).toBeLessThan(0);
+    expect(Math.abs(capital.available)).toBeLessThan(SLACK_EPSILON);
+
+    // The guard ACCEPTS it …
+    expect(checkFundingCoverage(resting, [{ id: CAPITAL_RESERVE, amount: balance }]).status).toBe("ok");
+    // … so the report must not call the same book an impossible state.
+    const rendered = formatAvailableCapital(
+      composeAvailableCapital(syntheticFund(balance), resting),
+    );
+    expect(rendered).not.toContain("NEGATIVE");
+
+    // And the NUMBER is untouched — only the trigger moved. A genuinely negative
+    // available still gets the banner, and still renders its own value.
+    const genuine = formatAvailableCapital(
+      composeAvailableCapital(syntheticFund(LADDER_VALUE - RUNG_VALUE), pickRestingOrdersAsOf(ladder())),
+    );
+    expect(genuine).toContain("NEGATIVE");
   });
 
   it("the shared helper is the SOLE source of both — rungs fold to committedByReserve", () => {

@@ -19,6 +19,33 @@ import type { OrderSide } from "./records.js";
 import type { RestingOrder } from "./select.js";
 
 /**
+ * Pure IEEE noise floor for `slack = balance − committed`. NOT a business tolerance: the
+ * fund's own ladder sums to a fraction of a cent more than a whole-cent transfer, and
+ * that difference is REAL and must stay VISIBLE. This absorbs only the ~1e-17 residue of
+ * summing decimal products in binary floating point, so a balance of `0.3` against three
+ * rungs of `0.1 × 1` is coverage, not a shortfall.
+ *
+ * It lives HERE, beside the one committed formula, for the same reason that formula
+ * does: the `O1` import guard (`./ingest.ts`) and the rendered report
+ * (`../format.ts`) must not be able to drift about what counts as negative. They did:
+ * the guard ACCEPTED float residue while the report shouted "available is NEGATIVE" over
+ * every input the epsilon exists to admit. One constant, two callers, no second copy.
+ */
+export const SLACK_EPSILON = 1e-9;
+
+/**
+ * Is this slack GENUINELY negative — the impossible state — rather than float residue?
+ *
+ * A predicate rather than a bare constant so neither caller has to remember the sign of
+ * the comparison. It answers only about the TRIGGER; the number itself is never clamped
+ * or rounded by anyone, because a real sub-cent residue is information the operator is
+ * owed.
+ */
+export function isNegativeSlack(slack: number): boolean {
+  return slack < -SLACK_EPSILON;
+}
+
+/**
  * One resting claim, with the encumbrance it represents made explicit.
  *
  * This is the reconciliation row the TUI lists beneath the committed figure, and it is

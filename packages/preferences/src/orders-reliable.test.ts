@@ -7,7 +7,7 @@
 // Every ladder here is SYNTHETIC and every figure invented and round. The fund's real
 // rungs are figures and must never enter this repository (ADR-007); these tests assert
 // PROPERTIES of the IO, never a real value.
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -110,14 +110,45 @@ describe("appendOrders — a GENUINE append", () => {
     expect(load.skips).toEqual([]);
   });
 
-  it("leaves no temp file behind and writes nothing for an empty batch", async () => {
+  it("leaves no temp or lock file behind and writes nothing for an empty batch", async () => {
     const path = await tempPath();
     await appendOrders(path, LADDER);
     await appendOrders(path, []);
 
-    await expect(readFile(`${path}.tmp`, "utf8")).rejects.toThrow();
+    // Over the DIRECTORY, not over one guessed name: the temp sibling is now uniquely
+    // named per call, so asserting the absence of a single `${path}.tmp` would pass
+    // vacuously while a whole generation of temps piled up beside the sidecar.
+    const leftovers = (await readdir(dirname(path))).filter(
+      (entry) => entry.endsWith(".tmp") || entry.endsWith(".lock"),
+    );
+    expect(leftovers).toEqual([]);
     const load = await loadOrders(path, { warn: warnings().warn });
     expect(load.status === "loaded" && load.records).toHaveLength(3);
+  });
+
+  it("loses NEITHER batch when two appends to one path overlap", async () => {
+    // The lost-update this writer exists to prevent, in its concurrent form. The append
+    // is a read-modify-write of the WHOLE image, so two overlapping calls can both read
+    // the same prior image and the second rename silently discards the first one's
+    // records — no torn line, no error, nothing to attribute the loss to. Real
+    // filesystem, because the property under test IS the filesystem's.
+    const path = await tempPath();
+    await appendOrders(path, [LADDER[0]!]);
+
+    const batchB = placed("rung-c", "2026-01-01T10:00:02", 300, 2);
+    await Promise.all([appendOrders(path, [LADDER[1]!]), appendOrders(path, [batchB])]);
+
+    const load = await loadOrders(path, { warn: warnings().warn });
+    expect(load.status).toBe("loaded");
+    if (load.status !== "loaded") return;
+    // Order between the two concurrent batches is not asserted — which one lands first is
+    // genuinely undetermined. That BOTH survive is the whole contract.
+    expect([...load.records.map((record) => record.id)].sort()).toEqual([
+      "rung-a",
+      "rung-b",
+      "rung-c",
+    ]);
+    expect(load.skips).toEqual([]);
   });
 
   it("creates the sidecar and its directory on first write", async () => {
