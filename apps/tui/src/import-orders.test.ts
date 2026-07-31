@@ -497,3 +497,81 @@ describe("the export is refused whole when it is not an open-orders export", () 
     expect(await readFile(ordersPath, "utf8")).toBe("{not json}\n");
   });
 });
+
+/**
+ * `D2`/`D3` (#177 item 4) — a partial export STILL imports, and says so as a gap.
+ *
+ * The two partial-read policies stay ASYMMETRIC on purpose. Appending over a partially
+ * read SIDECAR asserts something false: `known` is built only from readable lines, so a
+ * row whose sidecar line was unreadable looks FRESH and appends a second time, and
+ * `detectChangedClaims` goes blind over that region. Skipping an unparseable EXPORT row
+ * asserts nothing — it omits, it cannot duplicate, it is reported with a line and a
+ * reason, and the next export carries the same rung again. What it must NOT do is read as
+ * an unqualified success on any of the three surfaces: the status, the operator's line, or
+ * the exit code.
+ */
+describe("a partial export imports, and every surface says it was partial", () => {
+  /** One readable rung and one whose price no build can read — a real, reported skip. */
+  const PARTLY_READABLE_LADDER = ladder(
+    rung("1000", "0.1", "2020-01-01 10:00:00"),
+    rung("not-a-price", "0.1", "2020-01-01 10:00:01"),
+  );
+
+  it("DISCRIMINATES in the status rather than hiding the gap in a second field", async () => {
+    const { csvPath, io } = await harness({ csv: PARTLY_READABLE_LADDER });
+    const outcome = await importBitgetOpenOrders({ csvPath, io });
+    expect(outcome).toMatchObject({ status: "imported-partial", appended: 1, alreadyKnown: 0 });
+    if (outcome.status !== "imported-partial") throw new Error("expected a partial import");
+    expect(outcome.skips).toHaveLength(1);
+  });
+
+  it("LEADS the operator's line with the unread rows and names the money DIRECTION", async () => {
+    const { csvPath, io, outputs } = await harness({ csv: PARTLY_READABLE_LADDER });
+    await importBitgetOpenOrders({ csvPath, io });
+
+    const line = outputs.find((message) => message.includes("could not be read"));
+    expect(line).toBeDefined();
+    // The gap OPENS the line — not a suffix after two success numbers.
+    expect(line?.startsWith("INCOMPLETE")).toBe(true);
+    expect(line).toContain("1 row(s)");
+    expect(line).toContain("available reads HIGH");
+    // The counts still follow, after the qualifier rather than before it.
+    expect(line).toContain("1 order(s) appended");
+  });
+
+  it("still WRITES the readable rungs — the skip omits, it does not refuse", async () => {
+    const { csvPath, io, ordersPath } = await harness({ csv: PARTLY_READABLE_LADDER });
+    await importBitgetOpenOrders({ csvPath, io });
+    expect(await idsOnDisk(ordersPath)).toHaveLength(1);
+  });
+
+  it("keeps a CLEAN export on the unqualified status", async () => {
+    const { csvPath, io } = await harness();
+    const outcome = await importBitgetOpenOrders({ csvPath, io });
+    expect(outcome).toMatchObject({ status: "imported", appended: 2, alreadyKnown: 0 });
+  });
+});
+
+/**
+ * #177 item 5 — a failed sidecar write returns through the refusal contract.
+ *
+ * `appendOrders` is atomic (temp + rename), so a rejection means nothing landed; the
+ * operator is owed the flow's own `REFUSED — ... Nothing was written` line rather than a
+ * bare stack from the CLI's outer catch. The precedent is `record-fill.ts`, which has
+ * carried a `write-failed` member for exactly this case all along.
+ */
+describe("a failed sidecar write is a refusal, not a thrown error", () => {
+  it("returns write-failed instead of throwing out of the flow", async () => {
+    const { csvPath, io, errors } = await harness();
+    io.appendOrders = async () => {
+      throw new Error("synthetic sidecar write failure");
+    };
+
+    const outcome = await importBitgetOpenOrders({ csvPath, io });
+
+    expect(outcome).toMatchObject({ status: "rejected", reason: "write-failed" });
+    if (outcome.status !== "rejected") throw new Error("expected a rejection");
+    expect(outcome.message).toContain("synthetic sidecar write failure");
+    expect(errors.some((message) => message.startsWith("REFUSED —"))).toBe(true);
+  });
+});

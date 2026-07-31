@@ -48,10 +48,22 @@ export interface ReserveCapital {
    * operator reads it by; the invariant is that it is `≥ 0`, ALWAYS, and the direction
    * carries the meaning: a negative value is an IMPOSSIBLE state, not a warning. The
    * venue would not have accepted orders the account could not fund, so it means the
-   * attribution is wrong. It is REJECTED at the import boundary (`checkFundingCoverage`,
-   * the only path that writes) rather than here — this module renders what is, and a
-   * renderer that quietly clamped a negative to zero would hide the very defect the
-   * invariant exists to expose.
+   * attribution is wrong.
+   *
+   * IT IS REJECTED AT THE WRITE BOUNDARIES, NOT HERE. There are TWO of them, with stated
+   * scopes, and neither lives in this module (#177):
+   *
+   *   - `checkFundingCoverage` guards the ORDER IMPORT, over the WHOLE resting book —
+   *     what is on file plus the batch — because that write adds `committed`.
+   *   - the fill act (`record-fill.ts`) guards ONE input, the operator's upward override
+   *     of the cash debited, over the ONE reserve funding the rung. The act moves both
+   *     terms at once (`Δavailable = price × quantity − cash debited`), so the default
+   *     figure is available-neutral by construction and the EXCESS is the only part that
+   *     can spend availability. The fill itself is deliberately unguarded: it records
+   *     something that already happened at the venue.
+   *
+   * This module renders what IS, and a renderer that quietly clamped a negative to zero
+   * would hide the very defect the invariant exists to expose.
    */
   available: number;
   /**
