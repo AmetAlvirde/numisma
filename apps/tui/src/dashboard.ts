@@ -11,12 +11,14 @@ import {
   formatMaybeUsd,
   formatPercent,
   formatPrice,
+  formatAvailableCapital,
   formatReserveReconciliation,
   formatSignedPercent,
   formatUsd,
   pad,
   padLeft,
 } from "@numisma/engine";
+import type { AvailableCapitalSection } from "./available-capital.js";
 
 export type DashboardAction =
   | {
@@ -47,6 +49,12 @@ export function buildDashboardLines(
   report: CompositionReport,
   detail: DashboardDetail | undefined,
   activeRecordId?: string,
+  /**
+   * `S7` — the three numbers and their rungs, joined from the `orders.jsonl` sidecar at
+   * read time. OPTIONAL, and the omitted case renders BYTE-FOR-BYTE the prior dashboard:
+   * every existing caller and every existing snapshot is untouched.
+   */
+  availableCapital?: AvailableCapitalSection,
 ): DashboardLine[] {
   const lines: DashboardLine[] = [
     { content: "Numisma Fund Composition Prototype", selectable: false },
@@ -175,6 +183,31 @@ export function buildDashboardLines(
   lines.push({ content: "", selectable: false });
   for (const line of formatReserveReconciliation(report.reserveReconciliation).split("\n")) {
     lines.push({ content: line, selectable: false });
+  }
+
+  // Available Capital (`S7`) sits directly beneath the reconciliation it extends: the
+  // line above says what the venue holds, this says how much of it a resting ladder has
+  // already claimed. Rendered through the shared engine formatter, like the block above,
+  // so `pnpm report` and the TUI cannot show different committed figures. A REFUSAL is
+  // rendered as a warning rather than as silence — an unreadable sidecar must never
+  // look like an unencumbered balance.
+  if (availableCapital?.status === "refused") {
+    lines.push(
+      { content: "", selectable: false },
+      {
+        content: `Available Capital unavailable — ${availableCapital.message}`,
+        selectable: false,
+        warning: true,
+      },
+    );
+  } else if (availableCapital) {
+    const block = formatAvailableCapital(availableCapital.report);
+    if (block) {
+      lines.push({ content: "", selectable: false });
+      for (const line of block.split("\n")) {
+        lines.push({ content: line, selectable: false });
+      }
+    }
   }
 
   lines.push(

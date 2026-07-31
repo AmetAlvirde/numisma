@@ -41,6 +41,9 @@ importers:
       '@numisma/event-store':
         specifier: workspace:*
         version: link:../../packages/event-store
+      '@numisma/preferences':
+        specifier: workspace:*
+        version: link:../../packages/preferences
       '@opentui/core':
         specifier: 0.2.15
         version: 0.2.15(typescript@5.9.3)(web-tree-sitter@0.25.10)

@@ -1,5 +1,7 @@
 import { mountApp } from "./mount-app.js";
 import { resolveEventStorePaths } from "@numisma/event-store";
+import { loadOrders, resolveOrdersPath } from "@numisma/preferences";
+import { loadAvailableCapital } from "./available-capital.js";
 import { prepareStartup, type StartupPlan } from "./startup.js";
 
 // PROTOTYPE (mvi 2026-06-29-portfolio-persistence): the real TUI surface now
@@ -22,10 +24,16 @@ const renderer = await core.createCliRenderer({
   targetFps: 20,
 });
 
+const ordersPath = resolveOrdersPath();
+
 await mountApp(renderer, {
   core,
   loadData: plan.loadData,
   sourcePath: plan.sourcePath,
+  // `S7` — the orders sidecar joined to the fold at READ time, as of the same date the
+  // fold rendered. Never merged: the two files stay two files.
+  loadAvailableCapital: (data) =>
+    loadAvailableCapital(data, { ordersPath, loadOrders: (path) => loadOrders(path) }, plan.asOf),
 });
 
 renderer.start();

@@ -120,6 +120,101 @@ export {
   composeProfitSplit,
   defaultProfitPolicyEntry,
 } from "./compose/profit-split.js";
+// The `orders.jsonl` sidecar (ADR-013) — recorded BESIDE the log, never in it. The
+// record contract and the pure as-of selector only; the file IO lives in
+// `@numisma/preferences`, per ADR-001.
+export type {
+  OrderKind,
+  OrderSide,
+  OrderRecord,
+  OrderPlacedRecord,
+  OrderCancelledRecord,
+  OrderFilledRecord,
+  OrderRecordProblem,
+  OrderRecordParse,
+} from "./orders/records.js";
+export {
+  serializeOrderRecord,
+  parseOrderRecord,
+  isObservedAtStamp,
+  formatObservedAt,
+} from "./orders/records.js";
+export type { RestingOrder } from "./orders/select.js";
+export { pickRestingOrdersAsOf } from "./orders/select.js";
+// Ingest: the PURE Bitget open-orders parse and the venue-neutral join to the one
+// declared field. The IO shell — reading the export, prompting, appending — is the
+// TUI's, per ADR-001.
+export type {
+  ObservedOpenOrder,
+  OrderIdentity,
+  OrderAttribution,
+  ReserveBalance,
+  FundingShortfall,
+  FundingCoverage,
+} from "./orders/ingest.js";
+export {
+  canonicalDecimal,
+  synthesizeOrderId,
+  buildOrderPlacedRecords,
+  checkFundingCoverage,
+} from "./orders/ingest.js";
+export type {
+  BitgetOpenOrder,
+  BitgetRowProblem,
+  BitgetRowSkip,
+  BitgetOpenOrdersParse,
+} from "./orders/bitget.js";
+export {
+  BITGET_OPEN_ORDERS_HEADER,
+  BITGET_RESTING_STATUS,
+  parseBitgetOpenOrdersCsv,
+} from "./orders/bitget.js";
+// `S7` — committed vs available. The ONE committed formula (`./orders/committed.js`)
+// that both the `O1` import guard and the rendered report call, and the new PURE
+// EXPORT over `buildCanonicalState` that joins the sidecar to the fold at read time.
+// A NEW EXPORT, NOT A WIDENING: `CompositionReport`, `DashboardSummary` and
+// `CompositionRow` are untouched by this slice.
+export type { CommittedRung } from "./orders/committed.js";
+export { committedRungs, committedByReserve, isNegativeSlack, SLACK_EPSILON } from "./orders/committed.js";
+export type {
+  ReserveCapital,
+  UnmatchedReason,
+  UnmatchedRung,
+  AvailableCapitalReport,
+} from "./orders/available.js";
+export { composeAvailableCapital } from "./orders/available.js";
+// `S8` — the fill act. Monotonicity PROPOSES a verdict (stamped `derived`, carrying its
+// evidence) and refuses on an impossible one; it never writes, and being pure it cannot.
+// The act's two records are built together so no caller can author half of one.
+export type {
+  ObservedRungState,
+  BookObservation,
+  FillVerdict,
+  VerdictEvidence,
+  ProposedVerdict,
+  MonotonicityContradiction,
+  MonotonicityProposal,
+} from "./orders/monotonicity.js";
+export { proposeFillVerdicts } from "./orders/monotonicity.js";
+export type {
+  TornFillAct,
+  LadderPosition,
+  FundingTier,
+  OpenLadderTarget,
+  AddLadderTarget,
+  LadderTarget,
+  FillActInput,
+  FillAct,
+} from "./orders/fill.js";
+export {
+  fillEventId,
+  parseFillEventId,
+  reconcileFillActs,
+  resolveLadderPosition,
+  deriveFundingTier,
+  buildFillAct,
+} from "./orders/fill.js";
+
 export {
   buildEventReference,
   applyEventToReference,
@@ -179,6 +274,7 @@ export {
   divider,
   formatCompositionReport,
   formatReserveReconciliation,
+  formatAvailableCapital,
   formatClosedBook,
   formatInvalidationWatch,
   formatProfitSplit,
