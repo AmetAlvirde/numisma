@@ -251,9 +251,15 @@ async function observeBook(
         )
       ).trim();
       const quantity = Number(rawQuantity);
-      if (rawQuantity === "" || !Number.isFinite(quantity)) {
-        // NOT a neutral default. `0` means UNTOUCHED, and the operator has just said the
-        // opposite; reading their typo as untouched is what would hide an impossible book.
+      if (rawQuantity === "" || !Number.isFinite(quantity) || quantity <= 0) {
+        // THE BOUNDARY IS `<= 0`, NOT MERELY UNPARSEABLE — and a literal `0` is refused
+        // for the same reason a typo is, not as an afterthought. `0` is the encoding for
+        // UNTOUCHED, which is the opposite of the `[t]ouched` just answered, and it is
+        // byte-identical to what the `[r]` answer produces below: this path never needs
+        // to emit it. Admitting it also skips `filled-quantity-exceeds-order`
+        // (`monotonicity.ts`), since 0 exceeds nothing — the one geometry where the
+        // defect is silent rather than loud. Blank refuses too: this prompt advertises
+        // no `[default]`, and in this file that is what a bracketless prompt means.
         return { status: "bad-quantity", orderId: rung.orderId, answer: rawQuantity };
       }
       present.push({ orderId: rung.orderId, filledQuantity: quantity });
@@ -394,8 +400,9 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
     return reject(
       io,
       "bad-quantity",
-      `'${observed.answer}' is not a filled_quantity for rung '${observed.orderId}'; reading it ` +
-        `as 0 would record that rung as UNTOUCHED, which is the opposite of what you just said`,
+      `'${observed.answer}' is not a positive filled_quantity for rung '${observed.orderId}'; ` +
+        `0 or blank is the encoding for UNTOUCHED, which is the opposite of the 'touched' ` +
+        `you just answered`,
     );
   }
   const proposal = proposeFillVerdicts(scoped.sameSymbol, observed.observation);
