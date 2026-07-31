@@ -155,12 +155,77 @@ export type MonotonicityProposal =
   | { status: "impossible"; contradictions: MonotonicityContradiction[] };
 
 /**
+ * CONDITION 1, as ONE predicate rather than two that have to be kept in step. A rung
+ * placed after the moment being reasoned about was not on the book then and cannot be
+ * evidence about it. Both the proposal below and {@link scopeBookForFill} — which is what
+ * a caller gathers its evidence over — partition with this, so "asked about" and
+ * "reasoned over" cannot drift apart (#175).
+ */
+function partitionByMoment(
+  resting: readonly RestingOrder[],
+  observedAt: string,
+): { simultaneous: RestingOrder[]; later: RestingOrder[] } {
+  const simultaneous: RestingOrder[] = [];
+  const later: RestingOrder[] = [];
+  for (const order of resting) {
+    // Sells are out of scope and out of the reasoning: a resting sell encumbers the ASSET,
+    // and the ladder monotonicity argument is about a descending buy ladder.
+    if (order.placed.side !== "buy") {
+      continue;
+    }
+    (order.placed.observedAt <= observedAt ? simultaneous : later).push(order);
+  }
+  return { simultaneous, later };
+}
+
+/** The one rung set an act observes AND reasons over, split by what may be asked about. */
+export interface ScopedBook {
+  /**
+   * Every BUY rung on the fill's own symbol, LATER ONES INCLUDED — the argument list for
+   * {@link proposeFillVerdicts}. A later rung belongs here so it surfaces in `excluded`,
+   * named, rather than being silently dropped.
+   */
+  sameSymbol: RestingOrder[];
+  /**
+   * Of those, the ones actually resting at the moment: the ONLY rungs there is any point
+   * asking the operator about. Asking about a later one puts a rung into the observation
+   * that condition 1 then refuses to know — `unknown-rung`, on a truthful answer.
+   */
+  observable: RestingOrder[];
+}
+
+/**
+ * The rung set ONE fill act is about: same instrument, resting at the fill's moment.
+ *
+ * This exists because the two halves of the act used to disagree. The caller asked the
+ * operator about same-symbol rungs and then handed the WHOLE resting book to the proposal,
+ * so every rung it had declined to ask about arrived as an ABSENCE — and an absence with
+ * nothing untouched above it derives `filled`. A second open ladder was therefore proposed
+ * as a purchase, which is precisely the conversion of cancellations into phantom purchases
+ * `D12` refuses to make (#175). The scope is computed once, here, and both halves take it.
+ */
+export function scopeBookForFill(
+  resting: readonly RestingOrder[],
+  symbol: string,
+  observedAt: string,
+): ScopedBook {
+  const sameSymbol = resting.filter((order) => order.placed.symbol === symbol);
+  return { sameSymbol, observable: partitionByMoment(sameSymbol, observedAt).simultaneous };
+}
+
+/**
  * Propose a verdict for every simultaneously-resting BUY rung, or refuse.
  *
  * Sells are out of scope and out of the reasoning: a resting sell encumbers the asset,
- * and the ladder monotonicity argument is about a descending buy ladder. Reasoning is
- * grouped per `symbol`, because a fill on one instrument implies nothing whatever about a
- * rung on another.
+ * and the ladder monotonicity argument is about a descending buy ladder.
+ *
+ * WHAT IS GROUPED PER `symbol` IS THE `above` COMPARISON, AND ONLY THAT. This function
+ * reasons over exactly the book it is handed: every buy rung in `resting` that was resting
+ * at `observation.observedAt` gets a verdict, whatever instrument it names. So a caller
+ * that wants "a fill on one instrument implies nothing whatever about a rung on another"
+ * must hand over one instrument's rungs — {@link scopeBookForFill} is that, and the
+ * observation must be gathered over the same set. Handing over more than was asked about
+ * is #175, and it was the whole defect: absence is the input `D12` forbids inferring from.
  */
 export function proposeFillVerdicts(
   resting: readonly RestingOrder[],
@@ -168,15 +233,10 @@ export function proposeFillVerdicts(
 ): MonotonicityProposal {
   const contradictions: MonotonicityContradiction[] = [];
 
-  // CONDITION 1, enforced rather than assumed. A rung placed after the observation was
-  // not on the book at that moment and cannot be evidence about it. Excluded rungs are
-  // returned by id so the operator sees WHAT the reasoning did not consider.
-  const simultaneous = resting.filter(
-    (order) => order.placed.side === "buy" && order.placed.observedAt <= observation.observedAt,
-  );
-  const excluded = resting
-    .filter((order) => order.placed.side === "buy" && order.placed.observedAt > observation.observedAt)
-    .map((order) => order.placed.id);
+  // CONDITION 1, enforced rather than assumed. Excluded rungs are returned by id so the
+  // operator sees WHAT the reasoning did not consider.
+  const { simultaneous, later } = partitionByMoment(resting, observation.observedAt);
+  const excluded = later.map((order) => order.placed.id);
 
   const present = new Map(observation.present.map((state) => [state.orderId, state]));
   const known = new Set(simultaneous.map((order) => order.placed.id));

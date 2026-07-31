@@ -200,8 +200,9 @@ export type {
   ProposedVerdict,
   MonotonicityContradiction,
   MonotonicityProposal,
+  ScopedBook,
 } from "./orders/monotonicity.js";
-export { proposeFillVerdicts } from "./orders/monotonicity.js";
+export { proposeFillVerdicts, scopeBookForFill } from "./orders/monotonicity.js";
 export type {
   TornFillAct,
   LadderPosition,

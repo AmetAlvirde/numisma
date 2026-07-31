@@ -12,7 +12,7 @@
 // EVERY FIXTURE IS A SYNTHETIC LADDER (`O7`). Round numbers, invented symbol, no real
 // price, size, balance or rung anywhere in this file.
 import { describe, expect, it } from "vitest";
-import { proposeFillVerdicts, type BookObservation } from "./monotonicity.js";
+import { proposeFillVerdicts, scopeBookForFill, type BookObservation } from "./monotonicity.js";
 import type { OrderPlacedRecord } from "./records.js";
 import type { RestingOrder } from "./select.js";
 
@@ -239,6 +239,49 @@ describe("a fill on one symbol implies nothing about a rung on another", () => {
     });
     // The untouched higher-priced rung on the OTHER symbol must not veto the top rung's
     // proposed fill on this one.
+    expect(verdictFor(proposal, 400).verdict).toBe("filled");
+  });
+});
+
+// #175. The scope a caller must gather evidence over is the same scope the proposal
+// reasons over, so it is computed HERE and once rather than restated at each call site.
+describe("`scopeBookForFill` — the one rung set both halves of the act use", () => {
+  const other = rung(900, { id: "other-900", symbol: "OTHER/USD" });
+  const later = rung(500, { id: "rung-500", observedAt: "2026-01-09T09:00:00" });
+  const sell = rung(600, { id: "sell-600", side: "sell" });
+
+  it("keeps only the fill's own symbol — the other ladder is not evidence at all", () => {
+    const scoped = scopeBookForFill([other, sell, later, ...LADDER], "TEST/USD", OBSERVED);
+    expect(scoped.sameSymbol.map((entry) => entry.placed.id)).not.toContain("other-900");
+    expect(scoped.observable.map((entry) => entry.placed.id)).not.toContain("other-900");
+  });
+
+  it("carries a LATER rung in `sameSymbol` but not in `observable`", () => {
+    // It must reach the proposal — so it is NAMED in `excluded` — while never being asked
+    // about, since an answer would put a rung condition 1 refuses to know into the book.
+    const scoped = scopeBookForFill([later, ...LADDER], "TEST/USD", OBSERVED);
+    expect(scoped.sameSymbol.map((entry) => entry.placed.id)).toContain("rung-500");
+    expect(scoped.observable.map((entry) => entry.placed.id)).not.toContain("rung-500");
+  });
+
+  it("leaves resting SELLS out of what is asked about", () => {
+    const scoped = scopeBookForFill([sell, ...LADDER], "TEST/USD", OBSERVED);
+    expect(scoped.observable.map((entry) => entry.placed.id)).not.toContain("sell-600");
+  });
+
+  it("agrees with the proposal: what it scopes out never arrives as an ABSENCE", () => {
+    const scoped = scopeBookForFill([other, later, ...LADDER], "TEST/USD", OBSERVED);
+    // The operator is asked about every `observable` rung except the one that filled, and
+    // answers "gone" for it — so the observation names the rest.
+    const proposal = proposeFillVerdicts(scoped.sameSymbol, {
+      observedAt: OBSERVED,
+      present: scoped.observable
+        .filter((entry) => entry.placed.id !== "rung-400")
+        .map((entry) => ({ orderId: entry.placed.id, filledQuantity: 0 })),
+    });
+    if (proposal.status !== "proposed") throw new Error(`expected a proposal: ${proposal.status}`);
+    expect(proposal.verdicts.map((entry) => entry.orderId)).not.toContain("other-900");
+    expect(proposal.excluded).toEqual(["rung-500"]);
     expect(verdictFor(proposal, 400).verdict).toBe("filled");
   });
 });

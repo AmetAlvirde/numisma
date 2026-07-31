@@ -62,6 +62,7 @@ import {
   proposeFillVerdicts,
   reconcileFillActs,
   resolveLadderPosition,
+  scopeBookForFill,
   type BookObservation,
   type CapitalTier,
   type CommittedRung,
@@ -174,12 +175,30 @@ function describeVerdict(verdict: ProposedVerdict): string {
 }
 
 /**
+ * Either the look at the book, or the refusal that a figure in it could not be read.
+ *
+ * The observation cannot just "do its best": a quantity nobody could parse used to become
+ * `0`, which is the encoding for UNTOUCHED and the very input `fill-below-untouched-rung`
+ * fires on — so a typo SUPPRESSED the impossible-book detection instead of tripping it
+ * (#177). It refuses instead, exactly as the sibling `Filled quantity` prompt does.
+ */
+type BookObservationResult =
+  | { status: "observed"; observation: BookObservation }
+  | { status: "bad-quantity"; orderId: string; answer: string };
+
+/**
  * Ask the operator what the venue shows for every OTHER rung of the ladder.
  *
  * This is the evidence monotonicity reasons over, and it is gathered interactively rather
  * than parsed because the fills export is deferred and `T6`'s interactive path is
  * PERMANENT. The default is `resting` — the conservative answer, since claiming a rung
  * was touched is what would license a fill verdict.
+ *
+ * `rungs` IS ALREADY THE SCOPED SET — `scopeBookForFill`'s `observable` — and this function
+ * does no scoping of its own. That is the whole correction of #175: whatever set the
+ * questions cover is the set the proposal reasons over, so nothing this function declined
+ * to ask about can reach `proposeFillVerdicts` as an ABSENCE. Restating the rule here as a
+ * second filter is how the two drifted apart in the first place.
  *
  * EVERY QUANTITY HERE IS CUMULATIVE SINCE PLACEMENT — the one meaning `ObservedRungState.
  * filledQuantity` has (#176). Both producers in this function supply that basis: the
@@ -192,7 +211,7 @@ async function observeBook(
   filled: CommittedRung,
   filledQuantity: number,
   observedAt: string,
-): Promise<BookObservation> {
+): Promise<BookObservationResult> {
   const present: ObservedRungState[] = [];
 
   // The rung being recorded needs no question: the operator just answered it. It leaves
@@ -208,7 +227,9 @@ async function observeBook(
   }
 
   for (const rung of rungs) {
-    if (rung.orderId === filled.orderId || rung.symbol !== filled.symbol) {
+    // The ONLY rung skipped here is the one being recorded, which the operator has already
+    // answered for. Symbol and moment were settled by `scopeBookForFill` before this ran.
+    if (rung.orderId === filled.orderId) {
       continue;
     }
     const answer = (
@@ -223,24 +244,25 @@ async function observeBook(
       // The BASIS is named in the prompt, because the operator is reading a column and
       // only they can tell which number they are reading. Asking for "filled_quantity"
       // bare is what let a delta and a running total mean the same field (#176).
-      const quantity = Number(
-        (
-          await io.ask(
-            `      filled_quantity observed — the venue's CUMULATIVE total for this rung ` +
-              `since it was placed, not just this session's: `,
-          )
-        ).trim(),
-      );
-      present.push({
-        orderId: rung.orderId,
-        filledQuantity: Number.isFinite(quantity) ? quantity : 0,
-      });
+      const rawQuantity = (
+        await io.ask(
+          `      filled_quantity observed — the venue's CUMULATIVE total for this rung ` +
+            `since it was placed, not just this session's: `,
+        )
+      ).trim();
+      const quantity = Number(rawQuantity);
+      if (rawQuantity === "" || !Number.isFinite(quantity)) {
+        // NOT a neutral default. `0` means UNTOUCHED, and the operator has just said the
+        // opposite; reading their typo as untouched is what would hide an impossible book.
+        return { status: "bad-quantity", orderId: rung.orderId, answer: rawQuantity };
+      }
+      present.push({ orderId: rung.orderId, filledQuantity: quantity });
       continue;
     }
     present.push({ orderId: rung.orderId, filledQuantity: 0 });
   }
 
-  return { observedAt, present };
+  return { status: "observed", observation: { observedAt, present } };
 }
 
 /** The five authored decision fields. All required; a blank one abandons the act. */
@@ -350,10 +372,33 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
     );
   }
 
-  // ---- 4. monotonicity PROPOSES ----
+  // ---- 4. monotonicity PROPOSES, over the SAME book the questions observed (#175) ----
+  //
+  // ONE rung set, computed once and used twice: the operator is asked about `observable`,
+  // and `sameSymbol` — that plus the rungs placed after this moment — is what reaches the
+  // proposal. Handing over the whole `resting` book instead made every rung the questions
+  // had skipped arrive as an ABSENCE, and an absence with nothing untouched above it
+  // derives FILLED: a second open ladder proposed as a purchase, and a rung placed after
+  // the fill answered for and then refused as `unknown-rung`. A later rung now surfaces
+  // where it belongs, in `excluded`, named rather than reasoned over.
+  const scoped = scopeBookForFill(resting, filled.symbol, observedAt);
   io.out("What does the venue show for the rest of this ladder?\n");
-  const observation = await observeBook(io, rungs, filled, filledQuantity, observedAt);
-  const proposal = proposeFillVerdicts(resting, observation);
+  const observed = await observeBook(
+    io,
+    committedRungs(scoped.observable),
+    filled,
+    filledQuantity,
+    observedAt,
+  );
+  if (observed.status === "bad-quantity") {
+    return reject(
+      io,
+      "bad-quantity",
+      `'${observed.answer}' is not a filled_quantity for rung '${observed.orderId}'; reading it ` +
+        `as 0 would record that rung as UNTOUCHED, which is the opposite of what you just said`,
+    );
+  }
+  const proposal = proposeFillVerdicts(scoped.sameSymbol, observed.observation);
   if (proposal.status === "impossible") {
     return reject(
       io,
