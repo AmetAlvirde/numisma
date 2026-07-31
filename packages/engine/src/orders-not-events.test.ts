@@ -12,6 +12,7 @@ import { EVENT_SCHEMA_VERSION, parseEvent } from "./events/parse.js";
 import type { PortfolioEvent } from "./events/types.js";
 import { parseOrderRecord, serializeOrderRecord } from "./orders/records.js";
 import type { OrderPlacedRecord } from "./orders/records.js";
+import { buildFillAct, fillEventId } from "./orders/fill.js";
 
 /** A synthetic line of the shape `orders.jsonl` actually holds. */
 const SYNTHETIC_ORDER: OrderPlacedRecord = {
@@ -70,6 +71,58 @@ describe("O4 — the orders sidecar leaves the durable log untouched", () => {
 
   it("EVENT_SCHEMA_VERSION is 2", () => {
     expect(EVENT_SCHEMA_VERSION).toBe(2);
+  });
+});
+
+describe("`S8` — the fill act introduces NO eleventh verb", () => {
+  // The riskiest slice is the one that writes to BOTH files, so the claim that it did not
+  // widen the log's verb surface is asserted against the same union map above rather than
+  // against a second, drifting list.
+  const act = buildFillAct({
+    rung: {
+      orderId: "rung-synthetic",
+      observedAt: "2026-01-01T10:00:00",
+      currency: "USD",
+      symbol: "TEST/USD",
+      side: "buy",
+      price: 100,
+      remainingQuantity: 1,
+      fundingReserveId: "reserve-synthetic",
+      committed: 100,
+    },
+    filledQuantity: 1,
+    observedAt: "2026-01-02T10:00:00",
+    fundingAmount: 100,
+    tier: "c1",
+    target: { mode: "add", positionId: "position-synthetic" },
+  });
+
+  it("writes a verb the ten-verb union already contains", () => {
+    expect(EVENT_VERBS[act.event.type]).toBe(true);
+    expect(Object.keys(EVENT_VERBS)).toHaveLength(10);
+  });
+
+  it("keeps EVENT_SCHEMA_VERSION at 2", () => {
+    expect(EVENT_SCHEMA_VERSION).toBe(2);
+  });
+
+  it("writes ONE event — never the PROHIBITED Close+Open custody move (`T9`)", () => {
+    // `buildFillAct` returns a single event by type, so a close/open pair is unexpressible
+    // rather than merely unwritten.
+    expect(act.event.type).toBe("PositionAddedTo");
+    expect(act.event.type).not.toBe("PositionClosed");
+  });
+
+  it("the act's order half is still an orders.jsonl line parseEvent turns away", () => {
+    expect(parseEvent(JSON.parse(serializeOrderRecord(act.order))).kind).toBe("event-error");
+  });
+
+  it("the two halves are joined by a DERIVED id, with no new field on either record", () => {
+    // The join costs nothing on disk, which is what makes the crash window detectable
+    // without designing the parked rung→lot key blind.
+    expect(act.event.id).toBe(fillEventId(act.order.id, act.order.observedAt));
+    const line = JSON.parse(serializeOrderRecord(act.order)) as Record<string, unknown>;
+    expect(Object.keys(line)).toEqual(["id", "observedAt", "kind", "currency", "filledQuantity"]);
   });
 });
 

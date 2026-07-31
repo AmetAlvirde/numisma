@@ -178,6 +178,37 @@ export type {
   AvailableCapitalReport,
 } from "./orders/available.js";
 export { composeAvailableCapital } from "./orders/available.js";
+// `S8` — the fill act. Monotonicity PROPOSES a verdict (stamped `derived`, carrying its
+// evidence) and refuses on an impossible one; it never writes, and being pure it cannot.
+// The act's two records are built together so no caller can author half of one.
+export type {
+  ObservedRungState,
+  BookObservation,
+  FillVerdict,
+  VerdictEvidence,
+  ProposedVerdict,
+  MonotonicityContradiction,
+  MonotonicityProposal,
+} from "./orders/monotonicity.js";
+export { proposeFillVerdicts } from "./orders/monotonicity.js";
+export type {
+  TornFillAct,
+  LadderPosition,
+  FundingTier,
+  OpenLadderTarget,
+  AddLadderTarget,
+  LadderTarget,
+  FillActInput,
+  FillAct,
+} from "./orders/fill.js";
+export {
+  fillEventId,
+  parseFillEventId,
+  reconcileFillActs,
+  resolveLadderPosition,
+  deriveFundingTier,
+  buildFillAct,
+} from "./orders/fill.js";
 
 export {
   buildEventReference,
