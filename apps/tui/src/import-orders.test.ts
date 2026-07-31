@@ -15,7 +15,8 @@ import { appendOrders, loadOrders, resolveOrdersPath } from "@numisma/preference
 import {
   BITGET_OPEN_ORDERS_HEADER,
   parseBitgetOpenOrdersCsv,
-  type ReserveBalance,
+  parseFundReview,
+  type FundReviewData,
 } from "@numisma/engine";
 import { afterEach, describe, expect, it } from "vitest";
 import { importBitgetOpenOrders, type OrdersImportIo } from "./import-orders.js";
@@ -82,7 +83,36 @@ interface HarnessOptions {
    * with the operator answering the same way both times.
    */
   answers?: string[];
-  balances?: ReserveBalance[];
+  /**
+   * The LIVE reserves the folded fund carries, as `{ id, amount }` — synthesized into a
+   * real `FundReviewData` by {@link syntheticFund}, because the guard takes the fund now
+   * and derives its own reserve set from it (#172). A harness can no longer hand the
+   * guard a reserve list the rendered report would reject.
+   */
+  reserves?: { id: string; amount: number }[];
+}
+
+/** A minimal folded fund carrying the given LIVE, USD reserves. Round fakes only (`O7`). */
+function syntheticFund(reserves: { id: string; amount: number }[]): FundReviewData {
+  const parsed = parseFundReview({
+    fund: { id: "synthetic-fund", name: "Synthetic Fund", baseCurrency: "USD" },
+    review: { asOf: "2026-01-31", usdMxn: 20 },
+    portfolios: [{ id: "core", name: "Core" }],
+    accounts: [{ id: "venue-usd", name: "Synthetic Venue", platform: "BITGET", currency: "USD" }],
+    instruments: [{ id: "test-usd", name: "Test Asset", symbol: "XYZ", currency: "USD" }],
+    reserves: reserves.map((reserve) => ({
+      id: reserve.id,
+      portfolioId: "core",
+      tempo: "Capital",
+      executionMode: "live",
+      accountId: "venue-usd",
+      currency: "USD",
+      amount: reserve.amount,
+    })),
+    positions: [],
+  });
+  if (parsed.kind !== "ok") throw new Error(`fixture must parse, got ${parsed.kind}`);
+  return parsed.value;
 }
 
 async function harness(options: HarnessOptions = {}): Promise<Harness> {
@@ -106,7 +136,7 @@ async function harness(options: HarnessOptions = {}): Promise<Harness> {
       ordersPath,
       loadOrders: (path) => loadOrders(path, { warn: () => {} }),
       appendOrders,
-      reserveBalances: async () => options.balances ?? [{ id: "reserve-a", amount: 1000 }],
+      fundReview: async () => syntheticFund(options.reserves ?? [{ id: "reserve-a", amount: 1000 }]),
       ask: async (question) => {
         asked.push(question);
         if (answers.length === 0) {
@@ -194,7 +224,7 @@ describe("`O1` — the over-commitment reject (testing decision 6)", () => {
   it("refuses loudly and leaves the sidecar untouched when it does not yet exist", async () => {
     const { csvPath, io, ordersPath, errors } = await harness({
       // A balance far below the synthetic ladder's committed sum.
-      balances: [{ id: "reserve-a", amount: 10 }],
+      reserves: [{ id: "reserve-a", amount: 10 }],
     });
 
     const outcome = await importBitgetOpenOrders({ csvPath, io });
@@ -219,7 +249,7 @@ describe("`O1` — the over-commitment reject (testing decision 6)", () => {
 
   it("counts the orders ALREADY on file toward the reserve, not just the new batch", async () => {
     // Each half fits the balance alone; together they do not.
-    const first = await harness({ balances: [{ id: "reserve-a", amount: 250 }] });
+    const first = await harness({ reserves: [{ id: "reserve-a", amount: 250 }] });
     await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
     const before = await readFile(first.ordersPath, "utf8");
 
@@ -257,7 +287,7 @@ describe("the declared half — one field, once per batch", () => {
   it("lets ONE rung be overridden, keeping the batch answer for the rest", async () => {
     const { csvPath, io, ordersPath } = await harness({
       answers: ["reserve-a", "y", "", "reserve-b"],
-      balances: [
+      reserves: [
         { id: "reserve-a", amount: 1000 },
         { id: "reserve-b", amount: 1000 },
       ],

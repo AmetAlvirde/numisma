@@ -10,7 +10,23 @@
  * be worse than today's honest silence: today the fund is quietly wrong about free cash
  * and everyone knows the number is unexamined, whereas two disagreeing figures would
  * each look examined. So there is exactly one place the arithmetic happens, and
- * `available.test.ts` asserts the two callers cannot part company.
+ * `available.test.ts` asserts the two callers cannot part company ABOUT THE ARITHMETIC.
+ *
+ * THIS FILE DOES NOT OWN THE ARGUMENTS, AND SAYING SO IS THE CORRECTION. An earlier
+ * version of this docstring claimed the two callers simply "cannot part company". That
+ * was false, and #172 is what it cost: the two shared this formula and were handed
+ * DIFFERENT reserve sets — the guard `data.reserves` straight off the fold, the report
+ * only the reserves `buildCanonicalState` admits — and the guard's reserve type carried
+ * no currency at all. Same formula, divergent arguments, a rung fundable at import and
+ * unplaceable in the report.
+ *
+ * WHICH SURFACE OWNS THE DERIVATION: `./attribution.js`, and neither caller. It answers
+ * both argument questions — which reserves may fund anything (delegated to
+ * `buildCanonicalState`, never restated), and which rung is placed against which — and
+ * the guard and the report each call it rather than deriving anything themselves. The
+ * pairing is the invariant: this module is the one FORMULA, `./attribution.js` is the one
+ * ARGUMENT SET, and `funding-parity.test.ts` drives BOTH surfaces from a single fund
+ * fixture so neither claim can rot into prose again.
  *
  * PURE (ADR-001): no IO, no clock. The input is what `pickRestingOrdersAsOf` returned.
  */

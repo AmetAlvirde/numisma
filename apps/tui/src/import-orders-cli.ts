@@ -28,10 +28,12 @@ if (!csvPath) {
         ordersPath: resolveOrdersPath(),
         loadOrders,
         appendOrders,
-        reserveBalances: async () => {
-          const data = await loadFoldedReview(resolveEventStorePaths());
-          return data.reserves.map((reserve) => ({ id: reserve.id, amount: reserve.amount }));
-        },
+        // The folded review goes over WHOLE. This used to map `data.reserves` into
+        // `{ id, amount }` pairs here — three lines that quietly gave the `O1` guard a
+        // different reserve set than the rendered report reads, and stripped the
+        // currency it needed to refuse a cross-currency rung (#172). Admission is the
+        // engine's policy, not this wiring's.
+        fundReview: () => loadFoldedReview(resolveEventStorePaths()),
         ask: (question) => rl.question(question),
         out: (message) => process.stdout.write(message),
         err: (message) => process.stderr.write(`${message}\n`),

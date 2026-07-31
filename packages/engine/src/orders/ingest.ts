@@ -10,8 +10,9 @@
  * happens to look like" and "what an observed open order IS". A second venue owes a
  * second parser and nothing here.
  */
-import type { Currency } from "../contracts.js";
-import { committedByReserve, isNegativeSlack } from "./committed.js";
+import type { Currency, FundReviewData } from "../contracts.js";
+import { attributeRungs } from "./attribution.js";
+import { isNegativeSlack, type CommittedRung } from "./committed.js";
 import type { OrderPlacedRecord, OrderSide } from "./records.js";
 import type { RestingOrder } from "./select.js";
 
@@ -128,11 +129,15 @@ export function buildOrderPlacedRecords(
   }));
 }
 
-/** A reserve's balance as the fold reports it — the value half, untouched by any order. */
-export interface ReserveBalance {
-  id: string;
-  amount: number;
-}
+/**
+ * `ReserveBalance` USED TO LIVE HERE — `{ id, amount }`, built by the caller. It is gone
+ * on purpose (#172). It carried no currency, so this guard summed a quote-denominated
+ * `committed` into a native balance; and because the CALLER built it, the import CLI
+ * handed over `data.reserves` straight off the fold, including reserves the report
+ * refuses to place. The successor is `FundableReserve` in `./attribution.js`, which
+ * carries `currency` and which only `fundableReserves(data)` can produce. This guard
+ * takes the FUND now, so there is no list left to hand it wrongly.
+ */
 
 /** One reserve that cannot fund what has been attributed to it. */
 export interface FundingShortfall {
@@ -143,10 +148,17 @@ export interface FundingShortfall {
   slack: number;
 }
 
+/**
+ * The two REFUSAL arms are, deliberately, the two `UnmatchedReason`s the report already
+ * uses — same names, same meanings. A rung the report would list as `unknown-reserve`
+ * refuses the import as `unknown-reserve`; likewise `currency-mismatch`. The parity is
+ * legible in the type rather than asserted in prose.
+ */
 export type FundingCoverage =
   | { status: "ok" }
   | { status: "over-committed"; shortfalls: FundingShortfall[] }
-  | { status: "unknown-reserve"; fundingReserveIds: string[] };
+  | { status: "unknown-reserve"; fundingReserveIds: string[] }
+  | { status: "currency-mismatch"; rungs: CommittedRung[] };
 
 /**
  * `O1` — no order may encumber a reserve that cannot fund it.
@@ -163,31 +175,46 @@ export type FundingCoverage =
  * encumbers only its remainder. Re-importing an unchanged export changes nothing here:
  * the ids are deterministic, so the selector counts each rung once.
  *
- * Committed comes from the SHARED formula in `./committed.ts` — the same call the
- * rendered available-capital report makes. This guard and that report must never be
- * able to disagree about how much of a reserve is encumbered: a rendered `available`
- * that contradicted the check which ACCEPTED the orders would be worse than the fund's
- * present honest silence. Only BUY claims encumber a cash reserve, and that rule lives
- * there too rather than being restated here.
+ * Committed comes from the SHARED formula in `./committed.ts`, and its ARGUMENTS — which
+ * reserves may fund anything, and which rung belongs to which — from the SHARED
+ * attribution in `./attribution.js`. Both are the same calls the rendered
+ * available-capital report makes. Sharing only the formula was not enough and is the
+ * defect this signature exists to close (#172): the guard took a reserve list from its
+ * CALLER, and the caller handed it reserves the report refuses to place, plus no
+ * currency to check against. It takes the FUND now. There is no list to get wrong.
+ *
+ * A rendered `available` that contradicted the check which ACCEPTED the orders would be
+ * worse than the fund's present honest silence. Only BUY claims encumber a cash reserve,
+ * and that rule lives in `./committed.ts` rather than being restated here.
  */
 export function checkFundingCoverage(
   resting: readonly RestingOrder[],
-  balances: readonly ReserveBalance[],
+  data: FundReviewData,
 ): FundingCoverage {
-  const balanceById = new Map(balances.map((balance) => [balance.id, balance.amount]));
+  const { reserves, rungsByReserve, unmatched } = attributeRungs(data, resting);
 
-  const committedById = committedByReserve(resting);
-
-  const unknown = [...committedById.keys()].filter((id) => !balanceById.has(id));
+  // Refuse before summing anything. An unplaceable rung has no honest balance to be
+  // compared against — reading it as a zero balance would render the ladder as
+  // "over-committed" on a typo, and summing it into a foreign-denominated balance would
+  // produce the confidently wrong slack that #172 was about.
+  const unknown = unmatched.filter((entry) => entry.reason === "unknown-reserve");
   if (unknown.length > 0) {
-    // An unknown reserve is refused rather than read as a zero balance: a typo'd id
-    // would otherwise render as "everything is over-committed" or, worse, silently
-    // attribute the ladder to a reserve nobody can see.
-    return { status: "unknown-reserve", fundingReserveIds: unknown };
+    return {
+      status: "unknown-reserve",
+      fundingReserveIds: [...new Set(unknown.map((entry) => entry.rung.fundingReserveId))],
+    };
+  }
+  const mismatched = unmatched.filter((entry) => entry.reason === "currency-mismatch");
+  if (mismatched.length > 0) {
+    return { status: "currency-mismatch", rungs: mismatched.map((entry) => entry.rung) };
   }
 
+  const balanceById = new Map(reserves.map((reserve) => [reserve.reserveId, reserve.balance]));
   const shortfalls: FundingShortfall[] = [];
-  for (const [fundingReserveId, committed] of committedById) {
+  for (const [fundingReserveId, rungs] of rungsByReserve) {
+    // Summed from the same rung rows the report lists, so the figure in the refusal
+    // message and the figure the operator reads afterwards are one arithmetic.
+    const committed = rungs.reduce((total, rung) => total + rung.committed, 0);
     const balance = balanceById.get(fundingReserveId) ?? 0;
     const slack = balance - committed;
     if (isNegativeSlack(slack)) {
