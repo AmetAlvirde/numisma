@@ -380,6 +380,44 @@ export type FundingCoverage =
  * A rendered `available` that contradicted the check which ACCEPTED the orders would be
  * worse than the fund's present honest silence. Only BUY claims encumber a cash reserve,
  * and that rule lives in `./committed.ts` rather than being restated here.
+ *
+ * SCOPE — THE GUARD WEIGHS THE RUNGS IT IS HANDED (#183). `resting` is not a sample of
+ * the venue's book; it IS this function's scope. The question answered is "are THESE
+ * rungs covered?", and over the rungs handed in, `ok` is honest. Whether that set is the
+ * WHOLE book is the CALLER's to own, and the caller cannot always say yes: a row the
+ * export's parser skipped never became a record, so it never reaches `resting` and is
+ * never in `committed`. The guard cannot see it and does not claim to. The surface that
+ * carries that gap is the import boundary's `imported-partial` outcome
+ * (`apps/tui/src/import-orders.ts`), whose operator line names the money direction —
+ * rungs nobody could weigh make `available` read HIGH — and whose count runs through
+ * `leavesRungUnweighed` so a `not-resting` row, read completely and found to encumber
+ * nothing, raises no false alarm (#184).
+ *
+ * The verdict is deliberately NOT qualified with that gap, and #183 decided so against
+ * its own leading candidate. This is a pure function of its arguments: the incompleteness
+ * lives in the ARGUMENT, not in the verdict, and a fifth arm apologizing for the caller's
+ * inputs moves the caller's problem into the callee's type. It would harden `ok` against
+ * a caller that does not exist — one non-test call site, and `record-fill.ts` names this
+ * function only in a comment saying why it deliberately does not call it. It would also
+ * break #172's parity property in TWO places: `funding-parity.test.ts:197`'s token
+ * equality against `UnmatchedReason`, and `:193`'s `if (coverage.status === "ok")
+ * expect(report.unmatched).toEqual([])`, where a fifth arm falls to the `else` and
+ * asserts a non-empty unmatched list against an empty one — on the ACCEPT path, which is
+ * the path a qualified verdict lives on.
+ *
+ * KNOWINGLY OPEN, tracked on #183 — A SKIPPED EXPORT ROW IS NEVER PERSISTED. `OrderRecord`
+ * is exactly three kinds — `orderPlaced`, `orderCancelled`, `orderFilled`
+ * (`./records.ts:132`) — and `appendOrders` (`packages/preferences/src/orders.ts:244`)
+ * writes only fresh `orderPlaced` rows. There is no record for "line N of the export
+ * could not be read": the skip reaches stderr and the returned outcome, then dies with
+ * the process. So `orders.jsonl` carries no trace that the rung exists, and every later
+ * reader — tomorrow's available-capital report, any adherence question about that date —
+ * sees a book that looks complete, with nothing to warn it otherwise. Persisting the gap
+ * was CONSIDERED AND REJECTED: a skipped row has no id, because the id is synthesized
+ * from venue, pair, side, price and submitted-at (`synthesizeOrderId`, :119) and those
+ * are the very tokens that failed to parse. An un-idable durable "something was here"
+ * could never be matched to a later import and so could never be RETIRED — a permanent
+ * blot on every future report with no verb to close it.
  */
 export function checkFundingCoverage(
   resting: readonly RestingOrder[],
