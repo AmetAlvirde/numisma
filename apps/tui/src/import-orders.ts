@@ -24,7 +24,7 @@ import {
   type BitgetRowSkip,
   type OrderPlacedRecord,
   type OrderRecord,
-  type ReserveBalance,
+  type FundReviewData,
 } from "@numisma/engine";
 import type { OrdersLoad } from "@numisma/preferences";
 
@@ -36,8 +36,17 @@ export interface OrdersImportIo {
   ordersPath: string;
   loadOrders: (path: string) => Promise<OrdersLoad>;
   appendOrders: (path: string, records: OrderRecord[]) => Promise<void>;
-  /** The reserves as the FOLD reports them: value, untouched by any order. */
-  reserveBalances: () => Promise<ReserveBalance[]>;
+  /**
+   * The FOLDED fund review — the whole thing, not a reserve list derived from it.
+   *
+   * This used to be `reserveBalances: () => Promise<ReserveBalance[]>`, and the CLI
+   * satisfied it with `data.reserves.map(...)` — every reserve the fold emitted, with no
+   * currency. That mapping was the bug (#172): it handed the guard reserves the rendered
+   * report refuses to place, so a ladder could be FUNDABLE at import and UNPLACEABLE in
+   * the report. The admission policy belongs to the engine, so the fund goes over
+   * whole and this shell derives nothing.
+   */
+  fundReview: () => Promise<FundReviewData>;
   /** Ask the operator one question; the answer is returned trimmed by the caller. */
   ask: (question: string) => Promise<string>;
   out: (message: string) => void;
@@ -52,6 +61,7 @@ export type OrdersImportRejection =
   | "unreadable-sidecar-lines"
   | "no-reserve-declared"
   | "unknown-reserve"
+  | "currency-mismatch"
   | "over-committed";
 
 export type OrdersImportOutcome =
@@ -193,12 +203,29 @@ export async function importBitgetOpenOrders(
   // this batch — because a reserve funds every claim against it, not one import's slice.
   // The selector dedupes by id, so a re-import does not double-count the same rung.
   const resting = pickRestingOrdersAsOf([...existingRecords, ...records]);
-  const coverage = checkFundingCoverage(resting, await io.reserveBalances());
+  const coverage = checkFundingCoverage(resting, await io.fundReview());
   if (coverage.status === "unknown-reserve") {
     return reject(
       io,
       "unknown-reserve",
-      `no such reserve: ${coverage.fundingReserveIds.join(", ")}`,
+      `no such fundable reserve: ${coverage.fundingReserveIds.join(", ")}. A reserve the ` +
+        `fold excluded — paper execution mode, an unsupported currency, a dangling ` +
+        `account reference — cannot fund a live order either, and the available-capital ` +
+        `report would not be able to place it`,
+    );
+  }
+  if (coverage.status === "currency-mismatch") {
+    // Cross-currency funding is not designed; it is refused, here and in the report.
+    // Accepting it would sum a quote-denominated committed into a native balance and
+    // report free capital that does not exist.
+    const detail = coverage.rungs
+      .map((rung) => `${rung.orderId} (${rung.currency}) against ${rung.fundingReserveId}`)
+      .join("; ");
+    return reject(
+      io,
+      "currency-mismatch",
+      `these rungs are quoted in a currency their declared reserve does not hold — ` +
+        `${detail}. Cross-currency funding is not supported; fix the declaration`,
     );
   }
   if (coverage.status === "over-committed") {

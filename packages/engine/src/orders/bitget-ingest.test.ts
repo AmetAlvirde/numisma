@@ -20,8 +20,39 @@ import {
   synthesizeOrderId,
 } from "./ingest.js";
 import { pickRestingOrdersAsOf } from "./select.js";
+import { parseFixture } from "../fund-composition.fixtures.js";
+import type { FundReviewData } from "../contracts.js";
 
 const HEADER = BITGET_OPEN_ORDERS_HEADER.join(",");
+
+/**
+ * A fund carrying ONE live USD reserve with the given balance.
+ *
+ * The guard takes the FUND, not a balance array, so its reserve set is derived by the
+ * same admission policy the rendered report uses and a test cannot hand it a reserve the
+ * report would reject (#172). Balances here remain invented round numbers (`O7`).
+ */
+function fundWith(amount: number, reserveId = "reserve-a"): FundReviewData {
+  return parseFixture({
+    fund: { id: "synthetic-fund", name: "Synthetic Fund", baseCurrency: "USD" },
+    review: { asOf: "2026-01-31", usdMxn: 20 },
+    portfolios: [{ id: "core", name: "Core" }],
+    accounts: [{ id: "venue-usd", name: "Synthetic Venue", platform: "BITGET", currency: "USD" }],
+    instruments: [{ id: "test-usd", name: "Test Asset", symbol: "XYZ", currency: "USD" }],
+    reserves: [
+      {
+        id: reserveId,
+        portfolioId: "core",
+        tempo: "Capital",
+        executionMode: "live",
+        accountId: "venue-usd",
+        currency: "USD",
+        amount,
+      },
+    ],
+    positions: [],
+  });
+}
 
 /**
  * One synthetic rendered row. Defaults are deliberately obvious fakes: the pair is
@@ -210,12 +241,12 @@ describe("checkFundingCoverage — `O1`, and slack >= 0", () => {
   it("accepts a batch the declared reserve can fund", () => {
     // 0.1 @ 1000 + 0.1 @ 900 = 190 committed against a 1000 balance.
     const resting = restingFrom(csv(row({ price: "1000" }), row({ price: "900" })), "reserve-a");
-    expect(checkFundingCoverage(resting, [{ id: "reserve-a", amount: 1000 }]).status).toBe("ok");
+    expect(checkFundingCoverage(resting, fundWith(1000)).status).toBe("ok");
   });
 
   it("REJECTS a batch whose committed sum exceeds the declared reserve", () => {
     const resting = restingFrom(csv(row({ price: "1000", quantity: "1" })), "reserve-a");
-    const coverage = checkFundingCoverage(resting, [{ id: "reserve-a", amount: 100 }]);
+    const coverage = checkFundingCoverage(resting, fundWith(100));
     expect(coverage.status).toBe("over-committed");
     if (coverage.status !== "over-committed") return;
     expect(coverage.shortfalls).toHaveLength(1);
@@ -226,12 +257,12 @@ describe("checkFundingCoverage — `O1`, and slack >= 0", () => {
 
   it("holds slack >= 0 at exact equality rather than tripping on IEEE noise", () => {
     const resting = restingFrom(csv(row({ price: "0.1", quantity: "3" })), "reserve-a");
-    expect(checkFundingCoverage(resting, [{ id: "reserve-a", amount: 0.3 }]).status).toBe("ok");
+    expect(checkFundingCoverage(resting, fundWith(0.3)).status).toBe("ok");
   });
 
   it("rejects a declared reserve that does not exist, rather than reading it as zero", () => {
     const resting = restingFrom(csv(row()), "reserve-ghost");
-    const coverage = checkFundingCoverage(resting, [{ id: "reserve-a", amount: 1000 }]);
+    const coverage = checkFundingCoverage(resting, fundWith(1000));
     expect(coverage.status).toBe("unknown-reserve");
     if (coverage.status !== "unknown-reserve") return;
     expect(coverage.fundingReserveIds).toEqual(["reserve-ghost"]);
