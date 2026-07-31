@@ -136,6 +136,34 @@ export type {
 export { serializeOrderRecord, parseOrderRecord } from "./orders/records.js";
 export type { RestingOrder } from "./orders/select.js";
 export { pickRestingOrdersAsOf } from "./orders/select.js";
+// Ingest: the PURE Bitget open-orders parse and the venue-neutral join to the one
+// declared field. The IO shell — reading the export, prompting, appending — is the
+// TUI's, per ADR-001.
+export type {
+  ObservedOpenOrder,
+  OrderIdentity,
+  OrderAttribution,
+  ReserveBalance,
+  FundingShortfall,
+  FundingCoverage,
+} from "./orders/ingest.js";
+export {
+  canonicalDecimal,
+  synthesizeOrderId,
+  buildOrderPlacedRecords,
+  checkFundingCoverage,
+} from "./orders/ingest.js";
+export type {
+  BitgetOpenOrder,
+  BitgetRowProblem,
+  BitgetRowSkip,
+  BitgetOpenOrdersParse,
+} from "./orders/bitget.js";
+export {
+  BITGET_OPEN_ORDERS_HEADER,
+  BITGET_RESTING_STATUS,
+  parseBitgetOpenOrdersCsv,
+} from "./orders/bitget.js";
 
 export {
   buildEventReference,

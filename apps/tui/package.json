@@ -6,6 +6,7 @@
   "dependencies": {
     "@numisma/engine": "workspace:*",
     "@numisma/event-store": "workspace:*",
+    "@numisma/preferences": "workspace:*",
     "@opentui/core": "0.2.15"
   },
   "scripts": {
