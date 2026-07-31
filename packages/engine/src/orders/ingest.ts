@@ -11,6 +11,7 @@
  * second parser and nothing here.
  */
 import type { Currency } from "../contracts.js";
+import { committedByReserve } from "./committed.js";
 import type { OrderPlacedRecord, OrderSide } from "./records.js";
 import type { RestingOrder } from "./select.js";
 
@@ -171,9 +172,12 @@ const SLACK_EPSILON = 1e-9;
  * encumbers only its remainder. Re-importing an unchanged export changes nothing here:
  * the ids are deterministic, so the selector counts each rung once.
  *
- * Only BUY claims encumber a cash reserve. A resting sell encumbers the asset instead —
- * the sign-flipped case is named, not designed, and is deliberately not summed into a
- * cash balance it does not draw on.
+ * Committed comes from the SHARED formula in `./committed.ts` — the same call the
+ * rendered available-capital report makes. This guard and that report must never be
+ * able to disagree about how much of a reserve is encumbered: a rendered `available`
+ * that contradicted the check which ACCEPTED the orders would be worse than the fund's
+ * present honest silence. Only BUY claims encumber a cash reserve, and that rule lives
+ * there too rather than being restated here.
  */
 export function checkFundingCoverage(
   resting: readonly RestingOrder[],
@@ -181,15 +185,7 @@ export function checkFundingCoverage(
 ): FundingCoverage {
   const balanceById = new Map(balances.map((balance) => [balance.id, balance.amount]));
 
-  const committedById = new Map<string, number>();
-  for (const order of resting) {
-    if (order.placed.side !== "buy") {
-      continue;
-    }
-    const reserveId = order.placed.fundingReserveId;
-    const committed = order.placed.price * order.remainingQuantity;
-    committedById.set(reserveId, (committedById.get(reserveId) ?? 0) + committed);
-  }
+  const committedById = committedByReserve(resting);
 
   const unknown = [...committedById.keys()].filter((id) => !balanceById.has(id));
   if (unknown.length > 0) {
