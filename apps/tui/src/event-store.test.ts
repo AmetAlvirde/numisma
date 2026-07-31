@@ -22,7 +22,25 @@ import {
   SPINE_MAGNITUDE_THRESHOLD_ENV,
 } from "./event-store.js";
 import type { SuppliedCashLeg } from "@numisma/engine";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+// Every case here is FILESYSTEM-bound: each one builds a real temp store (mkdir +
+// writes), folds it, and ingests — and the archive cases ingest twice. Under
+// `pnpm test` this file is scheduled alongside the real-`git`-subprocess suites
+// (ingest-commit-hardening, go-back-invariant, ingest-commit), whose individual
+// cases run 3–9s of subprocess and disk work. Measured on this tree: the archive
+// case ("never clobbers a prior archive…") costs ~540ms run in isolation and
+// 1.2–1.9s under full-suite load — a ~3x amplification that leaves the 5s vitest
+// DEFAULT under 3x of headroom. #178 saw it cross that line twice on a busier
+// machine, timing out the whole suite while passing in isolation.
+//
+// So the number is not a tolerance for slow code; it is headroom over scheduler
+// contention we do not control. 30_000 matches what the git-heavy tui suites
+// already set for the same reason — one convention, not a new number. Nothing
+// here awaits an unbounded operation (the archive's collision-suffix loop is
+// bounded by the first free name), so a case that actually reaches 30s is a real
+// hang and should be read as a defect, not raised again.
+vi.setConfig({ testTimeout: 30_000 });
 
 const GENESIS_AS_OF = "2026-06-01";
 
