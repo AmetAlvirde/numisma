@@ -13,6 +13,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { resolveDataDir } from "@numisma/engine";
+import { TRACKED_FILES } from "./ingest-commit.js";
 
 // The spine:reset guard cases spawn `tsx` subprocesses; give them headroom under load.
 vi.setConfig({ testTimeout: 30_000 });
@@ -95,4 +97,76 @@ describe("spine:reset destructive-default guard (R-M5)", () => {
     expect(result.status).toBe(0);
     expect(existsSync(join(dir, "events.jsonl"))).toBe(false);
   });
+});
+
+// ---------------------------------------------------------------------------
+// The durable-file floor: BOTH ENDS of the one contract (spec #163 S4 / #164).
+//
+// A durable file is only durable when TWO independent facts hold: the accumulus
+// allowlist `.gitignore` does NOT ignore it (or every write is silently
+// discarded), AND `TRACKED_FILES` names it (or nothing ever stages it). Either
+// end alone is FALSE ASSURANCE — a green check over a file git is throwing away.
+// So this guard asserts both, over the LIST rather than per filename: adding a
+// sixth durable file is a one-line change to EXPECTED_DURABLE_FILES.
+//
+// Membership test (ADR-006, amended): "is this durable, non-re-derivable truth?"
+// ---------------------------------------------------------------------------
+const EXPECTED_DURABLE_FILES = [
+  "events.jsonl",
+  "genesis.json",
+  "head-digest.json",
+  "orders.jsonl",
+  "preferences.jsonl",
+].sort();
+
+/**
+ * The accumulus checkout, or `undefined` when it is absent on this machine.
+ *
+ * accumulus is a SEPARATE, private repo (ADR-006) that a fresh clone of numisma
+ * will not have. Rather than go flaky there, the allowlist end is skipped with a
+ * stated reason when the data dir is missing or is not a git checkout; the
+ * `TRACKED_FILES` end is pure code and always runs.
+ */
+function accumulusDataDir(): string | undefined {
+  const dir = resolveDataDir();
+  if (!existsSync(dir)) {
+    return undefined;
+  }
+  const inRepo = spawnSync("git", ["-C", dir, "rev-parse", "--git-dir"], { encoding: "utf8" });
+  return inRepo.status === 0 ? dir : undefined;
+}
+
+/** True when git ignores `file` inside the accumulus data dir. */
+function gitIgnores(dataDir: string, file: string): boolean {
+  // `git check-ignore -q` exits 0 when the path IS ignored, 1 when it is not.
+  // (`-v` would exit 0 for a NEGATED match too, which would invert this guard.)
+  //
+  // `--no-index` is load-bearing, not tidiness. Without it check-ignore consults the
+  // INDEX first and reports a TRACKED path as "not ignored" whatever `.gitignore` says —
+  // so four of the five durable files, already tracked, would pass this end vacuously,
+  // and `orders.jsonl` would join them the moment the first daily fetch commits it. The
+  // guard must interrogate the ALLOWLIST, which is the thing that can regress; being
+  // already-tracked is not evidence the next write survives.
+  return spawnSync("git", ["-C", dataDir, "check-ignore", "-q", "--no-index", "--", file])
+    .status === 0;
+}
+
+describe("durable-file floor — both ends of the allowlist/TRACKED_FILES contract", () => {
+  const dataDir = accumulusDataDir();
+
+  it("end 2: TRACKED_FILES names exactly the durable files (incl. orders.jsonl)", () => {
+    expect([...TRACKED_FILES].sort()).toEqual(EXPECTED_DURABLE_FILES);
+  });
+
+  it.skipIf(dataDir === undefined)(
+    "end 1: the accumulus allowlist ignores none of the durable files",
+    () => {
+      const ignored = EXPECTED_DURABLE_FILES.filter((file) => gitIgnores(dataDir!, file));
+      expect(ignored).toEqual([]);
+
+      // Control: the allowlist polarity is real, not an empty/absent .gitignore
+      // that would make the assertion above pass vacuously.
+      expect(gitIgnores(dataDir!, join("prices", "btc.json"))).toBe(true);
+    },
+  );
 });

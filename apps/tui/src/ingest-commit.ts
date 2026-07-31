@@ -33,8 +33,22 @@ import {
   type PortfolioEvent,
 } from "@numisma/engine";
 
-/** The durable files we stage each ingest, when present in the dataDir. */
-const TRACKED_FILES = ["events.jsonl", "head-digest.json", "genesis.json", "preferences.jsonl"];
+/**
+ * The durable files we stage each ingest, when present in the dataDir.
+ *
+ * This list and the accumulus `.gitignore` allowlist are TWO ENDS OF ONE CONTRACT:
+ * a file staged here but not allowlisted there is written and silently discarded.
+ * `durable-log-guards.test.ts` asserts both ends over this exact array — which is
+ * why it is exported. Membership test (ADR-006, amended): "is this durable,
+ * non-re-derivable truth?"
+ */
+export const TRACKED_FILES = [
+  "events.jsonl",
+  "head-digest.json",
+  "genesis.json",
+  "preferences.jsonl",
+  "orders.jsonl",
+];
 
 /**
  * Bounded timeouts (ms) for the git steps that can touch the network or a credential

@@ -1,0 +1,609 @@
+/**
+ * `S8` — THE FILL ACT: ONE ACT ACROSS TWO FILES, and the honest account of what that can
+ * and cannot mean.
+ *
+ * When a rung fills, this flow writes BOTH halves of the truth:
+ *
+ *   - the `orderFilled` line into `orders.jsonl` — the claim left the book, and
+ *   - the `PositionOpened` (first fill on the ladder) or `PositionAddedTo` (every fill
+ *     after) with its funding leg into `events.jsonl` — the fund actually bought something.
+ *
+ * An `orderFilled` line with no lot, or a lot with the order still resting, is this
+ * increment's own silent-drift hazard, so the act must fail loud with NEITHER written.
+ *
+ * TWO FILES CANNOT BE RENAMED ATOMICALLY, AND THIS FILE DOES NOT PRETEND OTHERWISE. What
+ * it does instead, in order:
+ *
+ *   1. ALL VALIDATION UP FRONT. Both records are fully built and fully verified —
+ *      `parseEvent`, `crossReferenceEvent` against genesis + the whole prior log, the
+ *      monotonicity verdict, the operator's explicit confirmation — BEFORE either write.
+ *      Every refusal before step 2 has written nothing at all.
+ *   2. THE LOG FIRST, THE SIDECAR SECOND. Both writers build a full next image and
+ *      rename, so each write is individually atomic.
+ *   3. ROLLBACK. If the sidecar append fails, the log is restored to the image captured
+ *      before the first write — another rename, over a complete prior file.
+ *
+ * THE RESIDUAL CRASH WINDOW, NAMED. A hard kill (SIGKILL, power loss) BETWEEN the two
+ * renames leaves exactly one state: the log holds the `PositionOpened`/`PositionAddedTo`
+ * and `orders.jsonl` still shows the rung RESTING. Nothing else is reachable — the
+ * sidecar's own write is one rename, so it either happened or did not.
+ *
+ * That direction is deliberate, and it was chosen over the reverse for three reasons:
+ *
+ *   - IT ERRS CONSERVATIVE. The cash is debited and the lot is held, while the rung still
+ *     counts as committed. Available reads LOW. The opposite order would leave an
+ *     `orderFilled` line with no lot, which frees the rung's encumbrance while no cash
+ *     moved — available reads HIGH, and overstating free capital is the error direction
+ *     that costs money and the exact defect this increment exists to remove.
+ *   - IT IS ALREADY LOUD. The rung is counted against a reserve that has already been
+ *     debited, so `slack = balance − committed` shrinks by the fill. If the ladder was
+ *     close to fully committed, the next import trips `O1`'s over-commitment reject.
+ *   - IT IS DETECTABLE EXACTLY. `reconcileFillActs` (engine) finds it with no field on
+ *     either record: both halves of an act share a derived id, so a lot whose
+ *     `orderFilled` line is missing is arithmetic, not a guess.
+ *
+ * WHAT THE OPERATOR DOES ABOUT IT. This flow runs `reconcileFillActs` FIRST and REFUSES
+ * to record anything while a torn act is outstanding, so the window can never be
+ * compounded. The remedy is to append the missing `orderFilled` line for the named
+ * `(orderId, observedAt)` — the same hand-authored path every event in this log has always
+ * landed by — after which the reconciliation is clean and the flow proceeds. The log half
+ * is deliberately NOT rewritten: it is the durable record of fact and it is correct; it is
+ * the speculative sidecar that is behind.
+ */
+import {
+  buildEventReference,
+  buildFillAct,
+  committedRungs,
+  crossReferenceEvent,
+  deriveFundingTier,
+  isObservedAtStamp,
+  parseEvent,
+  pickRestingOrdersAsOf,
+  proposeFillVerdicts,
+  reconcileFillActs,
+  resolveLadderPosition,
+  type BookObservation,
+  type CapitalTier,
+  type CommittedRung,
+  type FillAct,
+  type FundReviewData,
+  type LadderTarget,
+  type ObservedRungState,
+  type OrderRecord,
+  type PortfolioEvent,
+  type PositionDecision,
+  type ProposedVerdict,
+} from "@numisma/engine";
+import type { OrdersLoad } from "@numisma/preferences";
+import { nextLogImage, serializeEvent } from "./event-store.js";
+
+/** Everything this act touches that is not a pure function, in one injectable bag. */
+export interface RecordFillIo {
+  ordersPath: string;
+  eventsPath: string;
+  loadOrders: (path: string) => Promise<OrdersLoad>;
+  appendOrders: (path: string, records: OrderRecord[]) => Promise<void>;
+  /** The durable log's current bytes, or `undefined` when it does not exist yet. */
+  readLogImage: () => Promise<string | undefined>;
+  /** Write a full next image of the log (temp + rename). */
+  writeLogImage: (contents: string) => Promise<void>;
+  /** Put the log back to a prior image — `undefined` means it did not exist. */
+  restoreLogImage: (prior: string | undefined) => Promise<void>;
+  loadGenesis: () => Promise<FundReviewData>;
+  loadLogEvents: () => Promise<PortfolioEvent[]>;
+  /** The FOLDED book: where the ladder's Position and the funding tier are read from. */
+  loadFolded: () => Promise<FundReviewData>;
+  ask: (question: string) => Promise<string>;
+  out: (message: string) => void;
+  err: (message: string) => void;
+}
+
+export type RecordFillRejection =
+  | "unreadable-sidecar"
+  | "unreadable-sidecar-lines"
+  | "torn-fill-act"
+  | "no-resting-rung"
+  | "unknown-rung"
+  | "bad-timestamp"
+  | "bad-quantity"
+  | "impossible-verdict"
+  | "verdict-contradicts-operator"
+  | "unknown-reserve"
+  | "unknown-instrument"
+  | "ambiguous-ladder-position"
+  | "ambiguous-tier"
+  | "incomplete-decision"
+  | "duplicate-fill-act"
+  | "invalid-event"
+  | "rejected-event"
+  | "write-failed"
+  | "rollback-failed";
+
+export type RecordFillOutcome =
+  | {
+      status: "recorded";
+      act: FillAct;
+      /** Ids of rungs whose CONFIRMED `cancelled` verdict was written in the same append. */
+      alsoCancelled: string[];
+    }
+  /** The operator declined at a confirmation gate. Nothing was written, by design. */
+  | { status: "abandoned"; message: string }
+  | { status: "rejected"; reason: RecordFillRejection; message: string };
+
+function reject(
+  io: RecordFillIo,
+  reason: RecordFillRejection,
+  message: string,
+): RecordFillOutcome {
+  io.err(
+    `REFUSED — ${message}\nNothing was written to ${io.eventsPath} or ${io.ordersPath}.`,
+  );
+  return { status: "rejected", reason, message };
+}
+
+function isAffirmative(answer: string): boolean {
+  const normalized = answer.trim().toLowerCase();
+  return normalized === "y" || normalized === "yes";
+}
+
+function isNegative(answer: string): boolean {
+  const normalized = answer.trim().toLowerCase();
+  return normalized === "n" || normalized === "no";
+}
+
+/** The rung list the fill prompt renders from — the same rows `S7` substantiates with. */
+function describeRung(index: number, rung: CommittedRung): string {
+  return (
+    `  [${index}] ${rung.orderId}\n` +
+    `      ${rung.symbol} ${rung.side} ${rung.remainingQuantity} @ ${rung.price} ` +
+    `= ${rung.committed} ${rung.currency} against ${rung.fundingReserveId}`
+  );
+}
+
+function describeVerdict(verdict: ProposedVerdict): string {
+  const evidence = verdict.evidence.disappeared
+    ? "gone from the book"
+    : `on the book, filled_quantity ${verdict.evidence.observedFilledQuantity}`;
+  return (
+    `  ${verdict.orderId} → ${verdict.verdict.toUpperCase()} [derived]\n` +
+    `      evidence: ${evidence}; untouched above: ` +
+    `${verdict.evidence.untouchedAbove.join(", ") || "none"}; reached above: ` +
+    `${verdict.evidence.reachedAbove.join(", ") || "none"}\n` +
+    `      ${verdict.rationale}`
+  );
+}
+
+/**
+ * Ask the operator what the venue shows for every OTHER rung of the ladder.
+ *
+ * This is the evidence monotonicity reasons over, and it is gathered interactively rather
+ * than parsed because the fills export is deferred and `T6`'s interactive path is
+ * PERMANENT. The default is `resting` — the conservative answer, since claiming a rung
+ * was touched is what would license a fill verdict.
+ */
+async function observeBook(
+  io: RecordFillIo,
+  rungs: readonly CommittedRung[],
+  filled: CommittedRung,
+  filledQuantity: number,
+  observedAt: string,
+): Promise<BookObservation> {
+  const present: ObservedRungState[] = [];
+
+  // The rung being recorded needs no question: the operator just answered it. It leaves
+  // the book only when the fill exhausts what was still claimed; a partial keeps resting
+  // with its remainder, which is condition 2 expressed as state rather than as a rule.
+  if (filledQuantity < filled.remainingQuantity) {
+    present.push({ orderId: filled.orderId, filledQuantity });
+  }
+
+  for (const rung of rungs) {
+    if (rung.orderId === filled.orderId || rung.symbol !== filled.symbol) {
+      continue;
+    }
+    const answer = (
+      await io.ask(`  ${rung.orderId} — [r]esting untouched / [t]ouched / [g]one? [r]: `)
+    )
+      .trim()
+      .toLowerCase();
+    if (answer === "g" || answer === "gone") {
+      continue; // absent from the observation = disappeared
+    }
+    if (answer === "t" || answer === "touched") {
+      const quantity = Number((await io.ask(`      filled_quantity observed: `)).trim());
+      present.push({
+        orderId: rung.orderId,
+        filledQuantity: Number.isFinite(quantity) ? quantity : 0,
+      });
+      continue;
+    }
+    present.push({ orderId: rung.orderId, filledQuantity: 0 });
+  }
+
+  return { observedAt, present };
+}
+
+/** The five authored decision fields. All required; a blank one abandons the act. */
+async function askDecision(io: RecordFillIo): Promise<PositionDecision | undefined> {
+  const entryThesis = (await io.ask("  Entry thesis: ")).trim();
+  const invalidationCondition = (await io.ask("  Invalidation condition: ")).trim();
+  const riskBudget = (await io.ask("  Risk budget: ")).trim();
+  const plannedHoldingHorizon = (await io.ask("  Planned holding horizon: ")).trim();
+  const strategy = (await io.ask("  Strategy: ")).trim();
+  if (
+    !entryThesis ||
+    !invalidationCondition ||
+    !riskBudget ||
+    !plannedHoldingHorizon ||
+    !strategy
+  ) {
+    return undefined;
+  }
+  return { entryThesis, invalidationCondition, riskBudget, plannedHoldingHorizon, strategy };
+}
+
+/**
+ * Record ONE fill as one act, or refuse and write nothing.
+ *
+ * THE ORDERING IS THE CONTRACT: reconcile → read the book → pick the rung → gather the
+ * evidence → propose the verdict → confirm → resolve the ladder's Position → author the
+ * decision → build BOTH records → validate BOTH → confirm → write log → write sidecar,
+ * rolling the log back if the sidecar fails.
+ */
+export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
+  // ---- 1. the sidecar, and the refusal to reason over a book we cannot fully read ----
+  const load = await io.loadOrders(io.ordersPath);
+  if (load.status === "unreadable") {
+    return reject(io, "unreadable-sidecar", `could not read ${io.ordersPath}: ${load.message}`);
+  }
+  if (load.status === "loaded" && load.skips.length > 0) {
+    return reject(
+      io,
+      "unreadable-sidecar-lines",
+      `${io.ordersPath} has ${load.skips.length} line(s) this build cannot read, so the resting ` +
+        `book monotonicity would reason over is only partly known`,
+    );
+  }
+  const records: OrderRecord[] = load.status === "loaded" ? load.records : [];
+
+  const genesis = await io.loadGenesis();
+  const priorEvents = await io.loadLogEvents();
+
+  // ---- 2. a torn act blocks everything, so the crash window can never compound ----
+  const torn = reconcileFillActs(priorEvents, records);
+  if (torn.length > 0) {
+    const detail = torn
+      .map(
+        (act) =>
+          `${act.kind}: rung '${act.orderId}' at ${act.observedAt} (event '${act.eventId}')`,
+      )
+      .join("; ");
+    return reject(
+      io,
+      "torn-fill-act",
+      `a previous fill act is half-landed — ${detail}. This is the named crash window: a ` +
+        `hard kill between the two renames. Repair it by hand-authoring the missing half ` +
+        `for that (orderId, observedAt) before recording another fill`,
+    );
+  }
+
+  // ---- 3. the rung list — the same rows the committed figure is substantiated with ----
+  const resting = pickRestingOrdersAsOf(records);
+  const rungs = committedRungs(resting);
+  if (rungs.length === 0) {
+    return reject(io, "no-resting-rung", `${io.ordersPath} shows no resting buy rung to fill`);
+  }
+  io.out(`Resting rungs:\n${rungs.map((rung, index) => describeRung(index, rung)).join("\n")}\n`);
+
+  const picked = (await io.ask("Which rung filled? [index or order id]: ")).trim();
+  const byIndex = /^\d+$/.test(picked) ? rungs[Number(picked)] : undefined;
+  const filled = byIndex ?? rungs.find((rung) => rung.orderId === picked);
+  if (!filled) {
+    return reject(io, "unknown-rung", `no resting rung matches '${picked}'`);
+  }
+
+  const observedAt = (await io.ask("Fill timestamp (YYYY-MM-DDTHH:MM:SS): ")).trim();
+  if (!isObservedAtStamp(observedAt)) {
+    return reject(io, "bad-timestamp", `'${observedAt}' is not a YYYY-MM-DDTHH:MM:SS stamp`);
+  }
+  if (observedAt < filled.observedAt) {
+    return reject(
+      io,
+      "bad-timestamp",
+      `the fill is stamped ${observedAt}, before the rung was placed (${filled.observedAt})`,
+    );
+  }
+
+  const quantityAnswer = (
+    await io.ask(`Filled quantity [${filled.remainingQuantity}]: `)
+  ).trim();
+  const filledQuantity =
+    quantityAnswer === "" ? filled.remainingQuantity : Number(quantityAnswer);
+  if (!Number.isFinite(filledQuantity) || filledQuantity <= 0) {
+    return reject(io, "bad-quantity", `'${quantityAnswer}' is not a positive quantity`);
+  }
+  if (filledQuantity > filled.remainingQuantity) {
+    return reject(
+      io,
+      "bad-quantity",
+      `${filledQuantity} exceeds the ${filled.remainingQuantity} still claimed by this rung`,
+    );
+  }
+
+  // ---- 4. monotonicity PROPOSES ----
+  io.out("What does the venue show for the rest of this ladder?\n");
+  const observation = await observeBook(io, rungs, filled, filledQuantity, observedAt);
+  const proposal = proposeFillVerdicts(resting, observation);
+  if (proposal.status === "impossible") {
+    return reject(
+      io,
+      "impossible-verdict",
+      `the observed book is impossible — ${proposal.contradictions
+        .map((contradiction) => contradiction.message)
+        .join("; ")}`,
+    );
+  }
+
+  io.out(
+    `Proposed verdicts — DERIVED, not observed:\n` +
+      `${proposal.verdicts.map(describeVerdict).join("\n")}\n` +
+      (proposal.excluded.length > 0
+        ? `  (not simultaneously resting, excluded from the reasoning: ${proposal.excluded.join(", ")})\n`
+        : ""),
+  );
+
+  const ownVerdict = proposal.verdicts.find((verdict) => verdict.orderId === filled.orderId);
+  if (ownVerdict && (ownVerdict.verdict === "cancelled" || ownVerdict.verdict === "resting")) {
+    // The guard doing its job: the operator says this rung filled, and the book they just
+    // described contradicts it. Writing anyway would put a purchase in the log that the
+    // evidence says did not happen.
+    return reject(
+      io,
+      "verdict-contradicts-operator",
+      `you recorded a fill on '${filled.orderId}', but the book you described derives ` +
+        `'${ownVerdict.verdict}' for it — ${ownVerdict.rationale}`,
+    );
+  }
+
+  // `O3`. Nothing above this line has written anything and nothing below writes without
+  // this answer: the inference is never recorded as an observation.
+  if (!isAffirmative(await io.ask("Confirm these derived verdicts? [y/N]: "))) {
+    return { status: "abandoned", message: "the derived verdicts were not confirmed" };
+  }
+
+  const cancelled = proposal.verdicts.filter((verdict) => verdict.verdict === "cancelled");
+  let alsoCancelled: string[] = [];
+  if (cancelled.length > 0) {
+    if (
+      isAffirmative(
+        await io.ask(
+          `Also record ${cancelled.length} confirmed cancellation(s) in this act? [y/N]: `,
+        ),
+      )
+    ) {
+      alsoCancelled = cancelled.map((verdict) => verdict.orderId);
+    }
+  }
+  const proposedFills = proposal.verdicts.filter(
+    (verdict) => verdict.verdict === "filled" && verdict.orderId !== filled.orderId,
+  );
+  if (proposedFills.length > 0) {
+    // Deliberately NOT written here. A fill needs a LOT, and a lot needs its own five
+    // authored decision fields and its own funding leg — i.e. its own act. Recording it
+    // as a bare `orderFilled` line would manufacture exactly the half-landed state this
+    // whole flow exists to make unreachable.
+    io.out(
+      `NOT written: ${proposedFills.map((verdict) => verdict.orderId).join(", ")} also derive ` +
+        `FILLED. Each needs its own fill act — a fill without a lot is the state this act ` +
+        `refuses to create.\n`,
+    );
+  }
+
+  // ---- 5. the ladder's Position: first fill OPENS, every fill after APPENDS ----
+  const folded = await io.loadFolded();
+  const reserve = folded.reserves.find((entry) => entry.id === filled.fundingReserveId);
+  if (!reserve) {
+    return reject(
+      io,
+      "unknown-reserve",
+      `the rung declares funding reserve '${filled.fundingReserveId}', which the fold does not have`,
+    );
+  }
+  const instrument = folded.instruments.find(
+    (entry) => entry.symbol === filled.symbol || filled.symbol.startsWith(`${entry.symbol}/`),
+  );
+  const instrumentId =
+    instrument?.id ?? (await io.ask(`Instrument id for ${filled.symbol}: `)).trim();
+  if (!instrumentId || !folded.instruments.some((entry) => entry.id === instrumentId)) {
+    return reject(
+      io,
+      "unknown-instrument",
+      `no instrument in the fold matches '${filled.symbol}'`,
+    );
+  }
+
+  const ladder = resolveLadderPosition(folded.positions, {
+    accountId: reserve.accountId,
+    instrumentId,
+  });
+  if (ladder.status === "ambiguous") {
+    return reject(
+      io,
+      "ambiguous-ladder-position",
+      `${ladder.positionIds.join(" and ")} are both open on ${instrumentId} in ` +
+        `${reserve.accountId}; "one Position per ladder" is already violated, and guessing ` +
+        `which decision this lot belongs to would put it in the wrong one`,
+    );
+  }
+
+  let target: LadderTarget;
+  if (ladder.status === "one") {
+    if (isNegative(await io.ask(`Append this lot to '${ladder.positionId}'? [Y/n]: `))) {
+      return { status: "abandoned", message: "the ladder's existing Position was declined" };
+    }
+    target = { mode: "add", positionId: ladder.positionId };
+  } else {
+    // FIRST FILL, WITH NO PLAN BEHIND IT — `T6`, and this path is permanent. The venue has
+    // never heard of a Tempo, so the decision context is authored here, at the moment of
+    // the fill, and nowhere else.
+    io.out("First fill on this ladder — opening the Position.\n");
+    const positionId = (await io.ask("  Position id: ")).trim();
+    if (!positionId) {
+      return { status: "abandoned", message: "no position id was given" };
+    }
+    const tempoAnswer = (await io.ask(`  Tempo [${reserve.tempo}]: `)).trim();
+    const decision = await askDecision(io);
+    if (!decision) {
+      return reject(
+        io,
+        "incomplete-decision",
+        "all five decision fields are required to open a Position; none of them has a default",
+      );
+    }
+    target = {
+      mode: "open",
+      position: {
+        id: positionId,
+        portfolioId: reserve.portfolioId,
+        tempo: tempoAnswer === "" ? reserve.tempo : tempoAnswer,
+        executionMode: reserve.executionMode,
+        accountId: reserve.accountId,
+        instrumentId,
+        direction: "long",
+        currency: reserve.currency,
+      },
+      decision,
+    };
+  }
+
+  // ---- 6. the cash leg and the tier that is READ, never re-decided ----
+  const proposedFunding = filled.price * filledQuantity;
+  const fundingAnswer = (await io.ask(`Cash debited [${proposedFunding}]: `)).trim();
+  const fundingAmount = fundingAnswer === "" ? proposedFunding : Number(fundingAnswer);
+  if (!Number.isFinite(fundingAmount) || fundingAmount <= 0) {
+    return reject(io, "bad-quantity", `'${fundingAnswer}' is not a positive cash amount`);
+  }
+
+  const fundingTier = deriveFundingTier(reserve);
+  let tier: CapitalTier;
+  if (fundingTier.status === "derived") {
+    tier = fundingTier.tier;
+  } else if (fundingTier.status === "ambiguous") {
+    // `T4` — the tier ordering was applied ONCE, at Transfer time. Asking here would
+    // re-decide it, which is the one thing this increment must not do.
+    return reject(
+      io,
+      "ambiguous-tier",
+      `'${reserve.id}' holds ${fundingTier.tiers.join(" and ")}; the tier ordering was decided ` +
+        `at Transfer time and this act does not get to re-decide it`,
+    );
+  } else {
+    const answer = (await io.ask("  Capital tier for this lot (c1/c2/c3): ")).trim();
+    if (answer !== "c1" && answer !== "c2" && answer !== "c3") {
+      return reject(io, "ambiguous-tier", `'${answer}' is not a capital tier`);
+    }
+    tier = answer;
+  }
+
+  // ---- 7. BOTH records, built together and validated together, before any write ----
+  const act = buildFillAct({
+    rung: filled,
+    filledQuantity,
+    observedAt,
+    fundingAmount,
+    tier,
+    target,
+  });
+
+  if (priorEvents.some((event) => event.id === act.event.id)) {
+    return reject(
+      io,
+      "duplicate-fill-act",
+      `the log already holds event '${act.event.id}' — this fill was already recorded`,
+    );
+  }
+
+  const eventLine = serializeEvent(act.event);
+  // Validate the EXACT BYTES that will land, not the in-memory object: a serializer that
+  // dropped a field would otherwise pass a gate the file itself would fail.
+  const parsed = parseEvent(JSON.parse(eventLine));
+  if (parsed.kind !== "ok") {
+    return reject(io, "invalid-event", `the fill's event does not parse (${parsed.path}: ${parsed.message})`);
+  }
+  const crossRef = crossReferenceEvent(parsed.value, buildEventReference(genesis, priorEvents));
+  if (crossRef.kind !== "ok") {
+    return reject(
+      io,
+      "rejected-event",
+      `the fill's event fails cross-reference (${crossRef.path}: ${crossRef.message})`,
+    );
+  }
+
+  const ordersToAppend: OrderRecord[] = [
+    act.order,
+    ...alsoCancelled.map((orderId): OrderRecord => {
+      const source = rungs.find((rung) => rung.orderId === orderId);
+      return {
+        id: orderId,
+        observedAt,
+        kind: "orderCancelled",
+        currency: source?.currency ?? act.order.currency,
+      };
+    }),
+  ];
+
+  io.out(
+    `About to write ONE act across TWO files:\n` +
+      `  ${io.eventsPath}  ${eventLine}\n` +
+      `${ordersToAppend
+        .map((record) => `  ${io.ordersPath}  ${JSON.stringify(record)}`)
+        .join("\n")}\n`,
+  );
+  if (!isAffirmative(await io.ask("Write BOTH? [y/N]: "))) {
+    return { status: "abandoned", message: "the fill act was not confirmed" };
+  }
+
+  // ---- 8. THE WRITE. Log first, sidecar second, roll the log back if the sidecar fails.
+  const priorImage = await io.readLogImage();
+  try {
+    await io.writeLogImage(nextLogImage(priorImage, [parsed.value]));
+  } catch (error) {
+    // The first rename never happened, so nothing landed anywhere.
+    const detail = error instanceof Error ? error.message : String(error);
+    return reject(io, "write-failed", `could not write ${io.eventsPath}: ${detail}`);
+  }
+
+  try {
+    await io.appendOrders(io.ordersPath, ordersToAppend);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    try {
+      await io.restoreLogImage(priorImage);
+    } catch (rollbackError) {
+      // The one state this flow cannot repair itself, so it says so in full rather than
+      // reporting a tidy failure over a log that is now ahead of the sidecar.
+      const rollbackDetail =
+        rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+      return reject(
+        io,
+        "rollback-failed",
+        `could not append to ${io.ordersPath} (${detail}) AND could not roll back ` +
+          `${io.eventsPath} (${rollbackDetail}). The log now holds event '${act.event.id}' ` +
+          `with the rung still resting — the same state the crash window leaves. Append the ` +
+          `matching orderFilled line for '${act.order.id}' at ${observedAt} by hand`,
+      );
+    }
+    return reject(
+      io,
+      "write-failed",
+      `could not append to ${io.ordersPath} (${detail}); ${io.eventsPath} was rolled back to ` +
+        `its prior image, so NEITHER half of the act is on disk`,
+    );
+  }
+
+  io.out(
+    `Recorded: ${act.order.filledQuantity} of ${act.order.id} filled at ${observedAt}, ` +
+      `${act.event.type} '${act.event.id}' written.\n`,
+  );
+  return { status: "recorded", act, alsoCancelled };
+}

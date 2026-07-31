@@ -11,6 +11,7 @@ import {
   renderLoadFailureText,
   type DashboardLine,
 } from "./dashboard.js";
+import type { AvailableCapitalSection } from "./available-capital.js";
 import {
   keepSelectionInView,
   mapKeyToIntent,
@@ -36,6 +37,13 @@ export interface MountAppDeps {
   sourcePath: string;
   /** Clock for load timestamps. Defaults to wall-clock ISO time. */
   now?: () => string;
+  /**
+   * `S7` — join the `orders.jsonl` sidecar to the folded fund and compose committed /
+   * available. OPTIONAL: a host that does not provide it (the openTUI smoke harness)
+   * renders exactly the prior dashboard, so the sidecar read is never on the path of a
+   * surface that does not want it.
+   */
+  loadAvailableCapital?: (data: FundReviewData) => Promise<AvailableCapitalSection>;
 }
 
 /** Handle returned by {@link mountApp} for the host to drive reloads. */
@@ -90,7 +98,11 @@ export async function mountApp(
   renderer.root.add(shell);
 
   let currentReview:
-    | { data: FundReviewData; report: CompositionReport }
+    | {
+        data: FundReviewData;
+        report: CompositionReport;
+        availableCapital: AvailableCapitalSection | undefined;
+      }
     | undefined;
   let state: InteractionState = { selectedLine: 0 };
 
@@ -113,7 +125,12 @@ export async function mountApp(
           activeRowId,
         )
       : undefined;
-    return buildDashboardLines(currentReview.report, detail, activeRecordId);
+    return buildDashboardLines(
+      currentReview.report,
+      detail,
+      activeRecordId,
+      currentReview.availableCapital,
+    );
   }
 
   async function refresh(): Promise<void> {
@@ -129,7 +146,10 @@ export async function mountApp(
           loadedAt: now(),
         },
       });
-      currentReview = { data, report };
+      // The sidecar read is part of the same refresh as the fold, so `r` re-reads both
+      // and the two halves of the join can never be from different moments.
+      const availableCapital = await deps.loadAvailableCapital?.(data);
+      currentReview = { data, report, availableCapital };
       state = reloadOutcome(state, { ok: true });
       renderDashboard();
     } catch (error) {
@@ -190,6 +210,7 @@ export async function mountApp(
       currentReview.report,
       detail,
       state.activeRecordId,
+      currentReview.availableCapital,
     );
     state = { ...state, selectedLine: normalizeSelection(lines, state.selectedLine) };
     dashboard.content = renderStyledDashboard(

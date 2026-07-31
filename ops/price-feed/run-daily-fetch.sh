@@ -121,9 +121,10 @@ pnpm spine
 #
 #    `git add -u` restages tracked modifications only, so a FIRST-TIME untracked
 #    source-of-truth file (e.g. an initial genesis.json) would slip past this
-#    backstop and then FATAL the post-check. The three source-of-truth files are
-#    NEVER ignored, so also add them explicitly. head-digest.json is deliberately
-#    NOT added here — it may be intentionally ignored, and `git add` of an ignored
+#    backstop and then FATAL the post-check. The source-of-truth files
+#    (events.jsonl, genesis.json, preferences.jsonl, orders.jsonl) are NEVER
+#    ignored — the accumulus allowlist names each one — so also add them
+#    explicitly. head-digest.json is deliberately NOT added here — it may be intentionally ignored, and `git add` of an ignored
 #    path aborts under `set -e`. Each explicit add is guarded on file existence so a
 #    missing optional file doesn't trip `set -e`.
 DATA_DIR="${NUMISMA_DATA_DIR:-$HOME/Dev/accumulus/data}"
@@ -131,7 +132,7 @@ if ! git -C "$DATA_DIR" rev-parse --git-dir >/dev/null 2>&1; then
   echo "[$STAMP] WARNING: $DATA_DIR is not inside a git repo — skipping commit (durable log left uncommitted)."
 else
   git -C "$DATA_DIR" add -u -- .
-  for f in events.jsonl genesis.json preferences.jsonl; do
+  for f in events.jsonl genesis.json preferences.jsonl orders.jsonl; do
     if [[ -e "$DATA_DIR/$f" ]]; then
       git -C "$DATA_DIR" add -- "$f"
     fi
@@ -167,7 +168,11 @@ if git -C "$DATA_DIR" rev-parse --git-dir >/dev/null 2>&1; then
     echo "[$STAMP] WARNING: head-digest.json uncaptured after ingest (forensic breadcrumb lagging, not fatal):"
     echo "$DIGEST_DIRTY"
   fi
-  LOG_DIRTY="$(git -C "$DATA_DIR" status --porcelain -- events.jsonl genesis.json preferences.jsonl)"
+  # orders.jsonl belongs in THIS (strict, no --ignored) arm: it is a TRACKED durable
+  # file per the accumulus allowlist, not an only-ignored breadcrumb like
+  # head-digest.json. Naming it here is only honest because the allowlist landed
+  # first — over an ignored path this arm would report clean while git discards it.
+  LOG_DIRTY="$(git -C "$DATA_DIR" status --porcelain -- events.jsonl genesis.json preferences.jsonl orders.jsonl)"
   if [[ -n "$LOG_DIRTY" ]]; then
     echo "[$STAMP] FATAL: durable LOG uncaptured after ingest + backstop — real fund data at risk:"
     echo "$LOG_DIRTY"

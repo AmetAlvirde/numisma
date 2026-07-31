@@ -6,7 +6,8 @@ PRD issue yet; ratified at the reliable-conversion gate so the substrate and the
 commit-per-ingest contract freeze before a hosted app reads accumulus by path and by
 the `head-digest.json` filename)._
 _Scope: product_
-_Status: accepted_
+_Status: accepted (amended 2026-07-30 — see "Amendment: the tracked-file list, and the
+membership test that governs it" below)_
 
 The durable log lives in a **dedicated private sibling git repository** — `~/Dev/accumulus`,
 the **Log History** — discovered at runtime through a configurable **`NUMISMA_DATA_DIR`**,
@@ -93,7 +94,9 @@ the `captureIngestCommit` seam wired into `ingestInbox` — is the `@numisma/tui
   ignored. The polarity is an *allowlist* (deny-by-default with named exceptions), so the
   disposable, re-fetchable cache is **structurally unable to enter durable history** — a
   stray `prices/foo.json` or `*.tmp` cannot be committed even by mistake, and the scoped
-  stage above reinforces the same guarantee from the writer side.
+  stage above reinforces the same guarantee from the writer side. _(Amended: the list is
+  now five files — `orders.jsonl` joined it — and the amendment below states the general
+  membership test that admits or excludes any candidate.)_
 - **The retired in-repo `data/` store is orphaned and must be retired as part of this
   decision.** The flip repointed all code at accumulus but left a full *stale* duplicate
   ledger under `numisma/data/`, which has **already diverged** (on the audit machine:
@@ -144,3 +147,58 @@ the `captureIngestCommit` seam wired into `ingestInbox` — is the `@numisma/tui
   coupled-commit vs. decoupled-batch (honest in-hand provenance vs. after-the-fact
   reconstruction); plaintext vs. encrypt (readable locate-when + access-control privacy vs.
   permanent-plaintext-history exposure).
+
+## Amendment: the tracked-file list, and the membership test that governs it
+
+_Made during: increment one — `Order`, Bitget ingest, and available capital (spec #163,
+slice #164, seam `S4`). The first amendment to the tracked-file list since this ADR was
+written._
+
+**`orders.jsonl` joins the allowlist as the fifth tracked file**, alongside
+`genesis.json`, `events.jsonl`, `preferences.jsonl` and `head-digest.json`. It is named
+in four places, and the ORDER in which they are edited is load-bearing: the accumulus
+`.gitignore` allowlist first, then `TRACKED_FILES` (`apps/tui/src/ingest-commit.ts`),
+then the daily-fetch explicit-add loop, then the daily-fetch strict post-check
+(`git status --porcelain` **without** `--ignored`). Reversed, the post-check reports
+clean over a file git is discarding — a **green check over data loss**, strictly worse
+than the silence it replaced, because plain `--porcelain` says nothing about an ignored
+path even when that path is named explicitly.
+
+**The membership test is general, and it is stated here once so the list can grow without
+a further amendment:**
+
+> **Is this durable, non-re-derivable truth?**
+
+Durable: losing it loses fund history that cannot be reconstructed. Non-re-derivable:
+nothing can recompute it from something else that is tracked. Both must hold. A file that
+answers yes belongs in the allowlist, in `TRACKED_FILES`, in the explicit-add loop and in
+the strict post-check — as one line in each. (`plans.jsonl`, arriving in increment two, is
+exactly such a one-line extension, not a second amendment.)
+
+**The warrant is DURABILITY, not secrecy.** This ADR's own justification for the sibling
+repo is that the log had *"no history and no backup"*, leaving the operator unable to tell
+*when* a value went wrong or to *go back*. Secrecy appears in this ADR only as a
+**rejection criterion** applied to the alternatives — it is why the repo is private and
+sibling rather than nested or same-repo; it is never the reason a file is tracked. The
+distinction is not academic: asking *"is this sensitive?"* about `orders.jsonl` yields the
+answer **don't commit it** — and the file is then written, ignored, and lost. A resting
+ladder is at least as revealing as the log it sits beside (ADR-007 bars stop levels from
+leaving the machine, and rung prices are that shape); it is tracked **anyway**, because
+sensitivity governs *where* the history lives, and durability governs *whether* there is
+one.
+
+**This is also why `prices/` stays excluded — not because it is less sensitive.** The
+price cache is re-fetchable from the vendor at any time: it fails the *non-re-derivable*
+half of the test and would fail it if it were the most secret file in the tree. Likewise
+`inbox/`, `ingested/`, `*.tmp` and `*.quarantine` — staging and byproducts, all
+reconstructible. The allowlist polarity is what makes the exclusion structural rather
+than disciplinary; the membership test is what makes each inclusion arguable.
+
+**The floor is guarded by a test asserting BOTH ends**
+(`apps/tui/src/durable-log-guards.test.ts`): that git does **not** ignore each durable
+file in the accumulus checkout, **and** that `TRACKED_FILES` names exactly that list.
+Either end alone is false assurance — an allowlisted file nothing stages is never
+committed, and a staged file the allowlist omits is discarded. The guard is written over
+the **list**, so a sixth member costs one line there too. It runs against the real
+accumulus checkout when present and skips the allowlist half (never the `TRACKED_FILES`
+half) where that private repo is absent.

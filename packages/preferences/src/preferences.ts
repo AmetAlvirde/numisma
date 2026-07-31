@@ -35,10 +35,13 @@ import {
 /**
  * Resolve the preferences sidecar path. With no `dataDir` we resolve under the shared
  * engine `resolveDataDir` (the `NUMISMA_DATA_DIR` override or the absolute, homedir-derived
- * accumulus default) — NEVER a CWD-relative `./data/preferences.jsonl` (R-M3). This is
- * latent today (no runtime caller), but becomes silent split-brain the moment the sidecar
- * is wired into the read path (ADR-004), so it routes through the single resolver now. An
- * explicit `dataDir` is still honored verbatim for callers (e.g. tests) that pass one.
+ * accumulus default) — NEVER a CWD-relative `./data/preferences.jsonl` (R-M3). The read
+ * path is ALREADY WIRED — `apps/web/src/push/push-core.ts` calls
+ * `loadPreferences(resolvePreferencesPath())` live, via `loadReserveFloorAsOf` →
+ * `buildGlanceForAnchor` — so the split-brain hazard this resolver prevents is live, not
+ * hypothetical: a CWD-relative read here would silently serve the phone a Reserve floor
+ * from a different file than the one the fund appends to (ADR-004). An explicit `dataDir`
+ * is still honored verbatim for callers (e.g. tests) that pass one.
  */
 export function resolvePreferencesPath(dataDir = resolveDataDir()): string {
   return join(resolve(dataDir), "preferences.jsonl");
