@@ -170,7 +170,7 @@ export {
 // A NEW EXPORT, NOT A WIDENING: `CompositionReport`, `DashboardSummary` and
 // `CompositionRow` are untouched by this slice.
 export type { CommittedRung } from "./orders/committed.js";
-export { committedRungs, committedByReserve } from "./orders/committed.js";
+export { committedRungs, committedByReserve, isNegativeSlack, SLACK_EPSILON } from "./orders/committed.js";
 export type {
   ReserveCapital,
   UnmatchedReason,

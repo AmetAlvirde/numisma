@@ -140,7 +140,15 @@ function accumulusDataDir(): string | undefined {
 function gitIgnores(dataDir: string, file: string): boolean {
   // `git check-ignore -q` exits 0 when the path IS ignored, 1 when it is not.
   // (`-v` would exit 0 for a NEGATED match too, which would invert this guard.)
-  return spawnSync("git", ["-C", dataDir, "check-ignore", "-q", "--", file]).status === 0;
+  //
+  // `--no-index` is load-bearing, not tidiness. Without it check-ignore consults the
+  // INDEX first and reports a TRACKED path as "not ignored" whatever `.gitignore` says —
+  // so four of the five durable files, already tracked, would pass this end vacuously,
+  // and `orders.jsonl` would join them the moment the first daily fetch commits it. The
+  // guard must interrogate the ALLOWLIST, which is the thing that can regress; being
+  // already-tracked is not evidence the next write survives.
+  return spawnSync("git", ["-C", dataDir, "check-ignore", "-q", "--no-index", "--", file])
+    .status === 0;
 }
 
 describe("durable-file floor — both ends of the allowlist/TRACKED_FILES contract", () => {

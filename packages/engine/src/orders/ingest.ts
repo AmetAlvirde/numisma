@@ -11,7 +11,7 @@
  * second parser and nothing here.
  */
 import type { Currency } from "../contracts.js";
-import { committedByReserve } from "./committed.js";
+import { committedByReserve, isNegativeSlack } from "./committed.js";
 import type { OrderPlacedRecord, OrderSide } from "./records.js";
 import type { RestingOrder } from "./select.js";
 
@@ -149,15 +149,6 @@ export type FundingCoverage =
   | { status: "unknown-reserve"; fundingReserveIds: string[] };
 
 /**
- * Pure IEEE noise floor. NOT a business tolerance: the fund's own ladder sums to a
- * fraction of a cent more than a whole-cent transfer, and that difference is REAL and
- * must stay visible. This absorbs only the ~1e-17 residue of summing decimal products in
- * binary floating point, so `0.1 × 3` against a balance of `0.3` is coverage, not a
- * shortfall.
- */
-const SLACK_EPSILON = 1e-9;
-
-/**
  * `O1` — no order may encumber a reserve that cannot fund it.
  *
  * The invariant is `slack = reserve.amount − committed ≥ 0`, and the direction carries
@@ -199,7 +190,7 @@ export function checkFundingCoverage(
   for (const [fundingReserveId, committed] of committedById) {
     const balance = balanceById.get(fundingReserveId) ?? 0;
     const slack = balance - committed;
-    if (slack < -SLACK_EPSILON) {
+    if (isNegativeSlack(slack)) {
       shortfalls.push({ fundingReserveId, balance, committed, slack });
     }
   }

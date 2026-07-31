@@ -17,6 +17,7 @@ import type {
 } from "./contracts.js";
 import type { ProfitSplit } from "./compose/profit-split.js";
 import type { AvailableCapitalReport } from "./orders/available.js";
+import { isNegativeSlack } from "./orders/committed.js";
 
 export function formatUsd(value: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -366,10 +367,17 @@ export function formatAvailableCapital(report: AvailableCapitalReport): string {
           `= ${padLeft(formatPrice(rung.committed, rung.currency), 16)}  ${rung.observedAt}`,
       );
     }
-    if (reserve.available < 0) {
+    if (isNegativeSlack(reserve.available)) {
       // The impossible state, rendered rather than clamped. Clamping would hide the
       // exact defect the `slack ≥ 0` invariant exists to expose; the REJECT lives at
       // the import boundary, which is the only path that writes.
+      //
+      // The TRIGGER is the guard's own predicate, and only the trigger. A bare
+      // `available < 0` shouted over every input the guard's epsilon exists to ACCEPT —
+      // three rungs of `0.1 × 1` against a balance of `0.3` leaves ~-5.5e-17 of binary
+      // residue, which the import admitted and this line then called an impossible
+      // state. The rendered figure above is UNTOUCHED either way: a genuine sub-cent
+      // residue stays visible, because it is real.
       body.push(
         `    !! available is NEGATIVE — the attribution is wrong; this reserve cannot fund its rungs.`,
       );
