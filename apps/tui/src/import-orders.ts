@@ -19,6 +19,7 @@ import {
   buildOrderPlacedRecords,
   checkFundingCoverage,
   detectChangedClaims,
+  leavesRungUnweighed,
   mergeCollidingClaims,
   parseBitgetOpenOrdersCsv,
   pickRestingOrdersAsOf,
@@ -357,7 +358,13 @@ export async function importBitgetOpenOrders(
 
   const counts =
     `${fresh.length} order(s) appended, ${records.length - fresh.length} already known`;
-  if (parsed.skips.length === 0) {
+  // NOT `parsed.skips.length` (#184). `skips` is heterogeneous, and a `not-resting` row
+  // was read COMPLETELY — the parser's finding about it is that nothing is still claimed.
+  // The gap this line warns about is rungs we could not weigh, so both the discrimination
+  // and the count below run through the engine's predicate rather than the raw total.
+  // `outcome.skips` still carries every skip and stderr still reports every one of them.
+  const unweighed = parsed.skips.filter((entry) => leavesRungUnweighed(entry.problem));
+  if (unweighed.length === 0) {
     io.out(`Imported ${csvPath}: ${counts}.\n`);
     return {
       status: "imported",
@@ -373,7 +380,7 @@ export async function importBitgetOpenOrders(
   // includes, so the figure this import feeds reads HIGH; naming that direction is what
   // makes it a risk rather than a statistic.
   io.out(
-    `INCOMPLETE — ${parsed.skips.length} row(s) of ${csvPath} could not be read, so that ` +
+    `INCOMPLETE — ${unweighed.length} row(s) of ${csvPath} could not be read, so that ` +
       `many rung(s) resting at the venue are NOT counted as committed and available reads ` +
       `HIGH by whatever they encumber. Imported ${csvPath}: ${counts}. Re-export and ` +
       `re-import to pick the missing rung(s) up; the reasons are on the error channel above.\n`,

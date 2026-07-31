@@ -206,6 +206,34 @@ export type BitgetRowProblem =
   | "not-resting"
   | "unknown-quote-currency";
 
+/**
+ * Does this problem leave a rung UNWEIGHED — a row that might still be claiming capital
+ * where we cannot say how much? That is the whole rule, and it lives here beside the
+ * taxonomy it reads rather than at the consumer, so a fifth `BitgetRowProblem` cannot be
+ * added without deciding which side of the alarm it falls on (#184).
+ *
+ * `unknown-status` and `unknown-quote-currency` fail the test on the SAFE side: we do not
+ * know those rows are not resting, so they count. `not-resting` is excluded because it is
+ * the one class where we DO know — the parser reached a positive finding about the row's
+ * encumbrance, and the finding is zero. Nothing is left claimed, so no committed sum is
+ * missing it and no `available` figure reads high because of it. Counting it would fire a
+ * money-direction alarm on the ordinary event of a rung filling between the operator's
+ * export and their import.
+ *
+ * The switch is EXHAUSTIVE with no `default` on purpose: a new member must fail
+ * `pnpm typecheck` rather than silently default into or out of the alarm.
+ */
+export function leavesRungUnweighed(problem: BitgetRowProblem): boolean {
+  switch (problem) {
+    case "malformed":
+    case "unknown-status":
+    case "unknown-quote-currency":
+      return true;
+    case "not-resting":
+      return false;
+  }
+}
+
 /** One row that did not become an order, reported rather than swallowed. */
 export interface BitgetRowSkip {
   /** 1-based line number in the file, so the operator can go look at it. */

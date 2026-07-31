@@ -183,6 +183,7 @@ export type {
 export {
   BITGET_OPEN_ORDERS_HEADER,
   BITGET_RESTING_STATUS,
+  leavesRungUnweighed,
   parseBitgetOpenOrdersCsv,
 } from "./orders/bitget.js";
 // `S7` — committed vs available. The ONE committed formula (`./orders/committed.js`)

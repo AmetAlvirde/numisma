@@ -84,6 +84,15 @@ function partlyFilledRung(
   return BITGET_OPEN_ORDERS_HEADER.map((column) => fields[column] ?? "").join(",");
 }
 
+/**
+ * One synthetic rung the venue shows as FULLY filled — nothing still claimed, so the
+ * parser reports it as `not-resting` rather than admitting it (#173). This is the
+ * ordinary case of a rung filling between the export and the import (#184).
+ */
+function filledRung(price: string, quantity: string, at: string): string {
+  return partlyFilledRung(price, quantity, quantity, at);
+}
+
 function ladder(...rows: string[]): string {
   return [HEADER, ...rows, ""].join("\n");
 }
@@ -549,6 +558,60 @@ describe("a partial export imports, and every surface says it was partial", () =
     const { csvPath, io } = await harness();
     const outcome = await importBitgetOpenOrders({ csvPath, io });
     expect(outcome).toMatchObject({ status: "imported", appended: 2, alreadyKnown: 0 });
+  });
+});
+
+/**
+ * #184 — a `not-resting` skip is a WEIGHED rung, not an unread one.
+ *
+ * `parsed.skips` is heterogeneous: three of the four `BitgetRowProblem` members mean the
+ * row might still be claiming capital and we cannot say how much, while `not-resting`
+ * means the parser reached a POSITIVE finding — the encumbrance is zero. Summing all four
+ * into the INCOMPLETE line fires a money-direction alarm on the ordinary event of a rung
+ * filling between the export and the import, which is how that alarm becomes noise.
+ */
+describe("a rung that filled before the import is not a gap in the read", () => {
+  it("keeps the CLEAN status and line when the only skip is not-resting", async () => {
+    const csv = ladder(
+      rung("1000", "0.1", "2020-01-01 10:00:00"),
+      rung("900", "0.1", "2020-01-01 10:00:01"),
+      filledRung("1100", "0.1", "2020-01-01 10:00:02"),
+    );
+    const { csvPath, io, outputs, errors } = await harness({ csv });
+    const outcome = await importBitgetOpenOrders({ csvPath, io });
+
+    expect(outcome).toMatchObject({ status: "imported", appended: 2, alreadyKnown: 0 });
+    if (outcome.status !== "imported") throw new Error("expected a clean import");
+    expect(outputs.some((message) => message.includes("INCOMPLETE"))).toBe(false);
+    expect(
+      outputs.some((message) => message.startsWith(`Imported ${csvPath}: 2 order(s) appended, 0 already known.`)),
+    ).toBe(true);
+    // The skip is still CARRIED and still REPORTED — only the discrimination changed.
+    expect(outcome.skips).toHaveLength(1);
+    expect(errors.some((message) => message.includes("not a resting order"))).toBe(true);
+  });
+
+  it("counts only the UNWEIGHED skips in the INCOMPLETE line of a mixed export", async () => {
+    const csv = ladder(
+      rung("1000", "0.1", "2020-01-01 10:00:00"),
+      rung("900", "0.1", "2020-01-01 10:00:01"),
+      rung("not-a-price", "0.1", "2020-01-01 10:00:02"),
+      filledRung("1100", "0.1", "2020-01-01 10:00:03"),
+    );
+    const { csvPath, io, outputs, errors } = await harness({ csv });
+    const outcome = await importBitgetOpenOrders({ csvPath, io });
+
+    expect(outcome).toMatchObject({ status: "imported-partial", appended: 2, alreadyKnown: 0 });
+    if (outcome.status !== "imported-partial") throw new Error("expected a partial import");
+    const line = outputs.find((message) => message.includes("could not be read"));
+    expect(line).toBeDefined();
+    // ONE row could not be read — the malformed price. The filled rung was read fully.
+    expect(line).toContain("1 row(s)");
+    expect(line).not.toContain("2 row(s)");
+    // Both skips still ride the outcome and both are still on the error channel.
+    expect(outcome.skips).toHaveLength(2);
+    expect(errors.some((message) => message.includes("price must be a positive decimal"))).toBe(true);
+    expect(errors.some((message) => message.includes("not a resting order"))).toBe(true);
   });
 });
 
