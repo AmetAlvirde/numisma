@@ -100,6 +100,8 @@ interface Harness {
   ordersPath: string;
   asked: string[];
   errors: string[];
+  /** Everything the flow told the OPERATOR on the normal channel — merges included. */
+  outputs: string[];
 }
 
 interface HarnessOptions {
@@ -150,6 +152,7 @@ async function harness(options: HarnessOptions = {}): Promise<Harness> {
 
   const asked: string[] = [];
   const errors: string[] = [];
+  const outputs: string[] = [];
   const script = options.answers ?? ["reserve-a", "n"];
   let answers = [...script];
 
@@ -158,6 +161,7 @@ async function harness(options: HarnessOptions = {}): Promise<Harness> {
     ordersPath,
     asked,
     errors,
+    outputs,
     io: {
       readExport: (path) => readFile(path, "utf8"),
       ordersPath,
@@ -171,7 +175,9 @@ async function harness(options: HarnessOptions = {}): Promise<Harness> {
         }
         return answers.shift() ?? "";
       },
-      out: () => {},
+      out: (message) => {
+        outputs.push(message);
+      },
       err: (message) => {
         errors.push(message);
       },
@@ -249,6 +255,97 @@ describe("importBitgetOpenOrders — deterministic ids (testing decision 5)", ()
     expect(load.status).toBe("loaded");
     if (load.status !== "loaded") return;
     expect(load.records.map((record) => record.currency)).toEqual(["USD", "USD"]);
+  });
+});
+
+describe("one id identifies exactly ONE claim (#174)", () => {
+  /** Two rows the venue rendered identically in every id component: same second, same price. */
+  const COLLIDING_LADDER = ladder(
+    rung("1000", "1", "2020-01-01 10:00:00"),
+    rung("1000", "2", "2020-01-01 10:00:00"),
+  );
+
+  it("SUMS two rows colliding on one id into a single claim, and appends one line", async () => {
+    const { csvPath, io, ordersPath } = await harness({
+      csv: COLLIDING_LADDER,
+      reserves: [{ id: "reserve-a", amount: 5000 }],
+    });
+    const outcome = await importBitgetOpenOrders({ csvPath, io });
+
+    expect(outcome).toMatchObject({ status: "imported", appended: 1, alreadyKnown: 0 });
+    // ONE line, under ONE id, claiming the SUM. Dropping either row would be a guess;
+    // two lines under one id would make the second unreachable to the selector.
+    expect(await idsOnDisk(ordersPath)).toHaveLength(1);
+    expect(await remainingOnDisk(ordersPath)).toEqual([3]);
+  });
+
+  it("REPORTS the merge to the operator, naming both quantities and the total", async () => {
+    const { csvPath, io, outputs } = await harness({
+      csv: COLLIDING_LADDER,
+      reserves: [{ id: "reserve-a", amount: 5000 }],
+    });
+    await importBitgetOpenOrders({ csvPath, io });
+
+    const merge = outputs.find((message) => message.toLowerCase().includes("merged"));
+    expect(merge).toBeDefined();
+    const text = merge ?? "";
+    expect(text).toContain("1000"); // the price
+    expect(text).toContain("2020-01-01T10:00:00"); // the second
+    expect(text).toContain("1"); // the first quantity
+    expect(text).toContain("2"); // the second quantity
+    expect(text).toContain("3"); // the merged total
+    // And how to keep two genuinely separate rungs distinct next time.
+    expect(text).toContain("tick");
+  });
+
+  it("puts the SUMMED claim in front of `O1`, so an over-committed batch is caught", async () => {
+    // The balance covers ONE of the two colliding rows and not both. Deduping by id
+    // instead of summing would hide the second row from the guard entirely.
+    const { csvPath, io, ordersPath } = await harness({
+      csv: COLLIDING_LADDER,
+      reserves: [{ id: "reserve-a", amount: 1500 }],
+    });
+    const outcome = await importBitgetOpenOrders({ csvPath, io });
+
+    expect(outcome).not.toMatchObject({ status: "imported" });
+    expect(outcome).toMatchObject({ status: "rejected", reason: "over-committed" });
+    expect(await readOrDefault(ordersPath, "<<absent>>")).toBe("<<absent>>");
+  });
+
+  it("REFUSES an amended row — same id, different quantity — instead of calling it known", async () => {
+    const first = await harness({ reserves: [{ id: "reserve-a", amount: 5000 }] });
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+    const before = await readFile(first.ordersPath, "utf8");
+
+    // The SAME rung by every id component, re-exported with a different size. There is
+    // no verb for "this claim changed" yet, and a second placement line is ignored by
+    // the selector by construction — so it is refused, loudly, and nothing is written.
+    const amended = ladder(
+      rung("1000", "0.5", "2020-01-01 10:00:00"),
+      rung("900", "0.1", "2020-01-01 10:00:01"),
+    );
+    await writeFile(first.csvPath, amended, "utf8");
+    const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    expect(outcome).toMatchObject({ status: "rejected", reason: "changed-claim" });
+    // NEVER counted as already known: it is a change, not a re-sighting.
+    expect(outcome).not.toMatchObject({ status: "imported" });
+    expect(first.errors.join("\n")).toContain("REFUSED");
+    expect(await readFile(first.ordersPath, "utf8")).toBe(before);
+  });
+
+  it("REFUSES a rung whose observed partial moved, rather than silently keeping the old one", async () => {
+    const partial = ladder(partlyFilledRung("100", "10", "6", "2020-01-01 10:00:00"));
+    const first = await harness({ csv: partial });
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+    const before = await readFile(first.ordersPath, "utf8");
+
+    const filledMore = ladder(partlyFilledRung("100", "10", "8", "2020-01-01 10:00:00"));
+    await writeFile(first.csvPath, filledMore, "utf8");
+    const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    expect(outcome).toMatchObject({ status: "rejected", reason: "changed-claim" });
+    expect(await readFile(first.ordersPath, "utf8")).toBe(before);
   });
 });
 

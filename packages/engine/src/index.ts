@@ -166,6 +166,13 @@ export {
   synthesizeOrderId,
   buildOrderPlacedRecords,
   checkFundingCoverage,
+  mergeCollidingClaims,
+  detectChangedClaims,
+} from "./orders/ingest.js";
+export type {
+  MergedOrderClaim,
+  ChangedClaim,
+  ClaimDifference,
 } from "./orders/ingest.js";
 export type {
   BitgetOpenOrder,

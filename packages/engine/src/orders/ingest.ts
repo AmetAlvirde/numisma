@@ -64,9 +64,37 @@ export interface OrderIdentity {
  * than through `Number(...).toString()` keeps the id exact for sizes the venue quotes
  * well past float's comfortable range, and keeps a rounding change in the runtime from
  * silently re-identifying every resting order in the file.
+ *
+ * A COMMA IS A GROUP SEPARATOR OR IT IS NOTHING (#177). Every comma used to be stripped
+ * before the shape test ran, so `10,50` — a decimal comma, which is how half the world
+ * writes ten and a half — canonicalized to `1050`: a silent 100x error, and one baked
+ * permanently into a synthesized order id and into the committed sum computed from it.
+ * The grouping must be VALID (first group 1-3 digits, every later group exactly 3, no
+ * comma anywhere after the decimal point) or the token is refused, and the row carrying
+ * it is skipped and reported. Guessing which spelling the operator meant is exactly the
+ * guess an append-only file cannot afford.
  */
+const THOUSANDS_GROUPED = /^\d{1,3}(,\d{3})+$/;
+
 export function canonicalDecimal(token: string): string | undefined {
-  const cleaned = token.trim().replace(/[\s,]/g, "").replace(/^\+/, "");
+  const signed = token.trim().replace(/\s/g, "").replace(/^\+/, "");
+  const isNegative = signed.startsWith("-");
+  const unsigned = isNegative ? signed.slice(1) : signed;
+  const [rawWholePart = "", rawFractionPart = "", ...surplus] = unsigned.split(".");
+  if (surplus.length > 0 || rawFractionPart.includes(",")) {
+    return undefined;
+  }
+  let wholePart = rawWholePart;
+  if (wholePart.includes(",")) {
+    if (!THOUSANDS_GROUPED.test(wholePart)) {
+      return undefined;
+    }
+    wholePart = wholePart.replace(/,/g, "");
+  }
+  const cleaned =
+    (isNegative ? "-" : "") +
+    wholePart +
+    (unsigned.includes(".") ? `.${rawFractionPart}` : "");
   if (!/^-?(\d+(\.\d*)?|\.\d+)$/.test(cleaned)) {
     return undefined;
   }
@@ -96,6 +124,154 @@ export function synthesizeOrderId(identity: OrderIdentity): string {
     identity.price,
     identity.observedAt,
   ].join(":");
+}
+
+/**
+ * Two or more rows of ONE batch that the venue rendered under the same synthesized id,
+ * summed into one claim. Reported so the operator sees the arithmetic that was applied.
+ */
+export interface MergedOrderClaim {
+  id: string;
+  price: number;
+  observedAt: string;
+  symbol: string;
+  side: OrderSide;
+  /** Every row's quantity, in the order the export rendered them. */
+  quantities: number[];
+  /** Their sum — what the single surviving claim encumbers. */
+  mergedQuantity: number;
+}
+
+/**
+ * Collapse rows of ONE batch that collide on the synthesized id into one claim each,
+ * SUMMING their sizes (#174).
+ *
+ * The export has no total discriminator: a venue-split order's children share every
+ * parsed field, so identity by content cannot be made total by widening the id (adding
+ * `quantity` would be worse than useless — a claim rests until something explicitly
+ * retires it, so the second sighting of a re-sized rung would become a second claim
+ * resting forever). What IS certain is the arithmetic: two claims at the same price
+ * against the same reserve encumber their SUM. Summing is therefore the only reading
+ * that is not a guess — dropping one row would silently free capital that is committed,
+ * and appending two lines under one id would leave the second unreachable to
+ * `pickRestingOrdersAsOf`, which ignores a repeat placement of a known id by design.
+ *
+ * The merge is RETURNED, never whispered: the caller owes the operator a first-class
+ * line naming both sizes and the total, because the remedy — re-place one rung a tick
+ * apart so the two get distinct prices — is the operator's to apply, not ours.
+ */
+export function mergeCollidingClaims<T extends ObservedOpenOrder>(
+  orders: readonly T[],
+): { orders: T[]; merges: MergedOrderClaim[] } {
+  const byId = new Map<string, { order: T; quantities: number[] }>();
+  for (const order of orders) {
+    const seen = byId.get(order.id);
+    if (seen === undefined) {
+      byId.set(order.id, { order, quantities: [order.quantity] });
+      continue;
+    }
+    seen.quantities.push(order.quantity);
+    seen.order = {
+      ...seen.order,
+      quantity: seen.order.quantity + order.quantity,
+      // The venue's cumulative fill for each child is a fill of the merged claim too, so
+      // the remainder the merged rung rests for stays honest.
+      ...(seen.order.filledQuantity !== undefined || order.filledQuantity !== undefined
+        ? { filledQuantity: (seen.order.filledQuantity ?? 0) + (order.filledQuantity ?? 0) }
+        : {}),
+    };
+  }
+
+  const merges: MergedOrderClaim[] = [];
+  for (const { order, quantities } of byId.values()) {
+    if (quantities.length > 1) {
+      merges.push({
+        id: order.id,
+        price: order.price,
+        observedAt: order.observedAt,
+        symbol: order.symbol,
+        side: order.side,
+        quantities,
+        mergedQuantity: order.quantity,
+      });
+    }
+  }
+
+  return { orders: [...byId.values()].map((entry) => entry.order), merges };
+}
+
+/** One field of a known claim that the venue is now rendering differently. */
+export interface ClaimDifference {
+  field: "quantity" | "observedFilledQuantity";
+  known: number;
+  observed: number;
+}
+
+/** A row that names a claim already on file, but does NOT say the same thing about it. */
+export interface ChangedClaim {
+  id: string;
+  differences: ClaimDifference[];
+}
+
+/**
+ * Rows of this batch that name a claim already on file while DIFFERING from it (#174).
+ *
+ * `alreadyKnown` means byte-identical in the fields that matter — the id components plus
+ * the size and the observed partial. Anything else is a CHANGE to a known claim, and a
+ * change is not a re-sighting: folding it into `alreadyKnown` reported "nothing to do"
+ * about a rung whose size on file is now wrong, which is exactly the silence #174 names.
+ *
+ * KNOWN LIMIT, stated rather than papered over: the sidecar persists neither
+ * `orderType`, `timeInForce` nor `triggerPrice` — `KEY_ORDER.orderPlaced` in `records.ts`
+ * is ten fields and none of them is a descriptor — so a change confined to those cannot be
+ * detected here. There is nothing on file to compare against.
+ *
+ * Accepted for increment two, deliberately: no descriptor moves the encumbrance, which is
+ * `price * quantity`, so the funding guard stays correct across such a change. Closing it
+ * means WIDENING the durable record, and that is not free — every line already on file
+ * carries no descriptors, so every re-imported row would differ from its known claim and an
+ * UNCHANGED batch would refuse on every rung until a migration rewrote an append-only file.
+ * That widening belongs with the observation verb #181 designs, which is the next thing to
+ * decide what a later sighting of a known rung may carry. When these fields are persisted,
+ * compare them here too.
+ */
+export function detectChangedClaims(
+  known: readonly OrderPlacedRecord[],
+  observed: readonly ObservedOpenOrder[],
+): ChangedClaim[] {
+  const placedById = new Map<string, OrderPlacedRecord>();
+  for (const record of known) {
+    // FIRST placement wins, matching `pickRestingOrdersAsOf`: a repeat placement line is
+    // ignored there, so it must not be what a change is measured against here.
+    if (!placedById.has(record.id)) {
+      placedById.set(record.id, record);
+    }
+  }
+
+  const changed: ChangedClaim[] = [];
+  for (const order of observed) {
+    const placed = placedById.get(order.id);
+    if (placed === undefined) {
+      continue;
+    }
+    const differences: ClaimDifference[] = [];
+    if (placed.quantity !== order.quantity) {
+      differences.push({ field: "quantity", known: placed.quantity, observed: order.quantity });
+    }
+    const knownFilled = placed.observedFilledQuantity ?? 0;
+    const observedFilled = order.filledQuantity ?? 0;
+    if (knownFilled !== observedFilled) {
+      differences.push({
+        field: "observedFilledQuantity",
+        known: knownFilled,
+        observed: observedFilled,
+      });
+    }
+    if (differences.length > 0) {
+      changed.push({ id: order.id, differences });
+    }
+  }
+  return changed;
 }
 
 /**

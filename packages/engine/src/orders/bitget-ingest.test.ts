@@ -16,6 +16,7 @@ import {
 } from "./bitget.js";
 import {
   buildOrderPlacedRecords,
+  canonicalDecimal,
   checkFundingCoverage,
   synthesizeOrderId,
 } from "./ingest.js";
@@ -257,6 +258,33 @@ describe("the null sentinel and the authoritative column (testing decision 4)", 
     // The drifting column is not carried at all — there is nothing to reconcile against.
     expect(order).not.toHaveProperty("orderValue");
     expect(JSON.stringify(order)).not.toContain("99.96");
+  });
+});
+
+describe("`canonicalDecimal` refuses ambiguous comma placement (#177)", () => {
+  it("refuses a token whose comma is not in a thousands position", () => {
+    // A decimal comma, not a group separator. Stripping it read `10,50` as `1050` — a
+    // silent 100x error, baked into a durable id and into the committed sum.
+    expect(canonicalDecimal("10,50")).toBeUndefined();
+    expect(canonicalDecimal("1,00")).toBeUndefined();
+    expect(canonicalDecimal("1000,5")).toBeUndefined();
+    // No comma may follow the decimal point either.
+    expect(canonicalDecimal("1.000,50")).toBeUndefined();
+  });
+
+  it("still accepts valid thousands grouping and the plain spelling", () => {
+    expect(canonicalDecimal("1,000.50")).toBe("1000.5");
+    expect(canonicalDecimal("10.50")).toBe("10.5");
+    expect(canonicalDecimal("1,234,567")).toBe("1234567");
+    expect(canonicalDecimal("-1,000")).toBe("-1000");
+  });
+
+  it("skips the row whose price carries an ambiguous comma rather than reading it 100x", () => {
+    const parsed = parseBitgetOpenOrdersCsv(csv(row({ price: '"10,50"' })));
+    expect(parsed.status).toBe("ok");
+    if (parsed.status !== "ok") return;
+    expect(parsed.orders).toHaveLength(0);
+    expect(parsed.skips.map((skip) => skip.problem)).toEqual(["malformed"]);
   });
 });
 
