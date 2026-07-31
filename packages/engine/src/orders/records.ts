@@ -123,6 +123,34 @@ const CURRENCIES: Record<Currency, true> = { USD: true, MXN: true };
 const OBSERVED_AT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/;
 
 /**
+ * THE stamp rule, as a predicate, so no producer has to restate the regex.
+ *
+ * `parseOrderRecord` below is the last line of defence and would reject a bad stamp on
+ * the way back IN — but by then the line is already on disk in an append-only file. A
+ * producer that wants to refuse BEFORE it writes (`orders:cancel` takes its stamp from
+ * argv) asks here, and asks the same question the reader will.
+ */
+export function isObservedAtStamp(value: string): boolean {
+  return OBSERVED_AT.test(value);
+}
+
+/**
+ * Format an instant into THE stamp shape: `YYYY-MM-DDTHH:MM:SS`, LOCAL, no timezone.
+ *
+ * Local rather than UTC on purpose: every other stamp in this file came from a venue
+ * export rendered in the operator's own wall clock, and mixing a UTC "now" into a file
+ * whose selector compares stamps as STRINGS would order the book wrong by exactly the
+ * UTC offset. Pure — the caller supplies the instant, so this stays clock-free.
+ */
+export function formatObservedAt(instant: Date): string {
+  const pad = (value: number, width = 2): string => String(value).padStart(width, "0");
+  return (
+    `${pad(instant.getFullYear(), 4)}-${pad(instant.getMonth() + 1)}-${pad(instant.getDate())}` +
+    `T${pad(instant.getHours())}:${pad(instant.getMinutes())}:${pad(instant.getSeconds())}`
+  );
+}
+
+/**
  * CANONICAL key order, one per record kind. Serialization goes through this rather than
  * through the caller's object so a round-trip (write → load → re-serialize) is
  * BYTE-EQUAL by construction, not by the caller's luck in field ordering.
