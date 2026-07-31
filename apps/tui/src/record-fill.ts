@@ -56,6 +56,7 @@ import {
   committedRungs,
   crossReferenceEvent,
   deriveFundingTier,
+  isObservedAtStamp,
   parseEvent,
   pickRestingOrdersAsOf,
   proposeFillVerdicts,
@@ -128,8 +129,6 @@ export type RecordFillOutcome =
   /** The operator declined at a confirmation gate. Nothing was written, by design. */
   | { status: "abandoned"; message: string }
   | { status: "rejected"; reason: RecordFillRejection; message: string };
-
-const OBSERVED_AT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/;
 
 function reject(
   io: RecordFillIo,
@@ -304,7 +303,7 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
   }
 
   const observedAt = (await io.ask("Fill timestamp (YYYY-MM-DDTHH:MM:SS): ")).trim();
-  if (!OBSERVED_AT.test(observedAt)) {
+  if (!isObservedAtStamp(observedAt)) {
     return reject(io, "bad-timestamp", `'${observedAt}' is not a YYYY-MM-DDTHH:MM:SS stamp`);
   }
   if (observedAt < filled.observedAt) {

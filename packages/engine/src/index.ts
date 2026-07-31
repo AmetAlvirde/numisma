@@ -133,7 +133,12 @@ export type {
   OrderRecordProblem,
   OrderRecordParse,
 } from "./orders/records.js";
-export { serializeOrderRecord, parseOrderRecord } from "./orders/records.js";
+export {
+  serializeOrderRecord,
+  parseOrderRecord,
+  isObservedAtStamp,
+  formatObservedAt,
+} from "./orders/records.js";
 export type { RestingOrder } from "./orders/select.js";
 export { pickRestingOrdersAsOf } from "./orders/select.js";
 // Ingest: the PURE Bitget open-orders parse and the venue-neutral join to the one
