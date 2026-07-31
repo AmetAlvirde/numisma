@@ -10,7 +10,23 @@
  * be worse than today's honest silence: today the fund is quietly wrong about free cash
  * and everyone knows the number is unexamined, whereas two disagreeing figures would
  * each look examined. So there is exactly one place the arithmetic happens, and
- * `available.test.ts` asserts the two callers cannot part company.
+ * `available.test.ts` asserts the two callers cannot part company ABOUT THE ARITHMETIC.
+ *
+ * THIS FILE DOES NOT OWN THE ARGUMENTS, AND SAYING SO IS THE CORRECTION. An earlier
+ * version of this docstring claimed the two callers simply "cannot part company". That
+ * was false, and #172 is what it cost: the two shared this formula and were handed
+ * DIFFERENT reserve sets — the guard `data.reserves` straight off the fold, the report
+ * only the reserves `buildCanonicalState` admits — and the guard's reserve type carried
+ * no currency at all. Same formula, divergent arguments, a rung fundable at import and
+ * unplaceable in the report.
+ *
+ * WHICH SURFACE OWNS THE DERIVATION: `./attribution.js`, and neither caller. It answers
+ * both argument questions — which reserves may fund anything (delegated to
+ * `buildCanonicalState`, never restated), and which rung is placed against which — and
+ * the guard and the report each call it rather than deriving anything themselves. The
+ * pairing is the invariant: this module is the one FORMULA, `./attribution.js` is the one
+ * ARGUMENT SET, and `funding-parity.test.ts` drives BOTH surfaces from a single fund
+ * fixture so neither claim can rot into prose again.
  *
  * PURE (ADR-001): no IO, no clock. The input is what `pickRestingOrdersAsOf` returned.
  */
@@ -61,6 +77,13 @@ export interface CommittedRung {
   symbol: string;
   side: OrderSide;
   price: number;
+  /**
+   * The size the rung was PLACED for, before anything filled against it. Carried beside
+   * the remainder because a CUMULATIVE venue reading is compared against this and never
+   * against the remainder — the two are on different bases, and conflating them is what
+   * #176 was.
+   */
+  quantity: number;
   /** What is STILL claimed: `quantity − filled_quantity`, per `./select.ts`. */
   remainingQuantity: number;
   fundingReserveId: string;
@@ -71,12 +94,22 @@ export interface CommittedRung {
 /**
  * The encumbrance of ONE resting claim: `price × (quantity − filled_quantity)`.
  *
- * UNVERIFIED, and named as such (spec Open Questions): the remainder rule is believed
- * right but nothing has partially filled yet, so it has never been checked against a
- * real venue's behaviour. The first real partial is the verification event. It is
- * written this way rather than `price × quantity` because the alternative is knowably
- * wrong in the direction that matters — it would over-state committed and under-state
- * available, i.e. hide capital the fund actually has.
+ * THE REMAINDER RULE IS NOW WHAT ACTUALLY RUNS ON EVERY PATH, AND SAYING SO IS THE
+ * CORRECTION (#173). An earlier version of this docstring named the remainder rule as the
+ * correction to `price × quantity` while the import path computed `price × quantity` — the
+ * venue's `filled_quantity` was parsed, validated and then dropped, so no imported rung
+ * could satisfy `remainingQuantity`'s own definition. The file named its own defect and
+ * did not have it. It has it now: the partial rides on the placement line
+ * (`OrderPlacedRecord.observedFilledQuantity`) and `pickRestingOrdersAsOf` nets it out
+ * before anything reaches here.
+ *
+ * STILL UNVERIFIED AGAINST THE REAL VENUE, and that part stands (spec Open Questions):
+ * nothing has partially filled yet, so the rule has never been checked against a real
+ * venue's behaviour — including whether its own partial spelling is one this build reads.
+ * The first real partial is the verification event. The rule is written this way rather
+ * than `price × quantity` because the alternative is knowably wrong in the direction that
+ * matters — it would over-state committed and under-state available, i.e. hide capital the
+ * fund actually has.
  */
 function encumbranceOf(order: RestingOrder): number {
   return order.placed.price * order.remainingQuantity;
@@ -102,6 +135,7 @@ export function committedRungs(resting: readonly RestingOrder[]): CommittedRung[
       symbol: order.placed.symbol,
       side: order.placed.side,
       price: order.placed.price,
+      quantity: order.placed.quantity,
       remainingQuantity: order.remainingQuantity,
       fundingReserveId: order.placed.fundingReserveId,
       committed: encumbranceOf(order),

@@ -148,15 +148,31 @@ export type {
   ObservedOpenOrder,
   OrderIdentity,
   OrderAttribution,
-  ReserveBalance,
   FundingShortfall,
   FundingCoverage,
 } from "./orders/ingest.js";
+// The ONE reserve admission policy and rung-placement rule, shared by the `O1` guard and
+// the available-capital report. `FundableReserve` replaces the old `ReserveBalance`: it
+// carries `currency`, and only `fundableReserves(data)` can produce one (#172).
+export type {
+  FundableReserve,
+  RungAttribution,
+  UnmatchedReason,
+  UnmatchedRung,
+} from "./orders/attribution.js";
+export { fundableReserves, attributeRungs } from "./orders/attribution.js";
 export {
   canonicalDecimal,
   synthesizeOrderId,
   buildOrderPlacedRecords,
   checkFundingCoverage,
+  mergeCollidingClaims,
+  detectChangedClaims,
+} from "./orders/ingest.js";
+export type {
+  MergedOrderClaim,
+  ChangedClaim,
+  ClaimDifference,
 } from "./orders/ingest.js";
 export type {
   BitgetOpenOrder,
@@ -167,6 +183,7 @@ export type {
 export {
   BITGET_OPEN_ORDERS_HEADER,
   BITGET_RESTING_STATUS,
+  leavesRungUnweighed,
   parseBitgetOpenOrdersCsv,
 } from "./orders/bitget.js";
 // `S7` — committed vs available. The ONE committed formula (`./orders/committed.js`)
@@ -176,12 +193,9 @@ export {
 // `CompositionRow` are untouched by this slice.
 export type { CommittedRung } from "./orders/committed.js";
 export { committedRungs, committedByReserve, isNegativeSlack, SLACK_EPSILON } from "./orders/committed.js";
-export type {
-  ReserveCapital,
-  UnmatchedReason,
-  UnmatchedRung,
-  AvailableCapitalReport,
-} from "./orders/available.js";
+// `UnmatchedReason`/`UnmatchedRung` are exported once, above, from the module that owns
+// them (`./orders/attribution.js`); `available.ts` re-exports them for its own readers.
+export type { ReserveCapital, AvailableCapitalReport } from "./orders/available.js";
 export { composeAvailableCapital } from "./orders/available.js";
 // `S8` — the fill act. Monotonicity PROPOSES a verdict (stamped `derived`, carrying its
 // evidence) and refuses on an impossible one; it never writes, and being pure it cannot.
@@ -194,8 +208,9 @@ export type {
   ProposedVerdict,
   MonotonicityContradiction,
   MonotonicityProposal,
+  ScopedBook,
 } from "./orders/monotonicity.js";
-export { proposeFillVerdicts } from "./orders/monotonicity.js";
+export { proposeFillVerdicts, scopeBookForFill } from "./orders/monotonicity.js";
 export type {
   TornFillAct,
   LadderPosition,

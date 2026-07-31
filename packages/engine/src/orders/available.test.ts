@@ -262,26 +262,28 @@ describe("`T4`'s invariant, in its corrected form — `slack = value − committ
 describe("`slack < 0` REJECTS — and the report cannot disagree with the guard that rejects", () => {
   it("the import-boundary guard rejects a reserve that cannot fund its ladder (`O1`)", () => {
     const resting = pickRestingOrdersAsOf(ladder());
-    const coverage = checkFundingCoverage(resting, [
-      { id: CAPITAL_RESERVE, amount: LADDER_VALUE - RUNG_VALUE },
-    ]);
+    const coverage = checkFundingCoverage(resting, syntheticFund(LADDER_VALUE - RUNG_VALUE));
     expect(coverage.status).toBe("over-committed");
     if (coverage.status !== "over-committed") throw new Error("unreachable");
     expect(coverage.shortfalls[0]?.slack).toBeLessThan(0);
   });
 
   it("ONE committed formula: the guard's committed and the report's committed agree", () => {
-    // This is the anti-drift test the whole slice turns on. A rendered `available` that
-    // disagreed with the guard which ACCEPTED the orders would be worse than today's
-    // honest silence, so both sides are computed from `committedByReserve` and this
-    // asserts they cannot part company — including in the over-committed case, where a
-    // second formula would be most likely to differ.
+    // This is the anti-drift test for the FORMULA. A rendered `available` that disagreed
+    // with the guard which ACCEPTED the orders would be worse than today's honest
+    // silence, so both sides are computed from the shared committed formula and this
+    // asserts they cannot part company about the arithmetic — including in the
+    // over-committed case, where a second formula would be most likely to differ.
+    //
+    // It is NOT the anti-drift test for the ARGUMENTS, and it never was: it used to
+    // hand-build the guard's balance array to agree with the fixture fund, which is
+    // exactly how #172 stayed invisible. Both sides now take the SAME fund value, and
+    // `funding-parity.test.ts` covers the argument divergences this file cannot see.
     const shortBalance = LADDER_VALUE - RUNG_VALUE;
+    const fund = syntheticFund(shortBalance);
     const resting = pickRestingOrdersAsOf(ladder());
-    const coverage = checkFundingCoverage(resting, [
-      { id: CAPITAL_RESERVE, amount: shortBalance },
-    ]);
-    const { capital } = capitalOf(ladder(), syntheticFund(shortBalance));
+    const coverage = checkFundingCoverage(resting, fund);
+    const { capital } = capitalOf(ladder(), fund);
 
     if (coverage.status !== "over-committed") throw new Error("fixture must over-commit");
     expect(coverage.shortfalls[0]?.committed).toBe(capital.committed);
@@ -310,7 +312,7 @@ describe("`slack < 0` REJECTS — and the report cannot disagree with the guard 
     expect(Math.abs(capital.available)).toBeLessThan(SLACK_EPSILON);
 
     // The guard ACCEPTS it …
-    expect(checkFundingCoverage(resting, [{ id: CAPITAL_RESERVE, amount: balance }]).status).toBe("ok");
+    expect(checkFundingCoverage(resting, syntheticFund(balance)).status).toBe("ok");
     // … so the report must not call the same book an impossible state.
     const rendered = formatAvailableCapital(
       composeAvailableCapital(syntheticFund(balance), resting),

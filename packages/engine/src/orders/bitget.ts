@@ -52,12 +52,35 @@ export const BITGET_OPEN_ORDERS_HEADER = [
 ] as const;
 
 /**
- * The one status value ever observed in this export. OPEN AT THE WIRE, CLOSED AT THE
- * READER: a row carrying any other status is skipped and reported rather than assumed to
- * be resting, because every other member of the vocabulary would be a guess — and
- * guessing here means a claim on capital that the venue never confirmed.
+ * The status value observed on an UNTOUCHED resting row. OPEN AT THE WIRE, CLOSED AT THE
+ * READER: a word outside the vocabulary below is still skipped and reported rather than
+ * assumed to be resting, because an unknown word would be a guess — and guessing here
+ * means a claim on capital the venue never confirmed.
+ *
+ * IT IS NO LONGER THE ADMISSION GATE (#173). It used to be, and the defect ran both ways:
+ * a row printed `unfilled` was admitted with its partial dropped (committed OVERSTATED),
+ * while a row printed as partially filled was skipped whole — the rung vanished from the
+ * book and the capital it encumbers was reported FREE, which is the direction that costs
+ * money. The REMAINDER decides now; the word only has to be one this reader knows.
  */
 export const BITGET_RESTING_STATUS = "unfilled";
+
+/**
+ * The spellings that mean PARTIALLY FILLED. Separators and case are normalized away, so
+ * `Partially Filled`, `partially_filled` and `PartiallyFilled` are one word.
+ *
+ * THE SPELLING IS UNVERIFIED and named as such: no real export has yet shown a partial, so
+ * this list is what a rendered table plausibly prints. It costs little if it is wrong — an
+ * unrecognized word still lands in `unknown-status` where the operator can see it, which
+ * is the same place it landed before. What is NOT a guess is the rule underneath: a row
+ * with a remainder open is resting, and `filled_quantity` is what says so.
+ */
+export const BITGET_PARTIAL_STATUSES = ["partiallyfilled", "partialfilled", "partial"] as const;
+
+/** Case- and separator-insensitive, because a rendered cell is styled for a human. */
+function normalizeStatus(value: string): string {
+  return value.trim().toLowerCase().replace(/[\s_\-/]/g, "");
+}
 
 /** The venue's identifier, and the first component of every id synthesized from it. */
 const VENUE = "bitget";
@@ -165,12 +188,51 @@ export interface BitgetOpenOrder extends ObservedOpenOrder {
   orderType: string;
   /** `null` when the venue rendered the `-- / --` sentinel — never that string. */
   triggerPrice: number | null;
-  /** May be `0`. The honest partial-fill test is this, never a status word. */
+  /**
+   * The venue's CUMULATIVE filled quantity for this row; may be `0`. This — not a status
+   * word — is what decides whether the row still claims anything: a row is admitted when
+   * `quantity − filledQuantity > 0` and skipped as `not-resting` when it is not. It is
+   * carried onto the placement record's `observedFilledQuantity` (`./ingest.js`), so the
+   * rung rests for its REMAINDER rather than for its full size (#173).
+   */
   filledQuantity: number;
   totalQuantity: number;
 }
 
-export type BitgetRowProblem = "malformed" | "unknown-status" | "unknown-quote-currency";
+export type BitgetRowProblem =
+  | "malformed"
+  | "unknown-status"
+  /** The venue shows nothing still claimed — correctly out of the resting book (#173). */
+  | "not-resting"
+  | "unknown-quote-currency";
+
+/**
+ * Does this problem leave a rung UNWEIGHED — a row that might still be claiming capital
+ * where we cannot say how much? That is the whole rule, and it lives here beside the
+ * taxonomy it reads rather than at the consumer, so a fifth `BitgetRowProblem` cannot be
+ * added without deciding which side of the alarm it falls on (#184).
+ *
+ * `unknown-status` and `unknown-quote-currency` fail the test on the SAFE side: we do not
+ * know those rows are not resting, so they count. `not-resting` is excluded because it is
+ * the one class where we DO know — the parser reached a positive finding about the row's
+ * encumbrance, and the finding is zero. Nothing is left claimed, so no committed sum is
+ * missing it and no `available` figure reads high because of it. Counting it would fire a
+ * money-direction alarm on the ordinary event of a rung filling between the operator's
+ * export and their import.
+ *
+ * The switch is EXHAUSTIVE with no `default` on purpose: a new member must fail
+ * `pnpm typecheck` rather than silently default into or out of the alarm.
+ */
+export function leavesRungUnweighed(problem: BitgetRowProblem): boolean {
+  switch (problem) {
+    case "malformed":
+    case "unknown-status":
+    case "unknown-quote-currency":
+      return true;
+    case "not-resting":
+      return false;
+  }
+}
 
 /** One row that did not become an order, reported rather than swallowed. */
 export interface BitgetRowSkip {
@@ -235,13 +297,21 @@ export function parseBitgetOpenOrdersCsv(csv: string): BitgetOpenOrdersParse {
       continue;
     }
 
-    if (column(fields, "status").trim().toLowerCase() !== BITGET_RESTING_STATUS) {
+    // VOCABULARY CHECK, NOT AN ADMISSION GATE. A word this reader does not know is still
+    // refused; a word it knows only gets the row as far as the remainder test below.
+    const status = normalizeStatus(column(fields, "status"));
+    const known =
+      status === BITGET_RESTING_STATUS ||
+      (BITGET_PARTIAL_STATUSES as readonly string[]).includes(status);
+    if (!known) {
       skips.push(
         skip(
           lineNumber,
           "unknown-status",
           `status ${JSON.stringify(column(fields, "status").trim())} is outside the observed ` +
-            `vocabulary; only ${JSON.stringify(BITGET_RESTING_STATUS)} is known to mean resting`,
+            `vocabulary; ${JSON.stringify(BITGET_RESTING_STATUS)} and ` +
+            `[${BITGET_PARTIAL_STATUSES.join(", ")}] are the words known to mean a row that ` +
+            `may still be resting`,
         ),
       );
       continue;
@@ -289,6 +359,22 @@ export function parseBitgetOpenOrdersCsv(csv: string): BitgetOpenOrdersParse {
     const filledQuantity = canonicalDecimal(column(fields, "filled_quantity"));
     if (filledQuantity === undefined || Number(filledQuantity) < 0) {
       skips.push(skip(lineNumber, "malformed", "filled_quantity must be a non-negative decimal"));
+      continue;
+    }
+
+    // THE ADMISSION GATE (#173). A row still claims capital exactly when something is left
+    // unfilled, whichever of the known words the venue printed. Nothing left is not a
+    // claim: it is correctly out of the resting book, and reported so it is not silent.
+    const remainder = Number(quantity) - Number(filledQuantity);
+    if (remainder <= 0) {
+      skips.push(
+        skip(
+          lineNumber,
+          "not-resting",
+          `the venue shows ${filledQuantity} of ${quantity} filled, so nothing is still ` +
+            `claimed; this row is not a resting order`,
+        ),
+      );
       continue;
     }
 

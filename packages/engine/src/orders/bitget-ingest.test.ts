@@ -16,12 +16,46 @@ import {
 } from "./bitget.js";
 import {
   buildOrderPlacedRecords,
+  canonicalDecimal,
   checkFundingCoverage,
   synthesizeOrderId,
 } from "./ingest.js";
+import { committedRungs } from "./committed.js";
+import { parseOrderRecord, serializeOrderRecord } from "./records.js";
 import { pickRestingOrdersAsOf } from "./select.js";
+import { parseFixture } from "../fund-composition.fixtures.js";
+import type { FundReviewData } from "../contracts.js";
 
 const HEADER = BITGET_OPEN_ORDERS_HEADER.join(",");
+
+/**
+ * A fund carrying ONE live USD reserve with the given balance.
+ *
+ * The guard takes the FUND, not a balance array, so its reserve set is derived by the
+ * same admission policy the rendered report uses and a test cannot hand it a reserve the
+ * report would reject (#172). Balances here remain invented round numbers (`O7`).
+ */
+function fundWith(amount: number, reserveId = "reserve-a"): FundReviewData {
+  return parseFixture({
+    fund: { id: "synthetic-fund", name: "Synthetic Fund", baseCurrency: "USD" },
+    review: { asOf: "2026-01-31", usdMxn: 20 },
+    portfolios: [{ id: "core", name: "Core" }],
+    accounts: [{ id: "venue-usd", name: "Synthetic Venue", platform: "BITGET", currency: "USD" }],
+    instruments: [{ id: "test-usd", name: "Test Asset", symbol: "XYZ", currency: "USD" }],
+    reserves: [
+      {
+        id: reserveId,
+        portfolioId: "core",
+        tempo: "Capital",
+        executionMode: "live",
+        accountId: "venue-usd",
+        currency: "USD",
+        amount,
+      },
+    ],
+    positions: [],
+  });
+}
 
 /**
  * One synthetic rendered row. Defaults are deliberately obvious fakes: the pair is
@@ -100,12 +134,106 @@ describe("parseBitgetOpenOrdersCsv — the 14-column rendered table", () => {
     expect(parseBitgetOpenOrdersCsv("").status).toBe("unrecognized-header");
   });
 
-  it("is closed at the reader on status — one observed value, everything else skipped", () => {
-    const parsed = parseBitgetOpenOrdersCsv(csv(row({ status: "PartiallyFilled" })));
+  it("is closed at the reader on status — a word outside the vocabulary is skipped", () => {
+    const parsed = parseBitgetOpenOrdersCsv(csv(row({ status: "Expired" })));
     expect(parsed.status).toBe("ok");
     if (parsed.status !== "ok") return;
     expect(parsed.orders).toHaveLength(0);
     expect(parsed.skips.map((skip) => skip.problem)).toEqual(["unknown-status"]);
+  });
+});
+
+// #173. The status word used to be the ADMISSION GATE, and the defect ran both ways: a
+// row the venue printed as `unfilled` was admitted with its partial silently dropped
+// (committed OVERSTATED), while a row printed as partially filled was skipped whole
+// (committed UNDERSTATED and its capital reported FREE — the direction that costs money).
+// The REMAINDER is the gate now; the status word is only a vocabulary check.
+describe("#173 — the venue's filled_quantity is carried, and the REMAINDER decides resting", () => {
+  it("admits a partially-filled row with its remainder still open", () => {
+    const parsed = parseBitgetOpenOrdersCsv(
+      csv(row({ status: "PartiallyFilled", quantity: "10", filled_quantity: "6" })),
+    );
+    expect(parsed.status).toBe("ok");
+    if (parsed.status !== "ok") return;
+    // Not an `unknown-status` skip any more, and not a skip at all.
+    expect(parsed.skips).toEqual([]);
+    expect(parsed.orders).toHaveLength(1);
+    expect(parsed.orders[0]?.quantity).toBe(10);
+    expect(parsed.orders[0]?.filledQuantity).toBe(6);
+  });
+
+  it("leaves a row with NO remainder out — it is not resting", () => {
+    const parsed = parseBitgetOpenOrdersCsv(
+      csv(row({ status: "PartiallyFilled", quantity: "10", filled_quantity: "10" })),
+    );
+    expect(parsed.status).toBe("ok");
+    if (parsed.status !== "ok") return;
+    expect(parsed.orders).toHaveLength(0);
+    expect(parsed.skips.map((skip) => skip.problem)).toEqual(["not-resting"]);
+  });
+
+  it("carries the partial through to `remainingQuantity` = quantity − filled_quantity", () => {
+    const records = buildOrderPlacedRecords(
+      okOrders(csv(row({ price: "100", quantity: "10", filled_quantity: "6" }))),
+      { fundingReserveId: "reserve-a" },
+    );
+    const resting = pickRestingOrdersAsOf(records);
+    expect(resting).toHaveLength(1);
+    expect(resting[0]?.remainingQuantity).toBe(4);
+  });
+
+  it("encumbers `price × remainder`, asserted through the ONE committed formula", () => {
+    // 10 units at 100 with 6 filled truly encumbers 400. Dropping the partial read 1,000.
+    const rungs = committedRungs(
+      pickRestingOrdersAsOf(
+        buildOrderPlacedRecords(
+          okOrders(csv(row({ price: "100", quantity: "10", filled_quantity: "6" }))),
+          { fundingReserveId: "reserve-a" },
+        ),
+      ),
+    );
+    expect(rungs).toHaveLength(1);
+    expect(rungs[0]?.committed).toBe(400);
+    // The ORIGINAL size is still carried beside the remainder — it is what the cumulative
+    // venue reading is compared against (#176).
+    expect(rungs[0]?.quantity).toBe(10);
+    expect(rungs[0]?.remainingQuantity).toBe(4);
+  });
+
+  it("stays IDEMPOTENT on a re-import: the partial is counted once, not twice", () => {
+    const text = csv(row({ price: "100", quantity: "10", filled_quantity: "6" }));
+    const first = buildOrderPlacedRecords(okOrders(text), { fundingReserveId: "reserve-a" });
+    const second = buildOrderPlacedRecords(okOrders(text), { fundingReserveId: "reserve-a" });
+    expect(second).toEqual(first);
+    // The partial rides on the PLACEMENT line, which the selector dedupes by id — there is
+    // no second `orderFilled` line for a replay to subtract twice.
+    const resting = pickRestingOrdersAsOf([...first, ...second]);
+    expect(resting).toHaveLength(1);
+    expect(resting[0]?.remainingQuantity).toBe(4);
+    expect([...first, ...second].filter((record) => record.kind !== "orderPlaced")).toEqual([]);
+  });
+
+  it("round-trips the partial through the record contract byte-for-byte", () => {
+    const [record] = buildOrderPlacedRecords(
+      okOrders(csv(row({ price: "100", quantity: "10", filled_quantity: "6" }))),
+      { fundingReserveId: "reserve-a" },
+    );
+    if (!record) throw new Error("expected one record");
+    const line = serializeOrderRecord(record);
+    const parsed = parseOrderRecord(JSON.parse(line));
+    expect(parsed.status).toBe("ok");
+    if (parsed.status !== "ok") return;
+    expect(serializeOrderRecord(parsed.record)).toBe(line);
+    expect(pickRestingOrdersAsOf([parsed.record])[0]?.remainingQuantity).toBe(4);
+  });
+
+  it("writes NO extra key when there is nothing filled, so existing lines are unchanged", () => {
+    const [record] = buildOrderPlacedRecords(okOrders(csv(row({ filled_quantity: "0" }))), {
+      fundingReserveId: "reserve-a",
+    });
+    if (!record) throw new Error("expected one record");
+    expect(record).not.toHaveProperty("observedFilledQuantity");
+    expect(serializeOrderRecord(record)).not.toContain("observedFilledQuantity");
   });
 });
 
@@ -130,6 +258,33 @@ describe("the null sentinel and the authoritative column (testing decision 4)", 
     // The drifting column is not carried at all — there is nothing to reconcile against.
     expect(order).not.toHaveProperty("orderValue");
     expect(JSON.stringify(order)).not.toContain("99.96");
+  });
+});
+
+describe("`canonicalDecimal` refuses ambiguous comma placement (#177)", () => {
+  it("refuses a token whose comma is not in a thousands position", () => {
+    // A decimal comma, not a group separator. Stripping it read `10,50` as `1050` — a
+    // silent 100x error, baked into a durable id and into the committed sum.
+    expect(canonicalDecimal("10,50")).toBeUndefined();
+    expect(canonicalDecimal("1,00")).toBeUndefined();
+    expect(canonicalDecimal("1000,5")).toBeUndefined();
+    // No comma may follow the decimal point either.
+    expect(canonicalDecimal("1.000,50")).toBeUndefined();
+  });
+
+  it("still accepts valid thousands grouping and the plain spelling", () => {
+    expect(canonicalDecimal("1,000.50")).toBe("1000.5");
+    expect(canonicalDecimal("10.50")).toBe("10.5");
+    expect(canonicalDecimal("1,234,567")).toBe("1234567");
+    expect(canonicalDecimal("-1,000")).toBe("-1000");
+  });
+
+  it("skips the row whose price carries an ambiguous comma rather than reading it 100x", () => {
+    const parsed = parseBitgetOpenOrdersCsv(csv(row({ price: '"10,50"' })));
+    expect(parsed.status).toBe("ok");
+    if (parsed.status !== "ok") return;
+    expect(parsed.orders).toHaveLength(0);
+    expect(parsed.skips.map((skip) => skip.problem)).toEqual(["malformed"]);
   });
 });
 
@@ -210,12 +365,12 @@ describe("checkFundingCoverage — `O1`, and slack >= 0", () => {
   it("accepts a batch the declared reserve can fund", () => {
     // 0.1 @ 1000 + 0.1 @ 900 = 190 committed against a 1000 balance.
     const resting = restingFrom(csv(row({ price: "1000" }), row({ price: "900" })), "reserve-a");
-    expect(checkFundingCoverage(resting, [{ id: "reserve-a", amount: 1000 }]).status).toBe("ok");
+    expect(checkFundingCoverage(resting, fundWith(1000)).status).toBe("ok");
   });
 
   it("REJECTS a batch whose committed sum exceeds the declared reserve", () => {
     const resting = restingFrom(csv(row({ price: "1000", quantity: "1" })), "reserve-a");
-    const coverage = checkFundingCoverage(resting, [{ id: "reserve-a", amount: 100 }]);
+    const coverage = checkFundingCoverage(resting, fundWith(100));
     expect(coverage.status).toBe("over-committed");
     if (coverage.status !== "over-committed") return;
     expect(coverage.shortfalls).toHaveLength(1);
@@ -226,12 +381,12 @@ describe("checkFundingCoverage — `O1`, and slack >= 0", () => {
 
   it("holds slack >= 0 at exact equality rather than tripping on IEEE noise", () => {
     const resting = restingFrom(csv(row({ price: "0.1", quantity: "3" })), "reserve-a");
-    expect(checkFundingCoverage(resting, [{ id: "reserve-a", amount: 0.3 }]).status).toBe("ok");
+    expect(checkFundingCoverage(resting, fundWith(0.3)).status).toBe("ok");
   });
 
   it("rejects a declared reserve that does not exist, rather than reading it as zero", () => {
     const resting = restingFrom(csv(row()), "reserve-ghost");
-    const coverage = checkFundingCoverage(resting, [{ id: "reserve-a", amount: 1000 }]);
+    const coverage = checkFundingCoverage(resting, fundWith(1000));
     expect(coverage.status).toBe("unknown-reserve");
     if (coverage.status !== "unknown-reserve") return;
     expect(coverage.fundingReserveIds).toEqual(["reserve-ghost"]);

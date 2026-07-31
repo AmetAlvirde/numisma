@@ -54,6 +54,7 @@ import {
   buildEventReference,
   buildFillAct,
   committedRungs,
+  composeAvailableCapital,
   crossReferenceEvent,
   deriveFundingTier,
   isObservedAtStamp,
@@ -62,6 +63,7 @@ import {
   proposeFillVerdicts,
   reconcileFillActs,
   resolveLadderPosition,
+  scopeBookForFill,
   type BookObservation,
   type CapitalTier,
   type CommittedRung,
@@ -112,6 +114,13 @@ export type RecordFillRejection =
   | "unknown-instrument"
   | "ambiguous-ladder-position"
   | "ambiguous-tier"
+  /**
+   * The operator overrode `Cash debited` UPWARD by more than the funding reserve has
+   * available (`D1`, #177). Only the excess over `price × quantity` is weighed: the fill's
+   * own arithmetic is available-neutral, so the default answer and every downward
+   * correction pass this guard by construction.
+   */
+  | "uncovered-override"
   | "incomplete-decision"
   | "duplicate-fill-act"
   | "invalid-event"
@@ -174,12 +183,35 @@ function describeVerdict(verdict: ProposedVerdict): string {
 }
 
 /**
+ * Either the look at the book, or the refusal that a figure in it could not be read.
+ *
+ * The observation cannot just "do its best": a quantity nobody could parse used to become
+ * `0`, which is the encoding for UNTOUCHED and the very input `fill-below-untouched-rung`
+ * fires on — so a typo SUPPRESSED the impossible-book detection instead of tripping it
+ * (#177). It refuses instead, exactly as the sibling `Filled quantity` prompt does.
+ */
+type BookObservationResult =
+  | { status: "observed"; observation: BookObservation }
+  | { status: "bad-quantity"; orderId: string; answer: string };
+
+/**
  * Ask the operator what the venue shows for every OTHER rung of the ladder.
  *
  * This is the evidence monotonicity reasons over, and it is gathered interactively rather
  * than parsed because the fills export is deferred and `T6`'s interactive path is
  * PERMANENT. The default is `resting` — the conservative answer, since claiming a rung
  * was touched is what would license a fill verdict.
+ *
+ * `rungs` IS ALREADY THE SCOPED SET — `scopeBookForFill`'s `observable` — and this function
+ * does no scoping of its own. That is the whole correction of #175: whatever set the
+ * questions cover is the set the proposal reasons over, so nothing this function declined
+ * to ask about can reach `proposeFillVerdicts` as an ABSENCE. Restating the rule here as a
+ * second filter is how the two drifted apart in the first place.
+ *
+ * EVERY QUANTITY HERE IS CUMULATIVE SINCE PLACEMENT — the one meaning `ObservedRungState.
+ * filledQuantity` has (#176). Both producers in this function supply that basis: the
+ * prompt names it, and the rung being recorded pushes its running TOTAL rather than this
+ * fill's delta. They used to disagree, a few lines apart.
  */
 async function observeBook(
   io: RecordFillIo,
@@ -187,18 +219,25 @@ async function observeBook(
   filled: CommittedRung,
   filledQuantity: number,
   observedAt: string,
-): Promise<BookObservation> {
+): Promise<BookObservationResult> {
   const present: ObservedRungState[] = [];
 
   // The rung being recorded needs no question: the operator just answered it. It leaves
   // the book only when the fill exhausts what was still claimed; a partial keeps resting
   // with its remainder, which is condition 2 expressed as state rather than as a rule.
+  //
+  // What is pushed is the CUMULATIVE total, not `filledQuantity` alone: everything already
+  // netted out of the remainder, plus this fill. That is the same number the venue's own
+  // column would show, which is the whole point of having one basis (#176).
   if (filledQuantity < filled.remainingQuantity) {
-    present.push({ orderId: filled.orderId, filledQuantity });
+    const cumulative = filled.quantity - filled.remainingQuantity + filledQuantity;
+    present.push({ orderId: filled.orderId, filledQuantity: cumulative });
   }
 
   for (const rung of rungs) {
-    if (rung.orderId === filled.orderId || rung.symbol !== filled.symbol) {
+    // The ONLY rung skipped here is the one being recorded, which the operator has already
+    // answered for. Symbol and moment were settled by `scopeBookForFill` before this ran.
+    if (rung.orderId === filled.orderId) {
       continue;
     }
     const answer = (
@@ -210,17 +249,34 @@ async function observeBook(
       continue; // absent from the observation = disappeared
     }
     if (answer === "t" || answer === "touched") {
-      const quantity = Number((await io.ask(`      filled_quantity observed: `)).trim());
-      present.push({
-        orderId: rung.orderId,
-        filledQuantity: Number.isFinite(quantity) ? quantity : 0,
-      });
+      // The BASIS is named in the prompt, because the operator is reading a column and
+      // only they can tell which number they are reading. Asking for "filled_quantity"
+      // bare is what let a delta and a running total mean the same field (#176).
+      const rawQuantity = (
+        await io.ask(
+          `      filled_quantity observed — the venue's CUMULATIVE total for this rung ` +
+            `since it was placed, not just this session's: `,
+        )
+      ).trim();
+      const quantity = Number(rawQuantity);
+      if (rawQuantity === "" || !Number.isFinite(quantity) || quantity <= 0) {
+        // THE BOUNDARY IS `<= 0`, NOT MERELY UNPARSEABLE — and a literal `0` is refused
+        // for the same reason a typo is, not as an afterthought. `0` is the encoding for
+        // UNTOUCHED, which is the opposite of the `[t]ouched` just answered, and it is
+        // byte-identical to what the `[r]` answer produces below: this path never needs
+        // to emit it. Admitting it also skips `filled-quantity-exceeds-order`
+        // (`monotonicity.ts`), since 0 exceeds nothing — the one geometry where the
+        // defect is silent rather than loud. Blank refuses too: this prompt advertises
+        // no `[default]`, and in this file that is what a bracketless prompt means.
+        return { status: "bad-quantity", orderId: rung.orderId, answer: rawQuantity };
+      }
+      present.push({ orderId: rung.orderId, filledQuantity: quantity });
       continue;
     }
     present.push({ orderId: rung.orderId, filledQuantity: 0 });
   }
 
-  return { observedAt, present };
+  return { status: "observed", observation: { observedAt, present } };
 }
 
 /** The five authored decision fields. All required; a blank one abandons the act. */
@@ -330,10 +386,34 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
     );
   }
 
-  // ---- 4. monotonicity PROPOSES ----
+  // ---- 4. monotonicity PROPOSES, over the SAME book the questions observed (#175) ----
+  //
+  // ONE rung set, computed once and used twice: the operator is asked about `observable`,
+  // and `sameSymbol` — that plus the rungs placed after this moment — is what reaches the
+  // proposal. Handing over the whole `resting` book instead made every rung the questions
+  // had skipped arrive as an ABSENCE, and an absence with nothing untouched above it
+  // derives FILLED: a second open ladder proposed as a purchase, and a rung placed after
+  // the fill answered for and then refused as `unknown-rung`. A later rung now surfaces
+  // where it belongs, in `excluded`, named rather than reasoned over.
+  const scoped = scopeBookForFill(resting, filled.symbol, observedAt);
   io.out("What does the venue show for the rest of this ladder?\n");
-  const observation = await observeBook(io, rungs, filled, filledQuantity, observedAt);
-  const proposal = proposeFillVerdicts(resting, observation);
+  const observed = await observeBook(
+    io,
+    committedRungs(scoped.observable),
+    filled,
+    filledQuantity,
+    observedAt,
+  );
+  if (observed.status === "bad-quantity") {
+    return reject(
+      io,
+      "bad-quantity",
+      `'${observed.answer}' is not a positive filled_quantity for rung '${observed.orderId}'; ` +
+        `0 or blank is the encoding for UNTOUCHED, which is the opposite of the 'touched' ` +
+        `you just answered`,
+    );
+  }
+  const proposal = proposeFillVerdicts(scoped.sameSymbol, observed.observation);
   if (proposal.status === "impossible") {
     return reject(
       io,
@@ -482,6 +562,60 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
   const fundingAmount = fundingAnswer === "" ? proposedFunding : Number(fundingAnswer);
   if (!Number.isFinite(fundingAmount) || fundingAmount <= 0) {
     return reject(io, "bad-quantity", `'${fundingAnswer}' is not a positive cash amount`);
+  }
+
+  // `D1` (#177) — THE ACT IS EXEMPT; THE OVERRIDE IS GUARDED, and only upward.
+  //
+  // The arithmetic decides where the guard goes. `available = value − committed`, and this
+  // act moves BOTH terms: the `orderFilled` line drops `committed` by `price × quantity`
+  // and the cash leg drops `value` by the amount debited. So
+  //
+  //     Δavailable = price × quantity − cash debited
+  //
+  // and the DEFAULT answer — `proposedFunding`, the two multiplied — is exactly
+  // available-neutral BY CONSTRUCTION. The fill itself therefore cannot break the
+  // `available ≥ 0` invariant no matter what shape the book is in, which is why this flow
+  // does NOT call `checkFundingCoverage`: that guard weighs the WHOLE book and returns on
+  // the first `unknown-reserve` anywhere in it (#179), so one stale `fundingReserveId` on
+  // an unrelated rung would refuse a fill that really happened at the venue. A fill is an
+  // observed fact; the flow does not get to disbelieve it.
+  //
+  // The override is not an observed fact. It is the operator asserting a figure nothing at
+  // the venue vouches for, and it is the ONLY input in this act that can drive a reserve
+  // negative. What is weighed is the EXCESS over the neutral figure — never "post-act
+  // available ≥ 0", which would brick every fill, neutral ones included, on any book that
+  // already sits negative from some other cause. A downward correction FREES availability
+  // and never reaches this branch.
+  const excess = fundingAmount - proposedFunding;
+  if (excess > 0) {
+    // The report's own arithmetic, over the report's own admission policy — not a second
+    // implementation of `value − committed` that could drift from the rendered figure.
+    const capital = composeAvailableCapital(folded, resting);
+    const funder = capital.reserves.find((entry) => entry.reserveId === reserve.id);
+    if (!funder) {
+      return reject(
+        io,
+        "uncovered-override",
+        `you asked to debit ${fundingAmount} against '${reserve.id}' — ${excess} more than the ` +
+          `${proposedFunding} this fill accounts for — but the available-capital report does ` +
+          `not place that reserve (paper execution mode, an unsupported currency, a dangling ` +
+          `account reference), so the excess cannot be weighed against anything. The fill ` +
+          `itself is recordable at the default figure`,
+      );
+    }
+    if (excess > funder.available) {
+      return reject(
+        io,
+        "uncovered-override",
+        `you asked to debit ${fundingAmount} against '${reserve.id}', ${excess} more than the ` +
+          `${proposedFunding} this fill accounts for, and '${reserve.id}' has only ` +
+          `${funder.available} available (${funder.value} balance less ${funder.committed} ` +
+          `committed). The fill's own arithmetic is available-neutral; only the extra is ` +
+          `spending capital that is not there, and a negative available is an IMPOSSIBLE ` +
+          `state rather than a warning. Record the fill at ${proposedFunding}, or record the ` +
+          `fee or funding difference as its own act`,
+      );
+    }
   }
 
   const fundingTier = deriveFundingTier(reserve);

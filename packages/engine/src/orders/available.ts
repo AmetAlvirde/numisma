@@ -20,9 +20,11 @@
  * files are joined HERE, at read time, and never merged.
  */
 import type { Currency, FundReviewData } from "../contracts.js";
-import { buildCanonicalState } from "../compose/canonical.js";
-import { committedRungs, type CommittedRung } from "./committed.js";
+import { attributeRungs, type UnmatchedRung } from "./attribution.js";
+import type { CommittedRung } from "./committed.js";
 import type { RestingOrder } from "./select.js";
+
+export type { UnmatchedReason, UnmatchedRung } from "./attribution.js";
 
 /** The three numbers, for one live reserve, plus what substantiates the middle one. */
 export interface ReserveCapital {
@@ -46,10 +48,22 @@ export interface ReserveCapital {
    * operator reads it by; the invariant is that it is `≥ 0`, ALWAYS, and the direction
    * carries the meaning: a negative value is an IMPOSSIBLE state, not a warning. The
    * venue would not have accepted orders the account could not fund, so it means the
-   * attribution is wrong. It is REJECTED at the import boundary (`checkFundingCoverage`,
-   * the only path that writes) rather than here — this module renders what is, and a
-   * renderer that quietly clamped a negative to zero would hide the very defect the
-   * invariant exists to expose.
+   * attribution is wrong.
+   *
+   * IT IS REJECTED AT THE WRITE BOUNDARIES, NOT HERE. There are TWO of them, with stated
+   * scopes, and neither lives in this module (#177):
+   *
+   *   - `checkFundingCoverage` guards the ORDER IMPORT, over the WHOLE resting book —
+   *     what is on file plus the batch — because that write adds `committed`.
+   *   - the fill act (`record-fill.ts`) guards ONE input, the operator's upward override
+   *     of the cash debited, over the ONE reserve funding the rung. The act moves both
+   *     terms at once (`Δavailable = price × quantity − cash debited`), so the default
+   *     figure is available-neutral by construction and the EXCESS is the only part that
+   *     can spend availability. The fill itself is deliberately unguarded: it records
+   *     something that already happened at the venue.
+   *
+   * This module renders what IS, and a renderer that quietly clamped a negative to zero
+   * would hide the very defect the invariant exists to expose.
    */
   available: number;
   /**
@@ -62,17 +76,10 @@ export interface ReserveCapital {
   rungs: CommittedRung[];
 }
 
-/** Why a resting rung could not be placed against any live reserve. */
-export type UnmatchedReason = "unknown-reserve" | "currency-mismatch";
-
-/**
- * A rung the fold cannot place. Surfaced rather than dropped: a silently ignored rung
- * is capital reported as free that is not, which is the exact defect of today.
- */
-export interface UnmatchedRung {
-  rung: CommittedRung;
-  reason: UnmatchedReason;
-}
+// `UnmatchedReason` and `UnmatchedRung` are RE-EXPORTED from `./attribution.js` (see the
+// import above) rather than declared here. They are the vocabulary of the placement
+// rule, and that rule is now shared with the import guard — two declarations of the same
+// two reasons is exactly the drift #172 was about.
 
 export interface AvailableCapitalReport {
   /** One entry per LIVE reserve the canonical state admitted, in its order. */
@@ -81,47 +88,23 @@ export interface AvailableCapitalReport {
 }
 
 /**
- * Compose the three numbers, per reserve, over `buildCanonicalState`.
+ * Compose the three numbers, per reserve, over the SHARED attribution (`./attribution.js`).
  *
- * Reserves come from the canonical state's reconciliation lines, which are the live,
- * post-fold, validated reserves — so a paper reserve, an unsupported currency or a
- * dangling account reference is excluded here for exactly the reasons it is excluded
- * from the composition, with no second admission policy to keep in step.
+ * Neither the reserve set nor the placement rule lives here any more. Both come from
+ * `attributeRungs`, which the `O1` import guard also calls — so the report cannot admit a
+ * reserve the guard would refuse, and cannot refuse a rung the guard would fund. That
+ * symmetry used to be a claim in a docstring; it is now the only code path there is.
  *
- * A rung is matched to a reserve by its declared `fundingReserveId` and only if the
- * currencies agree. The currency check is not ceremony: `committed` is denominated in
- * the rung's quote currency, and adding a differently-denominated sum into a native
- * balance would produce a confidently wrong `available` rather than an obviously
- * missing one. Cross-currency funding is not designed; it is refused and reported.
+ * What remains here is the ARITHMETIC and the rendering shape: value, committed,
+ * available, and the rungs that substantiate the middle one.
  */
 export function composeAvailableCapital(
   data: FundReviewData,
   resting: readonly RestingOrder[],
 ): AvailableCapitalReport {
-  const { reserveReconciliation } = buildCanonicalState(data);
+  const { reserves: fundable, rungsByReserve, unmatched } = attributeRungs(data, resting);
 
-  const rungsByReserve = new Map<string, CommittedRung[]>();
-  const unmatched: UnmatchedRung[] = [];
-  const reserveCurrency = new Map(
-    reserveReconciliation.map((line) => [line.reserveId, line.currency]),
-  );
-
-  for (const rung of committedRungs(resting)) {
-    const currency = reserveCurrency.get(rung.fundingReserveId);
-    if (currency === undefined) {
-      unmatched.push({ rung, reason: "unknown-reserve" });
-      continue;
-    }
-    if (currency !== rung.currency) {
-      unmatched.push({ rung, reason: "currency-mismatch" });
-      continue;
-    }
-    const existing = rungsByReserve.get(rung.fundingReserveId);
-    if (existing) existing.push(rung);
-    else rungsByReserve.set(rung.fundingReserveId, [rung]);
-  }
-
-  const reserves = reserveReconciliation.map((line) => {
+  const reserves = fundable.map((line) => {
     const rungs = rungsByReserve.get(line.reserveId) ?? [];
     // Summed from the rung rows themselves, so the list the operator reads and the
     // figure above it are the same arithmetic, not two agreeing implementations.
