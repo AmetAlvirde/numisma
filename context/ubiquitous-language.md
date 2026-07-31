@@ -13,6 +13,16 @@
 | **Lot**          | An accounting lineage unit inside a Position or Reserve.                                         | fill, parcel       |
 | **Capital Tier** | A capital provenance classification that tracks generated capital lineage.                       | tranche            |
 | **Reserve**      | The Tempo for liquidity and opportunity readiness.                                               | cash bucket        |
+| **Order**        | A claim on capital that has not yet become a transaction. A resting order encumbers **availability**, never **value** — it is what the venue shows, not what the Fund did. | trade, fill, transaction |
+
+A resting **Order** never changes a number that already exists. It adds a
+**third** number: a Reserve's **value** is unchanged and NAV-safe, its
+**committed** sum is what its resting Orders claim, and its **available** figure
+is `value − committed` — what can fund a decision today. Availability is a new
+reading over the same capital, not a modification of value, which is why an
+Order touches neither the Capital-Tier cost model (ADR-002), nor the fold, nor
+NAV. An Order becomes a transaction only when it fills, and only then does the
+event log record it. See ADR-013.
 
 ## Operating Dimensions
 
@@ -120,6 +130,9 @@ event log at the separate **Mark Cadence**. Candle intervals are never called
 - A **Fund** has a base **Currency** for canonical reporting.
 - An **FX Rate** translates non-base **Currency** values into the Fund base
   **Currency** for review and reporting.
+- An **Order** encumbers the availability of exactly one **Reserve** and changes
+  that Reserve's value only by filling — at which point it stops being an
+  **Order** and becomes a **Lot** in a **Position**.
 - A **Perspective** never owns capital.
 - A **Close** can exist at **Fund** level or **Portfolio** level.
 - **Execution Mode** controls whether performance can contribute to canonical
