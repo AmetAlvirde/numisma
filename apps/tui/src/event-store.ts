@@ -22,7 +22,7 @@
  *   - Append is atomic (write a full next image to a sibling temp file, then
  *     rename over the log) so an interrupted write cannot truncate a line.
  */
-import { mkdir, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { captureIngestCommit, readAppVersion, resolveWorkspaceRoot } from "./ingest-commit.js";
 import {
@@ -380,14 +380,45 @@ export async function migrateLegacyLog(
  * torn final line. Fine at this log's scale; revisit only if the log grows large.
  */
 async function appendEvents(logPath: string, events: PortfolioEvent[]): Promise<void> {
-  await mkdir(dirname(logPath), { recursive: true });
-  const lines = events.map((event) => serializeEvent(event)).join("\n");
   const existing = await readOptional(logPath);
-  const prefix = existing && existing.length > 0 && !existing.endsWith("\n") ? "\n" : "";
-  const next = `${existing ?? ""}${prefix}${lines}\n`;
+  await writeLogImage(logPath, nextLogImage(existing, events));
+}
+
+/**
+ * The log's next image: the prior bytes, the missing terminator if the prior image lacks
+ * one, then the new lines. Extracted so the two-file fill act (`record-fill.ts`) builds
+ * its image with the SAME function the ordinary ingest does — a second image builder is
+ * a second chance to get the torn-line repair wrong, and the plans-sidecar prototype
+ * already demonstrated what that costs.
+ */
+export function nextLogImage(prior: string | undefined, events: PortfolioEvent[]): string {
+  const lines = events.map((event) => serializeEvent(event)).join("\n");
+  const prefix = prior && prior.length > 0 && !prior.endsWith("\n") ? "\n" : "";
+  return `${prior ?? ""}${prefix}${lines}\n`;
+}
+
+/** Write a full image of the log via temp + rename. The only way the log is written. */
+export async function writeLogImage(logPath: string, contents: string): Promise<void> {
+  await mkdir(dirname(logPath), { recursive: true });
   const tempPath = `${logPath}.tmp`;
-  await writeFile(tempPath, next, "utf8");
+  await writeFile(tempPath, contents, "utf8");
   await rename(tempPath, logPath);
+}
+
+/**
+ * Put the log back to a prior image — the ROLLBACK half of the two-file fill act.
+ *
+ * This is only sound because every writer above builds a full next image and renames it
+ * over the log: the prior image is a complete, valid file, so restoring it is another
+ * atomic rename rather than a surgical edit. `undefined` means the log did not exist
+ * before, and the honest undo of creating it is removing it.
+ */
+export async function restoreLogImage(logPath: string, prior: string | undefined): Promise<void> {
+  if (prior === undefined) {
+    await rm(logPath, { force: true });
+    return;
+  }
+  await writeLogImage(logPath, prior);
 }
 
 /**
@@ -414,7 +445,7 @@ async function archiveInbox(paths: EventStorePaths, now: Date): Promise<string> 
  * the one-shot migration writes carries it, making the record shape explicit and
  * future migrations version-targetable (ADR-003 amendment).
  */
-function serializeEvent(event: PortfolioEvent): string {
+export function serializeEvent(event: PortfolioEvent): string {
   return JSON.stringify({ schemaVersion: EVENT_SCHEMA_VERSION, ...event });
 }
 
