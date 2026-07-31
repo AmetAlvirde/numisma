@@ -599,6 +599,123 @@ describe("`filled_quantity observed` is the venue's CUMULATIVE figure", () => {
   });
 });
 
+// #175. `observeBook` decides which rungs to ASK about; `proposeFillVerdicts` must then
+// reason over THAT SAME SET. When the caller handed it the whole resting book instead,
+// every rung the questions had skipped arrived as an ABSENCE — which is exactly the input
+// `D12` forbids reading as a fill. Plus #177 item 2: an unparseable observed quantity was
+// coerced to `0`, the encoding for UNTOUCHED, so a typo SUPPRESSED the impossible-book
+// detection instead of tripping it.
+describe("the proposal reasons over the same book the questions observed (#175)", () => {
+  /** A second synthetic ladder on a DIFFERENT instrument, against the same reserve. */
+  function otherLadderRecords(): OrderRecord[] {
+    return [900, 800].map((price) => ({
+      id: `other-${price}`,
+      observedAt: "2026-01-02T09:00:00",
+      kind: "orderPlaced" as const,
+      currency: "USD" as const,
+      symbol: "OTHER/USD",
+      side: "buy" as const,
+      price,
+      quantity: 1,
+      fundingReserveId: "reserve-synthetic",
+    }));
+  }
+
+  /** The proposal block alone — NOT the resting-rung listing, which names every rung. */
+  function verdictBlock(harness: Harness): string {
+    const block = harness.out.find((message) => message.startsWith("Proposed verdicts"));
+    if (block === undefined) {
+      throw new Error(`no proposal was printed; out was ${JSON.stringify(harness.out)}`);
+    }
+    return block;
+  }
+
+  it("proposes NO verdict for any rung of a second ladder on another symbol", async () => {
+    const harness = new Harness({
+      records: [...ladderRecords(), ...otherLadderRecords()],
+      answers: openTopRungAnswers(),
+    });
+
+    expectRecorded(await recordFill(harness.io));
+
+    // The other ladder was never asked about, so it must not arrive at the reasoning as an
+    // absence — which is what turned four untouched rungs into four proposed purchases.
+    expect(verdictBlock(harness)).not.toContain("other-900");
+    expect(verdictBlock(harness)).not.toContain("other-800");
+  });
+
+  it("records the fill with a second ladder open — no phantom FILLED to walk past", async () => {
+    const harness = new Harness({
+      records: [...ladderRecords(), ...otherLadderRecords()],
+      answers: openTopRungAnswers(),
+    });
+
+    const outcome = await recordFill(harness.io);
+
+    expect(outcome.status).toBe("recorded");
+    expect(harness.out.join("")).not.toContain("also derive");
+    expect(reconcileFillActs(harness.logEvents(), harness.orderRecords())).toEqual([]);
+  });
+
+  it("backdates a fill onto a ladder that has SINCE gained a rung", async () => {
+    // rung-500 was placed on the 9th; the fill being recorded happened on the 5th. It was
+    // not on the book at that moment, so it is not evidence about it — and asking about it
+    // put a rung into the observation that condition 1 then refused to know.
+    const harness = new Harness({
+      records: [
+        ...ladderRecords(),
+        {
+          id: "rung-500",
+          observedAt: "2026-01-09T09:00:00",
+          kind: "orderPlaced",
+          currency: "USD",
+          symbol: "TEST/USD",
+          side: "buy",
+          price: 500,
+          quantity: 10,
+          fundingReserveId: "reserve-synthetic",
+        },
+      ],
+      answers: openTopRungAnswers(),
+    });
+
+    const outcome = await recordFill(harness.io);
+
+    expect(outcome.status).toBe("recorded");
+    // Never asked about...
+    expect(harness.asked.some((question) => question.includes("rung-500"))).toBe(false);
+    // ...and NAMED, so its absence from the reasoning is visible rather than assumed.
+    expect(harness.out.join("")).toContain("excluded from the reasoning: rung-500");
+    expect(harness.err.join("")).not.toContain("no simultaneously-resting book");
+  });
+});
+
+// #177 item 2.
+describe("an unparseable `filled_quantity observed` is REFUSED, never read as zero", () => {
+  it("refuses instead of recording a `0` — which is the encoding for UNTOUCHED", async () => {
+    const harness = new Harness({
+      answers: [
+        "rung-400",
+        "2026-01-05T12:00:00",
+        "5", // a partial, so rung-400 stays on the book
+        "t", // rung-300 touched
+        "not-a-number", //   ...and the operator fat-fingers the figure
+      ],
+    });
+    const ordersBefore = harness.ordersImage;
+
+    const outcome = await recordFill(harness.io);
+
+    expect(outcome.status).toBe("rejected");
+    if (outcome.status !== "rejected") throw new Error("expected a rejection");
+    expect(outcome.reason).toBe("bad-quantity");
+    expect(outcome.message).toContain("not-a-number");
+    expect(outcome.message).toContain("rung-300");
+    expect(harness.ordersImage).toBe(ordersBefore);
+    expect(harness.logImage).toBeUndefined();
+  });
+});
+
 describe("the named crash window is DETECTABLE", () => {
   it("finds a lot whose orderFilled line never landed", async () => {
     const harness = new Harness({ answers: openTopRungAnswers(), failWrite: "orders" });
