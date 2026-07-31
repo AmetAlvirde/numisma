@@ -850,3 +850,80 @@ describe("the named crash window is DETECTABLE", () => {
     expect(outcome.reason).toBe("torn-fill-act");
   });
 });
+
+/**
+ * `D1` (#177 item 1) — the ACT is exempt, the OVERRIDE is guarded.
+ *
+ * The arithmetic: recording a fill of `Q` at `P` with cash debited `D` drops `committed`
+ * by `P x Q` and drops `value` by `D`, so `available` moves by `P x Q - D`. The default
+ * answer is `D = P x Q`, exactly available-neutral by construction — so the only input
+ * that can drive a reserve below the `available >= 0` invariant is an operator overriding
+ * the cash-debited figure UPWARD. That EXCESS is what is weighed here, and nothing else.
+ *
+ * Synthetic throughout (`O7`): reserve 10000, three rungs of 10 at 400/300/200 committing
+ * 9000, so available is a round 1000 before the act.
+ */
+describe("the cash-debited override is weighed against the reserve's available", () => {
+  /** The answer sequence with the `Cash debited` prompt answered explicitly. */
+  function answersWithCash(cash: string, answers = openTopRungAnswers()): string[] {
+    answers[answers.length - 2] = cash;
+    return answers;
+  }
+
+  it("refuses an override whose EXCESS over price x quantity exceeds available", async () => {
+    // available is 10000 - 9000 = 1000; the excess asked for is 1001.
+    const harness = new Harness({ answers: answersWithCash(String(400 * 10 + 1001)) });
+    const ordersBefore = harness.ordersImage;
+    const logBefore = harness.logImage;
+
+    const outcome = await recordFill(harness.io);
+
+    expect(outcome.status).toBe("rejected");
+    if (outcome.status !== "rejected") throw new Error("expected a rejection");
+    expect(outcome.reason).toBe("uncovered-override");
+    expect(harness.ordersImage).toBe(ordersBefore);
+    expect(harness.logImage).toBe(logBefore);
+  });
+
+  it("admits an override whose excess FITS inside available", async () => {
+    const harness = new Harness({ answers: answersWithCash(String(400 * 10 + 500)) });
+    const outcome = expectRecorded(await recordFill(harness.io));
+    expect(outcome.act.event.funding.amount).toBe(400 * 10 + 500);
+  });
+
+  it("admits a DOWNWARD correction, which frees available rather than spending it", async () => {
+    const harness = new Harness({ answers: answersWithCash(String(400 * 10 - 500)) });
+    const outcome = expectRecorded(await recordFill(harness.io));
+    expect(outcome.act.event.funding.amount).toBe(400 * 10 - 500);
+  });
+
+  it("records the DEFAULT answer over a book whose available is ALREADY negative", async () => {
+    // The guard is phrased over the EXCESS, not over "post-act available >= 0". A book that
+    // is already over-committed from some other cause must not have its fills bricked: the
+    // default answer moves available by exactly zero, so it has nothing to answer for.
+    const overCommitted: OrderRecord[] = [
+      ...ladderRecords(),
+      {
+        id: "rung-100",
+        observedAt: "2026-01-02T09:00:00",
+        kind: "orderPlaced",
+        currency: "USD",
+        symbol: "TEST/USD",
+        side: "buy",
+        price: 100,
+        quantity: 60,
+        fundingReserveId: "reserve-synthetic",
+      },
+    ];
+    const answers = openTopRungAnswers();
+    answers.splice(5, 0, "r"); // the extra rung below is resting untouched too
+    const harness = new Harness({ answers, records: overCommitted });
+
+    // 15000 committed against a balance of 10000 — available is -5000 before the act.
+    expect(harness.reserveAmount("reserve-synthetic") - harness.committedFor("reserve-synthetic"))
+      .toBeLessThan(0);
+
+    const outcome = expectRecorded(await recordFill(harness.io));
+    expect(outcome.act.event.funding.amount).toBe(400 * 10);
+  });
+});

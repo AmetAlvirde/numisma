@@ -76,22 +76,42 @@ export type OrdersImportRejection =
   | "changed-claim"
   | "unknown-reserve"
   | "currency-mismatch"
-  | "over-committed";
+  | "over-committed"
+  /**
+   * The sidecar append itself failed (#177 item 5). `appendOrders` builds a full next
+   * image and renames, so a failure means NOTHING landed and the flow's own refusal
+   * contract is the honest report — not a bare stack out of the CLI's outer catch.
+   */
+  | "write-failed";
+
+/** What an import that WROTE reports, in the two shapes it can honestly take. */
+interface OrdersImportWrite {
+  /** Lines actually appended. ZERO when the same export is imported twice. */
+  appended: number;
+  /**
+   * Rungs already in the sidecar under the same synthesized id AND saying the same
+   * thing about it — the id components plus `quantity` and the observed partial. A
+   * row that differs never reaches this count; it refuses the batch as
+   * `changed-claim` (#174).
+   */
+  alreadyKnown: number;
+  /** The export rows this build could not read. EMPTY on `imported`, by construction. */
+  skips: BitgetRowSkip[];
+}
 
 export type OrdersImportOutcome =
-  | {
-      status: "imported";
-      /** Lines actually appended. ZERO when the same export is imported twice. */
-      appended: number;
-      /**
-       * Rungs already in the sidecar under the same synthesized id AND saying the same
-       * thing about it — the id components plus `quantity` and the observed partial. A
-       * row that differs never reaches this count; it refuses the batch as
-       * `changed-claim` (#174).
-       */
-      alreadyKnown: number;
-      skips: BitgetRowSkip[];
-    }
+  /** Every row of the export was read. The unqualified success, and the only one. */
+  | ({ status: "imported" } & OrdersImportWrite)
+  /**
+   * The readable rungs were written and at least one row was NOT read (`D3`, #177).
+   *
+   * A DISTINCT MEMBER, not `imported` carrying a non-empty `skips`. The risk is real —
+   * an unread rung is `committed` that nobody counted, so `available` reads HIGH, the
+   * direction that costs money — and a shape that forces every reader to open a second
+   * field to discover the first was qualified is a type that lies to the reader who does
+   * not. It is still a SUCCESS: lines were written, and the CLI exits 0 (`D3`).
+   */
+  | ({ status: "imported-partial" } & OrdersImportWrite)
   | { status: "rejected"; reason: OrdersImportRejection; message: string };
 
 export interface OrdersImportOptions {
@@ -325,17 +345,42 @@ export async function importBitgetOpenOrders(
 
   const known = new Set(existingRecords.map((record) => record.id));
   const fresh: OrderPlacedRecord[] = records.filter((record) => !known.has(record.id));
-  await io.appendOrders(io.ordersPath, fresh);
+  try {
+    await io.appendOrders(io.ordersPath, fresh);
+  } catch (error) {
+    // The write is a temp file plus a rename, so a failure here landed NOTHING — the
+    // refusal contract's "Nothing was written" is literally true, and the operator gets
+    // it instead of a stack trace from the CLI's outer catch (#177 item 5).
+    const detail = error instanceof Error ? error.message : String(error);
+    return reject(io, "write-failed", `could not append to ${io.ordersPath}: ${detail}`);
+  }
 
+  const counts =
+    `${fresh.length} order(s) appended, ${records.length - fresh.length} already known`;
+  if (parsed.skips.length === 0) {
+    io.out(`Imported ${csvPath}: ${counts}.\n`);
+    return {
+      status: "imported",
+      appended: fresh.length,
+      alreadyKnown: records.length - fresh.length,
+      skips: parsed.skips,
+    };
+  }
+
+  // THE GAP OPENS THE LINE, AND IN MONEY TERMS (`D3`, #177). It used to be a suffix after
+  // two success numbers — `..., 1 row(s) skipped.` — in exactly the position an operator
+  // skims past. An unread row is a rung resting at the venue that no committed sum
+  // includes, so the figure this import feeds reads HIGH; naming that direction is what
+  // makes it a risk rather than a statistic.
   io.out(
-    `Imported ${csvPath}: ${fresh.length} order(s) appended, ` +
-      `${records.length - fresh.length} already known` +
-      (parsed.skips.length > 0 ? `, ${parsed.skips.length} row(s) skipped` : "") +
-      `.\n`,
+    `INCOMPLETE — ${parsed.skips.length} row(s) of ${csvPath} could not be read, so that ` +
+      `many rung(s) resting at the venue are NOT counted as committed and available reads ` +
+      `HIGH by whatever they encumber. Imported ${csvPath}: ${counts}. Re-export and ` +
+      `re-import to pick the missing rung(s) up; the reasons are on the error channel above.\n`,
   );
 
   return {
-    status: "imported",
+    status: "imported-partial",
     appended: fresh.length,
     alreadyKnown: records.length - fresh.length,
     skips: parsed.skips,

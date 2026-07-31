@@ -41,6 +41,14 @@ if (!csvPath) {
     });
     if (outcome.status === "rejected") {
       process.exitCode = 1;
+    } else if (outcome.status === "imported-partial") {
+      // HANDLED, AND DELIBERATELY 0 (`D3`, #177). Lines WERE written, so exiting 1 would
+      // tell a caller the run failed when it partly succeeded — replacing one
+      // overstatement with another. The flow is interactive, and the operator's line
+      // (which opens on the unread rows and names the money direction) is the real
+      // channel. If this import is ever automated or piped, the exit code becomes the only
+      // surface left and this branch must be revisited — that is #183.
+      process.exitCode = 0;
     }
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);

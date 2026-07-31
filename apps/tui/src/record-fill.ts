@@ -54,6 +54,7 @@ import {
   buildEventReference,
   buildFillAct,
   committedRungs,
+  composeAvailableCapital,
   crossReferenceEvent,
   deriveFundingTier,
   isObservedAtStamp,
@@ -113,6 +114,13 @@ export type RecordFillRejection =
   | "unknown-instrument"
   | "ambiguous-ladder-position"
   | "ambiguous-tier"
+  /**
+   * The operator overrode `Cash debited` UPWARD by more than the funding reserve has
+   * available (`D1`, #177). Only the excess over `price × quantity` is weighed: the fill's
+   * own arithmetic is available-neutral, so the default answer and every downward
+   * correction pass this guard by construction.
+   */
+  | "uncovered-override"
   | "incomplete-decision"
   | "duplicate-fill-act"
   | "invalid-event"
@@ -554,6 +562,60 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
   const fundingAmount = fundingAnswer === "" ? proposedFunding : Number(fundingAnswer);
   if (!Number.isFinite(fundingAmount) || fundingAmount <= 0) {
     return reject(io, "bad-quantity", `'${fundingAnswer}' is not a positive cash amount`);
+  }
+
+  // `D1` (#177) — THE ACT IS EXEMPT; THE OVERRIDE IS GUARDED, and only upward.
+  //
+  // The arithmetic decides where the guard goes. `available = value − committed`, and this
+  // act moves BOTH terms: the `orderFilled` line drops `committed` by `price × quantity`
+  // and the cash leg drops `value` by the amount debited. So
+  //
+  //     Δavailable = price × quantity − cash debited
+  //
+  // and the DEFAULT answer — `proposedFunding`, the two multiplied — is exactly
+  // available-neutral BY CONSTRUCTION. The fill itself therefore cannot break the
+  // `available ≥ 0` invariant no matter what shape the book is in, which is why this flow
+  // does NOT call `checkFundingCoverage`: that guard weighs the WHOLE book and returns on
+  // the first `unknown-reserve` anywhere in it (#179), so one stale `fundingReserveId` on
+  // an unrelated rung would refuse a fill that really happened at the venue. A fill is an
+  // observed fact; the flow does not get to disbelieve it.
+  //
+  // The override is not an observed fact. It is the operator asserting a figure nothing at
+  // the venue vouches for, and it is the ONLY input in this act that can drive a reserve
+  // negative. What is weighed is the EXCESS over the neutral figure — never "post-act
+  // available ≥ 0", which would brick every fill, neutral ones included, on any book that
+  // already sits negative from some other cause. A downward correction FREES availability
+  // and never reaches this branch.
+  const excess = fundingAmount - proposedFunding;
+  if (excess > 0) {
+    // The report's own arithmetic, over the report's own admission policy — not a second
+    // implementation of `value − committed` that could drift from the rendered figure.
+    const capital = composeAvailableCapital(folded, resting);
+    const funder = capital.reserves.find((entry) => entry.reserveId === reserve.id);
+    if (!funder) {
+      return reject(
+        io,
+        "uncovered-override",
+        `you asked to debit ${fundingAmount} against '${reserve.id}' — ${excess} more than the ` +
+          `${proposedFunding} this fill accounts for — but the available-capital report does ` +
+          `not place that reserve (paper execution mode, an unsupported currency, a dangling ` +
+          `account reference), so the excess cannot be weighed against anything. The fill ` +
+          `itself is recordable at the default figure`,
+      );
+    }
+    if (excess > funder.available) {
+      return reject(
+        io,
+        "uncovered-override",
+        `you asked to debit ${fundingAmount} against '${reserve.id}', ${excess} more than the ` +
+          `${proposedFunding} this fill accounts for, and '${reserve.id}' has only ` +
+          `${funder.available} available (${funder.value} balance less ${funder.committed} ` +
+          `committed). The fill's own arithmetic is available-neutral; only the extra is ` +
+          `spending capital that is not there, and a negative available is an IMPOSSIBLE ` +
+          `state rather than a warning. Record the fill at ${proposedFunding}, or record the ` +
+          `fee or funding difference as its own act`,
+      );
+    }
   }
 
   const fundingTier = deriveFundingTier(reserve);
