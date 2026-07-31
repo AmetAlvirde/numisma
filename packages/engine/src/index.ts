@@ -120,6 +120,23 @@ export {
   composeProfitSplit,
   defaultProfitPolicyEntry,
 } from "./compose/profit-split.js";
+// The `orders.jsonl` sidecar (ADR-013) — recorded BESIDE the log, never in it. The
+// record contract and the pure as-of selector only; the file IO lives in
+// `@numisma/preferences`, per ADR-001.
+export type {
+  OrderKind,
+  OrderSide,
+  OrderRecord,
+  OrderPlacedRecord,
+  OrderCancelledRecord,
+  OrderFilledRecord,
+  OrderRecordProblem,
+  OrderRecordParse,
+} from "./orders/records.js";
+export { serializeOrderRecord, parseOrderRecord } from "./orders/records.js";
+export type { RestingOrder } from "./orders/select.js";
+export { pickRestingOrdersAsOf } from "./orders/select.js";
+
 export {
   buildEventReference,
   applyEventToReference,
