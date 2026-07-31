@@ -691,7 +691,7 @@ describe("the proposal reasons over the same book the questions observed (#175)"
 });
 
 // #177 item 2.
-describe("an unparseable `filled_quantity observed` is REFUSED, never read as zero", () => {
+describe("`filled_quantity observed` refuses anything `<= 0`, never reads it as untouched", () => {
   it("refuses instead of recording a `0` — which is the encoding for UNTOUCHED", async () => {
     const harness = new Harness({
       answers: [
@@ -711,6 +711,67 @@ describe("an unparseable `filled_quantity observed` is REFUSED, never read as ze
     expect(outcome.reason).toBe("bad-quantity");
     expect(outcome.message).toContain("not-a-number");
     expect(outcome.message).toContain("rung-300");
+    expect(harness.ordersImage).toBe(ordersBefore);
+    expect(harness.logImage).toBeUndefined();
+  });
+
+  // A LITERAL `0` IS THE SAME DEFECT THROUGH THE FRONT DOOR. The typo case above was
+  // refused because reading it as 0 would contradict the `t` just answered — so typing
+  // the 0 outright has to be refused for that same reason, or the argument is only half
+  // applied. It is also what the `[r]` answer already produces, so this path never needs
+  // it, and admitting it skips `filled-quantity-exceeds-order`: 0 exceeds nothing.
+  it("refuses a literal `0` — the `[r]` answer is what legitimately produces one", async () => {
+    const harness = new Harness({
+      answers: [
+        "rung-400",
+        "2026-01-05T12:00:00",
+        "5", // a partial, so rung-400 stays on the book
+        "t", // rung-300 touched
+        "0", //   ...and then the figure that means untouched
+      ],
+    });
+    const ordersBefore = harness.ordersImage;
+
+    const outcome = await recordFill(harness.io);
+
+    expect(outcome.status).toBe("rejected");
+    if (outcome.status !== "rejected") throw new Error("expected a rejection");
+    expect(outcome.reason).toBe("bad-quantity");
+    expect(outcome.message).toContain("rung-300");
+    expect(harness.ordersImage).toBe(ordersBefore);
+    expect(harness.logImage).toBeUndefined();
+  });
+
+  it("refuses a negative — finite is not the same test as readable", async () => {
+    const harness = new Harness({
+      answers: ["rung-400", "2026-01-05T12:00:00", "5", "t", "-5"],
+    });
+    const ordersBefore = harness.ordersImage;
+
+    const outcome = await recordFill(harness.io);
+
+    expect(outcome.status).toBe("rejected");
+    if (outcome.status !== "rejected") throw new Error("expected a rejection");
+    expect(outcome.reason).toBe("bad-quantity");
+    expect(outcome.message).toContain("-5");
+    expect(harness.ordersImage).toBe(ordersBefore);
+    expect(harness.logImage).toBeUndefined();
+  });
+
+  // BLANK IS NOT A DEFAULT HERE. `Number("")` is `0` — finite, and the same UNTOUCHED
+  // encoding through a third door. This prompt advertises no `[default]`, and in this
+  // file a bracketless prompt refuses on blank (the five decision fields are the rule).
+  it("refuses a blank answer — this prompt advertises no default", async () => {
+    const harness = new Harness({
+      answers: ["rung-400", "2026-01-05T12:00:00", "5", "t", ""],
+    });
+    const ordersBefore = harness.ordersImage;
+
+    const outcome = await recordFill(harness.io);
+
+    expect(outcome.status).toBe("rejected");
+    if (outcome.status !== "rejected") throw new Error("expected a rejection");
+    expect(outcome.reason).toBe("bad-quantity");
     expect(harness.ordersImage).toBe(ordersBefore);
     expect(harness.logImage).toBeUndefined();
   });
