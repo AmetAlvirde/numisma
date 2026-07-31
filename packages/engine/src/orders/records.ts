@@ -97,9 +97,11 @@ export interface OrderPlacedRecord extends OrderRecordBase {
    *
    * KNOWN LIMIT, named rather than papered over: the id is synthesized from the venue's
    * SUBMISSION stamp, so a later export showing the same rung further filled arrives under
-   * the same id and is skipped as already known. The partial observed at FIRST import is
-   * the one carried. The error direction is conservative — committed reads high, available
-   * reads low — which is the direction that does not cost money.
+   * the same id. It USED TO BE SKIPPED AS ALREADY KNOWN, silently keeping the partial
+   * observed at first import; since #174 it is REFUSED as a `changed-claim` instead —
+   * loudly, with nothing written — because recording it needs an observation verb this
+   * build does not have and a second placement line would be ignored by the selector.
+   * Until that verb exists the operator records the fill, or cancels and re-places.
    */
   observedFilledQuantity?: number;
   /**
