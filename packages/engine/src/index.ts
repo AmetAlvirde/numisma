@@ -164,6 +164,20 @@ export {
   BITGET_RESTING_STATUS,
   parseBitgetOpenOrdersCsv,
 } from "./orders/bitget.js";
+// `S7` — committed vs available. The ONE committed formula (`./orders/committed.js`)
+// that both the `O1` import guard and the rendered report call, and the new PURE
+// EXPORT over `buildCanonicalState` that joins the sidecar to the fold at read time.
+// A NEW EXPORT, NOT A WIDENING: `CompositionReport`, `DashboardSummary` and
+// `CompositionRow` are untouched by this slice.
+export type { CommittedRung } from "./orders/committed.js";
+export { committedRungs, committedByReserve } from "./orders/committed.js";
+export type {
+  ReserveCapital,
+  UnmatchedReason,
+  UnmatchedRung,
+  AvailableCapitalReport,
+} from "./orders/available.js";
+export { composeAvailableCapital } from "./orders/available.js";
 
 export {
   buildEventReference,
@@ -224,6 +238,7 @@ export {
   divider,
   formatCompositionReport,
   formatReserveReconciliation,
+  formatAvailableCapital,
   formatClosedBook,
   formatInvalidationWatch,
   formatProfitSplit,

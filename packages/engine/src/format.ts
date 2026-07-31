@@ -16,6 +16,7 @@ import type {
   ReserveReconciliationLine,
 } from "./contracts.js";
 import type { ProfitSplit } from "./compose/profit-split.js";
+import type { AvailableCapitalReport } from "./orders/available.js";
 
 export function formatUsd(value: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -319,6 +320,75 @@ export function formatReserveReconciliation(
     header,
     "-".repeat(header.length),
     ...(body.length > 0 ? body : ["No live Reserves."]),
+  ].join("\n");
+}
+
+/**
+ * Available Capital (`S7`): per reserve, the THREE numbers — value, committed,
+ * available — and beneath each, the resting rungs that substantiate the middle one.
+ *
+ * EMPTY-GUARDED, and that is load-bearing rather than tidy. It renders `""` when
+ * nothing is resting and nothing is unmatched, so every surface that has no orders
+ * sidecar — every existing snapshot, every fund with an empty file, `pnpm report` on a
+ * machine that has never imported an export — renders BYTE-FOR-BYTE what it rendered
+ * before. Adding a section is only free if the no-orders case is untouched.
+ *
+ * Reserves with nothing committed are omitted from the body for the same reason the
+ * section is empty-guarded: this block exists to substantiate an encumbrance, and a
+ * reserve with no encumbrance is already fully described by the reconciliation line
+ * directly above it. Nothing here is a NAV figure; `value` is reprinted exactly as the
+ * fold reported it and no total on this screen descends from `committed`.
+ */
+export function formatAvailableCapital(report: AvailableCapitalReport): string {
+  const encumbered = report.reserves.filter((reserve) => reserve.rungs.length > 0);
+  if (encumbered.length === 0 && report.unmatched.length === 0) {
+    return "";
+  }
+
+  const title = "Available Capital";
+  const header = `${pad("Reserve", 28)} ${pad("Venue", 24)} ${padLeft("Value", 16)} ${padLeft("Committed", 16)} ${padLeft("Available", 16)}`;
+  const body: string[] = [];
+
+  for (const reserve of encumbered) {
+    body.push(
+      `${pad(reserve.reserveId, 28)} ${pad(reserve.venueLabel, 24)} ` +
+        `${padLeft(formatPrice(reserve.value, reserve.currency), 16)} ` +
+        `${padLeft(formatPrice(reserve.committed, reserve.currency), 16)} ` +
+        `${padLeft(formatPrice(reserve.available, reserve.currency), 16)}`,
+    );
+    // The rungs are indented UNDER their reserve rather than listed in a separate
+    // block, so "which reserve is this rung encumbering" is answered by position and
+    // never by a reader's join.
+    for (const rung of reserve.rungs) {
+      body.push(
+        `    ${pad(rung.symbol, 14)} ${pad(rung.side, 5)} ` +
+          `${padLeft(formatPrice(rung.price, rung.currency), 14)} x ${padLeft(String(rung.remainingQuantity), 12)} ` +
+          `= ${padLeft(formatPrice(rung.committed, rung.currency), 16)}  ${rung.observedAt}`,
+      );
+    }
+    if (reserve.available < 0) {
+      // The impossible state, rendered rather than clamped. Clamping would hide the
+      // exact defect the `slack ≥ 0` invariant exists to expose; the REJECT lives at
+      // the import boundary, which is the only path that writes.
+      body.push(
+        `    !! available is NEGATIVE — the attribution is wrong; this reserve cannot fund its rungs.`,
+      );
+    }
+  }
+
+  for (const { rung, reason } of report.unmatched) {
+    body.push(
+      `    !! ${pad(rung.orderId, 40)} ${reason} — declares ${rung.fundingReserveId}, encumbering nothing`,
+    );
+  }
+
+  return [
+    title,
+    "-".repeat(title.length),
+    "Value is untouched by any order; a resting order encumbers AVAILABILITY, never VALUE.",
+    header,
+    "-".repeat(header.length),
+    ...body,
   ].join("\n");
 }
 
