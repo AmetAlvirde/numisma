@@ -8,8 +8,8 @@
  * Every IO dependency is injected, so the whole flow — including the prompt and the
  * `O1` reject — is testable without a terminal, a real export or the real data dir.
  *
- * THE ORDERING IS THE CONTRACT: parse → load the sidecar → prompt → check coverage →
- * append. The coverage check is the LAST thing before the only write, and every refusal
+ * THE ORDERING IS THE CONTRACT: parse → merge id collisions → load the sidecar → refuse
+ * changed claims → prompt → check coverage → append. The coverage check is the LAST thing before the only write, and every refusal
  * before it returns having written nothing at all. `orders.jsonl` is append-only, so a
  * wrong claim written here is not edited away later — it costs a compensating line
  * forever, and that asymmetry is why the refusals are loud and total rather than
@@ -18,13 +18,17 @@
 import {
   buildOrderPlacedRecords,
   checkFundingCoverage,
+  detectChangedClaims,
+  leavesRungUnweighed,
+  mergeCollidingClaims,
   parseBitgetOpenOrdersCsv,
   pickRestingOrdersAsOf,
   type BitgetOpenOrder,
   type BitgetRowSkip,
+  type MergedOrderClaim,
   type OrderPlacedRecord,
   type OrderRecord,
-  type ReserveBalance,
+  type FundReviewData,
 } from "@numisma/engine";
 import type { OrdersLoad } from "@numisma/preferences";
 
@@ -36,8 +40,17 @@ export interface OrdersImportIo {
   ordersPath: string;
   loadOrders: (path: string) => Promise<OrdersLoad>;
   appendOrders: (path: string, records: OrderRecord[]) => Promise<void>;
-  /** The reserves as the FOLD reports them: value, untouched by any order. */
-  reserveBalances: () => Promise<ReserveBalance[]>;
+  /**
+   * The FOLDED fund review — the whole thing, not a reserve list derived from it.
+   *
+   * This used to be `reserveBalances: () => Promise<ReserveBalance[]>`, and the CLI
+   * satisfied it with `data.reserves.map(...)` — every reserve the fold emitted, with no
+   * currency. That mapping was the bug (#172): it handed the guard reserves the rendered
+   * report refuses to place, so a ladder could be FUNDABLE at import and UNPLACEABLE in
+   * the report. The admission policy belongs to the engine, so the fund goes over
+   * whole and this shell derives nothing.
+   */
+  fundReview: () => Promise<FundReviewData>;
   /** Ask the operator one question; the answer is returned trimmed by the caller. */
   ask: (question: string) => Promise<string>;
   out: (message: string) => void;
@@ -51,18 +64,55 @@ export type OrdersImportRejection =
   | "unreadable-sidecar"
   | "unreadable-sidecar-lines"
   | "no-reserve-declared"
+  /**
+   * A row names a claim already on file but says something DIFFERENT about it (#174).
+   *
+   * Refused rather than recorded, and this is the ONE place the "proceed with the
+   * arithmetic" reasoning behind the within-batch merge does not extend. Recording a
+   * change needs a verb this build does not have: a second `orderPlaced` line is ignored
+   * by `pickRestingOrdersAsOf` by construction (that guard is what makes re-import
+   * idempotent), and an observation verb is a later design that must not be pre-empted
+   * by one invented here, in an append-only file, to get past this import.
+   */
+  | "changed-claim"
   | "unknown-reserve"
-  | "over-committed";
+  | "currency-mismatch"
+  | "over-committed"
+  /**
+   * The sidecar append itself failed (#177 item 5). `appendOrders` builds a full next
+   * image and renames, so a failure means NOTHING landed and the flow's own refusal
+   * contract is the honest report — not a bare stack out of the CLI's outer catch.
+   */
+  | "write-failed";
+
+/** What an import that WROTE reports, in the two shapes it can honestly take. */
+interface OrdersImportWrite {
+  /** Lines actually appended. ZERO when the same export is imported twice. */
+  appended: number;
+  /**
+   * Rungs already in the sidecar under the same synthesized id AND saying the same
+   * thing about it — the id components plus `quantity` and the observed partial. A
+   * row that differs never reaches this count; it refuses the batch as
+   * `changed-claim` (#174).
+   */
+  alreadyKnown: number;
+  /** The export rows this build could not read. EMPTY on `imported`, by construction. */
+  skips: BitgetRowSkip[];
+}
 
 export type OrdersImportOutcome =
-  | {
-      status: "imported";
-      /** Lines actually appended. ZERO when the same export is imported twice. */
-      appended: number;
-      /** Rungs already in the sidecar under the same synthesized id. */
-      alreadyKnown: number;
-      skips: BitgetRowSkip[];
-    }
+  /** Every row of the export was read. The unqualified success, and the only one. */
+  | ({ status: "imported" } & OrdersImportWrite)
+  /**
+   * The readable rungs were written and at least one row was NOT read (`D3`, #177).
+   *
+   * A DISTINCT MEMBER, not `imported` carrying a non-empty `skips`. The risk is real —
+   * an unread rung is `committed` that nobody counted, so `available` reads HIGH, the
+   * direction that costs money — and a shape that forces every reader to open a second
+   * field to discover the first was qualified is a type that lies to the reader who does
+   * not. It is still a SUCCESS: lines were written, and the CLI exits 0 (`D3`).
+   */
+  | ({ status: "imported-partial" } & OrdersImportWrite)
   | { status: "rejected"; reason: OrdersImportRejection; message: string };
 
 export interface OrdersImportOptions {
@@ -79,6 +129,24 @@ function reject(
   // be able to mistake a refusal for a quiet no-op.
   io.err(`REFUSED — ${message}\nNothing was written to ${io.ordersPath}.`);
   return { status: "rejected", reason, message };
+}
+
+/**
+ * The operator-facing line for one merged claim — FIRST-CLASS output, not an aside.
+ *
+ * Two rows the venue rendered under one id have been summed, and the operator is owed
+ * the whole arithmetic: which rung, at what second, both sizes, the total that will be
+ * written, and the remedy if the two were meant to stay distinct claims.
+ */
+function describeMerge(merge: MergedOrderClaim): string {
+  return (
+    `MERGED — ${merge.symbol} ${merge.side} at ${merge.price}, submitted ${merge.observedAt}: ` +
+    `${merge.quantities.length} rows sharing one id (${merge.quantities.join(" + ")}) were ` +
+    `summed into ONE claim of ${merge.mergedQuantity}. The venue's export carries no order ` +
+    `id, and these rows agree on every field identity is built from, so the sum is the only ` +
+    `reading that neither invents a second claim nor frees committed capital. To keep two ` +
+    `rungs distinct, re-place one a tick apart so their prices differ.`
+  );
 }
 
 /** How one rung is shown when the operator asks to override it. */
@@ -165,6 +233,15 @@ export async function importBitgetOpenOrders(
     return reject(io, "no-orders", `${csvPath} contains no resting orders this build can read`);
   }
 
+  // ONE ID, ONE CLAIM (#174). Rows of this batch colliding on the synthesized id are
+  // SUMMED before anything else sees them, so the guard below weighs the whole claim and
+  // the append writes one line for it. Told to the operator on the normal channel: this
+  // is arithmetic that was applied, not a warning about something skipped.
+  const { orders, merges } = mergeCollidingClaims(parsed.orders);
+  for (const merge of merges) {
+    io.out(`${describeMerge(merge)}\n`);
+  }
+
   const existing = await io.loadOrders(io.ordersPath);
   if (existing.status === "unreadable") {
     // "There are no orders" and "I could not read the orders" are opposite facts about
@@ -182,23 +259,72 @@ export async function importBitgetOpenOrders(
   }
   const existingRecords: OrderRecord[] = existing.status === "loaded" ? existing.records : [];
 
-  const declaration = await declareFunding(io, parsed.orders);
+  // A row that names a known claim and DISAGREES with it is refused BEFORE the prompt and
+  // before the guard — the guard would read the claim's size off the file, not off this
+  // row (a repeat placement is ignored by the selector), so proceeding would check
+  // coverage against a book the export no longer describes.
+  const changed = detectChangedClaims(
+    existingRecords.filter(
+      (record): record is OrderPlacedRecord => record.kind === "orderPlaced",
+    ),
+    orders,
+  );
+  if (changed.length > 0) {
+    const detail = changed
+      .map(
+        (claim) =>
+          `${claim.id} (` +
+          claim.differences
+            .map((difference) => `${difference.field} ${difference.known} → ${difference.observed}`)
+            .join(", ") +
+          `)`,
+      )
+      .join("; ");
+    return reject(
+      io,
+      "changed-claim",
+      `${csvPath} re-states a claim already on file with different terms — ${detail}. An id ` +
+        `identifies exactly one claim, and this build has no verb for "the claim changed": a ` +
+        `second placement line would be ignored by the selector, and calling this row ALREADY ` +
+        `KNOWN would leave the wrong size committed. Cancel the rung at the venue and record ` +
+        `the cancellation, or re-place it at a different price so it arrives as a new claim`,
+    );
+  }
+
+  const declaration = await declareFunding(io, orders);
   if (declaration === undefined) {
     return reject(io, "no-reserve-declared", "no funding reserve was declared for this batch");
   }
 
-  const records = buildOrderPlacedRecords(parsed.orders, declaration);
+  const records = buildOrderPlacedRecords(orders, declaration);
 
   // `O1`. Coverage is checked over the WHOLE resting book — what is already on file plus
   // this batch — because a reserve funds every claim against it, not one import's slice.
   // The selector dedupes by id, so a re-import does not double-count the same rung.
   const resting = pickRestingOrdersAsOf([...existingRecords, ...records]);
-  const coverage = checkFundingCoverage(resting, await io.reserveBalances());
+  const coverage = checkFundingCoverage(resting, await io.fundReview());
   if (coverage.status === "unknown-reserve") {
     return reject(
       io,
       "unknown-reserve",
-      `no such reserve: ${coverage.fundingReserveIds.join(", ")}`,
+      `no such fundable reserve: ${coverage.fundingReserveIds.join(", ")}. A reserve the ` +
+        `fold excluded — paper execution mode, an unsupported currency, a dangling ` +
+        `account reference — cannot fund a live order either, and the available-capital ` +
+        `report would not be able to place it`,
+    );
+  }
+  if (coverage.status === "currency-mismatch") {
+    // Cross-currency funding is not designed; it is refused, here and in the report.
+    // Accepting it would sum a quote-denominated committed into a native balance and
+    // report free capital that does not exist.
+    const detail = coverage.rungs
+      .map((rung) => `${rung.orderId} (${rung.currency}) against ${rung.fundingReserveId}`)
+      .join("; ");
+    return reject(
+      io,
+      "currency-mismatch",
+      `these rungs are quoted in a currency their declared reserve does not hold — ` +
+        `${detail}. Cross-currency funding is not supported; fix the declaration`,
     );
   }
   if (coverage.status === "over-committed") {
@@ -220,17 +346,48 @@ export async function importBitgetOpenOrders(
 
   const known = new Set(existingRecords.map((record) => record.id));
   const fresh: OrderPlacedRecord[] = records.filter((record) => !known.has(record.id));
-  await io.appendOrders(io.ordersPath, fresh);
+  try {
+    await io.appendOrders(io.ordersPath, fresh);
+  } catch (error) {
+    // The write is a temp file plus a rename, so a failure here landed NOTHING — the
+    // refusal contract's "Nothing was written" is literally true, and the operator gets
+    // it instead of a stack trace from the CLI's outer catch (#177 item 5).
+    const detail = error instanceof Error ? error.message : String(error);
+    return reject(io, "write-failed", `could not append to ${io.ordersPath}: ${detail}`);
+  }
 
+  const counts =
+    `${fresh.length} order(s) appended, ${records.length - fresh.length} already known`;
+  // NOT `parsed.skips.length` (#184). `skips` is heterogeneous, and a `not-resting` row
+  // was read COMPLETELY — the parser's finding about it is that nothing is still claimed.
+  // The gap this line warns about is rungs we could not weigh, so both the discrimination
+  // and the count below run through the engine's predicate rather than the raw total.
+  // `outcome.skips` still carries every skip and stderr still reports every one of them.
+  const unweighed = parsed.skips.filter((entry) => leavesRungUnweighed(entry.problem));
+  if (unweighed.length === 0) {
+    io.out(`Imported ${csvPath}: ${counts}.\n`);
+    return {
+      status: "imported",
+      appended: fresh.length,
+      alreadyKnown: records.length - fresh.length,
+      skips: parsed.skips,
+    };
+  }
+
+  // THE GAP OPENS THE LINE, AND IN MONEY TERMS (`D3`, #177). It used to be a suffix after
+  // two success numbers — `..., 1 row(s) skipped.` — in exactly the position an operator
+  // skims past. An unread row is a rung resting at the venue that no committed sum
+  // includes, so the figure this import feeds reads HIGH; naming that direction is what
+  // makes it a risk rather than a statistic.
   io.out(
-    `Imported ${csvPath}: ${fresh.length} order(s) appended, ` +
-      `${records.length - fresh.length} already known` +
-      (parsed.skips.length > 0 ? `, ${parsed.skips.length} row(s) skipped` : "") +
-      `.\n`,
+    `INCOMPLETE — ${unweighed.length} row(s) of ${csvPath} could not be read, so that ` +
+      `many rung(s) resting at the venue are NOT counted as committed and available reads ` +
+      `HIGH by whatever they encumber. Imported ${csvPath}: ${counts}. Re-export and ` +
+      `re-import to pick the missing rung(s) up; the reasons are on the error channel above.\n`,
   );
 
   return {
-    status: "imported",
+    status: "imported-partial",
     appended: fresh.length,
     alreadyKnown: records.length - fresh.length,
     skips: parsed.skips,

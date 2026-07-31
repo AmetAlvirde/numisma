@@ -12,7 +12,7 @@
 // EVERY FIXTURE IS A SYNTHETIC LADDER (`O7`). Round numbers, invented symbol, no real
 // price, size, balance or rung anywhere in this file.
 import { describe, expect, it } from "vitest";
-import { proposeFillVerdicts, type BookObservation } from "./monotonicity.js";
+import { proposeFillVerdicts, scopeBookForFill, type BookObservation } from "./monotonicity.js";
 import type { OrderPlacedRecord } from "./records.js";
 import type { RestingOrder } from "./select.js";
 
@@ -157,7 +157,7 @@ describe("an IMPOSSIBLE verdict fails loud rather than being normalized", () => 
     expect(proposal).not.toHaveProperty("verdicts");
   });
 
-  it("refuses a filled quantity larger than the claim itself", () => {
+  it("refuses a filled quantity larger than the rung was ever PLACED for", () => {
     const proposal = proposeFillVerdicts([rung(400)], observe([[400, 99]]));
     expect(proposal.status).toBe("impossible");
     if (proposal.status !== "impossible") throw new Error("expected impossible");
@@ -172,6 +172,39 @@ describe("an IMPOSSIBLE verdict fails loud rather than being normalized", () => 
     expect(proposal.status).toBe("impossible");
     if (proposal.status !== "impossible") throw new Error("expected impossible");
     expect(proposal.contradictions[0]?.kind).toBe("unknown-rung");
+  });
+});
+
+// `ObservedRungState.filledQuantity` is CUMULATIVE-SINCE-PLACEMENT (#176). It used to be
+// compared against `remainingQuantity`, which `pickRestingOrdersAsOf` has ALREADY taken
+// the recorded fills out of — so the two sides of the comparison were on different bases
+// and an honest venue reading contradicted itself past the halfway point.
+describe("`filledQuantity` is cumulative, and the check compares it with like", () => {
+  /** rung-400 placed for 10, with 7 already recorded as filled: 3 is still claimed. */
+  const partlyFilled: RestingOrder = { ...rung(400), remainingQuantity: 3 };
+
+  it("does NOT contradict an honest cumulative reading above the remaining claim", () => {
+    // The venue honestly shows 7 filled of the 10 the rung was placed for. 7 exceeds the
+    // 3 still claimed, and that is not a contradiction — it is the same 7 counted once.
+    const proposal = proposeFillVerdicts(
+      [partlyFilled, rung(300)],
+      observe([[400, 7], [300, 0]]),
+    );
+    expect(proposal.status).toBe("proposed");
+    expect(verdictFor(proposal, 400).verdict).toBe("touched");
+    expect(verdictFor(proposal, 400).evidence.observedFilledQuantity).toBe(7);
+    // And the unrelated rung below still gets its own verdict rather than being
+    // discredited along with the whole book.
+    expect(verdictFor(proposal, 300).verdict).toBe("resting");
+  });
+
+  it("still trips on a reading larger than the rung was EVER placed for", () => {
+    // 11 of a rung placed for 10. Genuinely impossible on any basis — the check is
+    // corrected, not weakened.
+    const proposal = proposeFillVerdicts([partlyFilled], observe([[400, 11]]));
+    expect(proposal.status).toBe("impossible");
+    if (proposal.status !== "impossible") throw new Error("expected impossible");
+    expect(proposal.contradictions[0]?.kind).toBe("filled-quantity-exceeds-order");
   });
 });
 
@@ -206,6 +239,49 @@ describe("a fill on one symbol implies nothing about a rung on another", () => {
     });
     // The untouched higher-priced rung on the OTHER symbol must not veto the top rung's
     // proposed fill on this one.
+    expect(verdictFor(proposal, 400).verdict).toBe("filled");
+  });
+});
+
+// #175. The scope a caller must gather evidence over is the same scope the proposal
+// reasons over, so it is computed HERE and once rather than restated at each call site.
+describe("`scopeBookForFill` — the one rung set both halves of the act use", () => {
+  const other = rung(900, { id: "other-900", symbol: "OTHER/USD" });
+  const later = rung(500, { id: "rung-500", observedAt: "2026-01-09T09:00:00" });
+  const sell = rung(600, { id: "sell-600", side: "sell" });
+
+  it("keeps only the fill's own symbol — the other ladder is not evidence at all", () => {
+    const scoped = scopeBookForFill([other, sell, later, ...LADDER], "TEST/USD", OBSERVED);
+    expect(scoped.sameSymbol.map((entry) => entry.placed.id)).not.toContain("other-900");
+    expect(scoped.observable.map((entry) => entry.placed.id)).not.toContain("other-900");
+  });
+
+  it("carries a LATER rung in `sameSymbol` but not in `observable`", () => {
+    // It must reach the proposal — so it is NAMED in `excluded` — while never being asked
+    // about, since an answer would put a rung condition 1 refuses to know into the book.
+    const scoped = scopeBookForFill([later, ...LADDER], "TEST/USD", OBSERVED);
+    expect(scoped.sameSymbol.map((entry) => entry.placed.id)).toContain("rung-500");
+    expect(scoped.observable.map((entry) => entry.placed.id)).not.toContain("rung-500");
+  });
+
+  it("leaves resting SELLS out of what is asked about", () => {
+    const scoped = scopeBookForFill([sell, ...LADDER], "TEST/USD", OBSERVED);
+    expect(scoped.observable.map((entry) => entry.placed.id)).not.toContain("sell-600");
+  });
+
+  it("agrees with the proposal: what it scopes out never arrives as an ABSENCE", () => {
+    const scoped = scopeBookForFill([other, later, ...LADDER], "TEST/USD", OBSERVED);
+    // The operator is asked about every `observable` rung except the one that filled, and
+    // answers "gone" for it — so the observation names the rest.
+    const proposal = proposeFillVerdicts(scoped.sameSymbol, {
+      observedAt: OBSERVED,
+      present: scoped.observable
+        .filter((entry) => entry.placed.id !== "rung-400")
+        .map((entry) => ({ orderId: entry.placed.id, filledQuantity: 0 })),
+    });
+    if (proposal.status !== "proposed") throw new Error(`expected a proposal: ${proposal.status}`);
+    expect(proposal.verdicts.map((entry) => entry.orderId)).not.toContain("other-900");
+    expect(proposal.excluded).toEqual(["rung-500"]);
     expect(verdictFor(proposal, 400).verdict).toBe("filled");
   });
 });

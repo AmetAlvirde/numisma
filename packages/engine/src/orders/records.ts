@@ -74,6 +74,37 @@ export interface OrderPlacedRecord extends OrderRecordBase {
    */
   quantity: number;
   /**
+   * The venue's `filled_quantity` for this rung AS OF `observedAt` — CUMULATIVE since the
+   * rung was placed, and ABSENT rather than `0` when nothing had filled (#173).
+   *
+   * WHY IT IS A FIELD ON THE PLACEMENT LINE AND NOT A SYNTHESIZED `orderFilled`. The
+   * append-only file makes this shape permanent, so the reasoning is recorded here:
+   *
+   *   - AN `orderFilled` LINE IS HALF OF A FILL ACT. `reconcileFillActs` pairs every one
+   *     of them with a `PositionOpened`/`PositionAddedTo` in `events.jsonl` by a derived
+   *     id. A line synthesized at import has no lot answering for it, so it would read as
+   *     a permanent `fill-without-lot` TORN ACT — and `recordFill` refuses to record
+   *     anything while one is outstanding. Importing any partial would brick the fill flow.
+   *   - IDEMPOTENCY COMES FREE HERE AND NOWHERE ELSE. Both the import's append filter and
+   *     `pickRestingOrdersAsOf` dedupe by ORDER ID, so a re-import of the same export
+   *     lands nothing twice. `orderFilled` lines are SUBTRACTED unconditionally
+   *     (`./select.ts`), so two identical ones would double-count the partial — and a
+   *     dedupe rule for them would be indistinguishable from a genuine second real
+   *     partial at the same second.
+   *   - THE TWO FACTS ARE DIFFERENT. `orderFilled` is something the FUND did, with a lot
+   *     and a cash leg behind it. This is something the venue SHOWED about the row at the
+   *     moment it was observed. Collapsing them into one verb would lose that.
+   *
+   * KNOWN LIMIT, named rather than papered over: the id is synthesized from the venue's
+   * SUBMISSION stamp, so a later export showing the same rung further filled arrives under
+   * the same id. It USED TO BE SKIPPED AS ALREADY KNOWN, silently keeping the partial
+   * observed at first import; since #174 it is REFUSED as a `changed-claim` instead —
+   * loudly, with nothing written — because recording it needs an observation verb this
+   * build does not have and a second placement line would be ignored by the selector.
+   * Until that verb exists the operator records the fill, or cancels and re-places.
+   */
+  observedFilledQuantity?: number;
+  /**
    * The one DECLARED field at placement (`Q9`): which reserve the claim encumbers. The
    * venue has never heard of a Reserve, so this cannot be observed. Notably absent: a
    * target `positionId` (the Position cannot exist until the first fill, so naming it
@@ -165,6 +196,9 @@ const KEY_ORDER: Record<OrderKind, readonly string[]> = {
     "side",
     "price",
     "quantity",
+    // Absent when nothing had filled: `JSON.stringify` drops an `undefined` value, so a
+    // rung with no partial serializes to exactly the bytes it always did.
+    "observedFilledQuantity",
     "fundingReserveId",
   ],
   orderCancelled: ["id", "observedAt", "kind", "currency"],
@@ -263,6 +297,23 @@ export function parseOrderRecord(value: unknown): OrderRecordParse {
           message: "fundingReserveId must be a non-empty string",
         };
       }
+      // Optional and NON-NEGATIVE. Absent is the common case and reads as nothing filled;
+      // a value at or above `quantity` would leave nothing resting, and the selector — not
+      // this reader — is where "nothing still claimed stops resting" is decided.
+      if (
+        value.observedFilledQuantity !== undefined &&
+        !(
+          typeof value.observedFilledQuantity === "number" &&
+          Number.isFinite(value.observedFilledQuantity) &&
+          value.observedFilledQuantity >= 0
+        )
+      ) {
+        return {
+          status: "skip",
+          problem: "malformed",
+          message: "observedFilledQuantity must be a non-negative number when present",
+        };
+      }
       return {
         status: "ok",
         record: {
@@ -272,6 +323,9 @@ export function parseOrderRecord(value: unknown): OrderRecordParse {
           side: value.side,
           price: value.price,
           quantity: value.quantity,
+          ...(value.observedFilledQuantity !== undefined && value.observedFilledQuantity > 0
+            ? { observedFilledQuantity: value.observedFilledQuantity }
+            : {}),
           fundingReserveId: value.fundingReserveId,
         },
       };

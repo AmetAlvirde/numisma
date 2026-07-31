@@ -46,9 +46,28 @@ const QUANTITY_EPSILON = 1e-9;
 export interface ObservedRungState {
   orderId: string;
   /**
-   * The venue's `filled_quantity` for this rung, `0` when untouched. This is the honest
-   * test and the ONLY one: a `status` column reading `Filled` is a venue's summary of
-   * this number, and summarizing it is where partials get rounded up into whole fills.
+   * CUMULATIVE SINCE THE RUNG WAS PLACED — the venue's running `filled_quantity` total for
+   * it, `0` when untouched. NOT the quantity filled since the last record; NOT a delta.
+   * ONE basis, stated here rather than left to each caller (#176).
+   *
+   * CUMULATIVE, because that is the only basis a producer can honestly supply. The venue
+   * prints a running total in its own column, and an operator reading it off the screen
+   * cannot compute a delta without knowing what this file already recorded. Asking for a
+   * number nobody can look up is how the two bases got mixed in the first place: the
+   * prompt asked for the venue's column while the rung being recorded pushed its own
+   * fill's delta, a few lines apart in the same function.
+   *
+   * WHAT IT IS COMPARED AGAINST, AND WHY THAT IS NOT `remainingQuantity`. A cumulative
+   * total belongs beside the rung's ORIGINAL `placed.quantity`. `RestingOrder.
+   * remainingQuantity` has already had every recorded fill netted out of it (`./select.ts`
+   * — and, since #173, the placement line's own `observedFilledQuantity` too), so
+   * comparing the two subtracts the same fills twice: a rung placed for 10 with 7 recorded
+   * shows a remainder of 3, and an honest venue reading of 7 would read as `7 > 3` — an
+   * "arithmetic, not policy" contradiction raised against the truth.
+   *
+   * It is still the honest partial-fill test and the ONLY one: a `status` column reading
+   * `Filled` is a venue's summary of this number, and summarizing it is where partials get
+   * rounded up into whole fills.
    */
   filledQuantity: number;
 }
@@ -113,7 +132,12 @@ export interface MonotonicityContradiction {
      * leaving a higher buy limit untouched.
      */
     | "fill-below-untouched-rung"
-    /** The venue reports more filled than the rung still claims. Arithmetic, not policy. */
+    /**
+     * The venue reports more filled than the rung was EVER PLACED FOR. Arithmetic, not
+     * policy — and measured against the original quantity, because the observation is a
+     * cumulative total. It used to be measured against `remainingQuantity`, which is net
+     * of the very fills the cumulative figure counts (#176).
+     */
     | "filled-quantity-exceeds-order"
     /** The observation names a rung that was not resting — nothing to reason over. */
     | "unknown-rung";
@@ -131,12 +155,77 @@ export type MonotonicityProposal =
   | { status: "impossible"; contradictions: MonotonicityContradiction[] };
 
 /**
+ * CONDITION 1, as ONE predicate rather than two that have to be kept in step. A rung
+ * placed after the moment being reasoned about was not on the book then and cannot be
+ * evidence about it. Both the proposal below and {@link scopeBookForFill} — which is what
+ * a caller gathers its evidence over — partition with this, so "asked about" and
+ * "reasoned over" cannot drift apart (#175).
+ */
+function partitionByMoment(
+  resting: readonly RestingOrder[],
+  observedAt: string,
+): { simultaneous: RestingOrder[]; later: RestingOrder[] } {
+  const simultaneous: RestingOrder[] = [];
+  const later: RestingOrder[] = [];
+  for (const order of resting) {
+    // Sells are out of scope and out of the reasoning: a resting sell encumbers the ASSET,
+    // and the ladder monotonicity argument is about a descending buy ladder.
+    if (order.placed.side !== "buy") {
+      continue;
+    }
+    (order.placed.observedAt <= observedAt ? simultaneous : later).push(order);
+  }
+  return { simultaneous, later };
+}
+
+/** The one rung set an act observes AND reasons over, split by what may be asked about. */
+export interface ScopedBook {
+  /**
+   * Every BUY rung on the fill's own symbol, LATER ONES INCLUDED — the argument list for
+   * {@link proposeFillVerdicts}. A later rung belongs here so it surfaces in `excluded`,
+   * named, rather than being silently dropped.
+   */
+  sameSymbol: RestingOrder[];
+  /**
+   * Of those, the ones actually resting at the moment: the ONLY rungs there is any point
+   * asking the operator about. Asking about a later one puts a rung into the observation
+   * that condition 1 then refuses to know — `unknown-rung`, on a truthful answer.
+   */
+  observable: RestingOrder[];
+}
+
+/**
+ * The rung set ONE fill act is about: same instrument, resting at the fill's moment.
+ *
+ * This exists because the two halves of the act used to disagree. The caller asked the
+ * operator about same-symbol rungs and then handed the WHOLE resting book to the proposal,
+ * so every rung it had declined to ask about arrived as an ABSENCE — and an absence with
+ * nothing untouched above it derives `filled`. A second open ladder was therefore proposed
+ * as a purchase, which is precisely the conversion of cancellations into phantom purchases
+ * `D12` refuses to make (#175). The scope is computed once, here, and both halves take it.
+ */
+export function scopeBookForFill(
+  resting: readonly RestingOrder[],
+  symbol: string,
+  observedAt: string,
+): ScopedBook {
+  const sameSymbol = resting.filter((order) => order.placed.symbol === symbol);
+  return { sameSymbol, observable: partitionByMoment(sameSymbol, observedAt).simultaneous };
+}
+
+/**
  * Propose a verdict for every simultaneously-resting BUY rung, or refuse.
  *
  * Sells are out of scope and out of the reasoning: a resting sell encumbers the asset,
- * and the ladder monotonicity argument is about a descending buy ladder. Reasoning is
- * grouped per `symbol`, because a fill on one instrument implies nothing whatever about a
- * rung on another.
+ * and the ladder monotonicity argument is about a descending buy ladder.
+ *
+ * WHAT IS GROUPED PER `symbol` IS THE `above` COMPARISON, AND ONLY THAT. This function
+ * reasons over exactly the book it is handed: every buy rung in `resting` that was resting
+ * at `observation.observedAt` gets a verdict, whatever instrument it names. So a caller
+ * that wants "a fill on one instrument implies nothing whatever about a rung on another"
+ * must hand over one instrument's rungs — {@link scopeBookForFill} is that, and the
+ * observation must be gathered over the same set. Handing over more than was asked about
+ * is #175, and it was the whole defect: absence is the input `D12` forbids inferring from.
  */
 export function proposeFillVerdicts(
   resting: readonly RestingOrder[],
@@ -144,15 +233,10 @@ export function proposeFillVerdicts(
 ): MonotonicityProposal {
   const contradictions: MonotonicityContradiction[] = [];
 
-  // CONDITION 1, enforced rather than assumed. A rung placed after the observation was
-  // not on the book at that moment and cannot be evidence about it. Excluded rungs are
-  // returned by id so the operator sees WHAT the reasoning did not consider.
-  const simultaneous = resting.filter(
-    (order) => order.placed.side === "buy" && order.placed.observedAt <= observation.observedAt,
-  );
-  const excluded = resting
-    .filter((order) => order.placed.side === "buy" && order.placed.observedAt > observation.observedAt)
-    .map((order) => order.placed.id);
+  // CONDITION 1, enforced rather than assumed. Excluded rungs are returned by id so the
+  // operator sees WHAT the reasoning did not consider.
+  const { simultaneous, later } = partitionByMoment(resting, observation.observedAt);
+  const excluded = later.map((order) => order.placed.id);
 
   const present = new Map(observation.present.map((state) => [state.orderId, state]));
   const known = new Set(simultaneous.map((order) => order.placed.id));
@@ -170,13 +254,17 @@ export function proposeFillVerdicts(
 
   for (const order of simultaneous) {
     const state = present.get(order.placed.id);
-    if (state && state.filledQuantity > order.remainingQuantity + QUANTITY_EPSILON) {
+    // LIKE WITH LIKE. `state.filledQuantity` is cumulative since placement, so the only
+    // number it can contradict is what the rung was placed for. Against
+    // `remainingQuantity` — already net of those same fills — an honest reading past the
+    // halfway point would refuse the operator's whole act.
+    if (state && state.filledQuantity > order.placed.quantity + QUANTITY_EPSILON) {
       contradictions.push({
         kind: "filled-quantity-exceeds-order",
         orderId: order.placed.id,
         message:
-          `rung '${order.placed.id}' is observed with filled_quantity ${state.filledQuantity} ` +
-          `against a remaining claim of ${order.remainingQuantity}`,
+          `rung '${order.placed.id}' is observed with a cumulative filled_quantity of ` +
+          `${state.filledQuantity} against the ${order.placed.quantity} it was placed for`,
       });
     }
   }

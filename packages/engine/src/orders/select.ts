@@ -15,6 +15,12 @@ import type { OrderPlacedRecord, OrderRecord } from "./records.js";
  * One claim still resting at the as-of boundary, with the size that is STILL claimed.
  * A partially-filled rung encumbers only its unfilled remainder, so the remainder is
  * carried here rather than left for each caller to recompute from the fill lines.
+ *
+ * `remainingQuantity` is NET OF EVERYTHING OBSERVED: the placement line's own
+ * `observedFilledQuantity` (what the venue already showed filled when the rung was
+ * imported) and every `orderFilled` line since. The ORIGINAL size stays on
+ * `placed.quantity`, and that distinction is load-bearing — a cumulative venue reading is
+ * compared against the original, never against this (#176).
  */
 export interface RestingOrder {
   placed: OrderPlacedRecord;
@@ -61,9 +67,17 @@ export function pickRestingOrdersAsOf(records: OrderRecord[], asOf?: string): Re
       case "orderPlaced": {
         // A repeat placement of a known id is the same claim observed twice (ingest ids
         // are deterministic), not a second claim. Ignoring it keeps a re-import from
-        // double-counting the ladder.
+        // double-counting the ladder — and it is what makes the partial carried ON this
+        // line idempotent, where a synthesized `orderFilled` line would be subtracted
+        // once per copy (#173).
         if (!resting.has(record.id)) {
-          resting.set(record.id, { placed: record, remainingQuantity: record.quantity });
+          // A rung the venue already showed partly filled at placement rests only for its
+          // REMAINDER. Nothing still claimed means it is not resting at all — a fully
+          // filled row is not a claim on capital.
+          const remaining = record.quantity - (record.observedFilledQuantity ?? 0);
+          if (remaining > 0) {
+            resting.set(record.id, { placed: record, remainingQuantity: remaining });
+          }
         }
         break;
       }
