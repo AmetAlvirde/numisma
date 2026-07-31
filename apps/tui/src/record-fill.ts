@@ -180,6 +180,11 @@ function describeVerdict(verdict: ProposedVerdict): string {
  * than parsed because the fills export is deferred and `T6`'s interactive path is
  * PERMANENT. The default is `resting` — the conservative answer, since claiming a rung
  * was touched is what would license a fill verdict.
+ *
+ * EVERY QUANTITY HERE IS CUMULATIVE SINCE PLACEMENT — the one meaning `ObservedRungState.
+ * filledQuantity` has (#176). Both producers in this function supply that basis: the
+ * prompt names it, and the rung being recorded pushes its running TOTAL rather than this
+ * fill's delta. They used to disagree, a few lines apart.
  */
 async function observeBook(
   io: RecordFillIo,
@@ -193,8 +198,13 @@ async function observeBook(
   // The rung being recorded needs no question: the operator just answered it. It leaves
   // the book only when the fill exhausts what was still claimed; a partial keeps resting
   // with its remainder, which is condition 2 expressed as state rather than as a rule.
+  //
+  // What is pushed is the CUMULATIVE total, not `filledQuantity` alone: everything already
+  // netted out of the remainder, plus this fill. That is the same number the venue's own
+  // column would show, which is the whole point of having one basis (#176).
   if (filledQuantity < filled.remainingQuantity) {
-    present.push({ orderId: filled.orderId, filledQuantity });
+    const cumulative = filled.quantity - filled.remainingQuantity + filledQuantity;
+    present.push({ orderId: filled.orderId, filledQuantity: cumulative });
   }
 
   for (const rung of rungs) {
@@ -210,7 +220,17 @@ async function observeBook(
       continue; // absent from the observation = disappeared
     }
     if (answer === "t" || answer === "touched") {
-      const quantity = Number((await io.ask(`      filled_quantity observed: `)).trim());
+      // The BASIS is named in the prompt, because the operator is reading a column and
+      // only they can tell which number they are reading. Asking for "filled_quantity"
+      // bare is what let a delta and a running total mean the same field (#176).
+      const quantity = Number(
+        (
+          await io.ask(
+            `      filled_quantity observed — the venue's CUMULATIVE total for this rung ` +
+              `since it was placed, not just this session's: `,
+          )
+        ).trim(),
+      );
       present.push({
         orderId: rung.orderId,
         filledQuantity: Number.isFinite(quantity) ? quantity : 0,

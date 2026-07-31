@@ -46,9 +46,28 @@ const QUANTITY_EPSILON = 1e-9;
 export interface ObservedRungState {
   orderId: string;
   /**
-   * The venue's `filled_quantity` for this rung, `0` when untouched. This is the honest
-   * test and the ONLY one: a `status` column reading `Filled` is a venue's summary of
-   * this number, and summarizing it is where partials get rounded up into whole fills.
+   * CUMULATIVE SINCE THE RUNG WAS PLACED — the venue's running `filled_quantity` total for
+   * it, `0` when untouched. NOT the quantity filled since the last record; NOT a delta.
+   * ONE basis, stated here rather than left to each caller (#176).
+   *
+   * CUMULATIVE, because that is the only basis a producer can honestly supply. The venue
+   * prints a running total in its own column, and an operator reading it off the screen
+   * cannot compute a delta without knowing what this file already recorded. Asking for a
+   * number nobody can look up is how the two bases got mixed in the first place: the
+   * prompt asked for the venue's column while the rung being recorded pushed its own
+   * fill's delta, a few lines apart in the same function.
+   *
+   * WHAT IT IS COMPARED AGAINST, AND WHY THAT IS NOT `remainingQuantity`. A cumulative
+   * total belongs beside the rung's ORIGINAL `placed.quantity`. `RestingOrder.
+   * remainingQuantity` has already had every recorded fill netted out of it (`./select.ts`
+   * — and, since #173, the placement line's own `observedFilledQuantity` too), so
+   * comparing the two subtracts the same fills twice: a rung placed for 10 with 7 recorded
+   * shows a remainder of 3, and an honest venue reading of 7 would read as `7 > 3` — an
+   * "arithmetic, not policy" contradiction raised against the truth.
+   *
+   * It is still the honest partial-fill test and the ONLY one: a `status` column reading
+   * `Filled` is a venue's summary of this number, and summarizing it is where partials get
+   * rounded up into whole fills.
    */
   filledQuantity: number;
 }
@@ -113,7 +132,12 @@ export interface MonotonicityContradiction {
      * leaving a higher buy limit untouched.
      */
     | "fill-below-untouched-rung"
-    /** The venue reports more filled than the rung still claims. Arithmetic, not policy. */
+    /**
+     * The venue reports more filled than the rung was EVER PLACED FOR. Arithmetic, not
+     * policy — and measured against the original quantity, because the observation is a
+     * cumulative total. It used to be measured against `remainingQuantity`, which is net
+     * of the very fills the cumulative figure counts (#176).
+     */
     | "filled-quantity-exceeds-order"
     /** The observation names a rung that was not resting — nothing to reason over. */
     | "unknown-rung";
@@ -170,13 +194,17 @@ export function proposeFillVerdicts(
 
   for (const order of simultaneous) {
     const state = present.get(order.placed.id);
-    if (state && state.filledQuantity > order.remainingQuantity + QUANTITY_EPSILON) {
+    // LIKE WITH LIKE. `state.filledQuantity` is cumulative since placement, so the only
+    // number it can contradict is what the rung was placed for. Against
+    // `remainingQuantity` — already net of those same fills — an honest reading past the
+    // halfway point would refuse the operator's whole act.
+    if (state && state.filledQuantity > order.placed.quantity + QUANTITY_EPSILON) {
       contradictions.push({
         kind: "filled-quantity-exceeds-order",
         orderId: order.placed.id,
         message:
-          `rung '${order.placed.id}' is observed with filled_quantity ${state.filledQuantity} ` +
-          `against a remaining claim of ${order.remainingQuantity}`,
+          `rung '${order.placed.id}' is observed with a cumulative filled_quantity of ` +
+          `${state.filledQuantity} against the ${order.placed.quantity} it was placed for`,
       });
     }
   }

@@ -157,7 +157,7 @@ describe("an IMPOSSIBLE verdict fails loud rather than being normalized", () => 
     expect(proposal).not.toHaveProperty("verdicts");
   });
 
-  it("refuses a filled quantity larger than the claim itself", () => {
+  it("refuses a filled quantity larger than the rung was ever PLACED for", () => {
     const proposal = proposeFillVerdicts([rung(400)], observe([[400, 99]]));
     expect(proposal.status).toBe("impossible");
     if (proposal.status !== "impossible") throw new Error("expected impossible");
@@ -172,6 +172,39 @@ describe("an IMPOSSIBLE verdict fails loud rather than being normalized", () => 
     expect(proposal.status).toBe("impossible");
     if (proposal.status !== "impossible") throw new Error("expected impossible");
     expect(proposal.contradictions[0]?.kind).toBe("unknown-rung");
+  });
+});
+
+// `ObservedRungState.filledQuantity` is CUMULATIVE-SINCE-PLACEMENT (#176). It used to be
+// compared against `remainingQuantity`, which `pickRestingOrdersAsOf` has ALREADY taken
+// the recorded fills out of — so the two sides of the comparison were on different bases
+// and an honest venue reading contradicted itself past the halfway point.
+describe("`filledQuantity` is cumulative, and the check compares it with like", () => {
+  /** rung-400 placed for 10, with 7 already recorded as filled: 3 is still claimed. */
+  const partlyFilled: RestingOrder = { ...rung(400), remainingQuantity: 3 };
+
+  it("does NOT contradict an honest cumulative reading above the remaining claim", () => {
+    // The venue honestly shows 7 filled of the 10 the rung was placed for. 7 exceeds the
+    // 3 still claimed, and that is not a contradiction — it is the same 7 counted once.
+    const proposal = proposeFillVerdicts(
+      [partlyFilled, rung(300)],
+      observe([[400, 7], [300, 0]]),
+    );
+    expect(proposal.status).toBe("proposed");
+    expect(verdictFor(proposal, 400).verdict).toBe("touched");
+    expect(verdictFor(proposal, 400).evidence.observedFilledQuantity).toBe(7);
+    // And the unrelated rung below still gets its own verdict rather than being
+    // discredited along with the whole book.
+    expect(verdictFor(proposal, 300).verdict).toBe("resting");
+  });
+
+  it("still trips on a reading larger than the rung was EVER placed for", () => {
+    // 11 of a rung placed for 10. Genuinely impossible on any basis — the check is
+    // corrected, not weakened.
+    const proposal = proposeFillVerdicts([partlyFilled], observe([[400, 11]]));
+    expect(proposal.status).toBe("impossible");
+    if (proposal.status !== "impossible") throw new Error("expected impossible");
+    expect(proposal.contradictions[0]?.kind).toBe("filled-quantity-exceeds-order");
   });
 });
 

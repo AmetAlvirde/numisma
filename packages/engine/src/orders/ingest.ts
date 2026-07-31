@@ -30,6 +30,12 @@ export interface ObservedOpenOrder {
   side: OrderSide;
   price: number;
   quantity: number;
+  /**
+   * The venue's CUMULATIVE filled quantity for this row, `0` or absent when untouched. A
+   * venue that does not report one may omit it; a venue that does must not have it
+   * dropped, which is exactly what #173 was.
+   */
+  filledQuantity?: number;
 }
 
 /**
@@ -111,6 +117,13 @@ export interface OrderAttribution {
  * first fill, so naming one here would be the repo's first unresolvable id) and a
  * ladder/batch id (that join is parked on a fills header nobody has, and designing a key
  * for it blind, into an append-only file, is the more expensive mistake).
+ *
+ * The venue's `filled_quantity` IS carried, onto the placement line's
+ * `observedFilledQuantity` and only when it is positive — #173. It used to be parsed,
+ * validated and then dropped here, which made every imported rung rest at its full
+ * quantity forever and put `CommittedRung.remainingQuantity` beyond the reach of its own
+ * definition. The mechanism (a field, never a synthesized `orderFilled` line) is argued in
+ * full on the field itself in `./records.ts`.
  */
 export function buildOrderPlacedRecords(
   orders: readonly ObservedOpenOrder[],
@@ -125,6 +138,11 @@ export function buildOrderPlacedRecords(
     side: order.side,
     price: order.price,
     quantity: order.quantity,
+    // Omitted rather than written as `0`, so an untouched rung serializes to exactly the
+    // bytes it always did and no existing line in the append-only file is re-shaped.
+    ...(order.filledQuantity !== undefined && order.filledQuantity > 0
+      ? { observedFilledQuantity: order.filledQuantity }
+      : {}),
     fundingReserveId: attribution.overrides?.[order.id] ?? attribution.fundingReserveId,
   }));
 }

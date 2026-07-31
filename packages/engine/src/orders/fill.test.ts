@@ -26,6 +26,7 @@ const RUNG: CommittedRung = {
   symbol: "TEST/USD",
   side: "buy",
   price: 400,
+  quantity: 10,
   remainingQuantity: 10,
   fundingReserveId: "reserve-synthetic",
   committed: 4000,
