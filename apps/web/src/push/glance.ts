@@ -37,7 +37,7 @@ import type {
   InstrumentRegistryEntry,
   PriceSource,
 } from "@numisma/engine";
-import { composeRowDependencies, instrumentsForSource } from "@numisma/engine";
+import { addDays, composeRowDependencies, instrumentsForSource } from "@numisma/engine";
 import type { GlanceBlock, GlanceMissingMark } from "../projection/contract.ts";
 
 /**
@@ -93,12 +93,6 @@ function allRegisteredInstruments(): InstrumentRegistryEntry[] {
 function isWeekend(asOf: string): boolean {
   const weekday = new Date(`${asOf}T00:00:00Z`).getUTCDay();
   return weekday === 0 || weekday === 6;
-}
-
-function addDays(asOf: string, delta: number): string {
-  const date = new Date(`${asOf}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + delta);
-  return date.toISOString().slice(0, 10);
 }
 
 /**
