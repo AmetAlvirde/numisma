@@ -8,7 +8,7 @@
  *   pnpm gap-report                          # print the report
  *   pnpm gap-report -- --since 2026-06-26    # override the calendar floor
  *   pnpm gap-report -- --until 2026-08-04    # override the ceiling
- *   pnpm gap-report -- --write               # …and persist it (#189)
+ *   pnpm gap-report -- --write               # …and write gap-report.json beside the log
  *
  * ── WHY THE ARGUMENT CHECKING IS NOT BOILERPLATE ──────────────────────────────
  * One input matters more than all the others: `--since 2026-02-30`. It satisfies
@@ -49,9 +49,11 @@
 import {
   formatGapReport,
   formatGapSummary,
+  gapReportPath,
   loadGapReport,
   resolveDataDirDefault,
   resolveEventStorePaths,
+  writeGapReportFile,
   type EventStorePaths,
   type GapReport,
 } from "@numisma/event-store";
@@ -158,9 +160,9 @@ export interface GapReportRunOptions {
   /** The resolved store. Defaults to {@link resolveGapReportPaths}. */
   paths?: EventStorePaths | undefined;
   /**
-   * Persistence, supplied by #189. Absent, `--write` FAILS LOUDLY rather than
-   * quietly doing nothing — a flag that silently no-ops is the same class of
-   * defect as a date that silently rolls forward.
+   * Persistence. Defaults to writing `gap-report.json` beside the log in `paths`
+   * — the standup's one well-known file. Injectable so the failure path (a write
+   * that throws must exit non-zero) is testable without breaking a disk.
    */
   writeReport?: ((report: GapReport) => Promise<string>) | undefined;
 }
@@ -207,13 +209,15 @@ export async function runGapReport(options: GapReportRunOptions): Promise<GapRep
   lines.push(`[gap-report] ${formatGapSummary(report)}`);
 
   if (args.write) {
-    if (options.writeReport === undefined) {
-      throw new Error(
-        "gap-report: --write is not available yet (persistence lands in #189). " +
-          "Re-run without --write to print the report.",
-      );
-    }
-    lines.push(`[gap-report] written: ${await options.writeReport(report)}`);
+    // The file lands beside the log in the store this run actually read, so a
+    // `NUMISMA_DATA_DIR` the caller honoured is honoured here too. A write that
+    // throws propagates: failing to PERSIST the report is failing to produce it,
+    // and #188's contract makes that a non-zero exit.
+    const write =
+      options.writeReport ??
+      ((written: GapReport) =>
+        writeGapReportFile(written, { path: gapReportPath(paths), now: options.now }));
+    lines.push(`[gap-report] written: ${await write(report)}`);
   }
 
   return { lines, report, exitCode: 0 };
