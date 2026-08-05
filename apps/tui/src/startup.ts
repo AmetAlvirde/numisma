@@ -14,6 +14,7 @@
 import type { FundReviewData } from "@numisma/engine";
 import { loadFoldedReview, type EventStorePaths } from "@numisma/event-store";
 import { ingestInbox, parseAsOfArg, type IngestReport } from "./event-store.js";
+import { formatGapCheckFailure } from "./gap-lines.js";
 
 /** What the renderer needs after the startup data path runs. */
 export interface StartupPlan {
@@ -31,6 +32,15 @@ export interface StartupDeps {
   emit: (line: string) => void;
   /** The inbox ingest. Defaults to the real {@link ingestInbox}. */
   ingest?: (paths: EventStorePaths) => Promise<IngestReport>;
+  /**
+   * The liveness lines — the job heartbeat and the lost days — when this entry
+   * point wants them. **OMITTED MEANS SILENT, AND THERE IS DELIBERATELY NO
+   * DEFAULT.** Only `pnpm dev` supplies it; `report`, `spine` and the openTUI smoke
+   * harness leave it out, so they never reach for the derivation at all. A default
+   * here would make every entry point speak, which is the difference between a
+   * startup channel you read and one you learn to scroll past.
+   */
+  livenessLines?: (() => Promise<string[]>) | undefined;
 }
 
 /**
@@ -72,6 +82,22 @@ export async function prepareStartup(
   const ingest = deps.ingest ?? ingestInbox;
   const report = await ingest(paths);
   deps.emit(formatIngestReport(report));
+  // AFTER the ingest report, deliberately: the ingest may have just appended the
+  // very events the gap report is about, so it must run against the log as it now
+  // stands. And guarded, because a liveness line must never be able to stop the
+  // dashboard from mounting — `loadGapLines` already catches its own failures; this
+  // is the seam refusing to trust that any injected adapter does.
+  if (deps.livenessLines !== undefined) {
+    let lines: string[];
+    try {
+      lines = await deps.livenessLines();
+    } catch (error) {
+      lines = [formatGapCheckFailure(error)];
+    }
+    for (const line of lines) {
+      deps.emit(line);
+    }
+  }
   const sourcePath = asOf ? `${paths.log} as-of ${asOf}` : paths.log;
   return {
     asOf,

@@ -270,6 +270,13 @@ export {
   priceStoreFileName,
 } from "./price-feed/inbox-merge.js";
 
+// Calendar-date arithmetic over the `asOf`-as-`YYYY-MM-DD`-string convention that
+// `tradingDayAsOf` above already owns. The ONE home: the web projection's as-of
+// module and the push glance builder both import from here rather than keeping
+// private copies (guarded by apps/web/src/calendar-contract.test.ts). Also
+// reachable browser-side via the pure `@numisma/engine/calendar` subpath.
+export { addDays, daysBetween } from "./calendar.js";
+
 // The ONE pure resolver for the durable ledger's data root, honoring the
 // `NUMISMA_DATA_DIR` env override with an absolute, homedir-derived accumulus
 // default. Shared by the tui event-store, the price-feed config, and the

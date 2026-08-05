@@ -37,33 +37,18 @@ export function asOfSortKey(asOf: string): number {
 }
 
 /**
- * The `YYYY-MM-DD` date `delta` days from `asOf`, read and written in UTC.
+ * `addDays` / `daysBetween` moved to `@numisma/engine`'s calendar module — the ONE
+ * home for this arithmetic, next to the `asOf` convention `tradingDayAsOf` owns.
+ * They were born here and the push glance builder had copied them privately; a
+ * package cannot import from an app, so a third consumer would have written a
+ * third copy. Re-exported so this module still reads as the projection's whole
+ * as-of vocabulary, and so the UTC-throughout rationale has exactly one place to
+ * live. Guarded by `apps/web/src/calendar-contract.test.ts`.
  *
- * UTC THROUGHOUT, deliberately. `new Date("2026-07-26")` parses as UTC midnight and
- * then renders in LOCAL time, which west of Greenwich lands on the previous day —
- * enough to call a Monday a Sunday. The push side makes the same choice for the same
- * reason (`push/glance.ts`).
+ * The subpath, not the engine root: `glance/verdict.ts` reaches this module from
+ * the BROWSER, and the root pulls `node:os`/`node:path` (data-dir) into its reach.
  */
-export function addDays(asOf: string, delta: number): string {
-  const date = new Date(`${asOf}T00:00:00Z`);
-  if (Number.isNaN(date.getTime())) {
-    throw new Error(`addDays: ${JSON.stringify(asOf)} is not a calendar date`);
-  }
-  date.setUTCDate(date.getUTCDate() + delta);
-  return date.toISOString().slice(0, 10);
-}
-
-/** Whole calendar days from `from` to `to`, in UTC. Negative when `to` precedes `from`. */
-export function daysBetween(from: string, to: string): number {
-  const start = Date.parse(`${from}T00:00:00Z`);
-  const end = Date.parse(`${to}T00:00:00Z`);
-  if (Number.isNaN(start) || Number.isNaN(end)) {
-    throw new Error(
-      `daysBetween: ${JSON.stringify(from)} → ${JSON.stringify(to)} is not a date range`,
-    );
-  }
-  return Math.round((end - start) / 86_400_000);
-}
+export { addDays, daysBetween } from "@numisma/engine/calendar";
 
 /** The UTC calendar date a wall clock is currently on. */
 export function calendarDateOf(now: Date): string {

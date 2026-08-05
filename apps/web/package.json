@@ -9,6 +9,7 @@
     "start": "node .output/server/index.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "push": "tsx src/push/push.ts",
+    "gap-report": "tsx src/push/gap-report.ts",
     "backfill": "tsx src/push/backfill.ts",
     "db:init": "tsx src/push/push.ts --init-only",
     "db:provision": "tsx src/projection/provision-projection.ts",
