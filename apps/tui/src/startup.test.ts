@@ -183,7 +183,7 @@ describe("prepareStartup — ingests, surfaces the report, and wires the fold lo
 
     await prepareStartup(paths, ["node", "app"], {
       emit: (line) => emitted.push(line),
-      gapLines: () => Promise.resolve(["Numisma: 2026-08-03 — NO MARKS. …"]),
+      livenessLines: () => Promise.resolve(["Numisma: 2026-08-03 — NO MARKS. …"]),
     });
 
     // After the ingest report, deliberately: the ingest may have just added the
@@ -201,15 +201,15 @@ describe("prepareStartup — ingests, surfaces the report, and wires the fold lo
     await prepareStartup(paths, ["node", "app"], {
       emit: (line) => emitted.push(line),
       // A clean report yields no lines at all — not an "all clear" line.
-      gapLines: () => Promise.resolve([]),
+      livenessLines: () => Promise.resolve([]),
     });
 
     expect(emitted).toEqual(["Numisma: 1 new transaction(s) ingested, 0 duplicate(s) skipped."]);
   });
 
-  it("SILENCE, HALF TWO: an entry point that supplies no gapLines never checks at all", async () => {
+  it("SILENCE, HALF TWO: an entry point that supplies no livenessLines never checks at all", async () => {
     // The half a "lost days print" test cannot catch. `report`, `spine` and the
-    // smoke harness omit `gapLines`, so startup must not reach for the derivation
+    // smoke harness omit `livenessLines`, so startup must not reach for the derivation
     // on its own — a default would make every entry point speak.
     const paths = await makeStore({ inbox: [openBtc()] });
     const emitted: string[] = [];
@@ -225,7 +225,7 @@ describe("prepareStartup — ingests, surfaces the report, and wires the fold lo
 
     const plan = await prepareStartup(paths, ["node", "app"], {
       emit: (line) => emitted.push(line),
-      gapLines: () => Promise.reject(new Error("derivation exploded")),
+      livenessLines: () => Promise.reject(new Error("derivation exploded")),
     });
 
     // Startup completes and the renderer still gets its plan.

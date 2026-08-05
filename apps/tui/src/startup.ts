@@ -33,14 +33,14 @@ export interface StartupDeps {
   /** The inbox ingest. Defaults to the real {@link ingestInbox}. */
   ingest?: (paths: EventStorePaths) => Promise<IngestReport>;
   /**
-   * The lost-day lines, when this entry point wants them. **OMITTED MEANS SILENT,
-   * AND THERE IS DELIBERATELY NO DEFAULT.** Only `pnpm dev` supplies it; `report`,
-   * `spine` and the openTUI smoke harness leave it out, so they never reach for the
-   * derivation at all. A default here would make every entry point speak, which is
-   * the difference between a startup channel you read and one you learn to scroll
-   * past.
+   * The liveness lines — the job heartbeat and the lost days — when this entry
+   * point wants them. **OMITTED MEANS SILENT, AND THERE IS DELIBERATELY NO
+   * DEFAULT.** Only `pnpm dev` supplies it; `report`, `spine` and the openTUI smoke
+   * harness leave it out, so they never reach for the derivation at all. A default
+   * here would make every entry point speak, which is the difference between a
+   * startup channel you read and one you learn to scroll past.
    */
-  gapLines?: (() => Promise<string[]>) | undefined;
+  livenessLines?: (() => Promise<string[]>) | undefined;
 }
 
 /**
@@ -87,10 +87,10 @@ export async function prepareStartup(
   // stands. And guarded, because a liveness line must never be able to stop the
   // dashboard from mounting — `loadGapLines` already catches its own failures; this
   // is the seam refusing to trust that any injected adapter does.
-  if (deps.gapLines !== undefined) {
+  if (deps.livenessLines !== undefined) {
     let lines: string[];
     try {
-      lines = await deps.gapLines();
+      lines = await deps.livenessLines();
     } catch (error) {
       lines = [formatGapCheckFailure(error)];
     }

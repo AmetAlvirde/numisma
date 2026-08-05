@@ -35,6 +35,10 @@ LOG_DIR="${NUMISMA_PRICEFEED_LOG_DIR:-$HOME/Library/Logs/numisma}"
 # asdf entry if you do not use asdf). The manual dry run passes without this only
 # because it inherits your interactive PATH.
 PATH_PREPEND="${NUMISMA_PATH_PREPEND:-$HOME/.asdf/shims:$HOME/Library/pnpm:/opt/homebrew/bin:/usr/local/bin}"
+# The durable data root. RESOLVED HERE, not at step 3 where it is used for the
+# commit, because the heartbeat trap below must know where to write BEFORE the
+# exit-127 checks — which are the very failures the heartbeat exists to record.
+DATA_DIR="${NUMISMA_DATA_DIR:-$HOME/Dev/accumulus/data}"
 # ----------------------------------------------------------------------------
 
 # Give the scheduled (non-login) job a deterministic PATH that can find pnpm. This
@@ -42,8 +46,50 @@ PATH_PREPEND="${NUMISMA_PATH_PREPEND:-$HOME/.asdf/shims:$HOME/Library/pnpm:/opt/
 # additional belt-and-suspenders (see the plist / docs/price-feed-ops.md).
 export PATH="$PATH_PREPEND:$PATH"
 
-mkdir -p "$LOG_DIR"
 STAMP="$(date +%Y-%m-%dT%H-%M-%S%z)"
+# A real ISO-8601 instant for the heartbeat (STAMP's dashed time is filename-safe,
+# not machine-parseable). UTC so the reader never has to guess a zone.
+STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+# How far the run got. MAINTAINED, not guessed: each step below advances it, so a
+# heartbeat can say WHERE a run died and not merely that it did.
+LAST_STEP="startup"
+HEARTBEAT_FILE="$DATA_DIR/job-heartbeat.json"
+
+# --- the heartbeat (#191) ---------------------------------------------------
+# THE ONE FACT THE DURABLE LOG CANNOT CONTAIN IS WHETHER THIS JOB RAN. The gap
+# report is a pure function of the log, deliberately — and the price of that purity
+# is exact: a run that fired and died leaves the same evidence as a machine that was
+# switched off, and a run that fetched cleanly then failed later leaves none at all.
+#
+# PURE BASH, ON PURPOSE. No node, no pnpm, no jq. The case that justifies the whole
+# design is exit 127 — `pnpm` or `node` unresolvable, in which NOTHING that needs
+# node can run — so the writer must have no dependency that could be the thing
+# that is missing. A `printf` into a file has none.
+#
+# It writes to a FILE, never to stdout: by the time this fires, stdout is a pipe to
+# a `tee` in a process substitution that may already be gone. And every command in
+# it is guarded, because a failure inside an EXIT trap under `set -e` would replace
+# the very exit code the heartbeat exists to record. `$?` is captured as the FIRST
+# act for the same reason — anything before it clobbers the status.
+#
+# It lands beside gap-report.json in the data dir, so the outcome travels with the
+# DATA rather than with the checkout. It is written after step 4's git checks have
+# already run, so it can never dirty the tree it just verified.
+write_heartbeat() {
+  HEARTBEAT_STATUS=$?
+  [[ -d "$DATA_DIR" ]] || return 0
+  HEARTBEAT_FINISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" || HEARTBEAT_FINISHED_AT="$STARTED_AT"
+  printf '{\n  "schemaVersion": 1,\n  "startedAt": "%s",\n  "finishedAt": "%s",\n  "exitCode": %d,\n  "lastStep": "%s"\n}\n' \
+    "$STARTED_AT" "$HEARTBEAT_FINISHED_AT" "$HEARTBEAT_STATUS" "$LAST_STEP" \
+    > "$HEARTBEAT_FILE" 2>/dev/null || true
+  return 0
+}
+# Installed BEFORE the log dir is even made, so every exit path below is covered —
+# including the two `exit 127`s, which happen before anything node-shaped exists.
+trap write_heartbeat EXIT
+# ----------------------------------------------------------------------------
+
+mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/price-feed-$STAMP.log"
 
 # Everything from here is tee'd to the per-run log AND the scheduler's stdout.
@@ -63,6 +109,7 @@ fi
 
 cd "$REPO_DIR"
 
+LAST_STEP="resolve-tools"
 # Fail LOUD if pnpm — or the node it drives — is still unresolvable. A clear, named
 # error beats dying as a bare exit 127 mid-run. This is exactly the scheduled-
 # environment PATH problem, so say so and point at the override.
@@ -86,6 +133,7 @@ fi
 # 1) Fetch + store + queue marks. Non-zero here = a provider failure OR a mark the
 #    spine would reject (the CLI's fetch-time pre-check). Either way, STOP: do not
 #    run spine on a run the operator has not looked at.
+LAST_STEP="prices-fetch"
 set +e
 pnpm prices:fetch
 FETCH_STATUS=$?
@@ -102,6 +150,7 @@ fi
 # 2) Clean fetch: land the day's marks through the unchanged spine ingest (the
 #    ±50% guard still owns the authoritative append). Its own non-zero exit is
 #    surfaced to the scheduler too.
+LAST_STEP="spine"
 echo "[$STAMP] prices:fetch clean — ingesting marks via pnpm spine"
 pnpm spine
 
@@ -117,7 +166,9 @@ pnpm spine
 #    (apps/tui/src/ingest-commit.ts derives ~/Dev/accumulus/data from os.homedir()
 #    when NUMISMA_DATA_DIR is unset), so this backstop AND the step-4 post-check
 #    always target the dir actually written to — never a no-op that leaves a failed
-#    capture uncommitted while the job stays green.
+#    capture uncommitted while the job stays green. It is now RESOLVED IN THE
+#    CONFIGURATION BLOCK at the top rather than here: the heartbeat trap needs it
+#    before the exit-127 checks, which run long before this step.
 #
 #    `git add -u` restages tracked modifications only, so a FIRST-TIME untracked
 #    source-of-truth file (e.g. an initial genesis.json) would slip past this
@@ -127,7 +178,7 @@ pnpm spine
 #    explicitly. head-digest.json is deliberately NOT added here — it may be intentionally ignored, and `git add` of an ignored
 #    path aborts under `set -e`. Each explicit add is guarded on file existence so a
 #    missing optional file doesn't trip `set -e`.
-DATA_DIR="${NUMISMA_DATA_DIR:-$HOME/Dev/accumulus/data}"
+LAST_STEP="commit"
 if ! git -C "$DATA_DIR" rev-parse --git-dir >/dev/null 2>&1; then
   echo "[$STAMP] WARNING: $DATA_DIR is not inside a git repo — skipping commit (durable log left uncommitted)."
 else
@@ -150,13 +201,21 @@ fi
 
 # 4) Post-check: assert the durable log actually landed. The 17-day silent miss
 #    (the in-process capture skipping every run, issue #132) was invisible because a
-#    launchd job's stderr goes to an UNREAD log — a "loud warning" reaches no one;
-#    only a FAILED job reaches the operator. So after the in-process capture AND the
+#    launchd job's stderr goes to an UNREAD log — a "loud warning" reaches no one.
+#    A FAILED JOB REACHES NO ONE EITHER. (An earlier version of this comment claimed
+#    it did. Measured against the live agent: launchd RECORDS the exit code and
+#    `launchctl print` will show it on request, but nothing is PUSHED — no
+#    notification, no badge, no mail. The `exit 1` below is only as loud as someone
+#    remembering to go and look, which is the same failure it was written to prevent.)
+#    That is why this run now also writes job-heartbeat.json (#191): the exit code
+#    becomes a breadcrumb the TUI reads on the next startup, which is what actually
+#    delivers it. So after the in-process capture AND the
 #    step-3 backstop have both run, verify the data-dir working tree is clean and
 #    turn the job RED if it is not. Split by ADR stance: the event log is the
 #    source-of-truth (STRICT — dirty ⇒ non-zero exit), head-digest.json is a forensic
 #    breadcrumb (LENIENT — warn only). Paths are relative to $DATA_DIR, which is the
 #    accumulus `data/` subdir holding the durable files directly.
+LAST_STEP="post-check"
 if git -C "$DATA_DIR" rev-parse --git-dir >/dev/null 2>&1; then
   # --ignored is REQUIRED: head-digest.json in the #132 shape is only-ignored (an
   # allowlist .gitignore keeps it out of history), and plain `git status --porcelain`
@@ -184,4 +243,5 @@ if git -C "$DATA_DIR" rev-parse --git-dir >/dev/null 2>&1; then
   echo "[$STAMP] post-check OK: durable log committed clean in $DATA_DIR."
 fi
 
+LAST_STEP="complete"
 echo "[$STAMP] price-feed daily run complete."

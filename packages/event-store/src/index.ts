@@ -27,6 +27,17 @@ export {
   type LostDay,
   type LostDayReason,
 } from "./gap-report.js";
+// The daily job's heartbeat (#191): the one fact the durable log cannot contain —
+// whether the job ran. Written by bash from an EXIT trap; read here.
+export {
+  HEARTBEAT_FILENAME,
+  HEARTBEAT_SCHEMA_VERSION,
+  formatHeartbeatWarning,
+  parseHeartbeat,
+  type JobHeartbeat,
+} from "./heartbeat.js";
+export { heartbeatPath, loadHeartbeat, loadHeartbeatLines } from "./heartbeat-io.js";
+
 export {
   GAP_REPORT_FILENAME,
   GAP_REPORT_SCHEMA_VERSION,
