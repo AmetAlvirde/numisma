@@ -60,6 +60,11 @@ export default defineConfig({
         // credential + console + exit-code wiring over `backfill-core.ts`, which
         // IS measured (backfill-core.test.ts drives the whole loop with no DB).
         "apps/web/src/push/backfill.ts",
+        // Same category again: the gap-report shell is argv + console + exit-code
+        // wiring over `gap-report-core.ts`, which IS measured — its argument
+        // validation, window bound and exit contract are unit-tested with an
+        // injected clock and a throwaway store, no database and no environment.
+        "apps/web/src/push/gap-report.ts",
         // Self-executing provisioning/auth CLI scripts (same category as
         // push.ts): top-level main().then(..., process.exit) over the tested
         // provision.ts builders / vendored SQL. No unit to assert as written;
