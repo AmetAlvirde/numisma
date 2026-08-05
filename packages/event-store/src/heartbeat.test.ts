@@ -250,6 +250,51 @@ describe("parseHeartbeat — over the writer's exact bytes", () => {
     });
   });
 
+  it("rejects a date-only finishedAt, which Date.parse would accept as UTC midnight", () => {
+    // `"2026-08-05"` parses; read through tradingDayAsOf in CDMX it lands on
+    // 2026-08-04, so a job that completed normally would be reported as not having
+    // completed since the day before. Unreadable is the honest answer, and the
+    // reader treats it exactly like an absent file.
+    expect(
+      parseHeartbeat(
+        heartbeatFileBody({
+          startedAt: "2026-08-04",
+          finishedAt: "2026-08-05",
+          exitCode: 0,
+          lastStep: "complete",
+        }),
+      ),
+    ).toBeUndefined();
+    // Nor a bare time, nor an instant with no zone at all.
+    expect(
+      parseHeartbeat(
+        heartbeatFileBody({
+          startedAt: "2026-08-04T23:00:00Z",
+          finishedAt: "2026-08-04T23:00:41",
+          exitCode: 0,
+          lastStep: "complete",
+        }),
+      ),
+    ).toBeUndefined();
+  });
+
+  it("accepts the offset and fractional-second forms an ISO instant may take", () => {
+    // The tightening is to the WRITTEN CONTRACT — an ISO instant — not to the one
+    // wrapper's exact bytes. A conforming writer must not be refused.
+    for (const finishedAt of ["2026-08-04T23:00:41.250Z", "2026-08-04T17:00:41-06:00"]) {
+      expect(
+        parseHeartbeat(
+          heartbeatFileBody({
+            startedAt: "2026-08-04T23:00:00Z",
+            finishedAt,
+            exitCode: 0,
+            lastStep: "complete",
+          }),
+        )?.finishedAt,
+      ).toBe(finishedAt);
+    }
+  });
+
   it("carries dates, a step name and an exit code — and nothing else", () => {
     // The privacy property, in the shape #189 established: an unknown key means a
     // field nobody classified, so the parse drops it rather than passing it on.

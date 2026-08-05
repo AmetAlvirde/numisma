@@ -84,8 +84,21 @@ export interface JobHeartbeat {
   lastStep: string;
 }
 
+/**
+ * An ISO INSTANT — a date AND a time AND a zone — not merely something `Date` will
+ * parse. The distinction is load-bearing: `Date.parse("2026-08-05")` succeeds as UTC
+ * midnight, and {@link formatHeartbeatWarning} then reads that through
+ * `tradingDayAsOf(…, CDMX)`, which credits it to the PREVIOUS day and emits a false
+ * "has not completed since" for a job that finished normally. The wrapper's `printf`
+ * cannot emit that shape, so the reach is a hand-edited or foreign-written file —
+ * the same case this module already reasons about for its future-dated trigger.
+ */
 function isIsoInstant(value: unknown): value is string {
-  return typeof value === "string" && !Number.isNaN(Date.parse(value));
+  return (
+    typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/.test(value) &&
+    !Number.isNaN(Date.parse(value))
+  );
 }
 
 /**
