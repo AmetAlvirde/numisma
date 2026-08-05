@@ -3,6 +3,7 @@ import { resolveEventStorePaths } from "@numisma/event-store";
 import { loadOrders, resolveOrdersPath } from "@numisma/preferences";
 import { loadAvailableCapital } from "./available-capital.js";
 import { prepareStartup, type StartupPlan } from "./startup.js";
+import { loadGapLines } from "./gap-lines.js";
 
 // PROTOTYPE (mvi 2026-06-29-portfolio-persistence): the real TUI surface now
 // renders the FOLD over the event log, not a single hand-edited snapshot. On
@@ -42,6 +43,11 @@ async function runStartup(): Promise<StartupPlan> {
   try {
     return await prepareStartup(paths, process.argv, {
       emit: (line) => process.stderr.write(`${line}\n`),
+      // THE ONLY ENTRY POINT THAT ASKS. `report`, `spine` and the openTUI smoke
+      // harness omit this, so they stay silent by construction rather than by a
+      // flag. Lost days land on the same pre-alternate-screen channel as the ingest
+      // report — the surface that reaches you without you going to look for it.
+      gapLines: () => loadGapLines(paths, { now: new Date() }),
     });
   } catch (error) {
     failStartup(error);

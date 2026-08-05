@@ -175,6 +175,67 @@ describe("prepareStartup — ingests, surfaces the report, and wires the fold lo
     expect(emitted).toEqual([]);
   });
 
+  // ── The gap lines, and the two halves of silence ──────────────────────────
+
+  it("prints the lost days after the ingest report, on the same channel", async () => {
+    const paths = await makeStore({ inbox: [openBtc()] });
+    const emitted: string[] = [];
+
+    await prepareStartup(paths, ["node", "app"], {
+      emit: (line) => emitted.push(line),
+      gapLines: () => Promise.resolve(["Numisma: 2026-08-03 — NO MARKS. …"]),
+    });
+
+    // After the ingest report, deliberately: the ingest may have just added the
+    // very events the report is about.
+    expect(emitted).toEqual([
+      "Numisma: 1 new transaction(s) ingested, 0 duplicate(s) skipped.",
+      "Numisma: 2026-08-03 — NO MARKS. …",
+    ]);
+  });
+
+  it("SILENCE, HALF ONE: a clean window adds nothing to the channel", async () => {
+    const paths = await makeStore({ inbox: [openBtc()] });
+    const emitted: string[] = [];
+
+    await prepareStartup(paths, ["node", "app"], {
+      emit: (line) => emitted.push(line),
+      // A clean report yields no lines at all — not an "all clear" line.
+      gapLines: () => Promise.resolve([]),
+    });
+
+    expect(emitted).toEqual(["Numisma: 1 new transaction(s) ingested, 0 duplicate(s) skipped."]);
+  });
+
+  it("SILENCE, HALF TWO: an entry point that supplies no gapLines never checks at all", async () => {
+    // The half a "lost days print" test cannot catch. `report`, `spine` and the
+    // smoke harness omit `gapLines`, so startup must not reach for the derivation
+    // on its own — a default would make every entry point speak.
+    const paths = await makeStore({ inbox: [openBtc()] });
+    const emitted: string[] = [];
+
+    await prepareStartup(paths, ["node", "app"], { emit: (line) => emitted.push(line) });
+
+    expect(emitted).toEqual(["Numisma: 1 new transaction(s) ingested, 0 duplicate(s) skipped."]);
+  });
+
+  it("does not let a gap-line failure take the dashboard down with it", async () => {
+    const paths = await makeStore({ inbox: [openBtc()] });
+    const emitted: string[] = [];
+
+    const plan = await prepareStartup(paths, ["node", "app"], {
+      emit: (line) => emitted.push(line),
+      gapLines: () => Promise.reject(new Error("derivation exploded")),
+    });
+
+    // Startup completes and the renderer still gets its plan.
+    expect(plan.sourcePath).toBe(paths.log);
+    expect(emitted).toEqual([
+      "Numisma: 1 new transaction(s) ingested, 0 duplicate(s) skipped.",
+      "Numisma: lost days were NOT checked (derivation exploded).",
+    ]);
+  });
+
   it("propagates a fail-loud ingest rejection without emitting a count", async () => {
     const paths = await makeStore({ inbox: [openBtc()] });
     const emitted: string[] = [];
