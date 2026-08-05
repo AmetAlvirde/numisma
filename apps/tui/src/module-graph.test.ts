@@ -177,18 +177,18 @@ describe("the TUI's module graph", () => {
     expect(GRAPH.unresolved).toEqual([]);
   });
 
-  it("ONLY `pnpm dev` asks for the gap lines — silence elsewhere is structural", () => {
+  it("ONLY `pnpm dev` asks for the liveness lines — silence elsewhere is structural", () => {
     // The behavioural half is in `startup.test.ts` (omitting `gapLines` emits
     // nothing). This is the other half: no OTHER entry point supplies it, so
     // `report`, `spine` and the smoke harness cannot start speaking by accident.
     const speaking = tuiSources()
-      .filter((file) => /\bgapLines\s*:/.test(readFileSync(file, "utf8")))
+      .filter((file) => /\blivenessLines\s*:/.test(readFileSync(file, "utf8")))
       .map((file) => relative(REPO_ROOT, file));
     expect(speaking).toEqual(["apps/tui/src/app.ts"]);
 
     // And the entry points that must stay quiet do not even reach the loader.
     for (const quiet of ["report.ts", "spine.ts", "spine-reset.ts", "smoke-startup-openTui.ts"]) {
-      expect(readFileSync(join(HERE, quiet), "utf8")).not.toMatch(/loadGapLines/);
+      expect(readFileSync(join(HERE, quiet), "utf8")).not.toMatch(/loadGapLines|loadLivenessLines/);
     }
   });
 
@@ -198,6 +198,8 @@ describe("the TUI's module graph", () => {
     const reached = [...GRAPH.files].map((file) => relative(REPO_ROOT, file));
     expect(reached).toContain("apps/tui/src/app.ts");
     expect(reached).toContain("apps/tui/src/gap-lines.ts");
+    expect(reached).toContain("apps/tui/src/liveness-lines.ts");
+    expect(reached).toContain("packages/event-store/src/heartbeat.ts");
     expect(reached).toContain("packages/event-store/src/gap-report-io.ts");
     expect(GRAPH.files.size).toBeGreaterThan(20);
   });
