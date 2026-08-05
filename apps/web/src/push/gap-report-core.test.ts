@@ -121,6 +121,17 @@ describe("parseGapReportArgs — refusing an input it cannot answer correctly", 
     expect(() => parseGapReportArgs(["--since", "--"])).toThrow(/--since expects a date/);
   });
 
+  it("rejects a repeated date flag rather than letting the last one win", () => {
+    // Same defect class as the cases above: last-wins produces a differently-scoped
+    // report that still looks right.
+    expect(() => parseGapReportArgs(["--since", "2026-07-03", "--since", "2026-07-10"])).toThrow(
+      /--since given twice \(2026-07-03 and 2026-07-10\)/,
+    );
+    expect(() => parseGapReportArgs(["--until", "2026-07-31", "--until", "2026-07-30"])).toThrow(
+      /--until given twice/,
+    );
+  });
+
   it("accepts the flags it documents, in any order", () => {
     expect(parseGapReportArgs([])).toEqual({ since: undefined, until: undefined, write: false });
     expect(parseGapReportArgs(["--write", "--since", "2026-07-03", "--until", "2026-07-31"])).toEqual({
@@ -146,6 +157,34 @@ describe("runGapReport — the window's bounds", () => {
       .toISOString()
       .slice(0, 10);
     const run = await runGapReport({ argv: ["--since", since], now: NOW, paths });
+    expect(run.exitCode).toBe(0);
+  });
+
+  it("refuses a --since that the ceiling clamp pulls the window behind", async () => {
+    // Found live: `pnpm gap-report -- --since 2026-08-05` printed
+    // "no lost days in 2026-08-05…2026-08-04 (0 day(s), 0 anchor(s) checked)" and
+    // exited 0. Each date is individually valid; the WINDOW is not. An all-clear
+    // that cannot be anything else is the failure mode that looks like success —
+    // and with --write it would overwrite the standup's gap-report.json with it.
+    const paths = await storeWith([mark(YESTERDAY, "cx-a")]);
+    await expect(
+      runGapReport({ argv: ["--since", TODAY_CDMX], now: NOW, paths }),
+    ).rejects.toThrow(/--since 2026-08-05 is after the effective ceiling 2026-08-04/);
+  });
+
+  it("refuses an explicitly inverted window too", async () => {
+    const paths = await storeWith([mark(YESTERDAY, "cx-a")]);
+    await expect(
+      runGapReport({ argv: ["--since", "2026-08-01", "--until", "2026-07-25"], now: NOW, paths }),
+    ).rejects.toThrow(/window is empty/);
+  });
+
+  it("does not refuse a single-day window, where since equals the ceiling", async () => {
+    // The guard is `>`, not `>=`: since === until is one real day, the narrowest
+    // report the command can produce, and it must stay reachable.
+    const paths = await storeWith([mark(YESTERDAY, "cx-a")]);
+    const run = await runGapReport({ argv: ["--since", YESTERDAY], now: NOW, paths });
+    expect(run.report.calendarDays).toBe(1);
     expect(run.exitCode).toBe(0);
   });
 

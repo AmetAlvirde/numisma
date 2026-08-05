@@ -138,6 +138,17 @@ export function parseGapReportArgs(argv: readonly string[]): GapReportArgs {
       throw new Error(`gap-report: ${dateFlag} expects a date (YYYY-MM-DD); ${got}.`);
     }
     const parsed = requireCalendarDate(dateFlag, value);
+    // A REPEATED flag is the same defect class as the three above: `--since A
+    // --since B` silently last-wins, and the report that comes back is scoped to a
+    // window the operator did not intend but cannot tell apart from the one they
+    // did. Refusing costs nothing; the alternative is a right-looking answer.
+    const existing = dateFlag === "--since" ? args.since : args.until;
+    if (existing !== undefined) {
+      throw new Error(
+        `gap-report: ${dateFlag} given twice (${existing} and ${parsed}). ` +
+          `Refusing rather than silently using the last one.`,
+      );
+    }
     if (dateFlag === "--since") {
       args.since = parsed;
     } else {
@@ -197,6 +208,24 @@ export async function runGapReport(options: GapReportRunOptions): Promise<GapRep
   // the derivation already clamped, so this reads the real window instead of
   // re-deriving — and re-deriving the clamp here is exactly how the two would
   // drift. The derivation is a linear walk; it is the PRINTING that must be bounded.
+  // DIRECTION BEFORE WIDTH. `--since 2026-08-05` is a real calendar date that the
+  // ceiling clamp then pulls `until` BEHIND, and the derivation's walk over an
+  // inverted window is empty by construction: zero days, zero lost, a confident
+  // all-clear — the failure mode that looks like success this whole command exists
+  // to refuse. With `--write` that all-clear overwrites the standup's file.
+  //
+  // It belongs to the COMMAND, not to `computeGapReport`: the derivation is a pure
+  // function whose empty-on-inverted result is deliberate and tested. Read here off
+  // the POST-CLAMP window, for the same reason the width check is.
+  if (report.since > report.until) {
+    throw new Error(
+      `gap-report: --since ${report.since} is after the effective ceiling ` +
+        `${report.until}, so the window is empty. An empty window reports no lost ` +
+        `days no matter what the log holds; refusing rather than printing an ` +
+        `all-clear nobody asked for.`,
+    );
+  }
+
   if (report.calendarDays > MAX_WINDOW_DAYS) {
     throw new Error(
       `gap-report: the window ${report.since}…${report.until} spans ` +
