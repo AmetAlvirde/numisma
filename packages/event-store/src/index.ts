@@ -27,4 +27,10 @@ export {
   type LostDay,
   type LostDayReason,
 } from "./gap-report.js";
-export { loadGapReport } from "./gap-report-io.js";
+export {
+  GAP_REPORT_FILENAME,
+  GAP_REPORT_SCHEMA_VERSION,
+  gapReportPath,
+  loadGapReport,
+  writeGapReportFile,
+} from "./gap-report-io.js";

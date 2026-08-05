@@ -11,11 +11,16 @@
  * The log fixtures are synthetic — invented instrument ids and round numbers,
  * written into a throwaway temp dir. No test here reads the real data store.
  */
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import type { PortfolioEvent } from "@numisma/engine";
-import { resolveEventStorePaths, type EventStorePaths } from "@numisma/event-store";
+import {
+  GAP_REPORT_SCHEMA_VERSION,
+  gapReportPath,
+  resolveEventStorePaths,
+  type EventStorePaths,
+} from "@numisma/event-store";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   MAX_WINDOW_DAYS,
@@ -234,13 +239,21 @@ describe("runGapReport — the exit contract", () => {
     expect(run.lines.at(-1)).toBe("[gap-report] written: /tmp/gap-report.json");
   });
 
-  it("throws on --write until a writer is wired, rather than silently not writing", async () => {
-    // Persistence is #189. Until then `--write` FAILS LOUDLY: a flag that
-    // quietly does nothing is the same class of defect as a rolled-forward date.
+  it("persists to the data dir by default, with no writer injected", async () => {
+    // #189 filled the seam: `--write` now writes `gap-report.json` beside the log
+    // and exits 0. No stub, no "not available yet".
     const paths = await storeWith([mark(YESTERDAY, "cx-a")]);
-    await expect(
-      runGapReport({ argv: ["--since", YESTERDAY, "--write"], now: NOW, paths }),
-    ).rejects.toThrow(/--write/);
+    const run = await runGapReport({
+      argv: ["--since", YESTERDAY, "--write"],
+      now: NOW,
+      paths,
+    });
+    expect(run.exitCode).toBe(0);
+    const written = gapReportPath(paths);
+    expect(run.lines.at(-1)).toBe(`[gap-report] written: ${written}`);
+    const body = JSON.parse(await readFile(written, "utf8")) as Record<string, unknown>;
+    expect(body.schemaVersion).toBe(GAP_REPORT_SCHEMA_VERSION);
+    expect(body.until).toBe(YESTERDAY);
   });
 });
 

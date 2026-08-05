@@ -6,7 +6,7 @@
  *   pnpm gap-report                          # print the report
  *   pnpm gap-report -- --since 2026-06-26    # override the calendar floor
  *   pnpm gap-report -- --until 2026-08-04    # override the ceiling
- *   pnpm gap-report -- --write               # …and persist it (#189)
+ *   pnpm gap-report -- --write               # …and write gap-report.json beside the log
  *
  * THE EXIT CONTRACT LIVES HERE, IN ONE PLACE. Everything that can go wrong —
  * a malformed flag, an out-of-bounds window, a derivation that threw, a `--write`
