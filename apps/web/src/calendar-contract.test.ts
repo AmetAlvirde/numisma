@@ -9,9 +9,15 @@
  * pair and `apps/web/src/push/glance.ts` held a private, undocumented `addDays`
  * with the validation dropped. A package cannot import from an app, so the next
  * consumer would have written a THIRD copy. The single home is
- * `packages/engine/src/calendar.ts`; this test fails the moment a private copy
- * reappears ANYWHERE in the repo, which is what makes "zero private copies
- * repo-wide" a fact rather than a claim.
+ * `packages/engine/src/calendar.ts`; this test sweeps every non-vendored source in
+ * the repo and fails the moment a second file DECLARES one of these two names.
+ *
+ * Its guarantee is NAME-SCOPED, and knowing that is what keeps it honest: it greps
+ * for `addDays` and `daysBetween` literally, so a re-implementation under another
+ * name is invisible to it. `packages/engine/src/price-feed/derive.ts`'s
+ * `calendarDaysBetween` is the live example — a duplicate of `daysBetween` that
+ * survived this sweep purely because of what it is called. Folding it in is its own
+ * change; what this file promises is that THESE TWO NAMES have one home.
  *
  * The UTC-throughout docstring is asserted too, because it is load-bearing: the
  * defect it names (`new Date("2026-07-26")` renders in LOCAL time and lands west
@@ -56,14 +62,20 @@ function typescriptSources(dir: string, found: string[] = []): string[] {
   return found;
 }
 
+// The repo walk and every read happen ONCE, hoisted for the same reason the three
+// sources below are: `declarersOf` is called per helper name, and re-walking 200-odd
+// files per name buys nothing.
+const SOURCES = typescriptSources(REPO_ROOT).map((file) => ({
+  file,
+  text: readFileSync(join(REPO_ROOT, file), "utf8"),
+}));
+
 /** Files that DECLARE a helper of this name (a `function` or a `const` arrow). */
 function declarersOf(name: string): string[] {
   const declaration = new RegExp(
     `(?:function\\s+${name}\\b|(?:const|let|var)\\s+${name}\\s*[:=][^=]*=>)`,
   );
-  return typescriptSources(REPO_ROOT).filter((file) =>
-    declaration.test(readFileSync(join(REPO_ROOT, file), "utf8")),
-  );
+  return SOURCES.filter(({ text }) => declaration.test(text)).map(({ file }) => file);
 }
 
 const asOfSource = readFileSync(join(REPO_ROOT, "apps/web/src/projection/as-of.ts"), "utf8");
