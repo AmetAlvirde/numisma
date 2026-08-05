@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./format": "./src/format.ts"
+    "./format": "./src/format.ts",
+    "./calendar": "./src/calendar.ts"
   },
   "types": "./src/index.ts",
   "scripts": {
