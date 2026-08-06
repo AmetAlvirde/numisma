@@ -243,5 +243,44 @@ if git -C "$DATA_DIR" rev-parse --git-dir >/dev/null 2>&1; then
   echo "[$STAMP] post-check OK: durable log committed clean in $DATA_DIR."
 fi
 
+# 5) Refresh the hosted projection. `backfill`, NOT `push`, and the difference is
+#    the whole reason this step can be unattended: `push` writes ONE row — the
+#    current fold's `asOf` — so a run that died yesterday leaves yesterday
+#    permanently missing from the dashboard. `backfill` enumerates the log's own
+#    anchored dates and upserts every one under `ON CONFLICT (fund_id, as_of) DO
+#    UPDATE`, so a missed day heals on the next fire. It is zero-argument by
+#    construction (it reads the dates off the log), which is what keeps a cron job
+#    from eventually writing the wrong date.
+#
+#    IT NEEDS `PROJECTION_WRITE_DATABASE_URL` AND WILL THROW IMMEDIATELY WITHOUT IT.
+#    That key comes from $ENV_FILE, sourced at the top — the same private,
+#    chmod-600, outside-the-repo file as the provider tokens. If it is absent the
+#    run goes red here (exit 1) rather than silently skipping, which is correct:
+#    the projection going stale is exactly the thing this step exists to prevent.
+#
+#    WHY THIS RUNS AFTER THE POST-CHECK, not before. This is a network call that
+#    can fail on its own terms. Placed earlier it would abort the run after step 3
+#    committed the log but BEFORE step 4 verified it landed — muddying the one
+#    check that guards real fund data with an unrelated database failure. The
+#    durable log is the source of truth; the projection is a derived read surface,
+#    so it is verified last and cannot pre-empt the log's own check.
+LAST_STEP="backfill"
+pnpm backfill
+
+# 6) Rewrite gap-report.json beside the durable log. Without this the file exists
+#    only from manual runs, so the standup's data source is a day stale every
+#    morning BY CONSTRUCTION — and stale precisely on the morning after a miss,
+#    the only morning it exists for. (The TUI channel derives the same report
+#    live and was never affected; this is the file half only.)
+#
+#    Needs no credential and no data-dir variable — it is a pure function of the
+#    log. It writes into $DATA_DIR, the accumulus tree step 3 just committed, but
+#    cannot dirty it: accumulus uses an allowlist .gitignore under which
+#    gap-report.json falls through to /data/* (ignored, untracked), and step 4's
+#    strict arm runs `git status --porcelain` WITHOUT `--ignored` over five named
+#    durable files, so the sidecar is invisible to it either way.
+LAST_STEP="gap-report"
+pnpm gap-report -- --write
+
 LAST_STEP="complete"
 echo "[$STAMP] price-feed daily run complete."
