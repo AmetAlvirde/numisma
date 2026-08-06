@@ -8,7 +8,8 @@
 export type { PriceFeedConfig, ProviderCredentials } from "./config.js";
 export { DEFAULT_CONFIG, readCredentialsFromEnv } from "./config.js";
 export { atomicWrite, type AtomicWriteIo } from "./atomic-write.js";
-export { fetchBinanceDailyClose, type ProviderObservation, type FetchOptions } from "./binance-provider.js";
+export { fetchBinanceDailyClose } from "./binance-provider.js";
+export type { ProviderObservation, FetchOptions } from "./provider.js";
 export { fetchTwelveDataDailyClose, type EquitiesFetchOptions } from "./twelvedata-provider.js";
 export { fetchBanxicoFix, type FixFetchOptions } from "./banxico-provider.js";
 export { upsertQuote } from "./price-store.js";
