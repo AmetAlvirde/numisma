@@ -20,6 +20,7 @@
 import { buildCompositionReport, formatCompositionReport } from "@numisma/engine";
 import { loadFoldedReview, resolveEventStorePaths } from "@numisma/event-store";
 import { ingestInbox, parseAsOfArg, parseMagnitudeThresholdArg } from "./event-store.js";
+import { plural } from "./plural.js";
 
 try {
   const paths = resolveEventStorePaths();
@@ -38,8 +39,8 @@ try {
       ? await ingestInbox(paths)
       : await ingestInbox(paths, { magnitudeThreshold });
   process.stdout.write(
-    `Success, ${ingest.newCount} new transaction${ingest.newCount === 1 ? "" : "s"} found, ` +
-      `${ingest.duplicateCount} duplicate${ingest.duplicateCount === 1 ? "" : "s"} skipped` +
+    `Success, ${plural(ingest.newCount, "new transaction")} found, ` +
+      `${plural(ingest.duplicateCount, "duplicate")} skipped` +
       (ingest.archivedTo ? ` (inbox archived to ${ingest.archivedTo})` : "") +
       "\n\n",
   );
