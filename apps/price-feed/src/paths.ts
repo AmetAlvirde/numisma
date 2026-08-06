@@ -26,14 +26,9 @@ export interface PriceFeedPaths {
 
 export function resolvePriceFeedPaths(dataDir: string): PriceFeedPaths {
   const base = resolve(dataDir);
-  // The spine owns genesis/log writes (R6): the pre-check never writes either
-  // file, it only READS them to rebuild the known world the ±50% guard judges a
-  // fetched mark against. That read does refresh the log's derived quarantine
-  // lane (`events.jsonl.quarantine`), which is shared with `pnpm spine` and the
-  // tui and is not the log. All three event-store locations come from the event
-  // store itself, so there is nothing left here to drift from what the spine and
-  // tui read; only `pricesDir` — which the event store has no equivalent for — is
-  // still assembled here, from the engine's own segment.
+  // Reading the log refreshes its derived `events.jsonl.quarantine` lane, which is
+  // shared with `pnpm spine` and the tui and is not the log itself (R6 holds).
+  // `pricesDir` is assembled here because the event store has no equivalent for it.
   const { genesis, log, inbox } = resolveEventStorePaths(base);
   return {
     pricesDir: join(base, PRICE_STORE_DIR_SEGMENT),
