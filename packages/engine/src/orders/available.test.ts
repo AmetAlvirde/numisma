@@ -342,7 +342,7 @@ describe("a rung the fold cannot place is surfaced, never silently dropped or mi
   it("reports a rung naming an unknown reserve as unmatched", () => {
     const { report } = capitalOf(ladder("reserve-that-does-not-exist", 1));
     expect(report.unmatched).toHaveLength(1);
-    expect(report.unmatched[0]?.reason).toBe("unknown-reserve");
+    expect(report.unmatched[0]?.reason).toBe("unfundable-reserve");
   });
 
   it("refuses to add a rung priced in another currency into a reserve's balance", () => {

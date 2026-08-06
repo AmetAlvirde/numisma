@@ -102,7 +102,16 @@ export type OrdersImportRejection =
    * way the leftover staleness points, not about the change itself.
    */
   | "changed-claim"
-  | "unknown-reserve"
+  /**
+   * A rung declares a reserve `fundableReserves` did not ADMIT — paper execution mode, an
+   * unsupported currency, a dangling account reference (#180). The reserve is usually
+   * right there in the operator's own fund file; what it lacks is the capacity to fund a
+   * live claim, so the token names FUNDABILITY and never existence (#180). Spelled
+   * identically to the engine's `UnmatchedReason` member on purpose: the two unions naming
+   * the same refusal must not diverge. `record-fill.ts`'s same-shaped rejection asks the
+   * OTHER question — see the docstring on its own member — and the two stay distinct.
+   */
+  | "unfundable-reserve"
   | "currency-mismatch"
   | "over-committed"
   /**
@@ -661,10 +670,10 @@ export async function importBitgetOpenOrders(
   // The selector dedupes by id, so a re-import does not double-count the same rung.
   const resting = pickRestingOrdersAsOf([...existingRecords, ...records]);
   const coverage = checkFundingCoverage(resting, await io.fundReview());
-  if (coverage.status === "unknown-reserve") {
+  if (coverage.status === "unfundable-reserve") {
     return reject(
       io,
-      "unknown-reserve",
+      "unfundable-reserve",
       `no such fundable reserve: ${coverage.fundingReserveIds.join(", ")}. A reserve the ` +
         `fold excluded — paper execution mode, an unsupported currency, a dangling ` +
         `account reference — cannot fund a live order either, and the available-capital ` +

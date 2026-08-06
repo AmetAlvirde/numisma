@@ -77,9 +77,10 @@ export interface ReserveCapital {
 }
 
 // `UnmatchedReason` and `UnmatchedRung` are RE-EXPORTED from `./attribution.js` (see the
-// import above) rather than declared here. They are the vocabulary of the placement
-// rule, and that rule is now shared with the import guard — two declarations of the same
-// two reasons is exactly the drift #172 was about.
+// import above) rather than declared here. They are the vocabulary of the ADMISSION rule
+// — `unfundable-reserve` says `fundableReserves` did not admit the declared reserve, not
+// that the id is unknown — and that rule is now shared with the import guard, so two
+// declarations of the same two reasons is exactly the drift #172 was about.
 
 export interface AvailableCapitalReport {
   /** One entry per LIVE reserve the canonical state admitted, in its order. */
