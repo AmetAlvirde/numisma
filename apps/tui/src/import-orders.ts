@@ -435,8 +435,14 @@ function renderUnattributedRefusal(
       : ``) +
     `\n` +
     `${sections.join("\n\n")}\n\n` +
-    `Reserve balances were NOT weighed: an unplaceable rung has no balance to compare\n` +
-    `against, so a coverage refusal may still follow once every rung above is placeable.\n`
+    // Wrapped at 72/71/19 rather than 80/83 (#202 review). Every other line this renderer
+    // emits sits inside 76, and these two were the only ones that did not — so on an
+    // 80-column terminal the one paragraph that admits what the operator has NOT been told
+    // was also the one paragraph that wrapped, which is the worst place to spend the
+    // reader's attention.
+    `Reserve balances were NOT weighed: an unplaceable rung has no balance to\n` +
+    `compare against, so a coverage refusal may still follow once every rung\n` +
+    `above is placeable.\n`
     // That trailing newline is the blank line before `reject()`'s "Nothing was written to
     // …" tail. Without it the tail reads as a continuation of the balances sentence —
     // invisible when the body was one paragraph, plainly wrong now that it is several.
