@@ -344,14 +344,14 @@ export interface FundingShortfall {
 
 /**
  * The two REFUSAL arms are, deliberately, the two `UnmatchedReason`s the report already
- * uses — same names, same meanings. A rung the report would list as `unknown-reserve`
- * refuses the import as `unknown-reserve`; likewise `currency-mismatch`. The parity is
+ * uses — same names, same meanings. A rung the report would list as `unfundable-reserve`
+ * refuses the import as `unfundable-reserve`; likewise `currency-mismatch`. The parity is
  * legible in the type rather than asserted in prose.
  */
 export type FundingCoverage =
   | { status: "ok" }
   | { status: "over-committed"; shortfalls: FundingShortfall[] }
-  | { status: "unknown-reserve"; fundingReserveIds: string[] }
+  | { status: "unfundable-reserve"; fundingReserveIds: string[] }
   | { status: "currency-mismatch"; rungs: CommittedRung[] };
 
 /**
@@ -429,11 +429,11 @@ export function checkFundingCoverage(
   // compared against — reading it as a zero balance would render the ladder as
   // "over-committed" on a typo, and summing it into a foreign-denominated balance would
   // produce the confidently wrong slack that #172 was about.
-  const unknown = unmatched.filter((entry) => entry.reason === "unknown-reserve");
-  if (unknown.length > 0) {
+  const unfundable = unmatched.filter((entry) => entry.reason === "unfundable-reserve");
+  if (unfundable.length > 0) {
     return {
-      status: "unknown-reserve",
-      fundingReserveIds: [...new Set(unknown.map((entry) => entry.rung.fundingReserveId))],
+      status: "unfundable-reserve",
+      fundingReserveIds: [...new Set(unfundable.map((entry) => entry.rung.fundingReserveId))],
     };
   }
   const mismatched = unmatched.filter((entry) => entry.reason === "currency-mismatch");

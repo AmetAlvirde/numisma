@@ -796,7 +796,7 @@ describe("`O1` — the over-commitment reject (testing decision 6)", () => {
   it("refuses a reserve the fold has never heard of, rather than reading it as zero", async () => {
     const { csvPath, io, ordersPath } = await harness({ answers: ["reserve-typo", "n"] });
     const outcome = await importBitgetOpenOrders({ csvPath, io });
-    expect(outcome).toMatchObject({ status: "rejected", reason: "unknown-reserve" });
+    expect(outcome).toMatchObject({ status: "rejected", reason: "unfundable-reserve" });
     expect(await readOrDefault(ordersPath, "<<absent>>")).toBe("<<absent>>");
   });
 });

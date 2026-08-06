@@ -121,15 +121,15 @@ describe("the guard and the report admit the SAME reserves (one admission policy
 
   it("both REFUSE a rung funded by a PAPER-mode reserve", () => {
     // Before the fix the guard said `ok` here — `data.reserves` carries the paper
-    // reserve — while the report listed the rung as `unknown-reserve` and encumbered
+    // reserve — while the report listed the rung as `unfundable-reserve` and encumbered
     // nothing. The import said yes and the rendered figure showed the capital as free.
     const { coverage, report } = bothSurfaces(ladder(PAPER_USD));
 
-    expect(coverage.status).toBe("unknown-reserve");
-    if (coverage.status !== "unknown-reserve") throw new Error("unreachable");
+    expect(coverage.status).toBe("unfundable-reserve");
+    if (coverage.status !== "unfundable-reserve") throw new Error("unreachable");
     expect(coverage.fundingReserveIds).toEqual([PAPER_USD]);
     expect(report.unmatched.map((entry) => entry.reason)).toEqual(
-      Array.from({ length: RUNG_COUNT }, () => "unknown-reserve"),
+      Array.from({ length: RUNG_COUNT }, () => "unfundable-reserve"),
     );
     expect(report.reserves.some((entry) => entry.reserveId === PAPER_USD)).toBe(false);
   });
@@ -137,11 +137,11 @@ describe("the guard and the report admit the SAME reserves (one admission policy
   it("both REFUSE a rung funded by an UNSUPPORTED-CURRENCY reserve", () => {
     const { coverage, report } = bothSurfaces(ladder(ODD_CURRENCY));
 
-    expect(coverage.status).toBe("unknown-reserve");
-    if (coverage.status !== "unknown-reserve") throw new Error("unreachable");
+    expect(coverage.status).toBe("unfundable-reserve");
+    if (coverage.status !== "unfundable-reserve") throw new Error("unreachable");
     expect(coverage.fundingReserveIds).toEqual([ODD_CURRENCY]);
     expect(report.unmatched.map((entry) => entry.reason)).toEqual(
-      Array.from({ length: RUNG_COUNT }, () => "unknown-reserve"),
+      Array.from({ length: RUNG_COUNT }, () => "unfundable-reserve"),
     );
   });
 });

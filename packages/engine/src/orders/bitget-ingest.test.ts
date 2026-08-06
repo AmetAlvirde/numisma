@@ -387,8 +387,8 @@ describe("checkFundingCoverage — `O1`, and slack >= 0", () => {
   it("rejects a declared reserve that does not exist, rather than reading it as zero", () => {
     const resting = restingFrom(csv(row()), "reserve-ghost");
     const coverage = checkFundingCoverage(resting, fundWith(1000));
-    expect(coverage.status).toBe("unknown-reserve");
-    if (coverage.status !== "unknown-reserve") return;
+    expect(coverage.status).toBe("unfundable-reserve");
+    if (coverage.status !== "unfundable-reserve") return;
     expect(coverage.fundingReserveIds).toEqual(["reserve-ghost"]);
   });
 });

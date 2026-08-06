@@ -110,6 +110,13 @@ export type RecordFillRejection =
   | "bad-quantity"
   | "impossible-verdict"
   | "verdict-contradicts-operator"
+  /**
+   * LITERAL, and deliberately not the engine's `unfundable-reserve` (#180). The lookup
+   * below goes straight at `folded.reserves`, so this fires only when the fold really does
+   * not have the id. The engine's token is a claim about ADMISSION — a reserve that exists
+   * and is plainly visible can still be unfundable. Two questions, two names; do not unify
+   * them.
+   */
   | "unknown-reserve"
   | "unknown-instrument"
   | "ambiguous-ladder-position"
@@ -575,8 +582,8 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
   // and the DEFAULT answer — `proposedFunding`, the two multiplied — is exactly
   // available-neutral BY CONSTRUCTION. The fill itself therefore cannot break the
   // `available ≥ 0` invariant no matter what shape the book is in, which is why this flow
-  // does NOT call `checkFundingCoverage`: that guard weighs the WHOLE book and returns on
-  // the first `unknown-reserve` anywhere in it (#179), so one stale `fundingReserveId` on
+  // does NOT call `checkFundingCoverage`: that guard weighs the WHOLE book and refuses it
+  // if ANY rung anywhere in it is unplaceable (#179), so one stale `fundingReserveId` on
   // an unrelated rung would refuse a fill that really happened at the venue. A fill is an
   // observed fact; the flow does not get to disbelieve it.
   //
