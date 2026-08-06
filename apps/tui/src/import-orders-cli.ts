@@ -50,7 +50,8 @@ if (!csvPath) {
       // that appends nothing. The flow is interactive, and the operator's lines (one per
       // qualification, each opening on its own gap and naming its own money direction)
       // are the real channel. If this import is ever automated or piped, the exit code
-      // becomes the only surface left and this branch must be revisited — that is #183.
+      // becomes the only surface left and this branch must be revisited — that is #203.
+      // (#183 DECIDED this and is closed; #203 is where the conditional work now lives.)
       process.exitCode = 0;
     }
   } catch (error) {

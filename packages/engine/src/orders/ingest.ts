@@ -436,7 +436,10 @@ export type FundingCoverage =
  * `unattributed` list to the whole report list, over all three arms. #183's conclusion
  * above is untouched by that; only these citations are.
  *
- * KNOWINGLY OPEN, tracked on #183 — A SKIPPED EXPORT ROW IS NEVER PERSISTED. `OrderRecord`
+ * KNOWINGLY OPEN, tracked on #203 — A SKIPPED EXPORT ROW IS NEVER PERSISTED. The gap was
+ * argued and accepted on #183, which is CLOSED because what it owed was a decision; the
+ * citations above are to that decision and stay pointed at it. This one is different: it
+ * names a cost still being paid, so it points at an OPEN issue. `OrderRecord`
  * is exactly three kinds — `orderPlaced`, `orderCancelled`, `orderFilled`
  * (`./records.ts:132`) — and `appendOrders` (`packages/preferences/src/orders.ts:244`)
  * writes only fresh `orderPlaced` rows. There is no record for "line N of the export
