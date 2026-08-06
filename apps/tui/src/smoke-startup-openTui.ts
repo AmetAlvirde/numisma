@@ -196,6 +196,11 @@ function openBtc() {
       lots: [{ quantity: 1, cost: 100, tier: "c1" }],
     },
     decision: DECISION,
+    // TOP-LEVEL on the event, not nested in `position` — `crossReferenceEvent`
+    // reads `event.funding.reserveId` / `.amount`. `cash-core` is the seed's only
+    // reserve, and it is USD like the position: a cross-currency funding leg is
+    // refused outright. 100 matches the lot (1 × 100), leaving `cash-core` at 900.
+    funding: { reserveId: "cash-core", amount: 100 },
   }
 }
 
