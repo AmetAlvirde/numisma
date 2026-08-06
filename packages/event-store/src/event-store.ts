@@ -21,6 +21,7 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import {
+  INBOX_PATH_SEGMENTS,
   foldEvents,
   parseEvent,
   parseFundReview,
@@ -71,7 +72,7 @@ export function resolveEventStorePaths(dataDir = resolveDataDirDefault()): Event
   return {
     genesis: join(base, "genesis.json"),
     log: join(base, "events.jsonl"),
-    inbox: join(base, "inbox", "transactions.json"),
+    inbox: join(base, ...INBOX_PATH_SEGMENTS),
     ingestedDir: join(base, "ingested"),
   };
 }
