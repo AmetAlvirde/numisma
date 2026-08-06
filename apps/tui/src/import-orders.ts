@@ -140,13 +140,19 @@ interface OrdersImportWrite {
    */
   alreadyKnown: number;
   /**
-   * The export rows this build could not read. EMPTY on `imported`, by construction —
-   * one of the TWO invariants that status now carries, the sibling being `restated`.
+   * The export rows this build could not read — NOT empty on `imported`, and the
+   * asymmetry with `restated` is deliberate rather than an oversight. A `not-resting` row
+   * was read COMPLETELY and the parser's finding about it is that nothing is still
+   * claimed, so it rides here and qualifies nothing (#184). What `imported` promises
+   * about this field is that none of its entries left a rung UNWEIGHED — that is
+   * `leavesRungUnweighed`'s question, not this array's length.
    */
   skips: BitgetRowSkip[];
   /**
    * The rungs skipped because the venue has restated their partial (#199). EMPTY on
-   * `imported`, by construction, exactly as `skips` is.
+   * `imported`, by construction — the one field whose own length decides the status,
+   * because every entry in it is a qualification and `skips` needs a predicate to say
+   * which of its entries are.
    *
    * A SECOND FIELD RATHER THAN A THIRD STATUS, and that is the load-bearing choice: an
    * export can carry an unreadable row AND a restated rung at once, and a sum type can
