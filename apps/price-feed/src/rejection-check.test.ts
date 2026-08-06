@@ -5,7 +5,7 @@
 // rule), so these tests exercise the exact gate `pnpm spine` enforces. No live
 // network and no live data files: an in-memory engine genesis fixture and a fresh
 // temp data dir.
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -16,6 +16,7 @@ import {
   type FundReviewData,
   type Quote,
 } from "@numisma/engine";
+import { quarantineLogPath } from "@numisma/event-store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   findMarkRejections,
@@ -247,6 +248,19 @@ describe("loadSpineReference + scanFetchedMarks — reads the real genesis/log o
     expect(scan.rejections).toEqual([]);
   });
 
+  it("names the missing genesis in an ENOENT Note rather than skipping silently", async () => {
+    // The payoff of routing the read through `loadGenesis`: an unseeded or damaged
+    // data dir is OPERATOR-VISIBLE. `skipped: true` alone is the old silence — the
+    // Note is what tells the operator WHICH file is missing and why. Matched on
+    // substance (the ENOENT condition + the file), not on the exact full message.
+    const scan = await scanFetchedMarks(runResult(BTC_LAST_CLOSE * 3), resolvePriceFeedPaths(dataDir));
+
+    expect(scan.skipped).toBe(true);
+    expect(scan.unavailableReason).toBeDefined();
+    expect(scan.unavailableReason).toMatch(/ENOENT|no such file/i);
+    expect(scan.unavailableReason).toMatch(/genesis\.json/);
+  });
+
   it("does not pre-check before the mark time (no marks emitted this run)", async () => {
     await writeGenesis();
     const preMarkResult: FetchRunResult = {
@@ -268,6 +282,65 @@ describe("loadSpineReference + scanFetchedMarks — reads the real genesis/log o
     expect(scan.skipped).toBe(true);
     expect(scan.rejections).toEqual([]);
     expect(scan.unavailableReason).toMatch(/not valid JSON/);
+  });
+
+  // The pre-check reads the operator's real data dir on every scheduled run, and
+  // that read has one deliberate write: the log's derived quarantine side lane. These
+  // three pin the whole side effect — the lane appears, the LOG never moves, and a
+  // stale lane is deleted when the log reads clean.
+  async function exists(filePath: string): Promise<boolean> {
+    try {
+      await access(filePath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  it("surfaces the corrupt line to the quarantine lane beside the log", async () => {
+    await writeGenesis();
+    const paths = resolvePriceFeedPaths(dataDir);
+    await writeFile(paths.log, "{ not json\n", "utf8");
+
+    await scanFetchedMarks(runResult(BTC_LAST_CLOSE * 3), paths);
+
+    const lane = await readFile(quarantineLogPath(paths.log), "utf8");
+    expect(lane).toMatch(/\{ not json/);
+    expect(lane).toMatch(/not valid JSON/);
+  });
+
+  it("never mutates the log itself while reading it (bytes identical before and after)", async () => {
+    await writeGenesis();
+    const paths = resolvePriceFeedPaths(dataDir);
+    // A corrupt line is the case where a "repair on read" would be most tempting.
+    await writeFile(paths.log, "{ not json\n", "utf8");
+    const before = await readFile(paths.log);
+
+    await scanFetchedMarks(runResult(BTC_LAST_CLOSE * 3), paths);
+
+    const after = await readFile(paths.log);
+    expect(after.equals(before)).toBe(true);
+  });
+
+  it("removes a stale quarantine lane when the log reads clean", async () => {
+    await writeGenesis();
+    const paths = resolvePriceFeedPaths(dataDir);
+    // A log that loads fully, plus a leftover lane from an earlier corrupt read.
+    await writeFile(
+      paths.log,
+      JSON.stringify(markFromQuote(quote("btc", 66_000))) + "\n",
+      "utf8",
+    );
+    const lanePath = quarantineLogPath(paths.log);
+    await writeFile(lanePath, '{"lineNumber":1,"line":"stale","reason":"not valid JSON"}\n', "utf8");
+    expect(await exists(lanePath)).toBe(true);
+
+    // This is the branch the unattended 18:00 run actually takes: the pre-check
+    // DELETES the operator's sidecar as a side effect of reading a healthy log.
+    const scan = await scanFetchedMarks(runResult(BTC_LAST_CLOSE * 1.05), paths);
+
+    expect(scan.skipped).toBe(false);
+    expect(await exists(lanePath)).toBe(false);
   });
 });
 
