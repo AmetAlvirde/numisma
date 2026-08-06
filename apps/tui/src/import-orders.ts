@@ -35,6 +35,7 @@ import {
   type UnmatchedRung,
 } from "@numisma/engine";
 import type { OrdersLoad } from "@numisma/preferences";
+import { plural } from "./plural.js";
 
 /** Everything this flow touches that is not a pure function, in one injectable bag. */
 export interface OrdersImportIo {
@@ -283,10 +284,6 @@ function reject(
   // be able to mistake a refusal for a quiet no-op.
   io.err(`REFUSED — ${message}\nNothing was written to ${io.ordersPath}.`);
   return { status: "rejected", reason, message };
-}
-
-function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
 /**
