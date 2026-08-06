@@ -56,6 +56,49 @@ describe("cash leg — Open debits the funding reserve, tiered by the lots' own 
     expect(tierQty(reserve, "c2")).toBe(400); // 500 - 100
     expect(data.positions.some((position) => position.id === "btc-pos")).toBe(true);
   });
+
+  it("takes `funding.amount` as authoritative when it diverges from Σ(quantity × cost)", () => {
+    // The case above has amount === Σ(quantity × cost) === 300, and so does every
+    // other `funding` fixture in the repo — which means nothing here would fail if
+    // `reserveDeltasForOpen` ignored its `amount` argument entirely and re-derived
+    // the total from the lots. `applyReserveDelta` documents `amount` as ALWAYS
+    // authoritative; this is the case that can tell the difference. Same two lots
+    // (c1 200 + c2 100 = 300 of cost basis), amount 330 — the extra 30 is real cash
+    // that left the reserve (fees, slippage, a partial fill priced up).
+    //
+    // AND IT MUST SPLIT, NOT LAND. The weighting is by native cost, 2:1 across
+    // c1:c2, so the 30 of excess is apportioned 20 / 10 — it does not fall on one
+    // Tier. That is the per-Tier assertion below, and it is the half of the
+    // contract a total-only check would miss.
+    const open: PortfolioEvent = {
+      id: "open-btc-divergent",
+      asOf: "2026-06-02",
+      type: "PositionOpened",
+      position: {
+        id: "btc-pos",
+        portfolioId: "core",
+        tempo: "Liquid",
+        executionMode: "live",
+        accountId: "venue",
+        instrumentId: "btc-usd",
+        direction: "long",
+        currency: "USD",
+        lots: [
+          { quantity: 1, cost: 200, tier: "c1" },
+          { quantity: 1, cost: 100, tier: "c2" },
+        ],
+      },
+      decision: DECISION,
+      funding: { reserveId: "tiered", amount: 330 },
+    };
+
+    const data = foldEvents(genesis(), [open]);
+    const reserve = reserveById(data, "tiered");
+
+    expect(reserve.amount).toBe(1170); // 1500 - 330, NOT 1500 - 300
+    expect(tierQty(reserve, "c1")).toBeCloseTo(780, 6); // 1000 - 220 (330 × 200/300)
+    expect(tierQty(reserve, "c2")).toBeCloseTo(390, 6); // 500 - 110 (330 × 100/300)
+  });
 });
 
 describe("cash leg — Close credits the settlement reserve, proceeds tiered proportionally", () => {
