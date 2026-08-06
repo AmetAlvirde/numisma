@@ -878,14 +878,20 @@ describe("`O1` — the over-commitment reject (testing decision 6)", () => {
     // (one declaration fix clears all of them), the mismatched one per rung.
     expect(refusal).toContain("      reserve-odd\n        rung-odd");
     expect(refusal).toContain("\n      reserve-paper\n");
-    expect(refusal).toContain("rung-mxn (USD) against reserve-mxn");
+    // Marker-agnostic here — the id sits on its own line and the mismatch is indented
+    // beneath it; the marked form is pinned exactly below.
+    expect(refusal).toMatch(
+      /\n {6}rung-mxn.*\n {8}quoted in USD, declared against reserve-mxn\n/,
+    );
     // PROVENANCE (#202 review). The count is the whole book's, so the two rungs that were
     // already in the sidecar are MARKED and the legend says what the mark means — without
     // it, the operator reconciles "4 rungs" against an export holding two of them and
     // cannot make it come out even.
     expect(refusal).toContain('rungs marked "on file"');
     expect(refusal).toContain("        rung-odd — on file");
-    expect(refusal).toContain("      rung-mxn (USD) against reserve-mxn — on file");
+    expect(refusal).toContain(
+      "      rung-mxn — on file\n        quoted in USD, declared against reserve-mxn",
+    );
     // This batch's own rungs carry NO marker: they are in the export just read.
     const exported = parseBitgetOpenOrdersCsv(await readFile(csvPath, "utf8"));
     expect(exported.status).toBe("ok");
