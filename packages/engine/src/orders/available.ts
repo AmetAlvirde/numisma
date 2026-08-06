@@ -77,9 +77,12 @@ export interface ReserveCapital {
 }
 
 // `UnmatchedReason` and `UnmatchedRung` are RE-EXPORTED from `./attribution.js` (see the
-// import above) rather than declared here. They are the vocabulary of the ADMISSION rule
-// — `unfundable-reserve` says `fundableReserves` did not admit the declared reserve, not
-// that the id is unknown — and that rule is now shared with the import guard, so two
+// import above) rather than declared here. They are the vocabulary of the PLACEMENT rule,
+// which is the pair's common ground: admission is only one of the two ways placement
+// fails. `unfundable-reserve` says `fundableReserves` did not admit the declared reserve,
+// not that the id is unknown; `currency-mismatch` is the other way, and that reserve WAS
+// admitted — live mode, supported currency, resolvable account — with only the rung's
+// quote currency disagreeing. That rule is now shared with the import guard, so two
 // declarations of the same two reasons is exactly the drift #172 was about.
 
 export interface AvailableCapitalReport {
