@@ -225,7 +225,7 @@ describe("loadSpineReference + scanFetchedMarks — reads the real genesis/log o
     const paths = resolvePriceFeedPaths(dataDir);
 
     const world = await loadSpineReference(paths);
-    expect(world?.reference).toBeDefined();
+    expect(world.reference).toBeDefined();
 
     const scan = await scanFetchedMarks(runResult(BTC_LAST_CLOSE * 3), paths);
     expect(scan.skipped).toBe(false);

@@ -1,10 +1,12 @@
 /**
- * Resolve the two on-disk locations the shell writes to, from the shared engine
- * path convention (so price-feed and tui agree without depending on each other):
- * the disposable price-store directory and the shared inbox write channel.
+ * Resolve the two on-disk locations the shell writes to: the disposable
+ * price-store directory and the shared inbox write channel. The event-store
+ * locations come from `@numisma/event-store` itself, the same extracted read path
+ * the tui consumes — so price-feed and tui agree by construction rather than by
+ * two copies of one convention.
  */
 import { join, resolve } from "node:path";
-import { INBOX_PATH_SEGMENTS, PRICE_STORE_DIR_SEGMENT } from "@numisma/engine";
+import { PRICE_STORE_DIR_SEGMENT } from "@numisma/engine";
 import { resolveEventStorePaths } from "@numisma/event-store";
 
 export interface PriceFeedPaths {
@@ -28,12 +30,14 @@ export function resolvePriceFeedPaths(dataDir: string): PriceFeedPaths {
   // file, it only READS them to rebuild the known world the ±50% guard judges a
   // fetched mark against. That read does refresh the log's derived quarantine
   // lane (`events.jsonl.quarantine`), which is shared with `pnpm spine` and the
-  // tui and is not the log. Both filenames come from the event store itself, so
-  // there is nothing left here to drift from what the spine and tui read.
-  const { genesis, log } = resolveEventStorePaths(base);
+  // tui and is not the log. All three event-store locations come from the event
+  // store itself, so there is nothing left here to drift from what the spine and
+  // tui read; only `pricesDir` — which the event store has no equivalent for — is
+  // still assembled here, from the engine's own segment.
+  const { genesis, log, inbox } = resolveEventStorePaths(base);
   return {
     pricesDir: join(base, PRICE_STORE_DIR_SEGMENT),
-    inbox: join(base, ...INBOX_PATH_SEGMENTS),
+    inbox,
     genesis,
     log,
   };
