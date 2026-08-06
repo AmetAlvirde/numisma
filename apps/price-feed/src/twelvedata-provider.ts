@@ -79,10 +79,18 @@ export async function fetchTwelveDataDailyCloses(
     );
   }
 
-  const symbols = entries.map((entry) => encodeURIComponent(entry.symbol)).join(",");
-  const url =
-    `${TWELVEDATA_TIME_SERIES}?symbol=${symbols}` +
-    `&interval=1day&outputsize=1&apikey=${encodeURIComponent(options.apiKey)}`;
+  // `encodeURIComponent` THROWS (`URIError`) on a lone surrogate, so building the
+  // URL is itself a failure channel: a malformed key or registry symbol must become
+  // an attributed result here, not a throw that escapes and aborts the whole run.
+  let url: string;
+  try {
+    const symbols = entries.map((entry) => encodeURIComponent(entry.symbol)).join(",");
+    url =
+      `${TWELVEDATA_TIME_SERIES}?symbol=${symbols}` +
+      `&interval=1day&outputsize=1&apikey=${encodeURIComponent(options.apiKey)}`;
+  } catch (error) {
+    return failAll(error instanceof Error ? error.message : String(error));
+  }
   const r = await fetchJson(url, {
     timeoutMs: options.timeoutMs,
     fetchImpl: options.fetchImpl,
