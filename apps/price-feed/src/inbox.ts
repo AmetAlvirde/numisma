@@ -8,8 +8,8 @@
  * The fetcher NEVER writes the event log (R6): it drops candidates in the inbox
  * and `pnpm spine` owns the guarded, validated append.
  */
-import { readFile } from "node:fs/promises";
 import { mergeInbox, type InboxRecord, type PriceMarkedEvent } from "@numisma/engine";
+import { readOptional } from "@numisma/event-store";
 import { atomicWrite } from "./atomic-write.js";
 
 /**
@@ -34,21 +34,29 @@ export async function emitMarksToInbox(
   return addedCount;
 }
 
-async function readInbox(inboxPath: string): Promise<InboxRecord[]> {
-  let raw: string;
-  try {
-    raw = await readFile(inboxPath, "utf8");
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return [];
-    }
-    throw error;
+/**
+ * Read the inbox as the JSON array of transactions `pnpm spine` expects, mirroring
+ * `ingestInbox`'s parse. A missing inbox is the normal case (ENOENT → `[]`, via the
+ * event-store package's `readOptional` — the one ENOENT-tolerant reader); invalid
+ * JSON or a non-array throws.
+ *
+ * The single reader for BOTH price-feed callers: this module's own merge and the
+ * fetch-time rejection pre-check (`rejection-check.ts`), which folds the pending
+ * inbox into the spine's reference. It yields `unknown[]` because the inbox holds
+ * records of any shape; every event-shape decision belongs to the engine's
+ * `parseEvent` afterwards.
+ *
+ * The parse sits OUTSIDE the ENOENT tolerance but WITH its own attribution: a
+ * corrupt or empty inbox file would otherwise throw a bare `SyntaxError: Unexpected
+ * token…` with no path — and, worse, only AFTER fresh marks were already written to
+ * the store, skipping the per-symbol report. Fail loudly naming the file, matching
+ * the tui's event-store phrasing (`Inbox … is not valid JSON.`).
+ */
+export async function readInboxArray(inboxPath: string): Promise<unknown[]> {
+  const raw = await readOptional(inboxPath);
+  if (raw === undefined) {
+    return [];
   }
-  // Parse OUTSIDE the ENOENT guard above but WITH its own attribution: a corrupt
-  // or empty inbox file would otherwise throw a bare `SyntaxError: Unexpected
-  // token…` with no path — and, worse, only AFTER fresh marks were already
-  // written to the store, skipping the per-symbol report. Fail loudly naming the
-  // file, matching the tui's event-store phrasing (`Inbox … is not valid JSON.`).
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -58,5 +66,10 @@ async function readInbox(inboxPath: string): Promise<InboxRecord[]> {
   if (!Array.isArray(parsed)) {
     throw new Error(`Inbox ${inboxPath} must be a JSON array of transactions.`);
   }
-  return parsed as InboxRecord[];
+  return parsed;
+}
+
+/** The inbox as the `{ id }`-bearing records `mergeInbox` merges on. */
+async function readInbox(inboxPath: string): Promise<InboxRecord[]> {
+  return (await readInboxArray(inboxPath)) as InboxRecord[];
 }
