@@ -343,14 +343,112 @@ describe("one id identifies exactly ONE claim (#174)", () => {
     expect(await readFile(first.ordersPath, "utf8")).toBe(before);
   });
 
-  it("REFUSES a rung whose observed partial moved, rather than silently keeping the old one", async () => {
-    const partial = ladder(partlyFilledRung("100", "10", "6", "2020-01-01 10:00:00"));
-    const first = await harness({ csv: partial });
+});
+
+/**
+ * #199 — a rung the venue filled FURTHER costs ITS OWN rung, not the whole batch.
+ *
+ * The id is synthesized from the submission stamp, so a rung that fills between two
+ * exports returns under the same id with a larger `filled_quantity`. Refusing the batch
+ * over it blocked every unrelated new rung in every later export from that venue,
+ * indefinitely, with no local remedy: nothing is written on a refusal, so recording the
+ * fill repaired `committed`/`available` and left the placement line — and therefore the
+ * refusal — exactly where it was. The only exits were at the venue.
+ *
+ * The split is safe for THIS FIELD AND NO OTHER, and the direction is the whole argument.
+ * A stale partial makes the file believe more is still resting than is, so the guard
+ * reads the encumbrance HIGH — it can refuse a fundable batch and can never admit an
+ * unfundable one. A stale `quantity` points the other way and stays a total refusal.
+ */
+describe("a restated partial is skipped per rung (#199)", () => {
+  /** The rung of the traced case: 10 units at 100, the venue showing 6 already filled. */
+  const PARTLY_FILLED = partlyFilledRung("100", "10", "6", "2020-01-01 10:00:00");
+
+  it("SKIPS the restated rung and imports every other rung in the export", async () => {
+    const first = await harness({
+      csv: ladder(PARTLY_FILLED),
+      reserves: [{ id: "reserve-a", amount: 5000 }],
+    });
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    // The same rung filled further at the venue, PLUS an unrelated new rung — which is
+    // the whole point: that new rung used to be blocked with no local way to clear it.
+    await writeFile(
+      first.csvPath,
+      ladder(
+        partlyFilledRung("100", "10", "8", "2020-01-01 10:00:00"),
+        rung("90", "1", "2020-01-01 11:00:00"),
+      ),
+      "utf8",
+    );
+    const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    expect(outcome).not.toMatchObject({ status: "rejected" });
+    // The new rung landed. The restated one is NOT `alreadyKnown` — it is not a
+    // re-sighting, and calling it one is the silence #174 named.
+    expect(outcome).toMatchObject({ appended: 1, alreadyKnown: 0 });
+    expect(await idsOnDisk(first.ordersPath)).toHaveLength(2);
+  });
+
+  it("leaves the restated rung's line on file at the OLDER, more conservative partial", async () => {
+    const first = await harness({
+      csv: ladder(PARTLY_FILLED),
+      reserves: [{ id: "reserve-a", amount: 5000 }],
+    });
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    await writeFile(
+      first.csvPath,
+      ladder(partlyFilledRung("100", "10", "8", "2020-01-01 10:00:00")),
+      "utf8",
+    );
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    // `orders.jsonl` is append-only and a second placement line is ignored by the
+    // selector, so the skip cannot repair the figure — and must not pretend to. The rung
+    // still claims 4 (10 less the partial of 6 on file), NOT the 2 the venue now shows.
+    const remaining = await remainingOnDisk(first.ordersPath);
+    expect(remaining).toEqual([4]);
+    expect(remaining).not.toContain(2);
+    // No second placement line was appended for it, and no fill was synthesized.
+    const load = await loadOrders(first.ordersPath, { warn: () => {} });
+    if (load.status !== "loaded") throw new Error("expected a loaded sidecar");
+    expect(load.records).toHaveLength(1);
+  });
+
+  it("REFUSES the batch when the same claim also changed its quantity", async () => {
+    const first = await harness({
+      csv: ladder(PARTLY_FILLED),
+      reserves: [{ id: "reserve-a", amount: 5000 }],
+    });
     await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
     const before = await readFile(first.ordersPath, "utf8");
 
-    const filledMore = ladder(partlyFilledRung("100", "10", "8", "2020-01-01 10:00:00"));
-    await writeFile(first.csvPath, filledMore, "utf8");
+    // Both fields at once. `quantity` is not in the synthesized id, so this is the SAME
+    // claim — and carrying the safe difference does not make the dangerous one safe.
+    await writeFile(
+      first.csvPath,
+      ladder(partlyFilledRung("100", "12", "8", "2020-01-01 10:00:00")),
+      "utf8",
+    );
+    const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    expect(outcome).toMatchObject({ status: "rejected", reason: "changed-claim" });
+    expect(await readFile(first.ordersPath, "utf8")).toBe(before);
+  });
+
+  it("REFUSES a partial that moved DOWN — the direction is what makes the skip safe", async () => {
+    const first = await harness({ csv: ladder(PARTLY_FILLED) });
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+    const before = await readFile(first.ordersPath, "utf8");
+
+    // A fill does not un-fill. Whatever this is, the file would be left UNDER-stating
+    // the encumbrance — the permissive direction — so it gets #174's total refusal.
+    await writeFile(
+      first.csvPath,
+      ladder(partlyFilledRung("100", "10", "4", "2020-01-01 10:00:00")),
+      "utf8",
+    );
     const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
 
     expect(outcome).toMatchObject({ status: "rejected", reason: "changed-claim" });

@@ -25,6 +25,7 @@ import {
   pickRestingOrdersAsOf,
   type BitgetOpenOrder,
   type BitgetRowSkip,
+  type ChangedClaim,
   type MergedOrderClaim,
   type OrderPlacedRecord,
   type OrderRecord,
@@ -65,7 +66,8 @@ export type OrdersImportRejection =
   | "unreadable-sidecar-lines"
   | "no-reserve-declared"
   /**
-   * A row names a claim already on file but says something DIFFERENT about it (#174).
+   * A row names a claim already on file but states a different `quantity` for it (#174)
+   * — the venue amended the size, or the file and the venue disagree about it.
    *
    * Refused rather than recorded, and this is the ONE place the "proceed with the
    * arithmetic" reasoning behind the within-batch merge does not extend. Recording a
@@ -73,6 +75,16 @@ export type OrdersImportRejection =
    * by `pickRestingOrdersAsOf` by construction (that guard is what makes re-import
    * idempotent), and an observation verb is a later design that must not be pre-empted
    * by one invented here, in an append-only file, to get past this import.
+   *
+   * NARROWED TO `quantity` BY #199, and the DIRECTION is the whole reason. Refusing the
+   * batch never repaired the stale line — nothing is written on a refusal — so what the
+   * refusal actually protects is the funding guard's reading of the OTHER rungs, which
+   * it weighs off the file. A `quantity` the file states LOW leaves the guard more
+   * PERMISSIVE than reality, so it could admit a batch the reserve cannot fund: #174's
+   * own hazard, and it stays a total refusal. A partial the venue has since restated
+   * leaves the file stating the encumbrance HIGH, which is the safe direction, and is
+   * handled per rung instead — see {@link RestatedPartial}. The argument for refusing
+   * here is about which way the leftover staleness points, not about the change itself.
    */
   | "changed-claim"
   | "unknown-reserve"
@@ -85,15 +97,46 @@ export type OrdersImportRejection =
    */
   | "write-failed";
 
+/**
+ * A rung the venue has filled FURTHER since its placement line was written (#199).
+ *
+ * The id is synthesized from the SUBMISSION stamp, so a rung that fills between two
+ * exports comes back under the same id carrying a larger `filled_quantity`. That is not
+ * an amendment and not a re-sighting — it is the ordinary life of a resting ladder — but
+ * the placement line cannot be rewritten (`orders.jsonl` is append-only and a second
+ * placement line is ignored by the selector), so the file keeps the OLDER partial until
+ * the observation verb #181 designs exists.
+ *
+ * Carrying the stale figure is safe in a way an amended `quantity` is not, and only
+ * because of the direction: the file believes MORE is still resting than actually is, so
+ * the encumbrance it computes is too large. That can refuse a batch the reserve could
+ * have funded; it can never admit one it cannot. So the rung is skipped and the rest of
+ * the export imports normally, rather than the whole batch being refused over it.
+ *
+ * A partial moving DOWN is excluded deliberately — it points the other way, and it is a
+ * venue contradiction besides (a fill does not un-fill). It stays a `changed-claim`.
+ */
+export interface RestatedPartial {
+  id: string;
+  /** The partial the placement line on file records. */
+  known: number;
+  /** The larger partial the venue's export now shows. */
+  observed: number;
+}
+
 /** What an import that WROTE reports, in the two shapes it can honestly take. */
 interface OrdersImportWrite {
   /** Lines actually appended. ZERO when the same export is imported twice. */
   appended: number;
   /**
    * Rungs already in the sidecar under the same synthesized id AND saying the same
-   * thing about it — the id components plus `quantity` and the observed partial. A
-   * row that differs never reaches this count; it refuses the batch as
-   * `changed-claim` (#174).
+   * thing about it — the id components plus `quantity` and the observed partial.
+   *
+   * A row that differs NEVER reaches this count, in either of the two ways it can
+   * differ: a changed `quantity` refuses the whole batch as `changed-claim` (#174), and
+   * a restated partial is skipped per rung and reported in `restated` (#199). Calling
+   * either one "already known" is the silence #174 named — it reports "nothing to do"
+   * about a rung the file now describes wrongly.
    */
   alreadyKnown: number;
   /** The export rows this build could not read. EMPTY on `imported`, by construction. */
@@ -157,6 +200,49 @@ function describe(order: BitgetOpenOrder): string {
 function isAffirmative(answer: string): boolean {
   const normalized = answer.trim().toLowerCase();
   return normalized === "y" || normalized === "yes";
+}
+
+/**
+ * Split the claims that disagree with the file into the ones that refuse the batch and
+ * the ones that cost their own rung — THE POLICY DECISION of #199, and the reason it
+ * lives here rather than in `import-orders-cli.ts`.
+ *
+ * Deciding which class a difference falls in is admission policy, and the wiring says so
+ * in its own words after #172 bit it for exactly this: "Admission is the engine's policy,
+ * not this wiring's." A CLI that filtered these out would be re-deciding, from the shell,
+ * something the flow is supposed to own.
+ *
+ * `quantity` decides whenever it is present. A claim differing in BOTH fields at once is
+ * refused, not skipped: the two point opposite ways, and a claim carrying the dangerous
+ * one is not made safe by also carrying the safe one.
+ */
+function partitionChangedClaims(changed: readonly ChangedClaim[]): {
+  amended: ChangedClaim[];
+  restated: RestatedPartial[];
+} {
+  const amended: ChangedClaim[] = [];
+  const restated: RestatedPartial[] = [];
+
+  for (const claim of changed) {
+    if (claim.differences.some((difference) => difference.field === "quantity")) {
+      amended.push(claim);
+      continue;
+    }
+    const fill = claim.differences.find(
+      (difference) => difference.field === "observedFilledQuantity",
+    );
+    // Unreachable today: `detectChangedClaims` never emits an empty `differences`, and
+    // those two are its only fields. Guarded rather than asserted so that a THIRD field
+    // added there — the descriptors its own KNOWN LIMIT contemplates persisting — lands
+    // in the REFUSAL class by default instead of silently becoming a per-rung skip.
+    if (fill === undefined || fill.observed < fill.known) {
+      amended.push(claim);
+      continue;
+    }
+    restated.push({ id: claim.id, known: fill.known, observed: fill.observed });
+  }
+
+  return { amended, restated };
 }
 
 /**
@@ -269,8 +355,9 @@ export async function importBitgetOpenOrders(
     ),
     orders,
   );
-  if (changed.length > 0) {
-    const detail = changed
+  const { amended, restated } = partitionChangedClaims(changed);
+  if (amended.length > 0) {
+    const detail = amended
       .map(
         (claim) =>
           `${claim.id} (` +
@@ -283,20 +370,29 @@ export async function importBitgetOpenOrders(
     return reject(
       io,
       "changed-claim",
-      `${csvPath} re-states a claim already on file with different terms — ${detail}. An id ` +
+      `${csvPath} re-states a claim already on file with a different SIZE — ${detail}. An id ` +
         `identifies exactly one claim, and this build has no verb for "the claim changed": a ` +
         `second placement line would be ignored by the selector, and calling this row ALREADY ` +
-        `KNOWN would leave the wrong size committed. Cancel the rung at the venue and record ` +
+        `KNOWN would leave the wrong size committed — under-stating it, so the guard would ` +
+        `admit a batch the reserve cannot fund. Cancel the rung at the venue and record ` +
         `the cancellation, or re-place it at a different price so it arrives as a new claim`,
     );
   }
 
-  const declaration = await declareFunding(io, orders);
+  // THE PER-RUNG SKIP (#199). The restated rung is dropped from THIS batch and its line
+  // on file is left exactly as it was — so the guard below still weighs it, at the older
+  // and LARGER remainder, which is the conservative reading. Everything after this point
+  // sees `admitted`: the rung is not prompted for, not built into a record, and not
+  // counted as `alreadyKnown`, because it is not a re-sighting.
+  const restatedIds = new Set(restated.map((claim) => claim.id));
+  const admitted = orders.filter((order) => !restatedIds.has(order.id));
+
+  const declaration = await declareFunding(io, admitted);
   if (declaration === undefined) {
     return reject(io, "no-reserve-declared", "no funding reserve was declared for this batch");
   }
 
-  const records = buildOrderPlacedRecords(orders, declaration);
+  const records = buildOrderPlacedRecords(admitted, declaration);
 
   // `O1`. Coverage is checked over the WHOLE resting book — what is already on file plus
   // this batch — because a reserve funds every claim against it, not one import's slice.
