@@ -25,14 +25,6 @@ export interface PriceFeedConfig extends MarkClock {
    * together. A stalled provider still cannot hang a scheduled run (R4); bounded
    * retry/backoff is deferred (a missed run is harmless under the idempotent
    * deterministic id).
-   *
-   * Sized well above the observed request so the budget is never the binding
-   * constraint on a congested link: an abort here is not one symbol's failure but a
-   * WHOLE DAY'S. Twelve Data maps a request-level failure onto every entry in the
-   * batch, so one slow body loses all 8 equities in that chunk, `prices:fetch` exits
-   * 1, and the wrapper halts before `pnpm spine` — no marks land at all that day. The
-   * stall case this bounds is a provider that never finishes, and 30s catches that
-   * just as surely as 10s did.
    */
   requestTimeoutMs: number;
   /**
