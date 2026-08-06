@@ -14,7 +14,7 @@ Everything here is machine-local. Nothing secret or trade-derived enters the rep
 
 | File | Role |
 | --- | --- |
-| `ops/price-feed/run-daily-fetch.sh` | Wrapper the scheduler calls. Sets a PATH that can find `pnpm`, sources tokens, runs `pnpm prices:fetch`; on a clean fetch: (2) `pnpm spine` then (3) an auto-commit of any new data-repo changes scoped to `$NUMISMA_DATA_DIR` — idempotent if no new marks, never pushes — then (4) a post-check that **fails the job** if the durable event log is still uncommitted (lenient warn for the `head-digest.json` breadcrumb). Preserves the non-zero exit code so the scheduler notices a failure or rejection. |
+| `ops/price-feed/run-daily-fetch.sh` | Wrapper the scheduler calls. Sets a PATH that can find `pnpm`, sources tokens, runs `pnpm prices:fetch`; on a clean fetch: (2) `pnpm spine` then (3) an auto-commit of any new data-repo changes scoped to `$NUMISMA_DATA_DIR` — idempotent if no new marks, never pushes — then (4) a post-check that **fails the job** if the durable event log is still uncommitted (lenient warn for the `head-digest.json` breadcrumb). Only once the log is verified does it touch anything derived: (5) `pnpm backfill` to refresh the hosted projection and (6) `pnpm gap-report -- --write` to rewrite `gap-report.json` beside the log. Preserves the non-zero exit code so the scheduler notices a failure or rejection. |
 | `ops/price-feed/com.numisma.pricefeed.daily.plist` | launchd definition firing the wrapper at 18:00 local (the default mark time), **every day** (see "Why the schedule fires 7 days/week" below). |
 
 Both files are templates: replace `__REPO_DIR__` / `__HOME__` before installing.
@@ -34,6 +34,25 @@ Both files are templates: replace `__REPO_DIR__` / `__HOME__` before installing.
   #   TWELVEDATA_API_KEY=...   # Twelve Data free key, US equities
   #   BANXICO_TOKEN=...        # Banxico SIE free token, USD/MXN FIX series SF43718
   ```
+
+- **The projection write credential lives here too, and it is not like the other
+  two.** Step 5's `pnpm backfill` throws immediately without
+  `PROJECTION_WRITE_DATABASE_URL`, so the scheduled run needs it in this same file:
+
+  ```sh
+  #   PROJECTION_WRITE_DATABASE_URL=postgres://numisma_push:…  # ADR-007 writer cred
+  ```
+
+  It is the **same value** as `apps/web/.env.push.local` (the hand-run push's
+  source, `docs/hosted-cutover-runbook.md` step 8), duplicated rather than sourced
+  as a second file so the wrapper keeps exactly one `source` line. **Say the
+  consequence plainly: this file now holds a database WRITE credential alongside
+  two read-only market-data keys, so "the blast radius is someone reading public
+  prices on your quota" below no longer covers all of it.** The `numisma_push`
+  role holds SELECT/INSERT/UPDATE and **no DELETE** (`docs/projection-provisioning.md`),
+  so the worst case is a corrupted derived read surface that a `pnpm backfill` from
+  the durable log rebuilds — the event log itself is out of its reach. Rotate it
+  through the projection provisioning path, not the provider dashboards.
 
   The wrapper `source`s it if present. If a key is absent, only that provider's
   instruments fail (loud, per-symbol) — crypto still runs keyless. The file is never
@@ -59,12 +78,23 @@ skip the pause.)
 
 ### Why plaintext-at-rest is the right posture here (and when to upgrade)
 
-These are **free, read-only, revocable market-data keys** — not exchange/trading
-keys. They carry no write access, move no money, and expose no PII. The blast
-radius of a leak is "someone reads public prices on your quota until you
-regenerate the key." Against that thin threat, a `chmod 600` file outside the repo
-is proportionate, and it keeps the hands-off 18:00 launchd run dead-simple: no
-interactive keychain/vault unlock that could block a scheduled, non-login job.
+Two of the three are **free, read-only, revocable market-data keys** — not
+exchange/trading keys. They carry no write access, move no money, and expose no
+PII. The blast radius of a leak is "someone reads public prices on your quota
+until you regenerate the key."
+
+The third, `PROJECTION_WRITE_DATABASE_URL`, **does** carry write access, and the
+posture holds anyway rather than by omission: the `numisma_push` role can
+SELECT/INSERT/UPDATE the projection and **cannot DELETE**, the projection is a
+**derived** read surface, and the durable event log it derives from lives in a
+different place under a different credential the role does not have. So a leak
+buys an attacker the ability to corrupt a dashboard that `pnpm backfill` rebuilds
+from the log — not to touch the source of truth, and not to move money. That is a
+real step up from "reads public prices," and still short of the trigger below.
+
+Against that threat, a `chmod 600` file outside the repo is proportionate, and it
+keeps the hands-off 18:00 launchd run dead-simple: no interactive keychain/vault
+unlock that could block a scheduled, non-login job.
 
 **Your real defense is fast revocation, not encryption-at-rest.** If a key ever
 leaks (committed by mistake, copied into a shared backup, pasted somewhere):
@@ -75,13 +105,19 @@ leaks (committed by mistake, copied into a shared backup, pasted somewhere):
   (email signup flow) and replace `BANXICO_TOKEN`. The old token stops working
   once reissued.
 - **Binance:** nothing to revoke — the daily fetch uses keyless public REST.
+- **Projection writer:** not a dashboard rotation — change the `numisma_push`
+  role's password at the database and update **both** copies
+  (`~/.config/numisma/price-feed.env` and `apps/web/.env.push.local`). Two copies
+  is the price of the single `source` line; a rotation that updates only one
+  leaves either the hand-run push or the 18:00 job failing.
 
 After rotating, re-run the manual dry run to confirm the new credential works.
 
 **Upgrade the posture (to macOS Keychain or 1Password/Bitwarden CLI) only when a
 real trigger appears** — do not pre-build it:
 
-- a **write-capable or trading** key enters the picture (real money at risk), or
+- a key that **moves money or writes the durable log** enters the picture (the
+  projection writer is write-capable but does neither — see above), or
 - a **second machine or operator** needs the same secret, or
 - a **hosted surface** ships (then use the platform's secret store / Vercel env,
   not a machine-local file at all).
@@ -226,6 +262,25 @@ Confirm, in order:
    `head-digest.json` warns but does not fail the run (it is a forensic breadcrumb,
    not the source of truth); the warning uses `git status --ignored` so it fires even
    when the breadcrumb is only-ignored-and-present, the actual #132 shape.
+7. **Backfill (step 5):** the log reads `[backfill] N anchor(s) upserted: <first>
+   … <last>`, one line per anchored date. `[backfill] failed:
+   PROJECTION_WRITE_DATABASE_URL is not set` means the key is missing from the env
+   file — the run goes red here, deliberately, rather than leaving the dashboard to
+   rot quietly. Note the exit is non-zero but the durable log is already committed
+   and verified: this failure costs a stale projection, never fund data.
+8. **Gap report (step 6):** the run ends with the report's own lines and
+   `gap-report.json` in the data dir carries a `generatedAt` from **this** run.
+   Before this step existed the file was written only by hand, so it was a day
+   stale every morning — and stale precisely on the morning after a miss, the one
+   morning anybody reads it.
+
+**The failure mode these two steps create, and who catches it.** Fetch succeeds,
+`backfill` fails: the durable log is clean and committed, the projection is stale,
+and the gap report is **structurally silent** — it derives purely over the log,
+and the log is fine. Nothing in the data says anything is wrong. Only
+`job-heartbeat.json` sees it, carrying `exitCode` non-zero and
+`lastStep: "backfill"`, which the TUI surfaces on its next startup (#191). That
+dependency is why these steps could not be added before the heartbeat shipped.
 
 ### Dry-run record
 
