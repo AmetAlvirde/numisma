@@ -18,6 +18,7 @@ import {
   parseFundReview,
   pickRestingOrdersAsOf,
   type FundReviewData,
+  type OrderRecord,
 } from "@numisma/engine";
 import { afterEach, describe, expect, it } from "vitest";
 import { importBitgetOpenOrders, type OrdersImportIo } from "./import-orders.js";
@@ -97,6 +98,25 @@ function ladder(...rows: string[]): string {
   return [HEADER, ...rows, ""].join("\n");
 }
 
+/**
+ * One resting rung written STRAIGHT to the sidecar, under a chosen id and funding
+ * reserve — the only way to build a book whose rungs name DIFFERENT reserves, since the
+ * import prompts for one declaration per batch. Synthetic throughout (`O7`).
+ */
+function seededRung(id: string, at: string, fundingReserveId: string): OrderRecord {
+  return {
+    id,
+    observedAt: at.replace(" ", "T"),
+    kind: "orderPlaced",
+    currency: "USD",
+    symbol: "XYZ/USDT",
+    side: "buy",
+    price: 100,
+    quantity: 0.1,
+    fundingReserveId,
+  };
+}
+
 /** A two-rung synthetic ladder: 0.1 @ 1000 and 0.1 @ 900, committing 190 in total. */
 const TWO_RUNG_LADDER = ladder(
   rung("1000", "0.1", "2020-01-01 10:00:00"),
@@ -127,24 +147,40 @@ interface HarnessOptions {
    * and derives its own reserve set from it (#172). A harness can no longer hand the
    * guard a reserve list the rendered report would reject.
    */
-  reserves?: { id: string; amount: number }[];
+  reserves?: SyntheticReserve[];
 }
 
-/** A minimal folded fund carrying the given LIVE, USD reserves. Round fakes only (`O7`). */
-function syntheticFund(reserves: { id: string; amount: number }[]): FundReviewData {
+/**
+ * One reserve of the synthetic fund. LIVE and USD unless the case is specifically about a
+ * reserve the fold will REFUSE to admit — `executionMode: "paper"`, an unsupported
+ * `currency`, or a `currency` the rungs are not quoted in.
+ */
+interface SyntheticReserve {
+  id: string;
+  amount: number;
+  executionMode?: string;
+  currency?: string;
+  accountId?: string;
+}
+
+/** A minimal folded fund carrying the given reserves. Round fakes only (`O7`). */
+function syntheticFund(reserves: SyntheticReserve[]): FundReviewData {
   const parsed = parseFundReview({
     fund: { id: "synthetic-fund", name: "Synthetic Fund", baseCurrency: "USD" },
     review: { asOf: "2026-01-31", usdMxn: 20 },
     portfolios: [{ id: "core", name: "Core" }],
-    accounts: [{ id: "venue-usd", name: "Synthetic Venue", platform: "BITGET", currency: "USD" }],
+    accounts: [
+      { id: "venue-usd", name: "Synthetic Venue", platform: "BITGET", currency: "USD" },
+      { id: "venue-mxn", name: "Other Venue", platform: "XTB", currency: "MXN" },
+    ],
     instruments: [{ id: "test-usd", name: "Test Asset", symbol: "XYZ", currency: "USD" }],
     reserves: reserves.map((reserve) => ({
       id: reserve.id,
       portfolioId: "core",
       tempo: "Capital",
-      executionMode: "live",
-      accountId: "venue-usd",
-      currency: "USD",
+      executionMode: reserve.executionMode ?? "live",
+      accountId: reserve.accountId ?? "venue-usd",
+      currency: reserve.currency ?? "USD",
       amount: reserve.amount,
     })),
     positions: [],
@@ -796,8 +832,105 @@ describe("`O1` — the over-commitment reject (testing decision 6)", () => {
   it("refuses a reserve the fold has never heard of, rather than reading it as zero", async () => {
     const { csvPath, io, ordersPath } = await harness({ answers: ["reserve-typo", "n"] });
     const outcome = await importBitgetOpenOrders({ csvPath, io });
-    expect(outcome).toMatchObject({ status: "rejected", reason: "unknown-reserve" });
+    expect(outcome).toMatchObject({ status: "rejected", reason: "unattributed" });
     expect(await readOrDefault(ordersPath, "<<absent>>")).toBe("<<absent>>");
+  });
+
+  it("names EVERY reason the book cannot be placed, in ONE refusal", async () => {
+    // THE MESSAGE IS THE DELIVERABLE (#179). A book wrong in BOTH attribution ways used
+    // to report whichever class the guard filtered for first, so the operator fixed it,
+    // re-ran the whole import — declaration prompt included — and was refused again for a
+    // fault already computed on the first pass.
+    //
+    // The batch itself declares ONE reserve, so the mixed book is built the way the guard
+    // actually sees one: rungs ALREADY ON FILE against two other unplaceable reserves,
+    // plus this batch's two against a paper one. `reserve-odd` is unfundable for a second
+    // reason (unsupported currency) so the section has two reserves to dedup to, and
+    // `reserve-mxn` is live and admitted but holds a currency these USD rungs are not
+    // quoted in — the other class entirely.
+    const { csvPath, io, ordersPath, errors } = await harness({
+      answers: ["reserve-paper", "n"],
+      reserves: [
+        { id: "reserve-paper", amount: 1000, executionMode: "paper" },
+        { id: "reserve-odd", amount: 1000, currency: "EUR" },
+        { id: "reserve-mxn", amount: 1000, currency: "MXN", accountId: "venue-mxn" },
+      ],
+    });
+    await appendOrders(ordersPath, [
+      seededRung("rung-odd", "2020-01-01 09:00:00", "reserve-odd"),
+      seededRung("rung-mxn", "2020-01-01 09:00:01", "reserve-mxn"),
+    ]);
+
+    const outcome = await importBitgetOpenOrders({ csvPath, io });
+    expect(outcome).toMatchObject({ status: "rejected", reason: "unattributed" });
+
+    const refusal = errors.join("\n");
+    // BOTH sections, both labels, and the counts with the RIGHT plurals — `2 reserves`
+    // and `3 rungs` against a bare `1 rung`, pinned here rather than left to the
+    // renderer's luck.
+    expect(refusal).toContain("REFUSED — 4 rungs cannot be placed against a fundable reserve.");
+    expect(refusal).toContain("unfundable reserve — 2 reserves, 3 rungs");
+    expect(refusal).toContain("currency mismatch — 1 rung");
+    // Each class's advice, distinct and never concatenated.
+    expect(refusal).toContain("The fold excluded these reserves");
+    expect(refusal).toContain("Cross-currency funding is not supported");
+    // Every unplaceable rung is NAMED — the unfundable ones grouped under their reserve
+    // (one declaration fix clears all of them), the mismatched one per rung.
+    expect(refusal).toContain("      reserve-odd\n        rung-odd");
+    expect(refusal).toContain("\n      reserve-paper\n");
+    // Marker-agnostic here — the id sits on its own line and the mismatch is indented
+    // beneath it; the marked form is pinned exactly below.
+    expect(refusal).toMatch(
+      /\n {6}rung-mxn.*\n {8}quoted in USD, declared against reserve-mxn\n/,
+    );
+    // PROVENANCE (#202 review). The count is the whole book's, so the two rungs that were
+    // already in the sidecar are MARKED and the legend says what the mark means — without
+    // it, the operator reconciles "4 rungs" against an export holding two of them and
+    // cannot make it come out even.
+    expect(refusal).toContain('rungs marked "on file"');
+    expect(refusal).toContain("        rung-odd — on file");
+    expect(refusal).toContain(
+      "      rung-mxn — on file\n        quoted in USD, declared against reserve-mxn",
+    );
+    // This batch's own rungs carry NO marker: they are in the export just read.
+    const exported = parseBitgetOpenOrdersCsv(await readFile(csvPath, "utf8"));
+    expect(exported.status).toBe("ok");
+    if (exported.status !== "ok") return;
+    const batchRungIds = exported.orders.map((order) => order.id);
+    expect(batchRungIds).toHaveLength(2);
+    for (const id of batchRungIds) {
+      expect(refusal).toContain(`        ${id}\n`);
+      expect(refusal).not.toContain(`${id} — on file`);
+    }
+    // NOTHING written: the file still carries exactly the two rungs seeded above.
+    expect(await idsOnDisk(ordersPath)).toEqual(["rung-odd", "rung-mxn"]);
+    // The honest cost of batching, and not droppable: `over-committed` never ran, so the
+    // operator has NOT been told everything, and one sentence says so.
+    expect(refusal).toContain(
+      "Reserve balances were NOT weighed: an unplaceable rung has no balance to\n" +
+        "compare against, so a coverage refusal may still follow once every rung\n" +
+        "above is placeable.",
+    );
+    // A blank line before `reject()`'s tail, so it does not read as a continuation of the
+    // balances sentence.
+    expect(refusal).toContain(`placeable.\n\nNothing was written to ${ordersPath}.`);
+  });
+
+  it("renders ONE section when only one class is present", async () => {
+    // Each section is absent when its class is: the homogeneous case does not pay for the
+    // batching, and the singular counts are exercised here rather than the plural ones.
+    const { csvPath, io, errors } = await harness({
+      csv: ladder(rung("1000", "0.1", "2020-01-01 10:00:00")),
+      answers: ["reserve-paper", "n"],
+      reserves: [{ id: "reserve-paper", amount: 1000, executionMode: "paper" }],
+    });
+    await importBitgetOpenOrders({ csvPath, io });
+
+    const refusal = errors.join("\n");
+    expect(refusal).toContain("REFUSED — 1 rung cannot be placed against a fundable reserve.");
+    expect(refusal).toContain("unfundable reserve — 1 reserve, 1 rung");
+    expect(refusal).toContain("The fold excluded this reserve");
+    expect(refusal).not.toContain("currency mismatch");
   });
 });
 
