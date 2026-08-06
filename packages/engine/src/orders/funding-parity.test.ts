@@ -125,9 +125,11 @@ describe("the guard and the report admit the SAME reserves (one admission policy
     // nothing. The import said yes and the rendered figure showed the capital as free.
     const { coverage, report } = bothSurfaces(ladder(PAPER_USD));
 
-    expect(coverage.status).toBe("unfundable-reserve");
-    if (coverage.status !== "unfundable-reserve") throw new Error("unreachable");
-    expect(coverage.fundingReserveIds).toEqual([PAPER_USD]);
+    expect(coverage.status).toBe("unattributed");
+    if (coverage.status !== "unattributed") throw new Error("unreachable");
+    expect(coverage.unmatched.map((entry) => entry.rung.fundingReserveId)).toEqual(
+      Array.from({ length: RUNG_COUNT }, () => PAPER_USD),
+    );
     expect(report.unmatched.map((entry) => entry.reason)).toEqual(
       Array.from({ length: RUNG_COUNT }, () => "unfundable-reserve"),
     );
@@ -137,12 +139,35 @@ describe("the guard and the report admit the SAME reserves (one admission policy
   it("both REFUSE a rung funded by an UNSUPPORTED-CURRENCY reserve", () => {
     const { coverage, report } = bothSurfaces(ladder(ODD_CURRENCY));
 
-    expect(coverage.status).toBe("unfundable-reserve");
-    if (coverage.status !== "unfundable-reserve") throw new Error("unreachable");
-    expect(coverage.fundingReserveIds).toEqual([ODD_CURRENCY]);
+    expect(coverage.status).toBe("unattributed");
+    if (coverage.status !== "unattributed") throw new Error("unreachable");
+    expect(coverage.unmatched.map((entry) => entry.rung.fundingReserveId)).toEqual(
+      Array.from({ length: RUNG_COUNT }, () => ODD_CURRENCY),
+    );
     expect(report.unmatched.map((entry) => entry.reason)).toEqual(
       Array.from({ length: RUNG_COUNT }, () => "unfundable-reserve"),
     );
+  });
+
+  it("names BOTH failure classes when the book is wrong in both ways", () => {
+    // #179's explicit AC, and the case the four hand-picked ones above could not reach:
+    // a book carrying a PAPER-mode ladder AND a cross-currency ladder. The guard used to
+    // filter for one class, return on it, and throw the other away — so the operator
+    // fixed the reserve declaration, re-ran the whole import including its prompts, and
+    // was refused a second time for a fault that was already computed on the first pass.
+    const { coverage, report } = bothSurfaces([...ladder(PAPER_USD), ...ladder(LIVE_MXN, "USD")]);
+
+    expect(coverage.status).toBe("unattributed");
+    if (coverage.status !== "unattributed") throw new Error("unreachable");
+    // `RUNG_COUNT` of EACH reason, and the list is INTERLEAVED rather than blocked by
+    // class — the two ladders share a stamp series, so `pickRestingOrdersAsOf` alternates
+    // them. That is the shape worth locking: the old guard filtered by reason, so it
+    // could not have seen past the first block even if one existed.
+    const reasons = coverage.unmatched.map((entry) => entry.reason);
+    expect(reasons.filter((reason) => reason === "unfundable-reserve")).toHaveLength(RUNG_COUNT);
+    expect(reasons.filter((reason) => reason === "currency-mismatch")).toHaveLength(RUNG_COUNT);
+    // And the report says exactly the same thing about exactly the same rungs.
+    expect(coverage.unmatched).toEqual(report.unmatched);
   });
 });
 
@@ -154,9 +179,12 @@ describe("the guard and the report treat CURRENCY the same way", () => {
     // accepted — while the report refused the identical rung as `currency-mismatch`.
     const { coverage, report } = bothSurfaces(ladder(LIVE_MXN, "USD"));
 
-    expect(coverage.status).toBe("currency-mismatch");
-    if (coverage.status !== "currency-mismatch") throw new Error("unreachable");
-    expect(coverage.rungs.map((rung) => rung.fundingReserveId)).toEqual(
+    expect(coverage.status).toBe("unattributed");
+    if (coverage.status !== "unattributed") throw new Error("unreachable");
+    expect(coverage.unmatched.map((entry) => entry.reason)).toEqual(
+      Array.from({ length: RUNG_COUNT }, () => "currency-mismatch"),
+    );
+    expect(coverage.unmatched.map((entry) => entry.rung.fundingReserveId)).toEqual(
       Array.from({ length: RUNG_COUNT }, () => LIVE_MXN),
     );
     expect(report.unmatched.map((entry) => entry.reason)).toEqual(
@@ -190,11 +218,29 @@ describe("no verdict the guard accepts leaves the report with an unplaceable run
     // and a refused import must be refused for the reason the report gives.
     for (const reserveId of [LIVE_USD, PAPER_USD, ODD_CURRENCY, LIVE_MXN]) {
       const { coverage, report } = bothSurfaces(ladder(reserveId));
-      if (coverage.status === "ok") {
-        expect(report.unmatched).toEqual([]);
+      if (coverage.status === "unattributed") {
+        // WHAT THIS PINS IS FORWARDING WITHOUT NARROWING — not agreement between two
+        // implementations, and it must not be read as though it were. Both sides now
+        // return the SAME array from the SAME `attributeRungs` call, so `toEqual` here is
+        // close to tautological as a comparison of two independent derivations: there is
+        // only one derivation left. That is the point of #172's shape, not a weakness of
+        // it — but it does mean this assertion earns its keep somewhere else.
+        //
+        // Where it earns it: NARROWING is the defect, and narrowing is what this catches.
+        // The guard used to filter `unmatched` by reason, return on the first non-empty
+        // filter, and dedup one class down to a set of reserve ids — so the two surfaces
+        // named different rungs while both were "derived from attribution". The likeliest
+        // future regression is someone re-adding a dedup HERE, in the engine, "for
+        // rendering convenience". The rendering does dedup, per reserve, and that is
+        // correct — at the import boundary, where the remedy is. Do it in
+        // `checkFundingCoverage` and this line fails, which is the whole intent.
+        expect(coverage.unmatched).toEqual(report.unmatched);
       } else {
-        expect(report.unmatched.length).toBeGreaterThan(0);
-        expect(coverage.status).toBe(report.unmatched[0]?.reason);
+        // `ok` AND `over-committed` both mean attribution succeeded — the report places
+        // everything. The old form asserted against `report.unmatched[0]?.reason`, the
+        // FIRST entry only, and said nothing at all about `over-committed`; this is total
+        // over all three arms.
+        expect(report.unmatched).toEqual([]);
       }
     }
   });
