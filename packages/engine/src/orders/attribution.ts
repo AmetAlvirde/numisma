@@ -53,7 +53,7 @@ export interface FundableReserve {
 }
 
 /** Why a resting rung could not be placed against any fundable reserve. */
-export type UnmatchedReason = "unknown-reserve" | "currency-mismatch";
+export type UnmatchedReason = "unfundable-reserve" | "currency-mismatch";
 
 /**
  * A rung that cannot be placed. Surfaced rather than dropped: a silently ignored rung is
@@ -81,6 +81,12 @@ export interface RungAttribution {
  * A paper reserve, an unsupported currency or a dangling account reference is excluded
  * here for exactly the reasons it is excluded from the composition, with no second
  * admission policy to keep in step.
+ *
+ * WHAT EXCLUSION MEANS, and it is why {@link UnmatchedReason}'s first member is spelled
+ * `unfundable-reserve`. Every one of those three exclusions describes a reserve the
+ * operator can plainly SEE in the fund file: it exists, it is spelled correctly, and it
+ * still may not fund a live claim. This function answers "can this fund anything?", never
+ * "does this exist?" — so a rung refused against its output is unfundable, not unknown.
  */
 export function fundableReserves(data: FundReviewData): FundableReserve[] {
   return buildCanonicalState(data).reserveReconciliation.map((line) => ({
@@ -102,8 +108,23 @@ export function fundableReserves(data: FundReviewData): FundableReserve[] {
  * balance would produce a confidently wrong number rather than an obviously missing one.
  * Cross-currency funding is not designed; it is refused, identically, on both sides.
  *
- * Rung order is preserved within a reserve, and the refusal order is the rungs' own, so
- * the guard's error message and the report's list name the same rungs in the same order.
+ * Rung order is preserved within a reserve, and the refusal order is the rungs' own — so
+ * the guard and the report name THE SAME RUNGS WITH THE SAME REASONS, because they name
+ * them off THIS list. The `unmatched` array returned here is the one `checkFundingCoverage`
+ * hands back verbatim on its `unattributed` arm (`./ingest.js`) and the one
+ * `composeAvailableCapital` renders (`./available.js`); neither filters it, dedups it or
+ * re-derives it.
+ *
+ * IT NO LONGER SAYS "IN THE SAME ORDER", AND THAT WORDING WAS FALSE BEFORE #179 AS WELL
+ * AS AFTER IT. Before: the guard's message named a deduped SET of reserve ids for one
+ * class while the report named every rung of both, so a mixed batch had no common order
+ * to preserve. After: both receive this list in the rungs' own order, but the import
+ * boundary's message GROUPS it — unfundable rungs under their reserve id, mismatched
+ * rungs per rung — because one class's remedy is per reserve and the other's is per rung.
+ * The grouping is stable, so the rungs' own order survives inside each group; across
+ * groups an interleaved batch is deliberately reordered. Order was never the property
+ * worth promising. Sameness of the rungs and their reasons is, and that one is now an
+ * identity rather than an assertion.
  */
 export function attributeRungs(
   data: FundReviewData,
@@ -118,10 +139,13 @@ export function attributeRungs(
   for (const rung of committedRungs(resting)) {
     const currency = currencyOf.get(rung.fundingReserveId);
     if (currency === undefined) {
-      // An unadmitted or unknown id is refused rather than read as a zero balance: a
-      // typo'd id would otherwise render the whole ladder as "over-committed", or worse,
-      // silently attribute it to a reserve nobody can see.
-      unmatched.push({ rung, reason: "unknown-reserve" });
+      // A reserve {@link fundableReserves} did not admit is refused rather than read as a
+      // zero balance: an unadmitted reserve would otherwise render the whole ladder as
+      // "over-committed", or worse, be silently attributed capacity nobody granted it.
+      // The id usually EXISTS in the operator's own fund file — it is the admission that
+      // is missing, which is why the reason is `unfundable-reserve` and not a claim that
+      // the reserve is unknown (#180).
+      unmatched.push({ rung, reason: "unfundable-reserve" });
       continue;
     }
     if (currency !== rung.currency) {

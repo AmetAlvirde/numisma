@@ -11,8 +11,8 @@
  * second parser and nothing here.
  */
 import type { Currency, FundReviewData } from "../contracts.js";
-import { attributeRungs } from "./attribution.js";
-import { isNegativeSlack, type CommittedRung } from "./committed.js";
+import { attributeRungs, type UnmatchedRung } from "./attribution.js";
+import { isNegativeSlack } from "./committed.js";
 import type { OrderPlacedRecord, OrderSide } from "./records.js";
 import type { RestingOrder } from "./select.js";
 
@@ -343,16 +343,39 @@ export interface FundingShortfall {
 }
 
 /**
- * The two REFUSAL arms are, deliberately, the two `UnmatchedReason`s the report already
- * uses — same names, same meanings. A rung the report would list as `unknown-reserve`
- * refuses the import as `unknown-reserve`; likewise `currency-mismatch`. The parity is
- * legible in the type rather than asserted in prose.
+ * THREE ARMS, AND THEY ARE THE REAL STRUCTURE: attribution succeeds or it does not, and
+ * coverage is only weighable when it does.
+ *
+ * `unattributed` carries the report's OWN `UnmatchedRung[]` — the identical array from
+ * the identical {@link attributeRungs} call the rendered available-capital report makes.
+ * That is what finishes #172's thesis: parity is no longer legible in a pair of
+ * hand-mirrored arm names, it is an IDENTITY, because there is only one list and both
+ * surfaces return it.
+ *
+ * IT USED TO BE FOUR, AND THE FOURTH MASKED THE THIRD (#179). The arm pair
+ * `unfundable-reserve` / `currency-mismatch` mirrored `UnmatchedReason` one level up, so
+ * a batch wrong in BOTH ways could only report the class that happened to be tested
+ * first: the operator fixed it, re-ran, and was refused again for the other. The reasons
+ * were all computed on the first pass and then thrown away. `UnmatchedReason` itself
+ * SURVIVES untouched — it is the per-RUNG reason, and it is what both the report
+ * (`./available.js`) and the import boundary's refusal message render from.
+ *
+ * `over-committed` is NOT folded in with them and stays a separate later pass: an
+ * unplaceable rung has no honest balance to be compared against, so there is nothing to
+ * weigh it with until every rung is placeable.
+ *
+ * The arm is named after the PHASE that failed rather than after a reason, because it is
+ * a class of reasons — and it is that phase's failure which is precisely why
+ * `over-committed` could not be computed.
  */
 export type FundingCoverage =
   | { status: "ok" }
-  | { status: "over-committed"; shortfalls: FundingShortfall[] }
-  | { status: "unknown-reserve"; fundingReserveIds: string[] }
-  | { status: "currency-mismatch"; rungs: CommittedRung[] };
+  // `readonly`, because "the identical array, narrowed by nobody" is a claim about the
+  // list the caller receives too: a consumer that spliced its own class out of it would
+  // re-create #179's masking one layer down, and the surfaces that render it already take
+  // `readonly UnmatchedRung[]`.
+  | { status: "unattributed"; unmatched: readonly UnmatchedRung[] }
+  | { status: "over-committed"; shortfalls: FundingShortfall[] };
 
 /**
  * `O1` — no order may encumber a reserve that cannot fund it.
@@ -399,11 +422,19 @@ export type FundingCoverage =
  * inputs moves the caller's problem into the callee's type. It would harden `ok` against
  * a caller that does not exist — one non-test call site, and `record-fill.ts` names this
  * function only in a comment saying why it deliberately does not call it. It would also
- * break #172's parity property in TWO places: `funding-parity.test.ts:197`'s token
- * equality against `UnmatchedReason`, and `:193`'s `if (coverage.status === "ok")
- * expect(report.unmatched).toEqual([])`, where a fifth arm falls to the `else` and
- * asserts a non-empty unmatched list against an empty one — on the ACCEPT path, which is
- * the path a qualified verdict lives on.
+ * break #172's parity property, which lives in `funding-parity.test.ts` under *"no
+ * verdict the guard accepts leaves the report with an unplaceable rung"* — cited BY NAME,
+ * because line numbers drift and these two citations already had. A qualifying arm falls
+ * to that property's `else`, which asserts `report.unmatched` is EMPTY for every verdict
+ * other than `unattributed` — so a fifth arm would assert a non-empty unmatched list
+ * against an empty one, on the ACCEPT path, which is the path a qualified verdict lives
+ * on.
+ *
+ * The property was RESTATED by #179 and the change was deliberate: it used to compare
+ * this function's status token against `report.unmatched[0]?.reason` — the FIRST entry
+ * only, which is the very blindness #179 removed — and it now relates the whole
+ * `unattributed` list to the whole report list, over all three arms. #183's conclusion
+ * above is untouched by that; only these citations are.
  *
  * KNOWINGLY OPEN, tracked on #183 — A SKIPPED EXPORT ROW IS NEVER PERSISTED. `OrderRecord`
  * is exactly three kinds — `orderPlaced`, `orderCancelled`, `orderFilled`
@@ -429,16 +460,16 @@ export function checkFundingCoverage(
   // compared against — reading it as a zero balance would render the ladder as
   // "over-committed" on a typo, and summing it into a foreign-denominated balance would
   // produce the confidently wrong slack that #172 was about.
-  const unknown = unmatched.filter((entry) => entry.reason === "unknown-reserve");
-  if (unknown.length > 0) {
-    return {
-      status: "unknown-reserve",
-      fundingReserveIds: [...new Set(unknown.map((entry) => entry.rung.fundingReserveId))],
-    };
-  }
-  const mismatched = unmatched.filter((entry) => entry.reason === "currency-mismatch");
-  if (mismatched.length > 0) {
-    return { status: "currency-mismatch", rungs: mismatched.map((entry) => entry.rung) };
+  //
+  // EVERY unplaceable rung goes back, of both classes, in the rungs' own order (#179).
+  // This used to filter twice and return on the first non-empty filter, so a batch wrong
+  // in both ways reported only one class and the operator paid a second full pass to
+  // learn the other. Nothing here is recomputed and nothing is deduped: the list is
+  // `attributeRungs`' own, and dedup — where it is right at all, which is per RESERVE for
+  // `unfundable-reserve` and never for `currency-mismatch` — belongs at render time,
+  // where the remedy is.
+  if (unmatched.length > 0) {
+    return { status: "unattributed", unmatched };
   }
 
   const balanceById = new Map(reserves.map((reserve) => [reserve.reserveId, reserve.balance]));
