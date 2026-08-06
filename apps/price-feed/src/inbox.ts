@@ -21,9 +21,10 @@ export async function emitMarksToInbox(
   inboxPath: string,
   marks: readonly PriceMarkedEvent[],
 ): Promise<number> {
-  const existing = await readInbox(inboxPath);
   // Marks are engine-typed events; the inbox may also hold hand-authored records
-  // of any shape, so the merge operates on the shared `{ id }` surface.
+  // of any shape, so the merge operates on the shared `{ id }` surface — which is
+  // all this cast asserts over the shared reader's `unknown[]`.
+  const existing = (await readInboxArray(inboxPath)) as InboxRecord[];
   const { next, addedCount } = mergeInbox<InboxRecord>(existing, marks);
   // Nothing fresh (a pre-mark-time or idempotent re-run): leave the inbox exactly
   // as-is — never create an empty inbox, never reformat hand-authored entries.
@@ -67,9 +68,4 @@ export async function readInboxArray(inboxPath: string): Promise<unknown[]> {
     throw new Error(`Inbox ${inboxPath} must be a JSON array of transactions.`);
   }
   return parsed;
-}
-
-/** The inbox as the `{ id }`-bearing records `mergeInbox` merges on. */
-async function readInbox(inboxPath: string): Promise<InboxRecord[]> {
-  return (await readInboxArray(inboxPath)) as InboxRecord[];
 }
