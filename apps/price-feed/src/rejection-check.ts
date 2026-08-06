@@ -34,18 +34,18 @@
  * shell; building the reference and evaluating the guard are the engine's pure
  * functions, consumed unchanged.
  */
-import { readFile } from "node:fs/promises";
 import {
   applyEventToReference,
   buildEventReference,
   crossReferenceEvent,
   parseEvent,
-  parseFundReview,
   type EventReference,
   type PortfolioEvent,
   type PriceMarkedEvent,
 } from "@numisma/engine";
+import { assertLogFullyLoaded, loadEventLog, loadGenesis } from "@numisma/event-store";
 import type { FetchRunResult } from "./fetch-prices.js";
+import { readInboxArray } from "./inbox.js";
 
 /**
  * One fetched mark the spine guard would reject, carried with the engine guard's
@@ -116,53 +116,34 @@ export interface SpineWorld {
  * marks — and guarantees we never double-count this run's marks as both reference
  * context AND judged subjects.
  *
- * Returns `undefined` when there is no genesis to check against — a pre-check needs
- * a reference, so its absence is surfaced as "could not pre-check", never a false
- * all-clear. Throws (fail-loud, like the spine) if genesis, a log line, or the
- * inbox is unreadable; the caller treats a throw as a non-fatal "pre-check
- * unavailable" so a corrupt file never masks an otherwise-successful fetch.
+ * Genesis + the log are read through `@numisma/event-store` — the same
+ * `loadGenesis` / `loadEventLog` + `assertLogFullyLoaded` pair `ingestInbox` and the
+ * TUI's own fold use, so the pre-check cannot drift from the spine it advises on
+ * (#141). Throws (fail-loud, like the spine) if genesis is MISSING or invalid, if
+ * any log line will not load, or if the inbox is unreadable; the caller swallows
+ * every throw into a non-fatal "pre-check unavailable" so a corrupt or unseeded
+ * data dir never masks an otherwise-successful fetch. A missing genesis therefore
+ * surfaces as an ENOENT note rather than silence — a pre-check needs a reference,
+ * so its absence is reported as "could not pre-check", never a false all-clear.
+ *
+ * Reading the log refreshes `events.jsonl.quarantine` (the derived side lane), which
+ * is deliberate and shared with every other reader; the log and genesis themselves
+ * are never written here (R6).
  */
 export async function loadSpineReference(
   paths: SpineReferencePaths,
   options?: { freshlyQueuedCount?: number },
-): Promise<SpineWorld | undefined> {
-  const genesisRaw = await readOptional(paths.genesis);
-  if (genesisRaw === undefined) {
-    return undefined;
-  }
-  const genesis = parseFundReview(genesisRaw);
-  if (genesis.kind !== "ok") {
-    throw new Error(`Genesis seed failed validation (${genesis.kind}) at ${paths.genesis}.`);
-  }
+): Promise<SpineWorld> {
+  const genesis = await loadGenesis(paths.genesis);
 
-  const logRaw = await readOptional(paths.log);
-  const priorEvents: PortfolioEvent[] = [];
-  if (logRaw !== undefined) {
-    for (const [index, line] of logRaw.split("\n").entries()) {
-      const trimmed = line.trim();
-      if (!trimmed) {
-        continue;
-      }
-      let json: unknown;
-      try {
-        json = JSON.parse(trimmed);
-      } catch {
-        throw new Error(`Log ${paths.log} line ${index + 1} is not valid JSON.`);
-      }
-      const parsed = parseEvent(json);
-      if (parsed.kind !== "ok") {
-        throw new Error(
-          `Log ${paths.log} line ${index + 1} failed to parse (${parsed.path}: ${parsed.message}).`,
-        );
-      }
-      priorEvents.push(parsed.value);
-    }
-  }
+  const load = await loadEventLog(paths.log);
+  assertLogFullyLoaded(load, paths.log);
+  const priorEvents: PortfolioEvent[] = load.events;
 
   // The known world is genesis + the durable log; accepted pending inbox events
   // extend it in order, exactly as `ingestInbox`. `seen` starts as the log ids —
   // the ids the spine dedup-skips before the guard even runs (event-store.ts:245).
-  const reference = buildEventReference(genesis.value, priorEvents);
+  const reference = buildEventReference(genesis, priorEvents);
   const seenIds = new Set(priorEvents.map((event) => event.id));
 
   // Fold in the PRE-EXISTING inbox: everything on disk except the tail this run just
@@ -290,18 +271,17 @@ export async function scanFetchedMarks(
   if (!result.markEmitted) {
     return { rejections: [], skipped: false };
   }
-  let world: SpineWorld | undefined;
+  let world: SpineWorld;
   try {
     world = await loadSpineReference(paths, { freshlyQueuedCount: result.emittedCount });
   } catch (error) {
+    // Includes a MISSING genesis (ENOENT from `loadGenesis`): unseeded or damaged,
+    // it is surfaced as one Note rather than an unexplained silent skip.
     return {
       rejections: [],
       skipped: true,
       unavailableReason: error instanceof Error ? error.message : String(error),
     };
-  }
-  if (world === undefined) {
-    return { rejections: [], skipped: true };
   }
   // Judge only the marks spine will actually guard (new to the batch), in spine's
   // order: any already-doomed pending mark first, then this run's fresh marks
@@ -332,37 +312,4 @@ function toMarkRejection(event: PortfolioEvent, path: string, reason: string): M
     path,
     reason,
   };
-}
-
-/**
- * Read the inbox as the JSON array of transactions spine expects, mirroring
- * `ingestInbox`'s parse. A missing inbox is the normal case (returns `[]`); invalid
- * JSON or a non-array throws (the caller treats it as pre-check unavailable).
- */
-async function readInboxArray(inboxPath: string): Promise<unknown[]> {
-  const raw = await readOptional(inboxPath);
-  if (raw === undefined) {
-    return [];
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error(`Inbox ${inboxPath} is not valid JSON.`);
-  }
-  if (!Array.isArray(parsed)) {
-    throw new Error(`Inbox ${inboxPath} must be a JSON array of transactions.`);
-  }
-  return parsed;
-}
-
-async function readOptional(filePath: string): Promise<string | undefined> {
-  try {
-    return await readFile(filePath, "utf8");
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return undefined;
-    }
-    throw error;
-  }
 }
