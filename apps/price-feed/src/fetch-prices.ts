@@ -59,7 +59,8 @@ import {
   type PriceFeedConfig,
   type ProviderCredentials,
 } from "./config.js";
-import { fetchBinanceDailyClose, type ProviderObservation } from "./binance-provider.js";
+import { fetchBinanceDailyClose } from "./binance-provider.js";
+import type { ProviderObservation } from "./provider.js";
 import { fetchTwelveDataDailyCloses, type ProviderFetchResult } from "./twelvedata-provider.js";
 import { fetchBanxicoFix } from "./banxico-provider.js";
 import { emitMarksToInbox } from "./inbox.js";

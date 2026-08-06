@@ -12,6 +12,7 @@
  * token is read from the environment (`BANXICO_TOKEN`), never committed.
  */
 import type { FixObservation } from "@numisma/engine";
+import { fetchJson, isRecord } from "./provider.js";
 
 const BANXICO_SF43718 =
   "https://www.banxico.org.mx/SieAPIRest/service/v1/series/SF43718/datos/oportuno";
@@ -36,31 +37,15 @@ export async function fetchBanxicoFix(options: FixFetchOptions): Promise<FixObse
         "before fetching the USD/MXN FIX.",
     );
   }
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), options.timeoutMs);
-  let res: Response;
-  try {
-    res = await fetchImpl(BANXICO_SF43718, {
-      signal: controller.signal,
-      headers: { "Bmx-Token": options.token, Accept: "application/json" },
-    });
-  } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
-      throw new Error(`Banxico SF43718 -> request timed out after ${options.timeoutMs}ms`);
-    }
-    throw new Error(
-      `Banxico SF43718 -> ${error instanceof Error ? error.message : String(error)}`,
-    );
-  } finally {
-    clearTimeout(timer);
+  const r = await fetchJson(BANXICO_SF43718, {
+    timeoutMs: options.timeoutMs,
+    fetchImpl: options.fetchImpl,
+    init: { headers: { "Bmx-Token": options.token, Accept: "application/json" } },
+  });
+  if (!r.ok) {
+    throw new Error(`Banxico SF43718 -> ${r.reason}`);
   }
-
-  if (!res.ok) {
-    throw new Error(`Banxico SF43718 -> HTTP ${res.status} ${res.statusText}`);
-  }
-  const body = (await res.json()) as unknown;
-  const datum = extractLatestDatum(body);
+  const datum = extractLatestDatum(r.body);
   const rate = Number(datum.dato);
   if (!Number.isFinite(rate) || rate <= 0) {
     throw new Error(`Banxico SF43718 -> non-positive FIX rate '${datum.dato}'`);
@@ -100,8 +85,4 @@ function isoDateFromBanxico(fecha: string): string {
     throw new Error(`Banxico SF43718 -> unexpected FIX date format '${fecha}'`);
   }
   return `${match[3]}-${match[2]}-${match[1]}`;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }

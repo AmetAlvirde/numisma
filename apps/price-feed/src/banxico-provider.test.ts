@@ -100,6 +100,18 @@ describe("fetchBanxicoFix — loud failures", () => {
     ).rejects.toThrow(/unexpected FIX date format/);
   });
 
+  it("attributes a non-JSON 200 to the series instead of throwing a bare SyntaxError", async () => {
+    // Regression guard for #110's finding 2 — see twelvedata-provider.test.ts. Banxico
+    // was always caught by the orchestrator, but unlabelled: the decode threw before
+    // any provider prefix was applied.
+    await expect(
+      fetchBanxicoFix({
+        ...OPTS,
+        fetchImpl: fetchWith(() => new Response("<html>maintenance</html>", { status: 200 })),
+      }),
+    ).rejects.toThrow(/^Banxico SF43718 -> /);
+  });
+
   it("attributes a request timeout", async () => {
     const stall: typeof fetch = ((_url: string | URL | Request, init?: RequestInit) =>
       new Promise<Response>((_resolve, reject) => {

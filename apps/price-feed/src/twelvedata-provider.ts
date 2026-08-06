@@ -25,7 +25,12 @@
  * passed in via {@link EquitiesFetchOptions.apiKey}.
  */
 import type { InstrumentRegistryEntry } from "@numisma/engine";
-import type { FetchOptions, ProviderObservation } from "./binance-provider.js";
+import {
+  fetchJson,
+  isRecord,
+  type FetchOptions,
+  type ProviderObservation,
+} from "./provider.js";
 
 const TWELVEDATA_TIME_SERIES = "https://api.twelvedata.com/time_series";
 
@@ -74,29 +79,18 @@ export async function fetchTwelveDataDailyCloses(
     );
   }
 
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), options.timeoutMs);
-  let res: Response;
-  try {
-    const symbols = entries.map((entry) => encodeURIComponent(entry.symbol)).join(",");
-    const url =
-      `${TWELVEDATA_TIME_SERIES}?symbol=${symbols}` +
-      `&interval=1day&outputsize=1&apikey=${encodeURIComponent(options.apiKey)}`;
-    res = await fetchImpl(url, { signal: controller.signal });
-  } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
-      return failAll(`request timed out after ${options.timeoutMs}ms`);
-    }
-    return failAll(error instanceof Error ? error.message : String(error));
-  } finally {
-    clearTimeout(timer);
+  const symbols = entries.map((entry) => encodeURIComponent(entry.symbol)).join(",");
+  const url =
+    `${TWELVEDATA_TIME_SERIES}?symbol=${symbols}` +
+    `&interval=1day&outputsize=1&apikey=${encodeURIComponent(options.apiKey)}`;
+  const r = await fetchJson(url, {
+    timeoutMs: options.timeoutMs,
+    fetchImpl: options.fetchImpl,
+  });
+  if (!r.ok) {
+    return failAll(r.reason);
   }
-
-  if (!res.ok) {
-    return failAll(`HTTP ${res.status} ${res.statusText}`);
-  }
-  const body = (await res.json()) as unknown;
+  const body = r.body;
   if (!isRecord(body)) {
     return failAll(`unexpected payload shape`);
   }
@@ -188,8 +182,4 @@ function barDateFromRow(entry: InstrumentRegistryEntry, row: Record<string, unkn
     throw new Error(`Twelve Data ${entry.symbol} -> unexpected payload shape (no bar datetime)`);
   }
   return match[1]!;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }

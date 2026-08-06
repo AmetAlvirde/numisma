@@ -202,6 +202,23 @@ describe("fetchTwelveDataDailyCloses — batched multi-symbol fetch (rate-limit 
     expect(result?.observation?.observationDate).toBe("2026-07-02");
   });
 
+  it("fails EVERY symbol attributably on a non-JSON 200 instead of aborting the run", async () => {
+    // Regression guard for #110's finding 2. `res.json()` used to sit OUTSIDE the
+    // guarded region, so a 200 carrying a maintenance page or a Cloudflare
+    // interstitial threw a bare SyntaxError that escaped this function entirely and
+    // aborted the whole fetch run — contradicting its own docstring promise that one
+    // bad symbol can never do that. It is an ordinary attributed result now.
+    const results = await fetchTwelveDataDailyCloses([AAPL, GOOGL], {
+      ...OPTS,
+      fetchImpl: fetchWith(
+        () => new Response("<html>scheduled maintenance</html>", { status: 200 }),
+      ),
+    });
+    expect(results.map((r) => r.observation)).toEqual([undefined, undefined]);
+    expect(results[0]?.error).toMatch(/^Twelve Data AAPL -> /);
+    expect(results[1]?.error).toMatch(/^Twelve Data GOOGL -> /);
+  });
+
   it("returns [] for an empty entry list without touching the network", async () => {
     let called = false;
     const spy: typeof fetch = (() => {
