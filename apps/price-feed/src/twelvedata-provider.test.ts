@@ -219,6 +219,26 @@ describe("fetchTwelveDataDailyCloses — batched multi-symbol fetch (rate-limit 
     expect(results[1]?.error).toMatch(/^Twelve Data GOOGL -> /);
   });
 
+  it("attributes a malformed symbol (lone surrogate) instead of throwing a URIError", async () => {
+    // `encodeURIComponent` throws `URIError: URI malformed` on a lone surrogate, so
+    // building the request URL is a failure channel of its own. It must land as an
+    // attributed per-entry result like every other failure here — never a throw that
+    // escapes and aborts the whole run.
+    const BROKEN: InstrumentRegistryEntry = { ...AAPL, instrumentId: "broken", symbol: "\uD800" };
+    let called = false;
+    const spy: typeof fetch = (() => {
+      called = true;
+      return Promise.resolve(timeSeriesResponse("1"));
+    }) as typeof fetch;
+
+    const results = await fetchTwelveDataDailyCloses([BROKEN, GOOGL], { ...OPTS, fetchImpl: spy });
+
+    expect(called).toBe(false);
+    expect(results.map((r) => r.observation)).toEqual([undefined, undefined]);
+    expect(results[0]?.error).toMatch(/^Twelve Data \uD800 -> /);
+    expect(results[1]?.error).toMatch(/^Twelve Data GOOGL -> /);
+  });
+
   it("returns [] for an empty entry list without touching the network", async () => {
     let called = false;
     const spy: typeof fetch = (() => {
