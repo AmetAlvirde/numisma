@@ -97,11 +97,25 @@ export interface OrderPlacedRecord extends OrderRecordBase {
    *
    * KNOWN LIMIT, named rather than papered over: the id is synthesized from the venue's
    * SUBMISSION stamp, so a later export showing the same rung further filled arrives under
-   * the same id. It USED TO BE SKIPPED AS ALREADY KNOWN, silently keeping the partial
-   * observed at first import; since #174 it is REFUSED as a `changed-claim` instead —
-   * loudly, with nothing written — because recording it needs an observation verb this
-   * build does not have and a second placement line would be ignored by the selector.
-   * Until that verb exists the operator records the fill, or cancels and re-places.
+   * the same id, and THIS FIELD CANNOT BE UPDATED — the file is append-only and a second
+   * placement line is ignored by the selector. So the value here is the partial as of the
+   * FIRST import that saw the rung, not the venue's current one, until the observation
+   * verb #181 designs exists.
+   *
+   * The handling of that has moved twice. It was originally SKIPPED AS ALREADY KNOWN,
+   * silently. #174 made it a `changed-claim` refusal — loud, with nothing written — which
+   * fixed the silence and created a worse problem: the refusal is batch-wide, so one
+   * further-filled rung blocked every unrelated new rung in every later export from that
+   * venue, indefinitely. THE EXIT THIS PARAGRAPH USED TO NAME — "the operator records the
+   * fill" — DOES NOT WORK, and never did: `recordFill` appends an `orderFilled` line and
+   * never rewrites this one, so it repairs `committed`/`available` and leaves the refusal
+   * exactly where it was.
+   *
+   * Since #199 the rung is SKIPPED PER RUNG and reported as `restated`: the rest of the
+   * export imports, and this field keeps the older partial. That is safe only because of
+   * the direction — a stale partial over-states what is still resting, so the funding
+   * guard reads the encumbrance HIGH and can only ever be too strict. A stale `quantity`
+   * points the other way and is still a total refusal.
    */
   observedFilledQuantity?: number;
   /**
