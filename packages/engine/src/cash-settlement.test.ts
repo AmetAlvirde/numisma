@@ -95,9 +95,12 @@ describe("cash leg — Open debits the funding reserve, tiered by the lots' own 
     const data = foldEvents(genesis(), [open]);
     const reserve = reserveById(data, "tiered");
 
+    // Exact, not approximate: 330 × 200/300 is 66000/300 = 220 in IEEE-754, and c2
+    // takes the residual 330 - 220 = 110. Asserted with `toBe` like the equal-amount
+    // case above — a tolerance here would read as "the split is fuzzy", and it is not.
     expect(reserve.amount).toBe(1170); // 1500 - 330, NOT 1500 - 300
-    expect(tierQty(reserve, "c1")).toBeCloseTo(780, 6); // 1000 - 220 (330 × 200/300)
-    expect(tierQty(reserve, "c2")).toBeCloseTo(390, 6); // 500 - 110 (330 × 100/300)
+    expect(tierQty(reserve, "c1")).toBe(780); // 1000 - 220 (330 × 200/300)
+    expect(tierQty(reserve, "c2")).toBe(390); // 500 - 110 (330 × 100/300)
   });
 });
 
