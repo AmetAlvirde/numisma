@@ -18,9 +18,21 @@ export interface PriceFeedConfig extends MarkClock {
   /** Daily mark time (`HH:MM` local). A fetch before it upserts the store only. */
   markTime: string;
   /**
-   * Per-request network timeout in milliseconds. A stalled provider cannot hang a
-   * scheduled run (R4); bounded retry/backoff is deferred (a missed run is
-   * harmless under the idempotent deterministic id).
+   * Per-request network budget in milliseconds, covering CONNECT + HEADERS + BODY
+   * DECODE — not just time-to-headers. `fetchJson` holds one `AbortController` over
+   * the whole exchange (the decode is inside the guarded region on purpose), so this
+   * single number funds every phase and must be sized for the slowest of them
+   * together. A stalled provider still cannot hang a scheduled run (R4); bounded
+   * retry/backoff is deferred (a missed run is harmless under the idempotent
+   * deterministic id).
+   *
+   * Sized well above the observed request so the budget is never the binding
+   * constraint on a congested link: an abort here is not one symbol's failure but a
+   * WHOLE DAY'S. Twelve Data maps a request-level failure onto every entry in the
+   * batch, so one slow body loses all 8 equities in that chunk, `prices:fetch` exits
+   * 1, and the wrapper halts before `pnpm spine` — no marks land at all that day. The
+   * stall case this bounds is a provider that never finishes, and 30s catches that
+   * just as surely as 10s did.
    */
   requestTimeoutMs: number;
   /**
@@ -59,7 +71,7 @@ export interface PriceFeedConfig extends MarkClock {
 export const DEFAULT_CONFIG: PriceFeedConfig = {
   timeZone: "America/Mexico_City",
   markTime: "18:00",
-  requestTimeoutMs: 10_000,
+  requestTimeoutMs: 30_000,
   fixMaxStaleDays: 4,
   // The SINGLE engine resolver: `NUMISMA_DATA_DIR` override with an absolute,
   // homedir-derived accumulus default (`~/Dev/accumulus/data`), never a CWD-relative
