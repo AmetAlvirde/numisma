@@ -533,6 +533,48 @@ describe("a restated partial is skipped per rung (#199)", () => {
     expect(load.records).toHaveLength(1);
   });
 
+  it("reports the qualification without prompting when EVERY rung is restated", async () => {
+    // The empty-batch path (#200 review). A one-rung export that filled further leaves
+    // NOTHING admitted, and the flow used to carry straight on: two prompts for the
+    // funding reserve of a batch of zero orders, a coverage guard over a book this
+    // import does not change, an append of nothing.
+    const first = await harness({
+      csv: ladder(PARTLY_FILLED),
+      reserves: [{ id: "reserve-a", amount: 5000 }],
+    });
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+    const before = await readFile(first.ordersPath, "utf8");
+    const askedByTheFirstImport = first.asked.length;
+
+    await writeFile(
+      first.csvPath,
+      ladder(partlyFilledRung("100", "10", "8", "2020-01-01 10:00:00")),
+      "utf8",
+    );
+    const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    // Still a qualified success, and still NOT the unqualified one: `restated` is
+    // non-empty by construction on this path, since an export with no readable rows at
+    // all was already refused as `no-orders` further up.
+    expect(outcome).not.toMatchObject({ status: "imported" });
+    expect(outcome).toMatchObject({ status: "imported-partial", appended: 0, alreadyKnown: 0 });
+    if (outcome.status !== "imported-partial") throw new Error("expected a partial import");
+    expect(outcome.restated).toHaveLength(1);
+    expect(await readFile(first.ordersPath, "utf8")).toBe(before);
+    // The operator still gets the whole qualification — the short-circuit skips the
+    // prompt and the guard, never the reporting.
+    const line = first.outputs.find((message) => message.includes("RESTATED"));
+    expect(line).toBeDefined();
+    expect(line).toContain("0 order(s) appended");
+
+    // NOTHING WAS ASKED, and that is what makes the blank-answer refusal unreachable.
+    // "Funding reserve for this batch:" over a batch of zero orders has no honest
+    // answer, and the honest reply — a blank line — used to return
+    // `rejected`/`no-reserve-declared`: a refusal reported over an import that had
+    // nothing to refuse and nothing to fund.
+    expect(first.asked.length).toBe(askedByTheFirstImport);
+  });
+
   it("REFUSES the batch when the same claim also changed its quantity", async () => {
     const first = await harness({
       csv: ladder(PARTLY_FILLED),
