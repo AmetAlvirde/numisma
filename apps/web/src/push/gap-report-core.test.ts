@@ -14,9 +14,11 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import type { PortfolioEvent } from "@numisma/engine";
+import { daysBetween, type PortfolioEvent } from "@numisma/engine";
 import {
   GAP_REPORT_SCHEMA_VERSION,
+  LAUNCHD_ERA_START,
+  dueThrough,
   gapReportPath,
   resolveEventStorePaths,
   type EventStorePaths,
@@ -24,6 +26,7 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 import {
   MAX_WINDOW_DAYS,
+  defaultGapReportSince,
   parseGapReportArgs,
   resolveGapReportPaths,
   runGapReport,
@@ -210,6 +213,47 @@ describe("runGapReport — the window's bounds", () => {
     });
     expect(run.report.until).toBe(YESTERDAY);
     expect(run.lines.join("\n")).not.toContain(TODAY_CDMX);
+  });
+
+  it("floors a zero-argument run at the era start while the era is younger than the cap", async () => {
+    // The unchanged behavior, pinned so the clamp below cannot quietly narrow
+    // today's report: the era start is LATER than 400 days back, so it wins.
+    const paths = await storeWith([mark(YESTERDAY, "cx-a")]);
+    expect(defaultGapReportSince(NOW)).toBe(LAUNCHD_ERA_START);
+    const run = await runGapReport({ argv: [], now: NOW, paths });
+    expect(run.report.since).toBe(LAUNCHD_ERA_START);
+  });
+
+  it("rolls the zero-argument floor forward once the era outgrows the cap, instead of throwing", async () => {
+    // THE REGRESSION THIS EXISTS FOR. The era start is fixed and the ceiling is
+    // yesterday, so the default window grows a day per day and crosses
+    // MAX_WINDOW_DAYS on 2027-08-08 — at which point the 18:00 job's zero-argument
+    // `pnpm gap-report -- --write` would have thrown every night, forever, AFTER
+    // every other step had succeeded. Driven by a real future `now`, not by a
+    // restated bound.
+    const paths = await storeWith([mark("2027-08-06", "cx-a")]);
+    const firstOverLimit = new Date("2027-08-08T12:00:00Z");
+    // Unclamped this window would be 401 days — one past the cap.
+    expect(daysBetween(LAUNCHD_ERA_START, dueThrough(firstOverLimit)) + 1).toBe(
+      MAX_WINDOW_DAYS + 1,
+    );
+
+    const run = await runGapReport({ argv: [], now: firstOverLimit, paths });
+    expect(run.exitCode).toBe(0);
+    expect(run.report.calendarDays).toBe(MAX_WINDOW_DAYS);
+    expect(run.report.since).toBe("2026-07-04");
+    expect(run.report.until).toBe("2027-08-07");
+  });
+
+  it("still refuses an explicit --since past the cap — the clamp fills a floor, it does not lift the bound", async () => {
+    const paths = await storeWith([mark("2027-08-06", "cx-a")]);
+    await expect(
+      runGapReport({
+        argv: ["--since", LAUNCHD_ERA_START],
+        now: new Date("2027-08-08T12:00:00Z"),
+        paths,
+      }),
+    ).rejects.toThrow(new RegExp(`window .*${MAX_WINDOW_DAYS}`));
   });
 });
 
