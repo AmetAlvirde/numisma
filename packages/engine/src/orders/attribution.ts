@@ -108,8 +108,23 @@ export function fundableReserves(data: FundReviewData): FundableReserve[] {
  * balance would produce a confidently wrong number rather than an obviously missing one.
  * Cross-currency funding is not designed; it is refused, identically, on both sides.
  *
- * Rung order is preserved within a reserve, and the refusal order is the rungs' own, so
- * the guard's error message and the report's list name the same rungs in the same order.
+ * Rung order is preserved within a reserve, and the refusal order is the rungs' own — so
+ * the guard and the report name THE SAME RUNGS WITH THE SAME REASONS, because they name
+ * them off THIS list. The `unmatched` array returned here is the one `checkFundingCoverage`
+ * hands back verbatim on its `unattributed` arm (`./ingest.js`) and the one
+ * `composeAvailableCapital` renders (`./available.js`); neither filters it, dedups it or
+ * re-derives it.
+ *
+ * IT NO LONGER SAYS "IN THE SAME ORDER", AND THAT WORDING WAS FALSE BEFORE #179 AS WELL
+ * AS AFTER IT. Before: the guard's message named a deduped SET of reserve ids for one
+ * class while the report named every rung of both, so a mixed batch had no common order
+ * to preserve. After: both receive this list in the rungs' own order, but the import
+ * boundary's message GROUPS it — unfundable rungs under their reserve id, mismatched
+ * rungs per rung — because one class's remedy is per reserve and the other's is per rung.
+ * The grouping is stable, so the rungs' own order survives inside each group; across
+ * groups an interleaved batch is deliberately reordered. Order was never the property
+ * worth promising. Sameness of the rungs and their reasons is, and that one is now an
+ * identity rather than an assertion.
  */
 export function attributeRungs(
   data: FundReviewData,
