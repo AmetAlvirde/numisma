@@ -9,8 +9,9 @@
  * `O1` reject — is testable without a terminal, a real export or the real data dir.
  *
  * THE ORDERING IS THE CONTRACT: parse → merge id collisions → load the sidecar → refuse
- * changed claims → prompt → check coverage → append. The coverage check is the LAST thing before the only write, and every refusal
- * before it returns having written nothing at all. `orders.jsonl` is append-only, so a
+ * changed claims → skip the restated rungs → prompt → check coverage → append. The
+ * coverage check is the LAST thing before the only write, and every refusal before it
+ * returns having written nothing at all. `orders.jsonl` is append-only, so a
  * wrong claim written here is not edited away later — it costs a compensating line
  * forever, and that asymmetry is why the refusals are loud and total rather than
  * warnings the operator can walk past.
@@ -158,9 +159,22 @@ export interface RestatedPartial {
   remainingAtVenue: number;
 }
 
-/** What an import that WROTE reports, in the two shapes it can honestly take. */
+/**
+ * What an import that REFUSED NOTHING reports, in the two shapes it can honestly take.
+ *
+ * Not "an import that WROTE" (#200 review): an export whose every readable rung was
+ * restated writes no line at all and still reports here, because the flow reached its end
+ * with nothing refused. Writing is what these outcomes usually DO; not refusing is what
+ * they all MEAN.
+ */
 interface OrdersImportWrite {
-  /** Lines actually appended. ZERO when the same export is imported twice. */
+  /**
+   * Lines actually appended. ZERO in two different ways, and the distinction is visible
+   * only in the other fields: every rung was already known — the same export imported
+   * twice, so `alreadyKnown` carries them — or nothing was admitted at all, every
+   * readable rung having been restated, so `alreadyKnown` is 0 too and `restated` holds
+   * them.
+   */
   appended: number;
   /**
    * Rungs already in the sidecar under the same synthesized id AND saying the same
@@ -203,12 +217,15 @@ export type OrdersImportOutcome =
    */
   | ({ status: "imported" } & OrdersImportWrite)
   /**
-   * Lines were written, and SOMETHING ABOUT THE EXPORT WAS QUALIFIED (`D3`, #177; #199).
+   * The import ran to its end, and SOMETHING ABOUT THE EXPORT WAS QUALIFIED (`D3`, #177;
+   * #199).
    *
    * A DISTINCT MEMBER, not `imported` carrying a non-empty field. A shape that forces
    * every reader to open a second field to discover the first was qualified is a type
-   * that lies to the reader who does not. It is still a SUCCESS: lines were written, and
-   * the CLI exits 0 (`D3`).
+   * that lies to the reader who does not. It is still a SUCCESS, and the test is that
+   * NOTHING WAS REFUSED — not that lines were written, which is the weaker claim this
+   * used to make and which an export of nothing but restated rungs falsifies while still
+   * being a perfectly honest run. The CLI exits 0 either way (`D3`).
    *
    * TWO qualifications reach it, with OPPOSITE money directions, each carrying its own
    * field and printing its own operator line:
@@ -544,6 +561,94 @@ export async function importBitgetOpenOrders(
   const restatedIds = new Set(restated.map((claim) => claim.id));
   const admitted = orders.filter((order) => !restatedIds.has(order.id));
 
+  /**
+   * THE ONE TAIL, reached by both exits (#200 review). Extracted rather than duplicated
+   * at the short-circuit below, because a qualification added to one exit and forgotten
+   * on the other is exactly the silent half-report this whole flow is built to refuse.
+   */
+  const report = (appended: number, alreadyKnown: number): OrdersImportOutcome => {
+    const counts = `${appended} order(s) appended, ${alreadyKnown} already known`;
+    const write = { appended, alreadyKnown, skips: parsed.skips, restated };
+
+    // NOT `parsed.skips.length` (#184). `skips` is heterogeneous, and a `not-resting` row
+    // was read COMPLETELY — the parser's finding about it is that nothing is still
+    // claimed. The gap this line warns about is rungs we could not weigh, so both the
+    // discrimination and the count below run through the engine's predicate rather than
+    // the raw total. `outcome.skips` still carries every skip and stderr still reports
+    // every one of them.
+    const unweighed = parsed.skips.filter((entry) => leavesRungUnweighed(entry.problem));
+
+    if (unweighed.length === 0 && restated.length === 0) {
+      io.out(`Imported ${csvPath}: ${counts}.\n`);
+      return { status: "imported", ...write };
+    }
+
+    // EVERY QUALIFICATION GETS ITS OWN LINE, EACH OPENING ON THE GAP AND NAMING ITS OWN
+    // MONEY DIRECTION (`D3`, #177; #199). The counts follow all of them, once — they used
+    // to be the whole line, with the qualification a suffix (`..., 1 row(s) skipped.`) in
+    // exactly the position an operator skims past. An export qualified BOTH ways prints
+    // BOTH lines; that case is why this is two fields and not a third status.
+    //
+    // Unread rows lead, because they are the qualification we know least about: a restated
+    // rung was read perfectly and we can state its figures, an unread one we cannot.
+    const qualifications: string[] = [];
+
+    if (unweighed.length > 0) {
+      qualifications.push(
+        `INCOMPLETE — ${unweighed.length} row(s) of ${csvPath} could not be read, so that ` +
+          `many rung(s) resting at the venue are NOT counted as committed and available reads ` +
+          `HIGH by whatever they encumber. Re-export and re-import to pick the missing ` +
+          `rung(s) up; the reasons are on the error channel above.`,
+      );
+    }
+
+    if (restated.length > 0) {
+      // BOTH REMAINDERS, not just the two partials: the remainders are what the skip was
+      // decided on, so printing them lets the operator check the safety claim the rest of
+      // this line makes rather than take it on faith.
+      const detail = restated
+        .map(
+          (claim) =>
+            `${claim.id} (filled ${claim.known} → ${claim.observed}; the file still claims ` +
+            `${claim.remainingOnFile}, the venue holds ${claim.remainingAtVenue})`,
+        )
+        .join("; ");
+      qualifications.push(
+        `RESTATED — ${restated.length} rung(s) of ${csvPath} have filled FURTHER at the ` +
+          `venue since this file recorded them — ${detail} — and were SKIPPED; every other ` +
+          `rung imported normally. Their lines on file still read the OLDER partial, so they ` +
+          `encumber NO LESS than the venue still holds: committed never reads LOW and ` +
+          `available never reads HIGH. That is the safe direction — it can refuse a batch ` +
+          `you could fund, never fund one you cannot — but it is not free, and recording the ` +
+          `restatement needs an observation verb this build does not have. This line ` +
+          `REPRINTS on every import until the rung fills out or is cancelled at the venue.`,
+      );
+    }
+
+    io.out(`${qualifications.join("\n")}\nImported ${csvPath}: ${counts}.\n`);
+
+    return { status: "imported-partial", ...write };
+  };
+
+  // NOTHING LEFT TO IMPORT — every readable rung of this export was restated (#200
+  // review). Reported here rather than walked through the rest of the flow, which used to
+  // prompt TWICE for the funding reserve of a batch of ZERO orders and then, on the only
+  // honest answer to that question — a blank line — return `no-reserve-declared`: a
+  // refusal raised over an import that had nothing to fund and nothing to refuse.
+  //
+  // The status is honest BY CONSTRUCTION rather than by choice. An export with no readable
+  // rows at all was already refused as `no-orders` above, and `admitted` is `orders` less
+  // the restated ids, so an empty `admitted` means `restated` is non-empty — this path
+  // cannot reach the unqualified `imported`, and `report` does not have to be told so.
+  //
+  // NO COVERAGE GUARD HERE, deliberately. It would weigh only the book already on file,
+  // which this import does not change by a single line, so a refusal from it would be a
+  // NEW refusal raised over a PRE-EXISTING condition — and unfixable at that, since we
+  // did not prompt for the declaration that is the only thing the operator could correct.
+  if (admitted.length === 0) {
+    return report(0, 0);
+  }
+
   const declaration = await declareFunding(io, admitted);
   if (declaration === undefined) {
     return reject(io, "no-reserve-declared", "no funding reserve was declared for this batch");
@@ -609,70 +714,5 @@ export async function importBitgetOpenOrders(
     return reject(io, "write-failed", `could not append to ${io.ordersPath}: ${detail}`);
   }
 
-  const counts =
-    `${fresh.length} order(s) appended, ${records.length - fresh.length} already known`;
-  // NOT `parsed.skips.length` (#184). `skips` is heterogeneous, and a `not-resting` row
-  // was read COMPLETELY — the parser's finding about it is that nothing is still claimed.
-  // The gap this line warns about is rungs we could not weigh, so both the discrimination
-  // and the count below run through the engine's predicate rather than the raw total.
-  // `outcome.skips` still carries every skip and stderr still reports every one of them.
-  const unweighed = parsed.skips.filter((entry) => leavesRungUnweighed(entry.problem));
-
-  const write = {
-    appended: fresh.length,
-    alreadyKnown: records.length - fresh.length,
-    skips: parsed.skips,
-    restated,
-  };
-
-  if (unweighed.length === 0 && restated.length === 0) {
-    io.out(`Imported ${csvPath}: ${counts}.\n`);
-    return { status: "imported", ...write };
-  }
-
-  // EVERY QUALIFICATION GETS ITS OWN LINE, EACH OPENING ON THE GAP AND NAMING ITS OWN
-  // MONEY DIRECTION (`D3`, #177; #199). The counts follow all of them, once — they used
-  // to be the whole line, with the qualification a suffix (`..., 1 row(s) skipped.`) in
-  // exactly the position an operator skims past. An export qualified BOTH ways prints
-  // BOTH lines; that case is why this is two fields and not a third status.
-  //
-  // Unread rows lead, because they are the qualification we know least about: a restated
-  // rung was read perfectly and we can state its figures, an unread one we cannot.
-  const qualifications: string[] = [];
-
-  if (unweighed.length > 0) {
-    qualifications.push(
-      `INCOMPLETE — ${unweighed.length} row(s) of ${csvPath} could not be read, so that ` +
-        `many rung(s) resting at the venue are NOT counted as committed and available reads ` +
-        `HIGH by whatever they encumber. Re-export and re-import to pick the missing ` +
-        `rung(s) up; the reasons are on the error channel above.`,
-    );
-  }
-
-  if (restated.length > 0) {
-    // BOTH REMAINDERS, not just the two partials: the remainders are what the skip was
-    // decided on, so printing them lets the operator check the safety claim the rest of
-    // this line makes rather than take it on faith.
-    const detail = restated
-      .map(
-        (claim) =>
-          `${claim.id} (filled ${claim.known} → ${claim.observed}; the file still claims ` +
-          `${claim.remainingOnFile}, the venue holds ${claim.remainingAtVenue})`,
-      )
-      .join("; ");
-    qualifications.push(
-      `RESTATED — ${restated.length} rung(s) of ${csvPath} have filled FURTHER at the ` +
-        `venue since this file recorded them — ${detail} — and were SKIPPED; every other ` +
-        `rung imported normally. Their lines on file still read the OLDER partial, so they ` +
-        `encumber NO LESS than the venue still holds: committed never reads LOW and ` +
-        `available never reads HIGH. That is the safe direction — it can refuse a batch ` +
-        `you could fund, never fund one you cannot — but it is not free, and recording the ` +
-        `restatement needs an observation verb this build does not have. This line ` +
-        `REPRINTS on every import until the rung fills out or is cancelled at the venue.`,
-    );
-  }
-
-  io.out(`${qualifications.join("\n")}\nImported ${csvPath}: ${counts}.\n`);
-
-  return { status: "imported-partial", ...write };
+  return report(fresh.length, records.length - fresh.length);
 }
