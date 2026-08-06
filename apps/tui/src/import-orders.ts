@@ -359,9 +359,11 @@ function renderUnattributedRefusal(
   // export the operator just read. Unmarked, the count invited a reconciliation against
   // that export which could not come out even. The marker is short because these lines
   // already carry a synthesized id and would wrap; the header spells out what it means.
-  // It marks the LINE, not the id: on the currency-mismatch line the id is followed by the
-  // rung's own currency and reserve, and a marker wedged between them reads as part of
-  // that clause rather than as a note about the rung.
+  // It marks the LINE, not the id: a marker wedged between an id and the clause that
+  // follows it reads as part of that clause rather than as a note about the rung. Keeping
+  // the marker at end-of-line is why the currency-mismatch section puts the id alone on
+  // its line and indents the mismatch beneath it — end-of-line and inside 80 columns are
+  // both wanted, and the id plus the clause plus the marker do not fit one line.
   const mark = (line: string, orderId: string): string =>
     batchIds.has(orderId) ? line : `${line} — on file`;
   const anyOnFile = unmatched.some((entry) => !batchIds.has(entry.rung.orderId));
@@ -397,12 +399,13 @@ function renderUnattributedRefusal(
   }
 
   if (mismatched.length > 0) {
-    const listing = mismatched.map((entry) =>
-      mark(
-        `      ${entry.rung.orderId} (${entry.rung.currency}) against ` +
-          `${entry.rung.fundingReserveId}`,
-        entry.rung.orderId,
-      ),
+    // Id on its own line, its mismatch indented beneath — the shape the unfundable section
+    // already uses for a grouping and its rungs, rather than a third layout for this one.
+    const listing = mismatched.map(
+      (entry) =>
+        `${mark(`      ${entry.rung.orderId}`, entry.rung.orderId)}\n` +
+        `        quoted in ${entry.rung.currency}, declared against ` +
+        `${entry.rung.fundingReserveId}`,
     );
     sections.push(
       `  currency mismatch — ${plural(mismatched.length, "rung")}\n` +
