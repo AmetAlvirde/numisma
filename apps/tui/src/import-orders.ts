@@ -307,14 +307,52 @@ function plural(count: number, noun: string): string {
  * classes and narrows nothing (see `FundingCoverage`).
  *
  * EACH SECTION IS ABSENT WHEN ITS CLASS IS, so a homogeneous batch renders one section.
- * There will never be a third: `over-committed` cannot join the pair, because an
- * unplaceable rung has no balance to weigh — which is exactly what the closing line says,
- * and why that line is not droppable. Batching creates the expectation *"I have now been
- * told everything"*, and without that sentence the expectation is false.
+ * `over-committed` cannot join them, because an unplaceable rung has no balance to weigh —
+ * which is exactly what the closing line says, and why that line is not droppable.
+ * Batching creates the expectation *"I have now been told everything"*, and without that
+ * sentence the expectation is false.
+ *
+ * WHICH IS ALSO WHY THE PARTITION IS A SWITCH AND NOT TWO FILTERS. The header counts off
+ * `unmatched.length` while the body lists only what the partition matched, so under two
+ * `.filter` calls a third {@link UnmatchedReason} was COUNTED AND NEVER NAMED — and with a
+ * homogeneous batch of it, `sections` was empty and the refusal named ZERO rungs while
+ * claiming one could not be placed. That is #179's masking defect rebuilt at the render
+ * boundary, and splitting `unfundable-reserve` into its three causes — paper mode,
+ * unsupported currency, dangling account — is a change `UnmatchedReason` needs no new
+ * shape for, so the premise is a live one.
+ *
+ * TWO LAYERS NOW STOP IT, AND ONLY ONE OF THEM IS THE FIX. The `never` assignment makes a
+ * new member a `pnpm typecheck` failure AT THIS SITE — that is the fix, and it is the only
+ * thing that catches the omission before an operator does. The fallback section is what
+ * the output degrades to if one ever arrives here unhandled anyway: named under its raw
+ * token rather than swallowed, so the count and the listing still agree.
  */
 function renderUnattributedRefusal(unmatched: readonly UnmatchedRung[]): string {
-  const unfundable = unmatched.filter((entry) => entry.reason === "unfundable-reserve");
-  const mismatched = unmatched.filter((entry) => entry.reason === "currency-mismatch");
+  const unfundable: UnmatchedRung[] = [];
+  const mismatched: UnmatchedRung[] = [];
+  // Raw reason token → the rungs carrying it. Empty in every reachable state.
+  const unclassified = new Map<string, string[]>();
+  for (const entry of unmatched) {
+    switch (entry.reason) {
+      case "unfundable-reserve":
+        unfundable.push(entry);
+        break;
+      case "currency-mismatch":
+        mismatched.push(entry);
+        break;
+      default: {
+        const _never: never = entry.reason;
+        // It does NOT throw, unlike `foldEvents`'s latch. The message IS the deliverable
+        // here, and `import-orders-cli.ts` would collapse a throw into one bare error
+        // line — losing every rung the operator was owed, to protect them from a
+        // rendering gap. Degrade the section, never the refusal.
+        const token: string = _never;
+        const existing = unclassified.get(token);
+        if (existing) existing.push(entry.rung.orderId);
+        else unclassified.set(token, [entry.rung.orderId]);
+      }
+    }
+  }
 
   const sections: string[] = [];
 
@@ -355,6 +393,17 @@ function renderUnattributedRefusal(unmatched: readonly UnmatchedRung[]): string 
       `  currency mismatch — ${plural(mismatched.length, "rung")}\n` +
         `    Cross-currency funding is not supported; fix the declaration.\n` +
         `${listing.join("\n")}`,
+    );
+  }
+
+  for (const [token, orderIds] of unclassified) {
+    // No advice line: nothing here knows the remedy for a reason it does not know. The
+    // token and the rungs are what can be said honestly, and they are enough to report.
+    sections.push(
+      `  ${token} — ${plural(orderIds.length, "rung")}\n` +
+        `    This refusal has no section for that reason; it is named as the engine\n` +
+        `    gave it, so no rung counted above goes unlisted.\n` +
+        `${orderIds.map((orderId) => `      ${orderId}`).join("\n")}`,
     );
   }
 
