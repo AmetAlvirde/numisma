@@ -27,7 +27,7 @@ export async function fetchBinanceDailyClose(
   options: FetchOptions,
 ): Promise<ProviderObservation> {
   const now = options.now ?? (() => new Date());
-  const url = `${BINANCE_KLINES}?symbol=${entry.symbol}&interval=1d&limit=2`;
+  const url = `${BINANCE_KLINES}?symbol=${encodeURIComponent(entry.symbol)}&interval=1d&limit=2`;
   const r = await fetchJson(url, {
     timeoutMs: options.timeoutMs,
     fetchImpl: options.fetchImpl,

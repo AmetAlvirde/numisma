@@ -1,9 +1,6 @@
 /**
  * The provider kernel: the contracts every price provider speaks and the one
- * network envelope they all ride. It exists so the three concrete providers
- * (Binance, Twelve Data, Banxico) hold nothing but their own URL, payload shape
- * and failure label — the shared `AbortController` timeout (R4), the HTTP-status
- * check, the JSON decode and the error rewrap live here once.
+ * network envelope they all ride.
  *
  * `fetchJson` deliberately returns a Result rather than throwing: the providers
  * disagree on channel (Binance and Banxico throw a symbol-attributable error;
@@ -13,6 +10,7 @@
  * one line, with its own label — the helper never formats the label, because
  * Twelve Data's is built per batch entry.
  */
+
 /**
  * A raw provider observation: the close, the DATE of the bar it came from, and the
  * instant it was fetched. `observationDate` (`YYYY-MM-DD`) is the provider's own bar

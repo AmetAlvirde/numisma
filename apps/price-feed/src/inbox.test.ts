@@ -3,8 +3,8 @@
 //  1. Attribution (finding 8): a corrupt/empty inbox file must fail LOUDLY and
 //     NAMING the file — matching the tui's `Inbox … is not valid JSON.` — rather
 //     than throwing a bare, unattributed `SyntaxError` from `JSON.parse`. The
-//     parse now sits in its own try/catch inside `readInbox`, distinct from the
-//     ENOENT→[] guard around `readFile`.
+//     parse now sits in its own try/catch inside `readInboxArray`, distinct from
+//     the ENOENT→[] guard around `readOptional`.
 //
 //  2. Sibling-repo data dir (grill decision): `DEFAULT_CONFIG.dataDir` must be an
 //     ABSOLUTE path in the sibling private `accumulus` repo (`~/Dev/accumulus/data`),
@@ -32,7 +32,7 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-describe("emitMarksToInbox / readInbox", () => {
+describe("emitMarksToInbox / readInboxArray", () => {
   it("throws an attributed error (not a bare SyntaxError) for a corrupt inbox", async () => {
     const inbox = join(dir, "inbox.json");
     await writeFile(inbox, "{ this is not json");
