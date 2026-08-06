@@ -243,7 +243,42 @@ if git -C "$DATA_DIR" rev-parse --git-dir >/dev/null 2>&1; then
   echo "[$STAMP] post-check OK: durable log committed clean in $DATA_DIR."
 fi
 
-# 5) Refresh the hosted projection. `backfill`, NOT `push`, and the difference is
+# Steps 5 and 6 are the DERIVED surfaces, and they run in this order for a reason
+# stated once here: THE LOCAL ONE FIRST, THE NETWORKED ONE SECOND. Under `set -e` a
+# failing step aborts every step after it, so ordering decides what a partial run
+# still delivers. `gap-report` needs no credential and no network — it is a pure
+# read of the log this run just verified, so if it runs first it succeeds on every
+# run that got past step 4, INCLUDING the runs where the database is unreachable.
+# The other order would have let a 30-second Neon outage leave the standup reading
+# a `generatedAt` from yesterday — which is the exact staleness these two steps were
+# added to end.
+
+# 5) Rewrite gap-report.json beside the durable log. Without this the file exists
+#    only from manual runs, so the standup's data source is a day stale every
+#    morning BY CONSTRUCTION — and stale precisely on the morning after a miss,
+#    the only morning it exists for. (The TUI channel derives the same report
+#    live and was never affected; this is the file half only.)
+#
+#    Needs no credential and no data-dir variable — it is a pure function of the
+#    log. It writes into $DATA_DIR, the accumulus tree step 3 just committed, but
+#    cannot dirty it: accumulus uses an allowlist .gitignore under which
+#    gap-report.json falls through to /data/* (ignored, untracked), and step 4's
+#    strict arm runs `git status --porcelain` WITHOUT `--ignored` over the FOUR
+#    durable files it names, so the sidecar is invisible to it either way. (Four,
+#    not five: the allowlist versions five files, but head-digest.json is handled
+#    by the lenient `--ignored` arm above, and that arm reports rather than fails.)
+#
+#    ZERO-ARGUMENT, and it stays that way even as the log ages: the command floors
+#    its own window at `boundedEraFloor` — the launchd era start, or 400 days back,
+#    whichever is later — so the default window can never grow into the command's
+#    own width cap. Before that clamp this line was a date-bomb: the era start is
+#    fixed while the ceiling is yesterday, so on 2027-08-08 the window would have
+#    hit 401 days and this step would have thrown every night from then on, after
+#    every other step had already succeeded.
+LAST_STEP="gap-report"
+pnpm gap-report -- --write
+
+# 6) Refresh the hosted projection. `backfill`, NOT `push`, and the difference is
 #    the whole reason this step can be unattended: `push` writes ONE row — the
 #    current fold's `asOf` — so a run that died yesterday leaves yesterday
 #    permanently missing from the dashboard. `backfill` enumerates the log's own
@@ -258,29 +293,14 @@ fi
 #    run goes red here (exit 1) rather than silently skipping, which is correct:
 #    the projection going stale is exactly the thing this step exists to prevent.
 #
-#    WHY THIS RUNS AFTER THE POST-CHECK, not before. This is a network call that
-#    can fail on its own terms. Placed earlier it would abort the run after step 3
-#    committed the log but BEFORE step 4 verified it landed — muddying the one
-#    check that guards real fund data with an unrelated database failure. The
+#    WHY BOTH OF THESE RUN AFTER THE POST-CHECK, not before. This is a network call
+#    that can fail on its own terms. Placed earlier it would abort the run after
+#    step 3 committed the log but BEFORE step 4 verified it landed — muddying the
+#    one check that guards real fund data with an unrelated database failure. The
 #    durable log is the source of truth; the projection is a derived read surface,
 #    so it is verified last and cannot pre-empt the log's own check.
 LAST_STEP="backfill"
 pnpm backfill
-
-# 6) Rewrite gap-report.json beside the durable log. Without this the file exists
-#    only from manual runs, so the standup's data source is a day stale every
-#    morning BY CONSTRUCTION — and stale precisely on the morning after a miss,
-#    the only morning it exists for. (The TUI channel derives the same report
-#    live and was never affected; this is the file half only.)
-#
-#    Needs no credential and no data-dir variable — it is a pure function of the
-#    log. It writes into $DATA_DIR, the accumulus tree step 3 just committed, but
-#    cannot dirty it: accumulus uses an allowlist .gitignore under which
-#    gap-report.json falls through to /data/* (ignored, untracked), and step 4's
-#    strict arm runs `git status --porcelain` WITHOUT `--ignored` over five named
-#    durable files, so the sidecar is invisible to it either way.
-LAST_STEP="gap-report"
-pnpm gap-report -- --write
 
 LAST_STEP="complete"
 echo "[$STAMP] price-feed daily run complete."

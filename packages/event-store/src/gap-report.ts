@@ -151,6 +151,27 @@ export function dueThrough(now: Date, timeZone: string = REPORT_TIME_ZONE): stri
 }
 
 /**
+ * THE FLOOR, BOUNDED: `LAUNCHD_ERA_START`, or `maxDays` back from the ceiling —
+ * whichever is LATER. Inclusive of the ceiling itself, so the window it opens is
+ * exactly `maxDays` calendar days wide at its widest.
+ *
+ * IT EXISTS BECAUSE THE ERA START IS A FIXED DAY AND THE CEILING IS NOT. A caller
+ * that both defaults its floor to the era start AND refuses windows over some width
+ * has written a date-bomb without noticing: the default window grows by one day
+ * every day and eventually crosses the refusal. For the gap-report command that day
+ * is 2027-08-08, and the cost is the 18:00 job going permanently red at its last
+ * step, long after anyone remembers why.
+ *
+ * The WIDTH lives with the caller that has the reason for it (readability, a line
+ * budget, a screen); the ERA START and the calendar arithmetic live here, with the
+ * derivation they belong to. Neither has to know the other's constant.
+ */
+export function boundedEraFloor(now: Date, maxDays: number): string {
+  const widest = addDays(dueThrough(now), -(maxDays - 1));
+  return widest > LAUNCHD_ERA_START ? widest : LAUNCHD_ERA_START;
+}
+
+/**
  * Name the lost days in the window. Synchronous, pure, and ONE PASS over the
  * events: the anchor set and the per-date mark counts are built together, because
  * they are two readings of the same scan.

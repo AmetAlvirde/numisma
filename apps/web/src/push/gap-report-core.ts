@@ -47,6 +47,7 @@
  * structurally rather than trusting it to stay true.
  */
 import {
+  boundedEraFloor,
   formatGapReport,
   formatGapSummary,
   gapReportPath,
@@ -67,6 +68,38 @@ import {
  * is a report nobody reads.
  */
 export const MAX_WINDOW_DAYS = 400;
+
+/**
+ * The floor a run that did not ask for one gets: `LAUNCHD_ERA_START`, or
+ * `MAX_WINDOW_DAYS` back from the ceiling — WHICHEVER IS LATER.
+ *
+ * WITHOUT THIS CLAMP THE TWO CONSTANTS COLLIDE ON A DATE. `computeGapReport`
+ * defaults the floor to the era start, which is a FIXED day and not a rolling one,
+ * so the default window grows by one day every day; the cap above refuses anything
+ * over 400. The zero-argument run — the only one the 18:00 job makes — therefore
+ * starts THROWING on 2027-08-08 and throws every night after, with no remedy short
+ * of a code change. A job that goes permanently red on a date nobody wrote down is
+ * the same skim-inducing failure the era floor itself was chosen to avoid, arriving
+ * through the scheduler instead of through the report.
+ *
+ * THE CAP STILL BITES, and only where it was aimed: an explicit `--since
+ * 1970-01-01` is an operator asking for twenty thousand lines and still gets the
+ * refusal. This clamp only fills in the floor nobody supplied.
+ *
+ * THE COST, SAID PLAINLY: once the era is older than the window, a lost day
+ * eventually ages out of the default report. That is the right trade for a finding
+ * that is PERMANENT and unfixable — a day lost in 2026 is not actionable in 2028,
+ * and `--since` still reaches it — but it does mean the default report is a
+ * trailing window, not a complete history, from 2027-08-08 on.
+ *
+ * The calendar arithmetic and the era start stay in `@numisma/event-store`; only
+ * the WIDTH is this command's, because readability is this command's reason. That
+ * split is also what keeps this module's one-import property intact — see the
+ * structural test in `gap-report-core.test.ts`.
+ */
+export function defaultGapReportSince(now: Date): string {
+  return boundedEraFloor(now, MAX_WINDOW_DAYS);
+}
 
 export interface GapReportArgs {
   since: string | undefined;
@@ -199,7 +232,12 @@ export async function runGapReport(options: GapReportRunOptions): Promise<GapRep
   const paths = options.paths ?? resolveGapReportPaths();
 
   const report = await loadGapReport(paths, {
-    since: args.since,
+    // The command supplies the floor rather than letting the derivation default it,
+    // so the zero-argument run can never grow into the cap below. See
+    // `defaultGapReportSince`. The pure derivation keeps its own era-start default
+    // for callers that bound their output some other way (the TUI channel bounds by
+    // LINES, not by window).
+    since: args.since ?? defaultGapReportSince(options.now),
     until: args.until,
     now: options.now,
   });
@@ -226,6 +264,9 @@ export async function runGapReport(options: GapReportRunOptions): Promise<GapRep
     );
   }
 
+  // Reachable ONLY through an explicit `--since` now that the default floor is
+  // clamped to the same bound. Kept as a real check rather than an assertion: the
+  // operator-supplied case is the one it was written for.
   if (report.calendarDays > MAX_WINDOW_DAYS) {
     throw new Error(
       `gap-report: the window ${report.since}…${report.until} spans ` +
