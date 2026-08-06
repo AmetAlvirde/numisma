@@ -11,7 +11,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import type { PortfolioEvent } from "@numisma/engine";
+import { addDays, type PortfolioEvent } from "@numisma/engine";
 import { resolveEventStorePaths, type EventStorePaths } from "@numisma/event-store";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadGapLines, MAX_GAP_LINES } from "./gap-lines.js";
@@ -39,12 +39,15 @@ function deposit(date: string): PortfolioEvent {
   return { id: `dep-${date}`, asOf: date, type: "Deposit", reserveId: "cash-core", amount: 500, tier: "c1" };
 }
 
-/** `count` consecutive `YYYY-MM-DD` days ending at (and including) `until`, ascending. */
+/**
+ * `count` consecutive `YYYY-MM-DD` days ending at (and including) `until`, ascending.
+ *
+ * Built on the engine's `addDays` rather than hand-rolled millisecond arithmetic —
+ * the same helper the walk under test steps with (`gap-report.ts`), so the test and
+ * the derivation cannot drift on what "the next day" means.
+ */
 function daysEndingAt(until: string, count: number): string[] {
-  const end = Date.parse(`${until}T00:00:00Z`);
-  return Array.from({ length: count }, (_unused, index) =>
-    new Date(end - (count - 1 - index) * 86_400_000).toISOString().slice(0, 10),
-  );
+  return Array.from({ length: count }, (_unused, index) => addDays(until, index - (count - 1)));
 }
 
 const NOW = new Date("2026-08-05T12:00:00Z"); // 06:00 CDMX; yesterday = 2026-08-04
