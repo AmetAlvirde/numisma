@@ -14,7 +14,7 @@ Everything here is machine-local. Nothing secret or trade-derived enters the rep
 
 | File | Role |
 | --- | --- |
-| `ops/price-feed/run-daily-fetch.sh` | Wrapper the scheduler calls. Sets a PATH that can find `pnpm`, sources tokens, runs `pnpm prices:fetch`; on a clean fetch: (2) `pnpm spine` then (3) an auto-commit of any new data-repo changes scoped to `$NUMISMA_DATA_DIR` — idempotent if no new marks, never pushes — then (4) a post-check that **fails the job** if the durable event log is still uncommitted (lenient warn for the `head-digest.json` breadcrumb). Only once the log is verified does it touch anything derived: (5) `pnpm backfill` to refresh the hosted projection and (6) `pnpm gap-report -- --write` to rewrite `gap-report.json` beside the log. Preserves the non-zero exit code so the scheduler notices a failure or rejection. |
+| `ops/price-feed/run-daily-fetch.sh` | Wrapper the scheduler calls. Sets a PATH that can find `pnpm`, sources tokens, runs `pnpm prices:fetch`; on a clean fetch: (2) `pnpm spine` then (3) an auto-commit of any new data-repo changes scoped to `$NUMISMA_DATA_DIR` — idempotent if no new marks, never pushes — then (4) a post-check that **fails the job** if the durable event log is still uncommitted (lenient warn for the `head-digest.json` breadcrumb). Only once the log is verified does it touch anything derived, local before networked: (5) `pnpm gap-report -- --write` to rewrite `gap-report.json` beside the log and (6) `pnpm backfill` to refresh the hosted projection. Preserves the non-zero exit code so the scheduler notices a failure or rejection. |
 | `ops/price-feed/com.numisma.pricefeed.daily.plist` | launchd definition firing the wrapper at 18:00 local (the default mark time), **every day** (see "Why the schedule fires 7 days/week" below). |
 
 Both files are templates: replace `__REPO_DIR__` / `__HOME__` before installing.
@@ -61,6 +61,16 @@ Both files are templates: replace `__REPO_DIR__` / `__HOME__` before installing.
   repo (`~/Dev/accumulus/data` by default, or wherever `NUMISMA_DATA_DIR` points),
   never inside the numisma checkout; secrets likewise are a machine-local artifact
   beside the repo, not in it.
+
+  **Credentials only — do not put `NUMISMA_DATA_DIR` in this file.** The wrapper
+  resolves `DATA_DIR` in its configuration block at the top, *before* it sources
+  this file, because the heartbeat trap must know where to write before the
+  exit-127 checks run. A `NUMISMA_DATA_DIR` set here would therefore reach every
+  node command but not the wrapper's own git steps: the commit and post-check would
+  guard `~/Dev/accumulus/data` while `spine` wrote somewhere else, and the job would
+  stay green over an unverified log. Set it in the launchd plist's
+  `EnvironmentVariables` (or the shell environment) instead, where both halves see
+  it.
 
 ### Twelve Data free tier: why the run pauses ~1 minute
 
@@ -262,25 +272,45 @@ Confirm, in order:
    `head-digest.json` warns but does not fail the run (it is a forensic breadcrumb,
    not the source of truth); the warning uses `git status --ignored` so it fires even
    when the breadcrumb is only-ignored-and-present, the actual #132 shape.
-7. **Backfill (step 5):** the log reads `[backfill] N anchor(s) upserted: <first>
+7. **Gap report (step 5):** the report's own lines appear and `gap-report.json` in
+   the data dir carries a `generatedAt` from **this** run. Before this step existed
+   the file was written only by hand, so it was a day stale every morning — and
+   stale precisely on the morning after a miss, the one morning anybody reads it.
+8. **Backfill (step 6):** the log reads `[backfill] N anchor(s) upserted: <first>
    … <last>`, one line per anchored date. `[backfill] failed:
    PROJECTION_WRITE_DATABASE_URL is not set` means the key is missing from the env
    file — the run goes red here, deliberately, rather than leaving the dashboard to
    rot quietly. Note the exit is non-zero but the durable log is already committed
    and verified: this failure costs a stale projection, never fund data.
-8. **Gap report (step 6):** the run ends with the report's own lines and
-   `gap-report.json` in the data dir carries a `generatedAt` from **this** run.
-   Before this step existed the file was written only by hand, so it was a day
-   stale every morning — and stale precisely on the morning after a miss, the one
-   morning anybody reads it.
+
+**Why the local step runs before the networked one.** Under `set -e` a failing step
+aborts everything after it, so the order decides what a partial run still delivers.
+`gap-report` needs no credential and no network — it is a pure read of the log the
+post-check just verified — so putting it first means it succeeds on every run that
+got past step 4, **including the runs where the database is unreachable**. The
+other order would let a 30-second projection outage leave the standup reading
+yesterday's `generatedAt`, which is the exact staleness these steps end.
 
 **The failure mode these two steps create, and who catches it.** Fetch succeeds,
-`backfill` fails: the durable log is clean and committed, the projection is stale,
-and the gap report is **structurally silent** — it derives purely over the log,
-and the log is fine. Nothing in the data says anything is wrong. Only
-`job-heartbeat.json` sees it, carrying `exitCode` non-zero and
-`lastStep: "backfill"`, which the TUI surfaces on its next startup (#191). That
-dependency is why these steps could not be added before the heartbeat shipped.
+`backfill` fails: the durable log is clean and committed, the gap report is fresh,
+and the projection is stale. The gap report cannot say so — it is **structurally
+silent** here, deriving purely over the log, and the log is fine. Nothing in the
+data says anything is wrong. Only `job-heartbeat.json` sees it, carrying `exitCode`
+non-zero and `lastStep: "backfill"`, which the TUI surfaces on its next startup
+(#191). That dependency is why these steps could not be added before the heartbeat
+shipped.
+
+**The gap report's window is bounded and self-flooring, so this step cannot age
+into a failure.** `pnpm gap-report` refuses a window over 400 calendar days (it
+would print one line per day), and its floor defaults to the launchd era start —
+a *fixed* day against a ceiling that moves. Left alone those two would have
+collided on **2027-08-08**, turning the last step of every night's run red forever,
+after everything else had succeeded. The command now floors a zero-argument run at
+the later of the era start and 400 days back (`boundedEraFloor`), so the scheduled
+invocation stays zero-argument — no date for a cron job to get wrong — and can
+never grow into its own cap. The trade, stated: from 2027-08-08 the default report
+is a trailing 400-day window rather than the whole era. A lost day is permanent and
+unfixable, so aging one out is right; `--since` still reaches it.
 
 ### Dry-run record
 

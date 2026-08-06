@@ -18,6 +18,7 @@ export {
 export {
   LAUNCHD_ERA_START,
   REPORT_TIME_ZONE,
+  boundedEraFloor,
   computeGapReport,
   dueThrough,
   formatGapReport,
