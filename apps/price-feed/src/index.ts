@@ -1,9 +1,10 @@
 /**
  * `@numisma/price-feed` — the headless runtime shell for the two-plane price
  * model (ADR-005). It hosts the provider fetch, the disposable price-store IO,
- * the atomic inbox emit, and the CLI, and depends ONLY on `@numisma/engine`,
- * never on `@numisma/tui`, so any future access surface (web, scheduler) can
- * reuse the pipeline. All domain decisions live in the engine's pure core.
+ * the atomic inbox emit, and the CLI. It depends on `@numisma/engine` and
+ * `@numisma/event-store` — never on `@numisma/tui` — so any future access surface
+ * (web, scheduler) can reuse the pipeline. All domain decisions live in the
+ * engine's pure core.
  */
 export type { PriceFeedConfig, ProviderCredentials } from "./config.js";
 export { DEFAULT_CONFIG, readCredentialsFromEnv } from "./config.js";
