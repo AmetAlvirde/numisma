@@ -32,6 +32,9 @@ importers:
       '@numisma/engine':
         specifier: workspace:*
         version: link:../../packages/engine
+      '@numisma/event-store':
+        specifier: workspace:*
+        version: link:../../packages/event-store
 
   apps/tui:
     dependencies:

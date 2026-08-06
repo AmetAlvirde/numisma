@@ -100,6 +100,18 @@ describe("fetchBanxicoFix — loud failures", () => {
     ).rejects.toThrow(/unexpected FIX date format/);
   });
 
+  it("attributes a non-JSON 200 to the series instead of throwing a bare SyntaxError", async () => {
+    // Regression guard for #110's finding 2 — see twelvedata-provider.test.ts. Banxico
+    // was always caught by the orchestrator, but unlabelled: the decode threw before
+    // any provider prefix was applied.
+    await expect(
+      fetchBanxicoFix({
+        ...OPTS,
+        fetchImpl: fetchWith(() => new Response("<html>maintenance</html>", { status: 200 })),
+      }),
+    ).rejects.toThrow(/^Banxico SF43718 -> /);
+  });
+
   it("attributes a request timeout", async () => {
     const stall: typeof fetch = ((_url: string | URL | Request, init?: RequestInit) =>
       new Promise<Response>((_resolve, reject) => {
@@ -112,5 +124,33 @@ describe("fetchBanxicoFix — loud failures", () => {
     await expect(
       fetchBanxicoFix({ ...OPTS, timeoutMs: 20, fetchImpl: stall }),
     ).rejects.toThrow(/timed out after 20ms/);
+  });
+
+  it("attributes a timeout that strikes during the BODY read, not just the fetch", async () => {
+    // The JSON decode moved INSIDE `fetchJson`'s guarded region, so the R4
+    // AbortController now bounds the body read too — `clearTimeout` no longer fires
+    // before the decode begins. The stall above rejects at the FETCH stage and never
+    // reaches this path: here the headers arrive fine (200) and the body is what
+    // never completes. The abort must still surface as the timeout reason with the
+    // provider's own label, not as the transport's raw wording.
+    const stallBody: typeof fetch = ((_url: string | URL | Request, init?: RequestInit) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"bmx":'));
+          init?.signal?.addEventListener("abort", () => {
+            // The shape undici surfaces for a mid-body abort: a DOMException whose
+            // `name` is `AbortError` and which satisfies `instanceof Error`.
+            controller.error(new DOMException("This operation was aborted", "AbortError"));
+          });
+        },
+      });
+      return Promise.resolve(
+        new Response(body, { status: 200, headers: { "content-type": "application/json" } }),
+      );
+    }) as typeof fetch;
+
+    await expect(
+      fetchBanxicoFix({ ...OPTS, timeoutMs: 20, fetchImpl: stallBody }),
+    ).rejects.toThrow(/^Banxico SF43718 -> request timed out after 20ms$/);
   });
 });
