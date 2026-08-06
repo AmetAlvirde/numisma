@@ -879,6 +879,23 @@ describe("`O1` — the over-commitment reject (testing decision 6)", () => {
     expect(refusal).toContain("      reserve-odd\n        rung-odd");
     expect(refusal).toContain("\n      reserve-paper\n");
     expect(refusal).toContain("rung-mxn (USD) against reserve-mxn");
+    // PROVENANCE (#202 review). The count is the whole book's, so the two rungs that were
+    // already in the sidecar are MARKED and the legend says what the mark means — without
+    // it, the operator reconciles "4 rungs" against an export holding two of them and
+    // cannot make it come out even.
+    expect(refusal).toContain('rungs marked "on file"');
+    expect(refusal).toContain("        rung-odd — on file");
+    expect(refusal).toContain("      rung-mxn (USD) against reserve-mxn — on file");
+    // This batch's own rungs carry NO marker: they are in the export just read.
+    const exported = parseBitgetOpenOrdersCsv(await readFile(csvPath, "utf8"));
+    expect(exported.status).toBe("ok");
+    if (exported.status !== "ok") return;
+    const batchRungIds = exported.orders.map((order) => order.id);
+    expect(batchRungIds).toHaveLength(2);
+    for (const id of batchRungIds) {
+      expect(refusal).toContain(`        ${id}\n`);
+      expect(refusal).not.toContain(`${id} — on file`);
+    }
     // NOTHING written: the file still carries exactly the two rungs seeded above.
     expect(await idsOnDisk(ordersPath)).toEqual(["rung-odd", "rung-mxn"]);
     // The honest cost of batching, and not droppable: `over-committed` never ran, so the

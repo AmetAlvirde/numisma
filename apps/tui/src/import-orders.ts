@@ -327,7 +327,10 @@ function plural(count: number, noun: string): string {
  * the output degrades to if one ever arrives here unhandled anyway: named under its raw
  * token rather than swallowed, so the count and the listing still agree.
  */
-function renderUnattributedRefusal(unmatched: readonly UnmatchedRung[]): string {
+function renderUnattributedRefusal(
+  unmatched: readonly UnmatchedRung[],
+  batchIds: ReadonlySet<string>,
+): string {
   const unfundable: UnmatchedRung[] = [];
   const mismatched: UnmatchedRung[] = [];
   // Raw reason token → the rungs carrying it. Empty in every reachable state.
@@ -354,6 +357,18 @@ function renderUnattributedRefusal(unmatched: readonly UnmatchedRung[]): string 
     }
   }
 
+  // PROVENANCE, PER RUNG (#202 review). `O1` weighs the WHOLE resting book — the sidecar's
+  // existing records plus this batch — so a listed rung need not appear anywhere in the
+  // export the operator just read. Unmarked, the count invited a reconciliation against
+  // that export which could not come out even. The marker is short because these lines
+  // already carry a synthesized id and would wrap; the header spells out what it means.
+  // It marks the LINE, not the id: on the currency-mismatch line the id is followed by the
+  // rung's own currency and reserve, and a marker wedged between them reads as part of
+  // that clause rather than as a note about the rung.
+  const mark = (line: string, orderId: string): string =>
+    batchIds.has(orderId) ? line : `${line} — on file`;
+  const anyOnFile = unmatched.some((entry) => !batchIds.has(entry.rung.orderId));
+
   const sections: string[] = [];
 
   if (unfundable.length > 0) {
@@ -375,7 +390,8 @@ function renderUnattributedRefusal(unmatched: readonly UnmatchedRung[]): string 
         `    and the available-capital report would not be able to place it either.`;
     const listing = [...byReserve].map(
       ([reserveId, orderIds]) =>
-        `      ${reserveId}\n${orderIds.map((orderId) => `        ${orderId}`).join("\n")}`,
+        `      ${reserveId}\n` +
+        `${orderIds.map((orderId) => mark(`        ${orderId}`, orderId)).join("\n")}`,
     );
     sections.push(
       `  unfundable reserve — ${plural(byReserve.size, "reserve")}, ` +
@@ -384,10 +400,12 @@ function renderUnattributedRefusal(unmatched: readonly UnmatchedRung[]): string 
   }
 
   if (mismatched.length > 0) {
-    const listing = mismatched.map(
-      (entry) =>
+    const listing = mismatched.map((entry) =>
+      mark(
         `      ${entry.rung.orderId} (${entry.rung.currency}) against ` +
-        `${entry.rung.fundingReserveId}`,
+          `${entry.rung.fundingReserveId}`,
+        entry.rung.orderId,
+      ),
     );
     sections.push(
       `  currency mismatch — ${plural(mismatched.length, "rung")}\n` +
@@ -403,12 +421,19 @@ function renderUnattributedRefusal(unmatched: readonly UnmatchedRung[]): string 
       `  ${token} — ${plural(orderIds.length, "rung")}\n` +
         `    This refusal has no section for that reason; it is named as the engine\n` +
         `    gave it, so no rung counted above goes unlisted.\n` +
-        `${orderIds.map((orderId) => `      ${orderId}`).join("\n")}`,
+        `${orderIds.map((orderId) => mark(`      ${orderId}`, orderId)).join("\n")}`,
     );
   }
 
   return (
-    `${plural(unmatched.length, "rung")} cannot be placed against a fundable reserve.\n\n` +
+    `${plural(unmatched.length, "rung")} cannot be placed against a fundable reserve.\n` +
+    // Only when there is something to explain: a batch whose every unplaceable rung came
+    // out of the export just read owes the operator no marker and no legend for one.
+    (anyOnFile
+      ? `Coverage weighs the WHOLE resting book, so rungs marked "on file" below were\n` +
+        `already in the sidecar before this import, not in the export just read.\n`
+      : ``) +
+    `\n` +
     `${sections.join("\n\n")}\n\n` +
     `Reserve balances were NOT weighed: an unplaceable rung has no balance to compare\n` +
     `against, so a coverage refusal may still follow once every rung above is placeable.\n`
@@ -824,7 +849,18 @@ export async function importBitgetOpenOrders(
     // and in the report, and the operator is told about every one of them at once rather
     // than paying a second full pass — declaration prompt included — to learn the second
     // class (#179).
-    return reject(io, "unattributed", renderUnattributedRefusal(coverage.unmatched));
+    //
+    // `records` is passed so the message can mark which listed rungs are NOT this batch's:
+    // `resting` above is the whole book, and only the caller knows which half the operator
+    // just exported.
+    return reject(
+      io,
+      "unattributed",
+      renderUnattributedRefusal(
+        coverage.unmatched,
+        new Set(records.map((record) => record.id)),
+      ),
+    );
   }
   if (coverage.status === "over-committed") {
     const detail = coverage.shortfalls
