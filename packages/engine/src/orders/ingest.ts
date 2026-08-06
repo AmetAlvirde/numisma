@@ -370,7 +370,11 @@ export interface FundingShortfall {
  */
 export type FundingCoverage =
   | { status: "ok" }
-  | { status: "unattributed"; unmatched: UnmatchedRung[] }
+  // `readonly`, because "the identical array, narrowed by nobody" is a claim about the
+  // list the caller receives too: a consumer that spliced its own class out of it would
+  // re-create #179's masking one layer down, and the surfaces that render it already take
+  // `readonly UnmatchedRung[]`.
+  | { status: "unattributed"; unmatched: readonly UnmatchedRung[] }
   | { status: "over-committed"; shortfalls: FundingShortfall[] };
 
 /**
