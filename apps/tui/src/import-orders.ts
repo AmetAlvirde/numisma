@@ -139,21 +139,49 @@ interface OrdersImportWrite {
    * about a rung the file now describes wrongly.
    */
   alreadyKnown: number;
-  /** The export rows this build could not read. EMPTY on `imported`, by construction. */
+  /**
+   * The export rows this build could not read. EMPTY on `imported`, by construction —
+   * one of the TWO invariants that status now carries, the sibling being `restated`.
+   */
   skips: BitgetRowSkip[];
+  /**
+   * The rungs skipped because the venue has restated their partial (#199). EMPTY on
+   * `imported`, by construction, exactly as `skips` is.
+   *
+   * A SECOND FIELD RATHER THAN A THIRD STATUS, and that is the load-bearing choice: an
+   * export can carry an unreadable row AND a restated rung at once, and a sum type can
+   * say only one of those, so a third member would drop one qualification silently. Two
+   * fields under one qualified status say both.
+   */
+  restated: RestatedPartial[];
 }
 
 export type OrdersImportOutcome =
-  /** Every row of the export was read. The unqualified success, and the only one. */
+  /**
+   * Every row of the export was read AND nothing was restated. The unqualified success,
+   * and the only one — its invariant STRENGTHENED by #199 rather than widened, so the
+   * status keeps meaning what a reader who never opens a second field assumes it means.
+   */
   | ({ status: "imported" } & OrdersImportWrite)
   /**
-   * The readable rungs were written and at least one row was NOT read (`D3`, #177).
+   * Lines were written, and SOMETHING ABOUT THE EXPORT WAS QUALIFIED (`D3`, #177; #199).
    *
-   * A DISTINCT MEMBER, not `imported` carrying a non-empty `skips`. The risk is real —
-   * an unread rung is `committed` that nobody counted, so `available` reads HIGH, the
-   * direction that costs money — and a shape that forces every reader to open a second
-   * field to discover the first was qualified is a type that lies to the reader who does
-   * not. It is still a SUCCESS: lines were written, and the CLI exits 0 (`D3`).
+   * A DISTINCT MEMBER, not `imported` carrying a non-empty field. A shape that forces
+   * every reader to open a second field to discover the first was qualified is a type
+   * that lies to the reader who does not. It is still a SUCCESS: lines were written, and
+   * the CLI exits 0 (`D3`).
+   *
+   * TWO qualifications reach it, with OPPOSITE money directions, each carrying its own
+   * field and printing its own operator line:
+   *
+   * - `skips` — a row was not read, so a rung resting at the venue is `committed` that
+   *   nobody counted and `available` reads HIGH.
+   * - `restated` — a rung was read perfectly and its partial on file is stale, so the
+   *   encumbrance is over-stated: `committed` reads HIGH and `available` reads LOW.
+   *
+   * That opposition is why `restated` could not reuse `skips`: `leavesRungUnweighed` is
+   * a predicate over PARSER problems, and a restated rung is not unweighed — it is
+   * weighed, and weighed high.
    */
   | ({ status: "imported-partial" } & OrdersImportWrite)
   | { status: "rejected"; reason: OrdersImportRejection; message: string };
@@ -460,32 +488,55 @@ export async function importBitgetOpenOrders(
   // and the count below run through the engine's predicate rather than the raw total.
   // `outcome.skips` still carries every skip and stderr still reports every one of them.
   const unweighed = parsed.skips.filter((entry) => leavesRungUnweighed(entry.problem));
-  if (unweighed.length === 0) {
-    io.out(`Imported ${csvPath}: ${counts}.\n`);
-    return {
-      status: "imported",
-      appended: fresh.length,
-      alreadyKnown: records.length - fresh.length,
-      skips: parsed.skips,
-    };
-  }
 
-  // THE GAP OPENS THE LINE, AND IN MONEY TERMS (`D3`, #177). It used to be a suffix after
-  // two success numbers — `..., 1 row(s) skipped.` — in exactly the position an operator
-  // skims past. An unread row is a rung resting at the venue that no committed sum
-  // includes, so the figure this import feeds reads HIGH; naming that direction is what
-  // makes it a risk rather than a statistic.
-  io.out(
-    `INCOMPLETE — ${unweighed.length} row(s) of ${csvPath} could not be read, so that ` +
-      `many rung(s) resting at the venue are NOT counted as committed and available reads ` +
-      `HIGH by whatever they encumber. Imported ${csvPath}: ${counts}. Re-export and ` +
-      `re-import to pick the missing rung(s) up; the reasons are on the error channel above.\n`,
-  );
-
-  return {
-    status: "imported-partial",
+  const write = {
     appended: fresh.length,
     alreadyKnown: records.length - fresh.length,
     skips: parsed.skips,
+    restated,
   };
+
+  if (unweighed.length === 0 && restated.length === 0) {
+    io.out(`Imported ${csvPath}: ${counts}.\n`);
+    return { status: "imported", ...write };
+  }
+
+  // EVERY QUALIFICATION GETS ITS OWN LINE, EACH OPENING ON THE GAP AND NAMING ITS OWN
+  // MONEY DIRECTION (`D3`, #177; #199). The counts follow all of them, once — they used
+  // to be the whole line, with the qualification a suffix (`..., 1 row(s) skipped.`) in
+  // exactly the position an operator skims past. An export qualified BOTH ways prints
+  // BOTH lines; that case is why this is two fields and not a third status.
+  //
+  // Unread rows lead, because they are the qualification we know least about: a restated
+  // rung was read perfectly and we can state its figures, an unread one we cannot.
+  const qualifications: string[] = [];
+
+  if (unweighed.length > 0) {
+    qualifications.push(
+      `INCOMPLETE — ${unweighed.length} row(s) of ${csvPath} could not be read, so that ` +
+        `many rung(s) resting at the venue are NOT counted as committed and available reads ` +
+        `HIGH by whatever they encumber. Re-export and re-import to pick the missing ` +
+        `rung(s) up; the reasons are on the error channel above.`,
+    );
+  }
+
+  if (restated.length > 0) {
+    const detail = restated
+      .map((claim) => `${claim.id} (filled ${claim.known} → ${claim.observed})`)
+      .join("; ");
+    qualifications.push(
+      `RESTATED — ${restated.length} rung(s) of ${csvPath} have filled FURTHER at the ` +
+        `venue since this file recorded them — ${detail} — and were SKIPPED; every other ` +
+        `rung imported normally. Their lines on file still read the OLDER partial, so they ` +
+        `encumber MORE than the venue actually holds: committed reads HIGH and available ` +
+        `reads LOW. That is the safe direction — it can refuse a batch you could fund, ` +
+        `never fund one you cannot — but it is not free, and recording the restatement ` +
+        `needs an observation verb this build does not have. This line REPRINTS on every ` +
+        `import until the rung fills out or is cancelled at the venue.`,
+    );
+  }
+
+  io.out(`${qualifications.join("\n")}\nImported ${csvPath}: ${counts}.\n`);
+
+  return { status: "imported-partial", ...write };
 }

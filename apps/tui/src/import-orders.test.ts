@@ -390,6 +390,112 @@ describe("a restated partial is skipped per rung (#199)", () => {
     expect(await idsOnDisk(first.ordersPath)).toHaveLength(2);
   });
 
+  it("QUALIFIES the status rather than reporting an unqualified success", async () => {
+    const first = await harness({
+      csv: ladder(PARTLY_FILLED),
+      reserves: [{ id: "reserve-a", amount: 5000 }],
+    });
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    await writeFile(
+      first.csvPath,
+      ladder(
+        partlyFilledRung("100", "10", "8", "2020-01-01 10:00:00"),
+        rung("90", "1", "2020-01-01 11:00:00"),
+      ),
+      "utf8",
+    );
+    const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    // `imported` now means every row read AND nothing restated — a strengthened
+    // invariant, so the status keeps meaning what a reader who opens no second field
+    // assumes it means.
+    expect(outcome).not.toMatchObject({ status: "imported" });
+    expect(outcome).toMatchObject({ status: "imported-partial", appended: 1 });
+    if (outcome.status !== "imported-partial") throw new Error("expected a partial import");
+    expect(outcome.restated).toEqual([
+      { id: expect.stringContaining(":100:"), known: 6, observed: 8 },
+    ]);
+    // NOT absorbed into `skips`: `leavesRungUnweighed` is a predicate over PARSER
+    // problems, and this rung was read perfectly — it is weighed, and weighed HIGH.
+    expect(outcome.skips).toHaveLength(0);
+  });
+
+  it("LEADS its own line with the restatement and names the OPPOSITE money direction", async () => {
+    const first = await harness({
+      csv: ladder(PARTLY_FILLED),
+      reserves: [{ id: "reserve-a", amount: 5000 }],
+    });
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    await writeFile(
+      first.csvPath,
+      ladder(
+        partlyFilledRung("100", "10", "8", "2020-01-01 10:00:00"),
+        rung("90", "1", "2020-01-01 11:00:00"),
+      ),
+      "utf8",
+    );
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    const line = first.outputs.find((message) => message.includes("RESTATED"));
+    expect(line).toBeDefined();
+    // The qualification OPENS the line, and the counts follow it.
+    expect(line?.startsWith("RESTATED")).toBe(true);
+    expect(line).toContain("1 order(s) appended");
+    // Its own direction, which is the REVERSE of an unread row's.
+    expect(line).toContain("committed reads HIGH and available reads LOW");
+    expect(line).not.toContain("available reads HIGH");
+    // Both figures, and the honest consequence: this recurs until the venue resolves it.
+    expect(line).toContain("filled 6 → 8");
+    expect(line).toContain("REPRINTS");
+  });
+
+  it("reports BOTH lines when one export is qualified both ways at once", async () => {
+    // The case that killed the third-status option: a sum type can say only ONE of
+    // these, so one qualification would drop silently. Two fields say both.
+    const first = await harness({
+      csv: ladder(PARTLY_FILLED),
+      reserves: [{ id: "reserve-a", amount: 5000 }],
+    });
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    await writeFile(
+      first.csvPath,
+      ladder(
+        partlyFilledRung("100", "10", "8", "2020-01-01 10:00:00"),
+        rung("90", "1", "2020-01-01 11:00:00"),
+        rung("not-a-price", "0.1", "2020-01-01 12:00:00"),
+      ),
+      "utf8",
+    );
+    const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    expect(outcome).toMatchObject({ status: "imported-partial", appended: 1 });
+    if (outcome.status !== "imported-partial") throw new Error("expected a partial import");
+    expect(outcome.skips).toHaveLength(1);
+    expect(outcome.restated).toHaveLength(1);
+
+    const message = first.outputs.find((line) => line.includes("could not be read"));
+    expect(message).toBeDefined();
+    // BOTH qualifications, each on its own line, each naming its own direction — and the
+    // unread row leads, being the one we can say least about.
+    expect(message?.startsWith("INCOMPLETE")).toBe(true);
+    expect(message).toContain("\nRESTATED");
+    expect(message).toContain("available reads HIGH");
+    expect(message).toContain("committed reads HIGH and available reads LOW");
+    // The counts follow both, once.
+    expect(message).toContain("1 order(s) appended");
+  });
+
+  it("keeps `restated` EMPTY on the unqualified status", async () => {
+    const { csvPath, io } = await harness();
+    const outcome = await importBitgetOpenOrders({ csvPath, io });
+    expect(outcome).toMatchObject({ status: "imported", appended: 2 });
+    if (outcome.status !== "imported") throw new Error("expected a clean import");
+    expect(outcome.restated).toEqual([]);
+  });
+
   it("leaves the restated rung's line on file at the OLDER, more conservative partial", async () => {
     const first = await harness({
       csv: ladder(PARTLY_FILLED),
