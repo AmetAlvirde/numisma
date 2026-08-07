@@ -436,3 +436,57 @@ describe("the `default: never` fallback — unreachable by types, so nothing rea
     expect(refusal).toContain("  unsupported-currency — 1 rung\n");
   });
 });
+
+/**
+ * Every line of `refusal`, with its length, for the ones that do not fit `width`.
+ *
+ * Reported as `line N (M cols): <text>` rather than as a bare boolean, because a failure
+ * here is a re-wrapping job and the only useful thing to hand back is WHICH line and how
+ * far over it ran.
+ */
+function overWide(refusal: string, width = 80): string[] {
+  return refusal
+    .split("\n")
+    .map((line, index) => ({ line, index }))
+    .filter(({ line }) => line.length > width)
+    .map(({ line, index }) => `line ${index + 1} (${line.length} cols): ${line}`);
+}
+
+describe("80 COLUMNS — no test in this suite measured a line length before this one", () => {
+  it("keeps every line of the widest refusal it can render inside 80 columns", () => {
+    // The renderer's own prose is what is pinned here — the advice paragraphs, the "on
+    // file" legend, and the closing balances paragraph #202's review re-wrapped at 72/71/19
+    // because it was the one paragraph that wrapped on an 80-column terminal, which is the
+    // worst place to spend the reader's attention: it is the paragraph admitting what the
+    // operator has NOT been told.
+    //
+    // Both classes, both plural advice paragraphs, the legend, the markers and the
+    // fallback section all present at once, over REAL synthesized ids — the widest thing
+    // the renderer indents.
+    const unmatched = [
+      unfundable(orderId("1000"), "reserve-paper"),
+      unfundable(orderId("1100"), "reserve-odd"),
+      mismatched(orderId("1200"), "reserve-mxn"),
+      unknownReason(orderId("1300"), "reserve-ghost", "dangling-account"),
+    ];
+
+    expect(overWide(renderUnattributedRefusal(unmatched, NONE))).toEqual([]);
+  });
+
+  it("keeps the SINGULAR advice paragraph and the unmarked layout inside 80 columns too", () => {
+    // The singular paragraph is a different string, not the plural one with an `s` removed,
+    // so it needs its own measurement; and dropping the legend changes which lines are
+    // emitted at all.
+    const unmatched = [unfundable(orderId("1000"), "reserve-paper")];
+
+    expect(overWide(renderUnattributedRefusal(unmatched, allOf(unmatched)))).toEqual([]);
+  });
+
+  it("keeps the mismatch clause inside 80 columns — id, currency and reserve on two lines", () => {
+    // The one clause built from THREE variable-width pieces at once. Kept on two lines
+    // precisely so it fits; a future edit folding it back onto one would fail here.
+    const unmatched = [mismatched(orderId("1200"), "reserve-mxn")];
+
+    expect(overWide(renderUnattributedRefusal(unmatched, NONE))).toEqual([]);
+  });
+});
