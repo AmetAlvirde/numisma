@@ -8,8 +8,26 @@
 # a doomed mark is never appended and never silently lost.
 #
 # Idempotency is free (ADR-005 / #106): the deterministic id `pm-<id>-<asOf>` means
-# a missed run catches up on the next fire and a doubled run adds 0 new marks — so
-# this wrapper needs no locking of its own.
+# a doubled run adds 0 new marks, so the schedule can fire this script repeatedly.
+#
+# IT DOES NOT MEAN A MISSED RUN CATCHES UP (an earlier version of this comment said
+# it did). Idempotency makes a REPEATED run harmless; it does nothing for a run that
+# never happened. `asOf` is the CDMX calendar date, so once midnight passes,
+# `isFreshBar` refuses yesterday's bar permanently and the day is unrecoverable.
+# launchd DOES start a slept-through job at the next wake (coalescing several
+# intervals into one), but that catch-up lands under the new date and so recovers
+# nothing. What actually recovers a missed evening is the SCHEDULE: the plist fires
+# this script hourly from 18:00 to 23:00 (#185 S2), so any hour the machine is awake
+# within the CDMX day still marks it. Past midnight, only the gap report (#186) can
+# name the loss.
+#
+# WHY THERE IS NO LOCK, stated accurately — the mark id is NOT the reason. It covers
+# marks only, and says nothing about `atomicWrite`'s fixed `${filePath}.tmp` or the
+# accumulus git `index.lock`, both of which two concurrent runs would collide over.
+# What actually makes the repeated schedule safe is launchd's PER-LABEL SINGLETON:
+# it will not start a second instance of a job already running. That leaves only
+# schedule-vs-human collisions (a manual run during a scheduled one), which fail
+# loud under `set -e` and self-heal on the next hour — cheaper than a lock.
 #
 # Edit the two placeholders below (or export them from the launchd plist), install
 # per docs/price-feed-ops.md, then verify with the documented manual dry run.
@@ -55,6 +73,95 @@ STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 LAST_STEP="startup"
 HEARTBEAT_FILE="$DATA_DIR/job-heartbeat.json"
 
+# --- was this run even CAPABLE of marking? (#185 S2) -------------------------
+# `RunAtLoad true` means this script now fires at ANY hour — a 09:00 login is an
+# ordinary trigger. Such a run stores quotes and emits ZERO marks (the mark-instant
+# contract gates on 18:00 CDMX), then exits 0. To the heartbeat reader that looked
+# identical to a healthy evening, which SILENCED the staleness warning on exactly
+# the morning after a lost day. So record the distinction instead of guessing at it.
+#
+# THE ZONE IS PART OF THE CONTRACT, NOT THE MACHINE'S BUSINESS. The real gate is
+# `isAtOrAfterMarkTime(instant, { timeZone: "America/Mexico_City" })`, which resolves
+# through Intl in CDMX explicitly. Reading the bare local hour would agree with it
+# only by coincidence of the OS setting — and docs/price-feed-ops.md offers the
+# divergent setup as SUPPORTED ("or shift all six of the plist's Hour entries to the
+# local clock equal to 18:00-23:00 CDMX"). Take that option on a UTC box and every
+# scheduled fire computes out-of-window, so nothing ever stamps and the staleness
+# trigger is permanently, silently dead — while the runs themselves mark fine.
+#
+# `10#` forces base 10 ON BOTH OPERANDS: bare `08`/`09` are invalid OCTAL, and `[[ ]]`
+# arithmetic-evaluates the right-hand side too. Unguarded, a mark hour in the 08/09
+# band would not abort — it is an `if` condition, so `set -e` never fires — it would
+# silently classify EVERY run as out-of-window. Moot at 18, latent the moment the
+# contract moves, which is precisely what the guard below exists to survive.
+#
+# Duplicating the hour AND the zone into bash is deliberate and guarded:
+# apps/price-feed/src/schedule-window.test.ts pins both against DEFAULT_CONFIG, so a
+# change to the contract fails a test rather than rotting here silently.
+MARK_HOUR=18
+MARK_TZ="America/Mexico_City"
+if [[ $((10#$(TZ="$MARK_TZ" date +%H))) -ge $((10#$MARK_HOUR)) ]]; then
+  MARK_WINDOW=true
+else
+  MARK_WINDOW=false
+fi
+
+# WHICH STEPS MEAN THE DAY'S MARKS ARE ACTUALLY IN THE LOG. `pnpm spine` (step 2) is
+# what appends them, so every step AFTER it implies they landed. Being in the window
+# is not enough on its own: a run that dies at `prices-fetch` is in-window and marked
+# NOTHING, and stamping it would record the failure as evidence the day was covered.
+#
+# DELIBERATELY NOT "exit 0". The exit code covers the whole pipeline, but the marks
+# land at step 2. A run that fails at `gap-report` or `backfill` (steps 5-6) has
+# already appended and committed the day — gating on exit 0 would leave that evening
+# unstamped, so the next morning would claim "nothing recorded" for a day the log
+# plainly holds, and contradict the gap report standing next to it. Cry-wolf is the
+# failure this channel was designed around; under-stamping trades one false negative
+# for a false positive rather than fixing anything.
+MARKS_LANDED_STEPS="commit post-check gap-report backfill complete"
+
+# The heartbeat has ONE slot, so an out-of-window run OVERWRITES the evening run's
+# breadcrumb. Carrying the last in-window finish forward is what stops that erasing
+# the evidence: without it the reader must choose between going silent after every
+# login (the bug) and crying wolf after every healthy evening. Read BEFORE the trap
+# can overwrite the file, and never inside the trap — pure bash, but `sed` is still
+# more work than an EXIT path in the middle of a failure should be doing.
+#
+# READ UNCONDITIONALLY, not only when out of window: an IN-window run that dies
+# before `spine` must also fall back to what it carried, so this value has to exist
+# on every path. (`|| VAR=""` on the pipelines below READS as a safety net and is
+# not one: under `pipefail`, if `head -n1` exits before `sed` finishes, `sed` takes
+# SIGPIPE, the pipeline reports failure, and the `||` blanks a value that was read
+# correctly. A heartbeat has one match, so this needs thousands of matching lines to
+# reach — and it fails CLOSED, to an unset carry. Left as is, named rather than
+# papered over.)
+CARRIED_MARK_WINDOW_AT=""
+if [[ -f "$HEARTBEAT_FILE" ]]; then
+  CARRIED_MARK_WINDOW_AT="$(sed -n \
+    's/.*"lastMarkWindowFinishedAt"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+    "$HEARTBEAT_FILE" 2>/dev/null | head -n1)" || CARRIED_MARK_WINDOW_AT=""
+  # A schemaVersion-1 file predates this field, and every v1 run was treated as
+  # in-window — so its `finishedAt` IS the last in-window finish. Only fall back
+  # when the previous run did not explicitly declare itself out-of-window.
+  if [[ -z "$CARRIED_MARK_WINDOW_AT" ]] && ! grep -q '"markWindow"[[:space:]]*:[[:space:]]*false' "$HEARTBEAT_FILE" 2>/dev/null; then
+    CARRIED_MARK_WINDOW_AT="$(sed -n \
+      's/.*"finishedAt"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+      "$HEARTBEAT_FILE" 2>/dev/null | head -n1)" || CARRIED_MARK_WINDOW_AT=""
+  fi
+  # VALIDATE BEFORE RE-EMITTING. This value is copied verbatim into the next file, so
+  # a corrupt one (a torn write, a hand-edit, an embedded quote or backslash) does not
+  # merely travel — it can make the JSON unparseable, and the reader condemns the
+  # WHOLE record on a bad field, losing the exit code and step name with it. Worse, it
+  # is self-sustaining: every later out-of-window run re-reads and re-emits it, so only
+  # an in-window run would ever heal it. Dropping an unreadable carry costs one
+  # staleness date; keeping it costs the entire breadcrumb. Same ISO-instant shape the
+  # reader enforces, so anything accepted here is accepted there.
+  if [[ ! "$CARRIED_MARK_WINDOW_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$ ]]; then
+    CARRIED_MARK_WINDOW_AT=""
+  fi
+fi
+# ----------------------------------------------------------------------------
+
 # --- the heartbeat (#191) ---------------------------------------------------
 # THE ONE FACT THE DURABLE LOG CANNOT CONTAIN IS WHETHER THIS JOB RAN. The gap
 # report is a pure function of the log, deliberately — and the price of that purity
@@ -79,9 +186,39 @@ write_heartbeat() {
   HEARTBEAT_STATUS=$?
   [[ -d "$DATA_DIR" ]] || return 0
   HEARTBEAT_FINISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" || HEARTBEAT_FINISHED_AT="$STARTED_AT"
-  printf '{\n  "schemaVersion": 1,\n  "startedAt": "%s",\n  "finishedAt": "%s",\n  "exitCode": %d,\n  "lastStep": "%s"\n}\n' \
-    "$STARTED_AT" "$HEARTBEAT_FINISHED_AT" "$HEARTBEAT_STATUS" "$LAST_STEP" \
-    > "$HEARTBEAT_FILE" 2>/dev/null || true
+  # A run stamps itself as the last in-window run only if it was in the window AND
+  # actually landed the day's marks. IN-WINDOW ALONE IS NOT ENOUGH, and the gap is
+  # not hypothetical: a provider outage makes all six fires die at `prices-fetch`,
+  # each one in-window with zero marks. Stamping those records the outage as proof
+  # the day was covered — and the next morning's successful login run then carries
+  # that stamp forward while overwriting the red exit code with 0, so the failure
+  # disappears from every trigger at once. That is the same shape as the bug this
+  # field was added to fix, just entered from the other side.
+  #
+  # Anything else re-emits what it carried, so a genuine earlier evening survives an
+  # arbitrary number of later failures. The field is OMITTED rather than written
+  # empty when there is nothing to carry: the reader validates it as an ISO instant
+  # and treats a bad one as an unreadable FILE, so `""` here would blind the whole
+  # breadcrumb.
+  HEARTBEAT_MARK_WINDOW_AT="$CARRIED_MARK_WINDOW_AT"
+  if [[ "$MARK_WINDOW" == "true" ]]; then
+    for landed_step in $MARKS_LANDED_STEPS; do
+      if [[ "$LAST_STEP" == "$landed_step" ]]; then
+        HEARTBEAT_MARK_WINDOW_AT="$HEARTBEAT_FINISHED_AT"
+        break
+      fi
+    done
+  fi
+  if [[ -n "$HEARTBEAT_MARK_WINDOW_AT" ]]; then
+    printf '{\n  "schemaVersion": 2,\n  "startedAt": "%s",\n  "finishedAt": "%s",\n  "exitCode": %d,\n  "lastStep": "%s",\n  "markWindow": %s,\n  "lastMarkWindowFinishedAt": "%s"\n}\n' \
+      "$STARTED_AT" "$HEARTBEAT_FINISHED_AT" "$HEARTBEAT_STATUS" "$LAST_STEP" \
+      "$MARK_WINDOW" "$HEARTBEAT_MARK_WINDOW_AT" \
+      > "$HEARTBEAT_FILE" 2>/dev/null || true
+  else
+    printf '{\n  "schemaVersion": 2,\n  "startedAt": "%s",\n  "finishedAt": "%s",\n  "exitCode": %d,\n  "lastStep": "%s",\n  "markWindow": %s\n}\n' \
+      "$STARTED_AT" "$HEARTBEAT_FINISHED_AT" "$HEARTBEAT_STATUS" "$LAST_STEP" "$MARK_WINDOW" \
+      > "$HEARTBEAT_FILE" 2>/dev/null || true
+  fi
   return 0
 }
 # Installed BEFORE the log dir is even made, so every exit path below is covered —

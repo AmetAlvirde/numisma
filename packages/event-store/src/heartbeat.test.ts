@@ -1,17 +1,23 @@
 /**
- * The job heartbeat's reader — the half of #191 that CAN be tested.
+ * The job heartbeat's reader, and — since #185 S2 — the writer it must agree with.
  *
- * The writer is five lines of bash in `ops/price-feed/run-daily-fetch.sh` and the
- * repo has no shell-test infrastructure; this slice deliberately does not invent
- * one. The mitigation is to keep the bash to a trap and a `printf` and to test
- * everything downstream of it exhaustively — so these fixtures are written in the
- * EXACT byte shape that `printf` emits, not in a shape convenient for the parser.
- * If the two ever disagree, that is the bug this file exists to catch.
+ * The writer is a trap and a `printf` in `ops/price-feed/run-daily-fetch.sh`. #191
+ * could only approach it indirectly: the fixtures below are written in the EXACT
+ * byte shape that `printf` emits rather than a shape convenient for the parser, so
+ * that a drift between the two would show up here.
+ *
+ * That is no longer the only defence. Adding `markWindow` (#185 S2) meant editing
+ * BOTH halves at once, which is precisely when they drift — so the last describe in
+ * this file now RUNS the wrapper and feeds its real output to `parseHeartbeat`. The
+ * fixtures still earn their place: they reach the dates and exit codes a live run
+ * cannot be made to produce on demand.
  *
  * Dates, step names and exit codes only. No figures of any kind — the same privacy
  * property `gap-report.json` carries, for the same reason.
  */
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { addDays, tradingDayAsOf } from "@numisma/engine";
@@ -43,6 +49,9 @@ function heartbeatFileBody(fields: {
   exitCode: number;
   lastStep: string;
   schemaVersion?: number;
+  /** Omitted ⇒ the v1 shape, which the reader must go on treating as in-window. */
+  markWindow?: boolean;
+  lastMarkWindowFinishedAt?: string;
 }): string {
   return (
     `{\n` +
@@ -50,8 +59,12 @@ function heartbeatFileBody(fields: {
     `  "startedAt": "${fields.startedAt}",\n` +
     `  "finishedAt": "${fields.finishedAt}",\n` +
     `  "exitCode": ${fields.exitCode},\n` +
-    `  "lastStep": "${fields.lastStep}"\n` +
-    `}\n`
+    `  "lastStep": "${fields.lastStep}"` +
+    (fields.markWindow === undefined ? `` : `,\n  "markWindow": ${fields.markWindow}`) +
+    (fields.lastMarkWindowFinishedAt === undefined
+      ? ``
+      : `,\n  "lastMarkWindowFinishedAt": "${fields.lastMarkWindowFinishedAt}"`) +
+    `\n}\n`
   );
 }
 
@@ -218,16 +231,308 @@ describe("formatHeartbeatWarning — the six cases", () => {
   it("ignores a schemaVersion it does not understand rather than misreading it", () => {
     // #189's convention: the version is bumped only when the shape changes in a way
     // that breaks a reader. Refusing an unknown one is what makes that promise safe.
-    expect(HEARTBEAT_SCHEMA_VERSION).toBe(1);
+    expect(HEARTBEAT_SCHEMA_VERSION).toBe(2);
     const future = heartbeatFileBody({
       startedAt: "2026-08-01T00:00:00Z",
       finishedAt: "2026-08-01T00:05:00Z",
       exitCode: 1,
       lastStep: "spine",
-      schemaVersion: 2,
+      schemaVersion: 3,
     });
     expect(parseHeartbeat(future)).toBeUndefined();
     expect(formatHeartbeatWarning(parseHeartbeat(future), NOW)).toEqual([]);
+  });
+});
+
+/**
+ * `RunAtLoad` (#185 S2) lets the job fire at ANY hour, and a pre-mark-time run emits
+ * zero marks while exiting 0. Read naively, that healthy-looking breadcrumb silences
+ * the one trigger that reports a lost day.
+ */
+describe("a run outside the mark window is not evidence that the day was marked", () => {
+  /** A `RunAtLoad` run at 09:00 CDMX on `day` — before the 18:00 mark time. */
+  function loginRunOn(
+    day: string,
+    options: { exitCode?: number; lastStep?: string; carried?: string } = {},
+  ): string {
+    return heartbeatFileBody({
+      schemaVersion: 2,
+      startedAt: `${day}T15:00:00Z`, // 09:00 CDMX on `day`
+      finishedAt: `${day}T15:02:00Z`, // 09:02 CDMX on `day`
+      exitCode: options.exitCode ?? 0,
+      lastStep: options.lastStep ?? "complete",
+      markWindow: false,
+      ...(options.carried === undefined ? {} : { lastMarkWindowFinishedAt: options.carried }),
+    });
+  }
+
+  it("STILL REPORTS THE LOST DAY after a clean login run — the #185 S2 regression", () => {
+    // Machine off through the evening of 2026-08-04 (the ceiling), opened 09:00 the
+    // next morning: the LaunchAgent loads, RunAtLoad fires, 0 marks, exit 0. Before
+    // this fix that run's own date satisfied the staleness check and 08-04 vanished
+    // from this channel entirely. The carried date is the last real evening, 08-03.
+    const lines = formatHeartbeatWarning(
+      parseHeartbeat(loginRunOn("2026-08-05", { carried: "2026-08-04T00:05:00Z" })),
+      NOW,
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("has not completed since 2026-08-03");
+    expect(lines[0]).toContain(`nothing recorded for ${CEILING}`);
+  });
+
+  it("stays silent when the evening before it DID mark — no cry-wolf on a healthy morning", () => {
+    // Same login run, but 2026-08-04 was marked at 18:05 CDMX (stamped 08-05T00:05Z).
+    // The out-of-window run must not manufacture a warning either.
+    expect(
+      formatHeartbeatWarning(
+        parseHeartbeat(loginRunOn("2026-08-05", { carried: "2026-08-05T00:05:00Z" })),
+        NOW,
+      ),
+    ).toEqual([]);
+  });
+
+  it("still surfaces a FAILED login run — the exit code is about this run, not the window", () => {
+    // Out-of-window only disqualifies a run as evidence of MARKING. A run that died
+    // at exit 127 with no node still has to reach the operator.
+    const lines = formatHeartbeatWarning(
+      parseHeartbeat(
+        loginRunOn("2026-08-05", {
+          exitCode: 127,
+          lastStep: "resolve-tools",
+          carried: "2026-08-05T00:05:00Z",
+        }),
+      ),
+      NOW,
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("FAILED");
+    expect(lines[0]).toContain("exit 127");
+    expect(lines[0]).toContain("resolve-tools");
+  });
+
+  it("says nothing about staleness when no in-window run is on record at all", () => {
+    // First ever load on a fresh machine: no evening has happened yet, so there is
+    // no date to be stale against. Silence, exactly as for an absent file — the gap
+    // report is the backstop.
+    const parsed = parseHeartbeat(loginRunOn("2026-08-05"));
+    expect(parsed?.lastMarkWindowFinishedAt).toBeUndefined();
+    expect(formatHeartbeatWarning(parsed, NOW)).toEqual([]);
+  });
+
+  it("reads a v1 file exactly as it did before, so an un-reinstalled wrapper is not broken", () => {
+    // The installed LaunchAgent/wrapper is a hand-resolved copy, so this reader will
+    // ship ahead of it. A v1 breadcrumb must keep behaving, not start crying.
+    expect(formatHeartbeatWarning(parseHeartbeat(ranOn(CEILING)), NOW)).toEqual([]);
+    expect(formatHeartbeatWarning(parseHeartbeat(ranOn("2026-08-03")), NOW)).toHaveLength(1);
+  });
+
+  it("REPORTS A DAY LOST TO A PROVIDER OUTAGE, even after a clean login run next morning", () => {
+    // The full scenario, end to end. Provider outage on 2026-08-04 (the ceiling):
+    // all six fires die at `prices-fetch`, in-window, zero marks — so none of them
+    // stamps, and the last in-window finish stays 08-03's evening. Next morning the
+    // provider is back and a 09:00 login run exits 0, overwriting the red exit code.
+    // The failure is gone from the exitCode trigger, so staleness is the only thing
+    // left holding the lost day — and it must not be fooled by the carried date
+    // belonging to a run that is now two days old.
+    const lines = formatHeartbeatWarning(
+      parseHeartbeat(loginRunOn("2026-08-05", { carried: "2026-08-04T00:05:00Z" })),
+      NOW,
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("has not completed since 2026-08-03");
+  });
+
+  it("does not credit an in-window run that never stamped itself", () => {
+    // The reader half of the same bug. A v2 breadcrumb that is in-window but carries
+    // NO stamp is a run that did not reach the marks — deriving the date from its own
+    // `finishedAt` would re-create the failure the writer just took care to avoid.
+    const failedEvening = heartbeatFileBody({
+      schemaVersion: 2,
+      startedAt: "2026-08-05T00:00:00Z",
+      finishedAt: "2026-08-05T00:05:00Z", // 18:05 CDMX on the ceiling day
+      exitCode: 1,
+      lastStep: "prices-fetch",
+      markWindow: true,
+    });
+    const parsed = parseHeartbeat(failedEvening);
+    expect(parsed?.lastMarkWindowFinishedAt).toBeUndefined();
+    // It still says the run FAILED; it just refuses to call it a marked day.
+    expect(formatHeartbeatWarning(parsed, NOW).join(" ")).toContain("FAILED");
+  });
+
+  it("refuses a markWindow that is not a boolean rather than coercing it", () => {
+    expect(
+      parseHeartbeat(
+        '{"schemaVersion":2,"startedAt":"2026-08-04T00:00:00Z","finishedAt":"2026-08-04T00:01:00Z",' +
+          '"exitCode":0,"lastStep":"complete","markWindow":"yes"}',
+      ),
+    ).toBeUndefined();
+  });
+});
+
+/**
+ * THE ONE SEAM THE FIXTURES ABOVE CANNOT COVER. Every other test in this file feeds
+ * the reader bytes a TEST wrote in the shape the wrapper is BELIEVED to emit. The
+ * failure mode that costs a real day is the two drifting apart — a `printf` edited
+ * without the parser, or the reverse — and a hand-written fixture agrees with
+ * whichever side wrote it.
+ *
+ * So run the actual script. It is pointed at a nonexistent repo so it dies at the
+ * `cd` in well under a second, which is enough: the heartbeat is written from an
+ * EXIT trap installed before anything else, and a failing run is the case the
+ * breadcrumb exists for.
+ *
+ * TWO THINGS ARE CONTROLLED SO NOTHING HERE DEPENDS ON THE WALL CLOCK. The window
+ * branch is forced by rewriting the script's own `MARK_HOUR` constant in a copy — 0
+ * is always in-window, 99 never is — because the wrapper reads the CDMX hour itself
+ * and no ambient `TZ` can move it. And the data dir is SEEDED, because a fresh
+ * `mkdtemp` per run means no previous breadcrumb exists and the entire carry-forward
+ * path goes unreached. An earlier version of this describe did both the other way
+ * and its assertions were vacuous for part of every day.
+ */
+describe("the wrapper's own bytes, read by the reader that must consume them", () => {
+  const wrapper = fileURLToPath(
+    new URL("../../../ops/price-feed/run-daily-fetch.sh", import.meta.url),
+  );
+
+  /**
+   * Run the wrapper and return the breadcrumb it left.
+   *
+   * `window` rewrites ONE constant — the mark hour — so the in/out-of-window branch
+   * becomes an input rather than a function of the time of day. Everything else is
+   * the real script, including the `sed` carry-forward read and the printf.
+   */
+  async function runWrapper(
+    options: { window?: "in" | "out"; seed?: string } = {},
+  ): Promise<string> {
+    const dataDir = await mkdtemp(join(tmpdir(), "numisma-heartbeat-wrapper-"));
+    created.push(dataDir);
+    if (options.seed !== undefined) {
+      await writeFile(join(dataDir, "job-heartbeat.json"), options.seed, "utf8");
+    }
+    let script = wrapper;
+    if (options.window !== undefined) {
+      const forced = options.window === "in" ? "0" : "99";
+      const source = await readFile(wrapper, "utf8");
+      const rewritten = source.replace(/^MARK_HOUR=18$/m, `MARK_HOUR=${forced}`);
+      // Fail loudly rather than silently testing the unmodified script.
+      expect(rewritten).not.toBe(source);
+      script = join(dataDir, "run-daily-fetch.sh");
+      await writeFile(script, rewritten, "utf8");
+    }
+    try {
+      execFileSync("/bin/bash", [script], {
+        env: {
+          ...process.env,
+          NUMISMA_DATA_DIR: dataDir,
+          NUMISMA_REPO_DIR: join(dataDir, "no-such-repo"),
+          NUMISMA_PRICEFEED_ENV: join(dataDir, "no-such-env"),
+          NUMISMA_PRICEFEED_LOG_DIR: join(dataDir, "logs"),
+        },
+        stdio: "ignore",
+      });
+    } catch {
+      // EXPECTED: there is no repo to `cd` into, so the run dies early and non-zero.
+      // That is the case the breadcrumb exists for, and the trap still fires.
+    }
+    return readFile(join(dataDir, "job-heartbeat.json"), "utf8");
+  }
+
+  /** A healthy evening on 2026-08-04 (18:05 CDMX = 2026-08-05T00:05Z), as v2. */
+  const HEALTHY_EVENING = heartbeatFileBody({
+    schemaVersion: 2,
+    startedAt: "2026-08-05T00:00:00Z",
+    finishedAt: "2026-08-05T00:05:00Z",
+    exitCode: 0,
+    lastStep: "complete",
+    markWindow: true,
+    lastMarkWindowFinishedAt: "2026-08-05T00:05:00Z",
+  });
+
+  it("writes a heartbeat parseHeartbeat accepts, at the version this reader expects", async () => {
+    const parsed = parseHeartbeat(await runWrapper());
+    // Unparseable here means the printf and the parser have drifted — the exact
+    // break that would silently blind this channel in production.
+    expect(parsed).toBeDefined();
+    expect(parsed?.schemaVersion).toBe(HEARTBEAT_SCHEMA_VERSION);
+    expect(parsed?.lastStep).toBe("startup");
+    expect(parsed?.exitCode).not.toBe(0);
+  });
+
+  it("DOES NOT STAMP AN IN-WINDOW RUN THAT DIED BEFORE THE MARKS LANDED", async () => {
+    // The regression this pins: being in the window is not evidence of marking. A
+    // provider outage kills every fire at `prices-fetch`, all six in-window with zero
+    // marks — stamping them records the outage as proof the day was covered.
+    const parsed = parseHeartbeat(await runWrapper({ window: "in" }));
+    expect(parsed?.markWindow).toBe(true);
+    expect(parsed?.lastStep).toBe("startup");
+    expect(parsed?.lastMarkWindowFinishedAt).toBeUndefined();
+  });
+
+  it("lets a real evening survive a later in-window failure, rather than clobbering it", async () => {
+    // Same run as above, but an evening IS on record. The failure must not overwrite
+    // it — otherwise the next successful login run carries the failure's own stamp
+    // forward while resetting the exit code, and the lost day leaves every trigger.
+    const parsed = parseHeartbeat(await runWrapper({ window: "in", seed: HEALTHY_EVENING }));
+    expect(parsed?.exitCode).not.toBe(0);
+    expect(parsed?.lastMarkWindowFinishedAt).toBe("2026-08-05T00:05:00Z");
+  });
+
+  it("carries the last in-window finish across an out-of-window run", async () => {
+    const parsed = parseHeartbeat(await runWrapper({ window: "out", seed: HEALTHY_EVENING }));
+    expect(parsed?.markWindow).toBe(false);
+    expect(parsed?.lastMarkWindowFinishedAt).toBe("2026-08-05T00:05:00Z");
+  });
+
+  it("adopts a v1 file's finishedAt, since every v1 run counted as in-window", async () => {
+    const v1 = heartbeatFileBody({
+      startedAt: "2026-08-05T00:00:00Z",
+      finishedAt: "2026-08-05T00:05:00Z",
+      exitCode: 0,
+      lastStep: "complete",
+    });
+    const parsed = parseHeartbeat(await runWrapper({ window: "out", seed: v1 }));
+    expect(parsed?.lastMarkWindowFinishedAt).toBe("2026-08-05T00:05:00Z");
+  });
+
+  it("does not adopt finishedAt from a previous OUT-of-window run", async () => {
+    // That run's finish is not evidence of marking either, so the v1 fallback must
+    // not fire for it — otherwise the carry-forward launders a non-marking run.
+    const priorLogin = heartbeatFileBody({
+      schemaVersion: 2,
+      startedAt: "2026-08-05T15:00:00Z",
+      finishedAt: "2026-08-05T15:02:00Z",
+      exitCode: 0,
+      lastStep: "complete",
+      markWindow: false,
+    });
+    const parsed = parseHeartbeat(await runWrapper({ window: "out", seed: priorLogin }));
+    expect(parsed?.lastMarkWindowFinishedAt).toBeUndefined();
+  });
+
+  it("emits no lastMarkWindowFinishedAt at all when there is none to carry", async () => {
+    // Written EMPTY it would fail the ISO-instant check and take the whole file down
+    // as unreadable — losing the exit code too, on a first-ever failing run. Forced
+    // out-of-window so this asserts something every hour of the day.
+    const raw = await runWrapper({ window: "out" });
+    expect(raw).not.toContain("lastMarkWindowFinishedAt");
+    expect(parseHeartbeat(raw)?.lastMarkWindowFinishedAt).toBeUndefined();
+  });
+
+  it("drops a CORRUPT carried value instead of re-emitting it into unparseable JSON", async () => {
+    // The carried value is copied verbatim into the next file, so a torn write or a
+    // hand-edit can break the whole record — and it is self-sustaining, since every
+    // later out-of-window run re-reads and re-emits it. Dropping it costs one
+    // staleness date; keeping it costs the exit code and the step name as well.
+    const corrupt = HEALTHY_EVENING.replace(
+      /"lastMarkWindowFinishedAt": "[^"]*"/,
+      String.raw`"lastMarkWindowFinishedAt": "2026-08-05T00:05:00\Z"`,
+    );
+    expect(corrupt).not.toBe(HEALTHY_EVENING);
+    const raw = await runWrapper({ window: "out", seed: corrupt });
+    expect(() => JSON.parse(raw)).not.toThrow();
+    expect(parseHeartbeat(raw)).toBeDefined();
+    expect(parseHeartbeat(raw)?.lastMarkWindowFinishedAt).toBeUndefined();
   });
 });
 
@@ -247,6 +552,10 @@ describe("parseHeartbeat — over the writer's exact bytes", () => {
       finishedAt: "2026-08-04T23:00:41Z",
       exitCode: 0,
       lastStep: "complete",
+      // A v1 file predates the mark window, so it is read the way it always was:
+      // the run counts as in-window and is its own last in-window run.
+      markWindow: true,
+      lastMarkWindowFinishedAt: "2026-08-04T23:00:41Z",
     });
   });
 
@@ -305,7 +614,9 @@ describe("parseHeartbeat — over the writer's exact bytes", () => {
     expect(Object.keys(parsed ?? {}).sort()).toEqual([
       "exitCode",
       "finishedAt",
+      "lastMarkWindowFinishedAt",
       "lastStep",
+      "markWindow",
       "schemaVersion",
       "startedAt",
     ]);
