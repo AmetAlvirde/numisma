@@ -1699,9 +1699,8 @@ describe("`O1` — the over-commitment reject (testing decision 6)", () => {
     // The honest cost of batching, and not droppable: `over-committed` never ran, so the
     // operator has NOT been told everything, and one sentence says so.
     expect(refusal).toContain(
-      "Reserve balances were NOT weighed: an unplaceable rung has no balance to\n" +
-        "compare against, so a coverage refusal may still follow once every rung\n" +
-        "above is placeable.",
+      "Reserve balances were NOT weighed: an unplaceable rung has no balance to compare\n" +
+        "against, so a coverage refusal may still follow once every rung above is placeable.",
     );
     // A blank line before `reject()`'s tail, so it does not read as a continuation of the
     // balances sentence.

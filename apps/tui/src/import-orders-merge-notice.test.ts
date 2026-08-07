@@ -1,6 +1,6 @@
 /**
- * THE MERGE NOTICE, ASSERTED DIRECTLY — the one line that tells the operator two export
- * rows were summed into a single claim (#174, #221).
+ * THE MERGE NOTICE, ASSERTED DIRECTLY — the operator's only word that two export rows
+ * sharing one id were summed into a single claim (#174, #221).
  *
  * WHY THIS FILE EXISTS AT ALL: the notice had a test before this one, and most of it did
  * not bite. `import-orders.test.ts`'s "REPORTS the merge to the operator, naming both
@@ -113,5 +113,54 @@ describe("the remedy, which is the operator's to apply and not ours", () => {
     expect(flat(describeMerge(TWO_ROWS))).toContain(
       "re-place one a tick apart so their prices differ",
     );
+  });
+});
+
+/**
+ * THE WRAP BUDGET (#221), the same 100 `import-orders-unattributed-refusal.test.ts`
+ * asserts. This notice used to be ONE unbroken ~450-character line, so every terminal
+ * soft-wrapped it at a column nothing chose; the prose is now hard-wrapped at 88.
+ */
+const BUDGET = 100;
+
+/** Every line that does not fit, named with its width — a failure here is a re-wrap job. */
+function overWide(notice: string, width = BUDGET): string[] {
+  return notice
+    .split("\n")
+    .map((line, index) => ({ line, index }))
+    .filter(({ line }) => line.length > width)
+    .map(({ line, index }) => `line ${index + 1} (${line.length} cols): ${line}`);
+}
+
+describe(`${BUDGET} COLUMNS — nothing measured this line's length before`, () => {
+  it(`keeps every line inside ${BUDGET} columns for a realistic collision`, () => {
+    expect(overWide(describeMerge(TWO_ROWS))).toEqual([]);
+    expect(overWide(describeMerge(THREE_ROWS))).toEqual([]);
+  });
+
+  it("keeps the FIXED PROSE inside the budget no matter how wide the claim is", () => {
+    // The prose is the part a budget can actually govern, so it is the part asserted.
+    // Lines 1-3 are built from the symbol, the stamp and an unbounded `quantities`; no
+    // wrap width can promise those fit, and the docstring says so rather than pretending.
+    const wide = describeMerge({
+      ...TWO_ROWS,
+      symbol: "SOMELONGSYMBOL",
+      price: 123456.789,
+      quantities: [0.1234, 0.2345, 0.3456, 0.4567, 0.5678, 0.6789],
+      mergedQuantity: 2.4069,
+    });
+    expect(overWide(wide.split("\n").slice(3).join("\n"))).toEqual([]);
+  });
+
+  it("keeps the TOTAL on its own line, so a wide listing never soft-wraps it away", () => {
+    // The reliability claim behind the split: `quantities` is unbounded and the total is
+    // not, so the total must not share a line with it. Six rows at four decimals is 113
+    // columns of listing — and the total still arrives intact on a line of its own.
+    const wide = describeMerge({
+      ...TWO_ROWS,
+      quantities: [0.1234, 0.2345, 0.3456, 0.4567, 0.5678, 0.6789],
+      mergedQuantity: 2.4069,
+    });
+    expect(wide.split("\n")).toContain("were summed into ONE claim of 2.4069.");
   });
 });
