@@ -21,15 +21,14 @@
  * RUNG they are about to re-fund was held by nothing.
  *
  * THIS IS NOT A PURE FUNCTION and the apparatus below is honest about it: `declareFunding`
- * awaits `io.ask`, so it takes a scripted-answer stub. What the stub does NOT take is an
- * export file, a sidecar, a temp dir, a frozen clock or a fund review — every other member
- * of the IO bag throws on touch, which is itself the assertion that this reads nothing but
- * the prompt channel.
+ * awaits the operator, so it takes a scripted-answer stub. What it cannot be handed is an
+ * export file, a sidecar, a temp dir, a frozen clock or a fund review — the parameter is
+ * the ASK CHANNEL, one function, so "this reads nothing but the prompt channel" is a
+ * compile-time fact rather than a trap this file has to lay and hope something springs.
  */
 import type { BitgetOpenOrder } from "@numisma/engine";
 import { describe, expect, it } from "vitest";
 import { declareFunding } from "./import-orders-funding-declaration.js";
-import type { OrdersImportIo } from "./import-orders.js";
 
 function order(overrides: Partial<BitgetOpenOrder> = {}): BitgetOpenOrder {
   return {
@@ -50,20 +49,18 @@ function order(overrides: Partial<BitgetOpenOrder> = {}): BitgetOpenOrder {
 }
 
 /**
- * An IO bag whose `ask` replays a script and records what it was asked — and whose every
- * OTHER member throws. Touching the sidecar path, the clock or the fund review from this
- * function would fail the test that touched it, so "prompt-only" is held rather than said.
+ * An `ask` that replays a script and records what it was asked. An UNSCRIPTED prompt
+ * throws rather than returning a blank, so a mutation that asks one question too many
+ * fails loudly instead of being read as an empty answer.
  */
-function scriptedIo(answers: readonly string[]): { io: OrdersImportIo; asked: string[] } {
+function scriptedAsk(answers: readonly string[]): {
+  ask: (question: string) => Promise<string>;
+  asked: string[];
+} {
   const asked: string[] = [];
   const remaining = [...answers];
-  const forbidden =
-    (member: string) =>
-    (): never => {
-      throw new Error(`declareFunding touched io.${member}`);
-    };
-
-  const io: OrdersImportIo = {
+  return {
+    asked,
     ask: async (question: string) => {
       asked.push(question);
       const next = remaining.shift();
@@ -72,18 +69,7 @@ function scriptedIo(answers: readonly string[]): { io: OrdersImportIo; asked: st
       }
       return next;
     },
-    readExport: forbidden("readExport"),
-    now: forbidden("now"),
-    loadOrders: forbidden("loadOrders"),
-    appendOrders: forbidden("appendOrders"),
-    fundReview: forbidden("fundReview"),
-    out: forbidden("out"),
-    err: forbidden("err"),
-    get ordersPath(): string {
-      throw new Error("declareFunding touched io.ordersPath");
-    },
   };
-  return { io, asked };
 }
 
 const BATCH_QUESTION = "Funding reserve for this batch: ";
@@ -91,8 +77,8 @@ const OVERRIDE_QUESTION = "Override the funding reserve for any individual order
 
 describe("the batch answer", () => {
   it("is the declared reserve, and a declined override pass leaves no overrides", async () => {
-    const { io, asked } = scriptedIo(["reserve-a", "n"]);
-    expect(await declareFunding(io, [order()])).toEqual({
+    const { ask, asked } = scriptedAsk(["reserve-a", "n"]);
+    expect(await declareFunding(ask, [order()])).toEqual({
       fundingReserveId: "reserve-a",
       overrides: {},
     });
@@ -101,22 +87,22 @@ describe("the batch answer", () => {
   });
 
   it("is TRIMMED — surrounding whitespace is not part of the reserve id (`M5`)", async () => {
-    const { io } = scriptedIo(["  reserve-a  ", "n"]);
-    expect(await declareFunding(io, [order()])).toEqual({
+    const { ask } = scriptedAsk(["  reserve-a  ", "n"]);
+    expect(await declareFunding(ask, [order()])).toEqual({
       fundingReserveId: "reserve-a",
       overrides: {},
     });
   });
 
   it("declares nothing when blank, and does not go on to ask about overrides", async () => {
-    const { io, asked } = scriptedIo([""]);
-    expect(await declareFunding(io, [order()])).toBeUndefined();
+    const { ask, asked } = scriptedAsk([""]);
+    expect(await declareFunding(ask, [order()])).toBeUndefined();
     expect(asked).toEqual([BATCH_QUESTION]);
   });
 
   it("declares nothing when it is only whitespace", async () => {
-    const { io, asked } = scriptedIo(["   "]);
-    expect(await declareFunding(io, [order()])).toBeUndefined();
+    const { ask, asked } = scriptedAsk(["   "]);
+    expect(await declareFunding(ask, [order()])).toBeUndefined();
     expect(asked).toEqual([BATCH_QUESTION]);
   });
 });
@@ -133,16 +119,16 @@ describe("the override question's answer", () => {
 
   for (const answer of AFFIRMATIVE) {
     it(`opens the per-order pass on ${JSON.stringify(answer)} (\`M2\`, \`M3\`)`, async () => {
-      const { io, asked } = scriptedIo(["reserve-a", answer, ""]);
-      await declareFunding(io, [order()]);
+      const { ask, asked } = scriptedAsk(["reserve-a", answer, ""]);
+      await declareFunding(ask, [order()]);
       expect(asked).toHaveLength(3);
     });
   }
 
   for (const answer of DECLINING) {
     it(`declines the per-order pass on ${JSON.stringify(answer)} (\`M1\`)`, async () => {
-      const { io, asked } = scriptedIo(["reserve-a", answer]);
-      expect(await declareFunding(io, [order()])).toEqual({
+      const { ask, asked } = scriptedAsk(["reserve-a", answer]);
+      expect(await declareFunding(ask, [order()])).toEqual({
         fundingReserveId: "reserve-a",
         overrides: {},
       });
@@ -165,9 +151,9 @@ describe("the per-order override pass", () => {
       order({ id: "rung-3" }),
       order({ id: "rung-4" }),
     ];
-    const { io } = scriptedIo(["reserve-a", "y", "reserve-b", "", "reserve-a", "  reserve-c  "]);
+    const { ask } = scriptedAsk(["reserve-a", "y", "reserve-b", "", "reserve-a", "  reserve-c  "]);
 
-    expect(await declareFunding(io, orders)).toEqual({
+    expect(await declareFunding(ask, orders)).toEqual({
       fundingReserveId: "reserve-a",
       // `rung-2` answered blank and `rung-3` answered the batch back: a redundant override
       // is not an override, and neither appears as a key.
@@ -177,16 +163,16 @@ describe("the per-order override pass", () => {
 
   it("keys the overrides by `order.id` and asks once per order, in order", async () => {
     const orders = [order({ id: "rung-1" }), order({ id: "rung-2" })];
-    const { io, asked } = scriptedIo(["reserve-a", "y", "reserve-b", "reserve-c"]);
+    const { ask, asked } = scriptedAsk(["reserve-a", "y", "reserve-b", "reserve-c"]);
 
-    const declaration = await declareFunding(io, orders);
+    const declaration = await declareFunding(ask, orders);
     expect(Object.keys(declaration?.overrides ?? {})).toEqual(["rung-1", "rung-2"]);
     expect(asked).toHaveLength(4);
   });
 
   it("asks nothing per order when the batch has no orders", async () => {
-    const { io, asked } = scriptedIo(["reserve-a", "y"]);
-    expect(await declareFunding(io, [])).toEqual({
+    const { ask, asked } = scriptedAsk(["reserve-a", "y"]);
+    expect(await declareFunding(ask, [])).toEqual({
       fundingReserveId: "reserve-a",
       overrides: {},
     });
@@ -202,8 +188,8 @@ describe("the per-order override pass", () => {
  */
 describe("the per-order prompt", () => {
   async function promptFor(subject: BitgetOpenOrder): Promise<string> {
-    const { io, asked } = scriptedIo(["reserve-a", "y", ""]);
-    await declareFunding(io, [subject]);
+    const { ask, asked } = scriptedAsk(["reserve-a", "y", ""]);
+    await declareFunding(ask, [subject]);
     return asked[2] as string;
   }
 
@@ -236,8 +222,8 @@ describe("the per-order prompt", () => {
   });
 
   it("carries the BATCH ANSWER as the default hint, not a hard-coded one (`M7`)", async () => {
-    const { io, asked } = scriptedIo(["reserve-zulu", "y", ""]);
-    await declareFunding(io, [order()]);
+    const { ask, asked } = scriptedAsk(["reserve-zulu", "y", ""]);
+    await declareFunding(ask, [order()]);
     expect(asked[2]).toContain("[reserve-zulu]");
   });
 });
