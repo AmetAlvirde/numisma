@@ -23,6 +23,10 @@
  * `@numisma/preferences`; the as-of selector lives in `./select.ts`.
  */
 import type { Currency } from "../contracts.js";
+// The STRICT record predicate — arrays refused, not waved through. It lives in the
+// engine's kernel beside its loose sibling `isRecord` so the contrast between them is
+// stated once, in one place, rather than rediscovered here.
+import { isRecordObject } from "../internal.js";
 
 /**
  * The lifecycle verbs of the sidecar (`S2`): one line per order placed, one further
@@ -304,10 +308,6 @@ export type OrderRecordProblem = "unknown-kind" | "malformed";
 export type OrderRecordParse =
   | { status: "ok"; record: OrderRecord }
   | { status: "skip"; problem: OrderRecordProblem; message: string };
-
-function isRecordObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim() !== "";
