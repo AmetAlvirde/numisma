@@ -38,6 +38,7 @@ import {
   type OrderRecord,
 } from "@numisma/engine";
 import type { OrdersLoad } from "@numisma/preferences";
+import { renderSkipMessage } from "./skip-message.js";
 
 /** Everything this act touches that is not a pure function, in one injectable bag. */
 export interface OrderCancelIo {
@@ -124,12 +125,9 @@ export async function cancelOrder(options: OrderCancelOptions): Promise<OrderCan
     // The same refusal the import makes, for the same reason: a partially-read book
     // cannot tell us whether this rung is resting, and a cancellation decided over one
     // would free capital on a guess.
-    return reject(
-      io,
-      "unreadable-sidecar-lines",
-      `${io.ordersPath} has ${existing.skips.length} line(s) this build cannot read, so the ` +
-        `resting book would be resolved over a partially-read file`,
-    );
+    // Same refusal, same reason code, same exit — one shared sentence (#181), so a line
+    // from a newer build is not reported to the operator as a broken file.
+    return reject(io, "unreadable-sidecar-lines", renderSkipMessage(io.ordersPath, existing.skips));
   }
   const records: OrderRecord[] = existing.status === "loaded" ? existing.records : [];
 

@@ -79,6 +79,7 @@ import {
 } from "@numisma/engine";
 import type { OrdersLoad } from "@numisma/preferences";
 import { nextLogImage, serializeEvent } from "./event-store.js";
+import { renderSkipMessage } from "./skip-message.js";
 
 /** Everything this act touches that is not a pure function, in one injectable bag. */
 export interface RecordFillIo {
@@ -330,12 +331,10 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
     return reject(io, "unreadable-sidecar", `could not read ${io.ordersPath}: ${load.message}`);
   }
   if (load.status === "loaded" && load.skips.length > 0) {
-    return reject(
-      io,
-      "unreadable-sidecar-lines",
-      `${io.ordersPath} has ${load.skips.length} line(s) this build cannot read, so the resting ` +
-        `book monotonicity would reason over is only partly known`,
-    );
+    // Same refusal, same reason code, same exit — one shared sentence (#181). A fill is
+    // still withheld over a partially-read book; the operator is just told which of the
+    // two problems they actually have.
+    return reject(io, "unreadable-sidecar-lines", renderSkipMessage(io.ordersPath, load.skips));
   }
   const records: OrderRecord[] = load.status === "loaded" ? load.records : [];
 
