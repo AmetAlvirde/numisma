@@ -118,6 +118,33 @@ export function isPositiveNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
+/**
+ * True for any non-null object — INCLUDING arrays, DELIBERATELY.
+ *
+ * Every caller (`parse.ts`, `events/parse.ts`) follows the guard with a read of a NAMED
+ * DOMAIN FIELD — `fund`, `id`, `asOf` — and an array answers all of those `undefined`.
+ * The checks on those fields then refuse it and SAY WHICH FIELD, which tells the operator
+ * more than a blanket "not an object" would, so tightening this predicate would buy
+ * nothing here and cost attribution.
+ *
+ * Where that is NOT true — where the very first field check would misattribute an array
+ * to a field problem — use {@link isRecordObject}, which additionally rejects arrays.
+ */
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+/**
+ * {@link isRecord} plus `!Array.isArray` — the STRICT sibling. The two are separate on
+ * purpose; neither is a stale copy of the other.
+ *
+ * `parseOrderRecord` (`./orders/records.ts`) is the caller that needs the strictness. Its
+ * first field check is `id`, so under the loose predicate an array line would fall through
+ * and be refused as `id must be a non-empty string` — a message that sends the reader
+ * looking for a missing id in a line that never had a place to put one. The strict
+ * predicate refuses it up front as `record must be a JSON object`, which is what actually
+ * went wrong.
+ */
+export function isRecordObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
