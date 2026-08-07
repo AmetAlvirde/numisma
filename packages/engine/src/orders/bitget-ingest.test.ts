@@ -261,6 +261,116 @@ describe("the null sentinel and the authoritative column (testing decision 4)", 
   });
 });
 
+/**
+ * #205 — THE DESCRIPTORS SURVIVE THE WRITE.
+ *
+ * These are the `KEY_ORDER` guard. `serializeOrderRecord` copies ONLY the keys named in
+ * `KEY_ORDER.orderPlaced`, so a field added to `OrderPlacedRecord` and forgotten there is
+ * dropped at write with a green `pnpm typecheck` and no other failing test — the value is
+ * on the object in memory and absent from every line on disk. Asserting the round trip
+ * (build → serialize → parse) rather than the record's own properties is what makes that
+ * omission fail here.
+ */
+describe("the placement descriptors round-trip through the record contract (#205)", () => {
+  function placedFrom(overrides: Partial<Record<string, string>> = {}) {
+    const [record] = buildOrderPlacedRecords(okOrders(csv(row(overrides))), {
+      fundingReserveId: "reserve-a",
+    });
+    if (!record) throw new Error("expected one record");
+    return record;
+  }
+
+  it("carries `orderType` and `timeInForce` from the export's own columns onto the line", () => {
+    const record = placedFrom({ order_type: "Limit", time_in_force: "GTC" });
+    const line = serializeOrderRecord(record);
+    const parsed = parseOrderRecord(JSON.parse(line));
+    expect(parsed.status).toBe("ok");
+    if (parsed.status !== "ok") return;
+    // THROUGH the line, not off the in-memory record: a missing `KEY_ORDER` entry fails
+    // exactly here.
+    expect(parsed.record).toMatchObject({ orderType: "Limit", timeInForce: "GTC" });
+    // Byte-equal on the way back out, which is what `KEY_ORDER` exists to guarantee.
+    expect(serializeOrderRecord(parsed.record)).toBe(line);
+  });
+
+  it("carries a rendered `triggerPrice` as a NUMBER", () => {
+    const record = placedFrom({ trigger_price: "1100" });
+    const parsed = parseOrderRecord(JSON.parse(serializeOrderRecord(record)));
+    expect(parsed.status).toBe("ok");
+    if (parsed.status !== "ok") return;
+    expect(parsed.record).toMatchObject({ triggerPrice: 1100 });
+  });
+
+  it("OMITS `triggerPrice` for the blank sentinel rather than writing `null`", () => {
+    // The observed row carries `null` — the venue positively rendering "no trigger". The
+    // record has no honest spelling for that, and a written `null` would be a third state
+    // every later reader of an append-only file would have to interpret.
+    const record = placedFrom({ trigger_price: "-- / --" });
+    expect(record).not.toHaveProperty("triggerPrice");
+    const line = serializeOrderRecord(record);
+    expect(line).not.toContain("triggerPrice");
+    expect(line).not.toContain("null");
+  });
+
+  it("writes NO descriptor key at all when the venue rendered the cells blank", () => {
+    // A blank is not a descriptor: absence is the only honest spelling of "we were never
+    // told", and it is what keeps the comparison from manufacturing a difference.
+    const record = placedFrom({ order_type: "", time_in_force: "  " });
+    expect(record).not.toHaveProperty("orderType");
+    expect(record).not.toHaveProperty("timeInForce");
+    const line = serializeOrderRecord(record);
+    expect(line).not.toContain("orderType");
+    expect(line).not.toContain("timeInForce");
+  });
+
+  it("keeps a pre-widening line byte-identical on a re-serialize", () => {
+    // The line every existing rung on the file looks like: ten keys, no descriptors. It
+    // must still read and re-write to exactly the same bytes.
+    const line = JSON.stringify({
+      id: "bitget:XYZUSDT:buy:1000:2020-01-01T10:00:00",
+      observedAt: "2020-01-01T10:00:00",
+      kind: "orderPlaced",
+      currency: "USD",
+      symbol: "XYZUSDT",
+      side: "buy",
+      price: 1000,
+      quantity: 0.1,
+      fundingReserveId: "reserve-a",
+    });
+    const parsed = parseOrderRecord(JSON.parse(line));
+    expect(parsed.status).toBe("ok");
+    if (parsed.status !== "ok") return;
+    expect(serializeOrderRecord(parsed.record)).toBe(line);
+  });
+
+  it("skips a line whose descriptor is present but empty, on the SAME gate the writer passed", () => {
+    // The asymmetry that makes the shared gate worth having: a blank descriptor serializes
+    // cleanly and only fails on the way back in, taking the whole placement line with it.
+    const base = {
+      id: "bitget:XYZUSDT:buy:1000:2020-01-01T10:00:00",
+      observedAt: "2020-01-01T10:00:00",
+      kind: "orderPlaced",
+      currency: "USD",
+      symbol: "XYZUSDT",
+      side: "buy",
+      price: 1000,
+      quantity: 0.1,
+      fundingReserveId: "reserve-a",
+    };
+    expect(parseOrderRecord({ ...base, orderType: "" })).toMatchObject({
+      status: "skip",
+      problem: "malformed",
+    });
+    expect(parseOrderRecord({ ...base, triggerPrice: 0 })).toMatchObject({
+      status: "skip",
+      problem: "malformed",
+    });
+    // An UNKNOWN key is still ignored, not refused — an older build reading a newer line
+    // degrades gracefully, and that is unchanged.
+    expect(parseOrderRecord({ ...base, someLaterDescriptor: "x" }).status).toBe("ok");
+  });
+});
+
 describe("`canonicalDecimal` refuses ambiguous comma placement (#177)", () => {
   it("refuses a token whose comma is not in a thousands position", () => {
     // A decimal comma, not a group separator. Stripping it read `10,50` as `1050` — a

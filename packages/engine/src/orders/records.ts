@@ -120,6 +120,35 @@ export interface OrderPlacedRecord extends OrderRecordBase {
    */
   observedFilledQuantity?: number;
   /**
+   * THE PLACEMENT DESCRIPTORS (#205) — how the venue says the rung was PLACED, beside the
+   * `price`/`quantity` pair that says what it CLAIMS.
+   *
+   * ALL THREE ARE OPTIONAL AND THAT IS THE WHOLE DESIGN. Every line written before this
+   * widening carries none of them, and the detector compares a descriptor only when the
+   * line it is comparing against actually has one — so no existing line reads as a
+   * difference, no re-import of an unchanged export refuses, and the append-only file
+   * needs no migration. An absent field is never read as `""` or as `0`: absence means
+   * *"we were never told"*, and a descriptor has no meaningful empty value to be defaulted
+   * to. `serializeOrderRecord` drops an `undefined`, so a rung with no descriptors
+   * serializes to exactly the bytes it always did.
+   *
+   * NONE OF THEM MOVES THE ENCUMBRANCE, which is `price * quantity`. That is why they are
+   * safe to widen into and why a difference in one is not the funding hazard the amendment
+   * refusal exists for.
+   *
+   * DELIBERATELY NOT ON `OrderFillObservedRecord` (#181 `D7`), and not "until #205 lands":
+   * an observation restates ONE fact — the venue's cumulative fill — and a copy of a
+   * descriptor there would be a second place for it to go stale.
+   */
+  orderType?: string;
+  timeInForce?: string;
+  /**
+   * ABSENT, never `null`. The venue renders "no trigger" as a sentinel, the parser turns
+   * that into `null` on the observed row, and the writer omits the key rather than putting
+   * a third state on disk that every later reader would have to interpret.
+   */
+  triggerPrice?: number;
+  /**
    * The one DECLARED field at placement (`Q9`): which reserve the claim encumbers. The
    * venue has never heard of a Reserve, so this cannot be observed. Notably absent: a
    * target `positionId` (the Position cannot exist until the first fill, so naming it
@@ -280,8 +309,17 @@ const KEY_ORDER: Record<OrderKind, readonly string[]> = {
     "side",
     "price",
     "quantity",
+    // THE WHITELIST IS THE WRITE (#205). `serializeOrderRecord` copies ONLY the keys named
+    // here, so a field added to `OrderPlacedRecord` and forgotten in this list is DROPPED
+    // at write with a green typecheck and no failing test. The descriptors are pinned by a
+    // round trip through a real file rather than by a type — see the `#205` cases in
+    // `./bitget-ingest.test.ts`.
+    "orderType",
+    "timeInForce",
+    "triggerPrice",
     // Absent when nothing had filled: `JSON.stringify` drops an `undefined` value, so a
-    // rung with no partial serializes to exactly the bytes it always did.
+    // rung with no partial serializes to exactly the bytes it always did — which is
+    // equally true of the three descriptors above.
     "observedFilledQuantity",
     "fundingReserveId",
   ],
@@ -315,6 +353,30 @@ function isNonEmptyString(value: unknown): value is string {
 
 function isFinitePositive(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+/**
+ * THE DESCRIPTOR GATES (#205), exported so the WRITER asks exactly the question this
+ * reader will ask on the way back in.
+ *
+ * The asymmetry that makes this worth a shared function rather than a comment is the one
+ * {@link buildOrderFillObserved} names: a blank `orderType` or a zero `triggerPrice`
+ * SERIALIZES CLEANLY and only reads back as `malformed` on every subsequent load, at which
+ * point the whole line — the rung's placement, its size, its funding reserve — is skipped
+ * by every reader of an append-only file that cannot take it back.
+ *
+ * A BLANK IS NOT A DESCRIPTOR. The venue renders these cells for a human, so an empty one
+ * says nothing was rendered, and the record's own convention is that an unrecorded
+ * descriptor is ABSENT rather than empty (see `ObservedOpenOrder` in `./ingest.ts`). A
+ * `triggerPrice` of zero is the same fact in numeric clothing: no rung triggers at zero,
+ * so the figure is a rendering artifact, not a price.
+ */
+export function isDescriptorText(value: unknown): value is string {
+  return isNonEmptyString(value);
+}
+
+export function isTriggerPrice(value: unknown): value is number {
+  return isFinitePositive(value);
 }
 
 /**
@@ -445,6 +507,32 @@ export function parseOrderRecord(value: unknown): OrderRecordParse {
           message: "observedFilledQuantity must be a non-negative number when present",
         };
       }
+      // THE DESCRIPTORS (#205) — optional, and checked ONLY when present, on the same
+      // gates the writer passed. A line from an OLDER build carries none of them and reads
+      // back exactly as it always did; a line from a NEWER build carrying a fourth
+      // descriptor this reader has never heard of still parses, because an unknown key is
+      // ignored here and that graceful degradation is deliberate.
+      if (value.orderType !== undefined && !isDescriptorText(value.orderType)) {
+        return {
+          status: "skip",
+          problem: "malformed",
+          message: "orderType must be a non-empty string when present",
+        };
+      }
+      if (value.timeInForce !== undefined && !isDescriptorText(value.timeInForce)) {
+        return {
+          status: "skip",
+          problem: "malformed",
+          message: "timeInForce must be a non-empty string when present",
+        };
+      }
+      if (value.triggerPrice !== undefined && !isTriggerPrice(value.triggerPrice)) {
+        return {
+          status: "skip",
+          problem: "malformed",
+          message: "triggerPrice must be a positive number when present",
+        };
+      }
       return {
         status: "ok",
         record: {
@@ -454,6 +542,9 @@ export function parseOrderRecord(value: unknown): OrderRecordParse {
           side: value.side,
           price: value.price,
           quantity: value.quantity,
+          ...(isDescriptorText(value.orderType) ? { orderType: value.orderType } : {}),
+          ...(isDescriptorText(value.timeInForce) ? { timeInForce: value.timeInForce } : {}),
+          ...(isTriggerPrice(value.triggerPrice) ? { triggerPrice: value.triggerPrice } : {}),
           ...(value.observedFilledQuantity !== undefined && value.observedFilledQuantity > 0
             ? { observedFilledQuantity: value.observedFilledQuantity }
             : {}),
