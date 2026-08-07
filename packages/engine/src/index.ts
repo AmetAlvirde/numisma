@@ -148,7 +148,7 @@ export {
   formatObservedAt,
 } from "./orders/records.js";
 export type { RestingOrder } from "./orders/select.js";
-export { pickRestingOrdersAsOf } from "./orders/select.js";
+export { bookedFills, pickRestingOrdersAsOf } from "./orders/select.js";
 // Ingest: the PURE Bitget open-orders parse and the venue-neutral join to the one
 // declared field. The IO shell — reading the export, prompting, appending — is the
 // TUI's, per ADR-001.

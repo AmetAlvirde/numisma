@@ -84,7 +84,18 @@ export interface CommittedRung {
    * #176 was.
    */
   quantity: number;
-  /** What is STILL claimed: `quantity − filled_quantity`, per `./select.ts`. */
+  /**
+   * What is STILL claimed: `quantity − consumed`, per `./select.ts`.
+   *
+   * A REPORT, NOT AN AUTHORIZATION, and it carries {@link RestingOrder.remainingQuantity}'s
+   * warning unchanged because flattening the row does not flatten the meaning. `consumed`
+   * is NOT MONOTONIC, so this figure can go UP as well as down and a retired rung can
+   * reappear with a positive remainder. Encumbrance is what it answers for — the committed
+   * figure below is derived from it and is right. A caller asking instead "how much may I
+   * still BOOK against this rung" must apply the booked-fills ceiling at its own boundary
+   * (`bookedFills`, `./select.ts`); this number alone would let a backwards observation
+   * authorize a second lot and cash leg against capital already spent.
+   */
   remainingQuantity: number;
   fundingReserveId: string;
   /** `price × remainingQuantity` — the encumbrance, in `currency`. */

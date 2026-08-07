@@ -174,3 +174,45 @@ export function pickRestingOrdersAsOf(records: OrderRecord[], asOf?: string): Re
   }
   return resting;
 }
+
+/**
+ * WHAT THE FUND HAS ACTUALLY BOOKED against one rung: the sum of its `orderFilled`
+ * quantities. PURE and TOTAL — an id this stream never met sums to 0.
+ *
+ * THIS IS THE SECOND TERM OF THE FILL-ADMISSION CEILING, and it exists because
+ * {@link pickRestingOrdersAsOf}'s `remainingQuantity` is a REPORT and not an
+ * AUTHORIZATION (invariant 2 above). A caller deciding how much it may still BOOK against
+ * a rung asks:
+ *
+ *     admissible = min(rung.remainingQuantity, rung.quantity − bookedFills(records, id))
+ *
+ * and the invariant that protects is that a rung's TOTAL BOOKED FILLS MAY NEVER EXCEED ITS
+ * PLACED QUANTITY. Without it, a backwards observation that resurrects an exhausted rung
+ * would authorize a second lot and a second cash leg into `events.jsonl` — a log with no
+ * reversal verb — for capital already spent.
+ *
+ * ONLY `orderFilled` COUNTS, AND THAT IS THE WHOLE POINT. An observation, whether the
+ * placement line's own `observedFilledQuantity` or a later `orderFillObserved`, is what
+ * the VENUE SHOWED; only an `orderFilled` line is something the FUND DID, with a lot and a
+ * cash leg answering for it. Counting an observation here would make the ceiling move with
+ * the very figure it exists to be independent of, and it would be no ceiling at all. A
+ * cancellation does not subtract either: retiring the CLAIM does not un-buy the lot.
+ *
+ * NO `asOf` BOUND, DELIBERATELY. This is not an as-of question. Capital that left the fund
+ * is spent whatever window the caller is looking through, so bounding this would let a
+ * narrow window hide a booking and re-open the gap. The ceiling is computed over the WHOLE
+ * stream the caller holds.
+ *
+ * ONE FUNCTION, NOT A RULE EACH CALLER RESTATES — the same discipline `./committed.ts`
+ * holds for the committed formula, and for the same reason: two independently-maintained
+ * copies of an authorization rule that silently drift is the defect class, not the fix.
+ */
+export function bookedFills(records: readonly OrderRecord[], id: string): number {
+  let total = 0;
+  for (const record of records) {
+    if (record.kind === "orderFilled" && record.id === id) {
+      total += record.filledQuantity;
+    }
+  }
+  return total;
+}

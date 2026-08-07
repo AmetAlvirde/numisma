@@ -51,6 +51,7 @@
  * the speculative sidecar that is behind.
  */
 import {
+  bookedFills,
   buildEventReference,
   buildFillAct,
   committedRungs,
@@ -108,6 +109,15 @@ export type RecordFillRejection =
   | "unknown-rung"
   | "bad-timestamp"
   | "bad-quantity"
+  /**
+   * The requested quantity fits what the rung REPORTS as still resting, and still exceeds
+   * what it may BOOK: total booked fills would pass the placed quantity (#181). Separated
+   * from `bad-quantity` for the same reason `unknown-order` is separated from `not-resting`
+   * in `cancel-order.ts` — the quantity is not the operator's mistake here, the sidecar's
+   * latest observation is, and the two want different next moves. Reachable only on a rung
+   * a backwards observation resurrected.
+   */
+  | "exceeds-booked-fills"
   | "impossible-verdict"
   | "verdict-contradicts-operator"
   /**
@@ -385,11 +395,61 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
   if (!Number.isFinite(filledQuantity) || filledQuantity <= 0) {
     return reject(io, "bad-quantity", `'${quantityAnswer}' is not a positive quantity`);
   }
-  if (filledQuantity > filled.remainingQuantity) {
+
+  // THE ADMISSION CEILING (#181) — the gate that lets a lot and a cash leg into
+  // `events.jsonl`, and the ONE place policy about it lives.
+  //
+  //     admissible = min(remainingQuantity, quantity − bookedFills(id))
+  //
+  // WHY `remainingQuantity` ALONE IS NO LONGER SUFFICIENT. The selector folds ONE
+  // `consumed` baseline per rung and an `orderFillObserved` line SETS it, so `consumed` is
+  // NOT MONOTONIC: an observation asserting a figure BELOW the baseline takes `remaining`
+  // from zero back to positive and a retired rung RESURRECTS. That is deliberate and
+  // correct arithmetic — see `select.ts`, invariant 2 — but it means `remainingQuantity` is
+  // a REPORT of what is still encumbered, not an AUTHORIZATION to book against it.
+  //
+  // Traced on a rung placed at 10 with all 10 booked: an observation of 3 makes the fold
+  // report 7 still resting, and the old gate would have authorized 7 more units — TOTAL
+  // BOOKED FILLS OF 17 AGAINST A PLACED 10, two lots and two cash legs the venue never
+  // filled, in a log with NO REVERSAL VERB. The invariant that closes it is not "was this
+  // rung ever exhausted" — exhaustion history would push state back into a fold that must
+  // stay pure — but the simpler and stronger one: a rung's TOTAL BOOKED FILLS MAY NEVER
+  // EXCEED ITS PLACED QUANTITY.
+  //
+  // ON EVERY ORDINARY STREAM THIS IS A PROVABLE NO-OP. Placement and observation only ever
+  // set the baseline at or above what the fund has booked, so `consumed ≥ bookedFills`
+  // holds on any stream the import path can produce, therefore
+  // `remainingQuantity ≤ quantity − bookedFills` and the `min` never binds. It binds ONLY
+  // in the resurrection case, which is why this ships without re-testing every existing
+  // fill path: nothing admissible before became inadmissible.
+  //
+  // NOT A HYPOTHETICAL REACHABILITY. `appendOrders` is typed over the whole record union
+  // and constrains no kind, and this flow's OWN torn-act guidance above instructs
+  // hand-authoring a missing half. Hand-editing this file is a documented operator
+  // procedure. (A validating write seam on `appendOrders` would bound this class at the
+  // file rather than at each caller. It is a real want and its own increment.)
+  const booked = bookedFills(records, filled.orderId);
+  const headroom = filled.quantity - booked;
+  const ceiling = Math.min(filled.remainingQuantity, headroom);
+  if (filledQuantity > ceiling) {
+    // WHICH TERM BOUND DECIDES WHICH REFUSAL. When the remainder binds — every ordinary
+    // stream — the operator meets the refusal they always met, unchanged. The second
+    // wording is reachable only on a resurrected rung, and it is a different problem
+    // needing a different next move, so it says so rather than blaming the quantity.
     return reject(
       io,
-      "bad-quantity",
-      `${filledQuantity} exceeds the ${filled.remainingQuantity} still claimed by this rung`,
+      ceiling === filled.remainingQuantity ? "bad-quantity" : "exceeds-booked-fills",
+      ceiling === filled.remainingQuantity
+        ? `${filledQuantity} exceeds the ${filled.remainingQuantity} still claimed by this rung`
+        : `${filledQuantity} exceeds the ${headroom} this rung can still book: it was ` +
+          `placed for ${filled.quantity} and ${booked} is already booked as filled against ` +
+          `it. ${io.ordersPath} reports ${filled.remainingQuantity} still resting because its ` +
+          `latest observation of this rung asserts LESS than the fund has already booked, ` +
+          `which resurrects a rung the fund exhausted rather than re-opening one the venue ` +
+          `re-opened. Recording against it would put a second lot and a second cash leg in ` +
+          `${io.eventsPath} for capital already spent, and that log has no reversal verb. ` +
+          `Append a correct orderFillObserved line for '${filled.orderId}' — one at or above ` +
+          `${booked} — and record the fill after that`,
     );
   }
 
