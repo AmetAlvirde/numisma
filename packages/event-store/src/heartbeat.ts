@@ -194,13 +194,23 @@ export function parseHeartbeat(raw: string | undefined): JobHeartbeat | undefine
   if (typeof markWindow !== "boolean") {
     return undefined;
   }
-  // An in-window run IS its own last in-window run, so the writer need not repeat
-  // itself and a v1 file needs no new field to stay correct.
   const carried = body.lastMarkWindowFinishedAt;
   if (carried !== undefined && !isIsoInstant(carried)) {
     return undefined;
   }
-  const lastMarkWindowFinishedAt = markWindow ? finishedAt : carried;
+  // TAKEN AS WRITTEN FOR v2, NEVER SYNTHESIZED. An earlier version derived this from
+  // `finishedAt` whenever `markWindow` was true, on the reasoning that an in-window
+  // run is its own last in-window run. THAT IS FALSE: being inside the window says
+  // only that a run COULD have marked. A provider outage kills every fire at
+  // `prices-fetch` — in-window, zero marks — and synthesizing here would credit those
+  // failures as evidence the day was covered, re-creating the bug this field exists
+  // to close even though the writer is careful not to stamp them. The writer decides;
+  // the reader reports.
+  //
+  // A v1 file is the one exception, and it is a migration rather than a synthesis:
+  // that shape predates the distinction and every v1 run was read as marking, so its
+  // `finishedAt` keeps meaning what it always meant.
+  const lastMarkWindowFinishedAt = carried ?? (schemaVersion === 1 ? finishedAt : undefined);
   // Rebuilt field by field, never spread: an unknown key is dropped here rather
   // than carried into a line the operator reads.
   return {

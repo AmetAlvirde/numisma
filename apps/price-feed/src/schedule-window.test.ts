@@ -164,14 +164,48 @@ describe("the launchd fetch window", () => {
     );
   });
 
-  it("keeps the wrapper's own mark hour equal to the contract's", () => {
+  it("keeps the wrapper's own mark hour equal to the contract's, with no leading zero", () => {
     // The wrapper duplicates the mark hour in bash to decide whether a run could
     // mark at all (the heartbeat's `markWindow`). It cannot import `DEFAULT_CONFIG`,
     // so this is the join: change the contract and a test fails rather than the
     // breadcrumb quietly mis-classifying every run.
+    //
+    // THE REGEX REFUSES A LEADING ZERO ON PURPOSE. `[[ x -ge $MARK_HOUR ]]`
+    // arithmetic-evaluates its right operand, and `08`/`09` are invalid octal. That
+    // does not abort — it is an `if` condition, so `set -e` never fires — it silently
+    // classifies EVERY run as out-of-window. `Number("08") === 8` would let a guard
+    // written the obvious way sail straight past it, so the SHAPE is asserted, not
+    // just the value. (The wrapper also wraps both operands in `10#`; this is the
+    // second lock on the same door, because either alone is enough to be forgotten.)
     const markHour = Number(DEFAULT_CONFIG.markTime.split(":")[0]);
-    const declared = /^MARK_HOUR=(\d+)$/m.exec(readFileSync(WRAPPER_PATH, "utf8"));
+    const declared = /^MARK_HOUR=([1-9]?[0-9])$/m.exec(readFileSync(WRAPPER_PATH, "utf8"));
     expect(declared?.[1]).toBeDefined();
     expect(Number(declared?.[1])).toBe(markHour);
+  });
+
+  it("keeps the wrapper's own mark timezone equal to the contract's", () => {
+    // The hour is meaningless without the zone. The real gate resolves the mark
+    // instant through Intl in CDMX explicitly, so a wrapper reading the bare local
+    // hour would agree only by coincidence of the OS setting — and the install docs
+    // offer the divergent setup (CDMX-equivalent plist hours on a non-CDMX box) as
+    // supported. Under that config every scheduled fire would classify itself
+    // out-of-window, nothing would ever stamp, and the staleness trigger would be
+    // permanently and silently dead while the runs themselves marked correctly.
+    const declared = /^MARK_TZ="([^"]+)"$/m.exec(readFileSync(WRAPPER_PATH, "utf8"));
+    expect(declared?.[1]).toBe(DEFAULT_CONFIG.timeZone);
+  });
+
+  it("lists exactly the wrapper steps that follow the one appending marks", () => {
+    // The heartbeat stamps a run as having marked the day only if it got past
+    // `spine`, which is the step that appends. That predicate is a hardcoded list of
+    // step names, and its oracle is the ORDER OF THE `LAST_STEP` ASSIGNMENTS in the
+    // same file — so renaming a step, or inserting a new one after `spine` without
+    // adding it, fails here instead of quietly narrowing what counts as a marked day.
+    const wrapper = readFileSync(WRAPPER_PATH, "utf8");
+    const steps = [...wrapper.matchAll(/^LAST_STEP="([^"]+)"$/gm)].map((m) => m[1]);
+    const afterSpine = steps.slice(steps.indexOf("spine") + 1);
+    expect(steps).toContain("spine");
+    const declared = /^MARKS_LANDED_STEPS="([^"]+)"$/m.exec(wrapper)?.[1]?.split(" ");
+    expect(declared).toEqual(afterSpine);
   });
 });
