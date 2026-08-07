@@ -102,6 +102,14 @@ export function reconcileFillActs(
 ): TornFillAct[] {
   const fillsOnFile = new Set(
     records
+      // `orderFilled` ONLY, and the EXCLUSION of `orderFillObserved` is DELIBERATE (#181).
+      // An observation is what the VENUE SHOWED about a row; it has no lot and no cash leg
+      // behind it and must never be paired with one. Routed in here, the first restatement
+      // an operator imported would read as a permanent `fill-without-lot` torn act — and
+      // the fill flow refuses to record anything while one is outstanding, so it would
+      // brick on first occurrence, with no verb in `PortfolioEventType` able to discharge
+      // it. This line is load-bearing for the argument that a torn state cannot be created
+      // by an import.
       .filter((record): record is OrderFilledRecord => record.kind === "orderFilled")
       .map((record) => fillEventId(record.id, record.observedAt)),
   );
