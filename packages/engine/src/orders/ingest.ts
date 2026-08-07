@@ -351,8 +351,8 @@ export interface ChangedClaim {
  * stale on is the drift the batch refusal exists to prevent).
  *
  * AN EXPORT FIGURE ABOVE THE PLACED QUANTITY GETS NO CHECK HERE, AND THAT IS THE DECISION
- * — see the partition rule in `apps/tui/src/import-orders.ts`, which states why it cannot
- * arrive and names both gates that make it so.
+ * — see the partition rule in `apps/tui/src/import-orders-changed-claims.ts`, which
+ * states why it cannot arrive and names both gates that make it so.
  *
  * TIES ON EQUAL STAMPS RESOLVE TO THE LAST LINE IN FILE ORDER — `>=` on the scan below,
  * over the records in the order the caller holds them. That is exactly the tie-break the
@@ -395,8 +395,9 @@ export interface ChangedClaim {
  * Accepted for the same reason the gap was acceptable before: no descriptor moves the
  * encumbrance, which is `price * quantity`, so the funding guard stays correct across
  * such a change. That is also why a descriptor difference does NOT refuse as an
- * amendment — see `partitionChangedClaims` in `apps/tui/src/import-orders.ts`, which
- * routes it to its own class with its own wording.
+ * amendment — see `partitionChangedClaims` in
+ * `apps/tui/src/import-orders-changed-claims.ts`, which routes it to its own class with
+ * its own wording.
  */
 export function detectChangedClaims(
   known: readonly OrderRecord[],
