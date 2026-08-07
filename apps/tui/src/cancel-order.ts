@@ -38,6 +38,7 @@ import {
   type OrderRecord,
 } from "@numisma/engine";
 import type { OrdersLoad } from "@numisma/preferences";
+import { renderSkipMessage } from "./skip-message.js";
 
 /** Everything this act touches that is not a pure function, in one injectable bag. */
 export interface OrderCancelIo {
@@ -124,12 +125,9 @@ export async function cancelOrder(options: OrderCancelOptions): Promise<OrderCan
     // The same refusal the import makes, for the same reason: a partially-read book
     // cannot tell us whether this rung is resting, and a cancellation decided over one
     // would free capital on a guess.
-    return reject(
-      io,
-      "unreadable-sidecar-lines",
-      `${io.ordersPath} has ${existing.skips.length} line(s) this build cannot read, so the ` +
-        `resting book would be resolved over a partially-read file`,
-    );
+    // Same refusal, same reason code, same exit — one shared sentence (#181), so a line
+    // from a newer build is not reported to the operator as a broken file.
+    return reject(io, "unreadable-sidecar-lines", renderSkipMessage(io.ordersPath, existing.skips));
   }
   const records: OrderRecord[] = existing.status === "loaded" ? existing.records : [];
 
@@ -144,6 +142,30 @@ export async function cancelOrder(options: OrderCancelOptions): Promise<OrderCan
     );
   }
 
+  // THE RESTING LIST IS THIS FLOW'S WHOLE GATE, AND IT CAN PRESENT A RESURRECTED RUNG.
+  // Stated, known, and deliberately NOT closed here (#181).
+  //
+  // `pickRestingOrdersAsOf` folds ONE `consumed` baseline per rung and an
+  // `orderFillObserved` line SETS it, so `consumed` is NOT MONOTONIC (`select.ts`,
+  // invariant 2): an observation asserting a figure BELOW the baseline takes `remaining`
+  // from zero back to positive, and a rung the fund already exhausted reappears below. So
+  // `not-resting` can be answered "it is resting" about a claim that is not really on the
+  // book, and this flow will retire it.
+  //
+  // WHY NO CEILING HERE, WHERE `record-fill.ts` HAS ONE. The two gates guard different
+  // exposures, and the asymmetry is the reason rather than an oversight. A fill writes a
+  // LOT and a CASH LEG into `events.jsonl` — an append-only log with NO REVERSAL VERB — so
+  // admitting one against a resurrected rung spends capital twice and nothing can discharge
+  // it; that gate carries the booked-fills ceiling. A cancellation writes ONE LINE into
+  // this sidecar and touches no lot and no cash leg. Its worst case is a false assertion in
+  // a file whose OWN verbs can correct it: a later observation restates the baseline and
+  // the book is right again. A torn money state and a recoverable sidecar line do not earn
+  // the same guard.
+  //
+  // Latching retirement in the fold instead was considered and REJECTED on its merits: in
+  // an append-only file with no reversal verb, a rung latched in error is permanently
+  // un-fillable AND un-cancellable, with hand-editing history the only recourse.
+  // Resurrection is recoverable, which is exactly what this flow relies on.
   const resting = pickRestingOrdersAsOf(records);
   const target = resting.find((order) => order.placed.id === orderId);
   if (!target) {

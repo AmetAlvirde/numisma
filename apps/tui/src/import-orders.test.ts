@@ -14,6 +14,7 @@ import { dirname, join, resolve } from "node:path";
 import { appendOrders, loadOrders, resolveOrdersPath } from "@numisma/preferences";
 import {
   BITGET_OPEN_ORDERS_HEADER,
+  buildOrderFillObserved,
   parseBitgetOpenOrdersCsv,
   parseFundReview,
   pickRestingOrdersAsOf,
@@ -127,6 +128,20 @@ interface Harness {
   io: OrdersImportIo;
   csvPath: string;
   ordersPath: string;
+  /**
+   * MOVE THE FROZEN CLOCK (#181) — the seam `OrdersImportIo.now` exists for, and until
+   * this slice nothing in the suite had ever touched it.
+   *
+   * That is not a tidiness point. Every import in the suite shared one wall-clock instant
+   * whose SECOND nobody controlled, so the suite ran permanently inside the precondition
+   * of the same-second bug and could never distinguish "two observations, one stamp,
+   * both kept" from "two observations, one stamp, one silently dropped". Holding the
+   * stamp still is what makes that distinguishable.
+   *
+   * Takes the stamp shape the file itself uses, LOCAL and second-granular, so a test
+   * reads the same string it will find on disk.
+   */
+  setClock: (stamp: string) => void;
   asked: string[];
   errors: string[];
   /** Everything the flow told the OPERATOR on the normal channel — merges included. */
@@ -200,6 +215,9 @@ async function harness(options: HarnessOptions = {}): Promise<Harness> {
   const outputs: string[] = [];
   const script = options.answers ?? ["reserve-a", "n"];
   let answers = [...script];
+  // FROZEN by default and movable by the test. A default of "now" would leave every
+  // stamped line depending on the second the suite happened to run in.
+  let clock = new Date("2026-06-01T09:00:00");
 
   return {
     csvPath,
@@ -207,8 +225,12 @@ async function harness(options: HarnessOptions = {}): Promise<Harness> {
     asked,
     errors,
     outputs,
+    setClock: (stamp) => {
+      clock = new Date(stamp);
+    },
     io: {
       readExport: (path) => readFile(path, "utf8"),
+      now: () => clock,
       ordersPath,
       loadOrders: (path) => loadOrders(path, { warn: () => {} }),
       appendOrders,
@@ -382,30 +404,42 @@ describe("one id identifies exactly ONE claim (#174)", () => {
 });
 
 /**
- * #199 — a rung the venue filled FURTHER costs ITS OWN rung, not the whole batch.
+ * #199 → #181 — a rung the venue filled FURTHER is RECORDED, not skipped.
  *
  * The id is synthesized from the submission stamp, so a rung that fills between two
- * exports returns under the same id with a larger `filled_quantity`. Refusing the batch
- * over it blocked every unrelated new rung in every later export from that venue,
- * indefinitely, with no local remedy: nothing is written on a refusal, so recording the
- * fill repaired `committed`/`available` and left the placement line — and therefore the
- * refusal — exactly where it was. The only exits were at the venue.
+ * exports returns under the same id with a larger `filled_quantity`. #174 refused the
+ * whole batch over it, which blocked every unrelated new rung in every later export from
+ * that venue, indefinitely and with no local remedy. #199 narrowed that to a per-rung
+ * SKIP, which unblocked the batch and left the file permanently stale. #181 writes the
+ * figure down: an `orderFillObserved` line the selector folds as a new `consumed`
+ * baseline, so the file's remainder becomes the venue's.
  *
- * The split is safe for THIS FIELD AND NO OTHER, and the direction is the whole argument.
- * A stale partial makes the file believe more is still resting than is, so the guard
- * reads the encumbrance HIGH — it can refuse a fundable batch and can never admit an
- * unfundable one. A stale `quantity` points the other way and stays a total refusal.
+ * THE COUNTING VOCABULARY SPLITS HERE, and it is why these assertions changed rather than
+ * being ported. `appended` and `alreadyKnown` used to be derived by DIFFERENT rules from
+ * the same list — one counting lines, the other contorted to count orders — so the moment
+ * an import could write a second kind of line, a pure-observation import reported
+ * `1 order(s) appended` about ZERO orders. `appended` now counts ORDERS and observations
+ * are counted separately, so every assertion that pinned the old reading is restated
+ * below with its reason beside it rather than quietly edited.
  */
-describe("a restated partial is skipped per rung (#199)", () => {
+describe("a restated partial is recorded as an observation (#181)", () => {
   /** The rung of the traced case: 10 units at 100, the venue showing 6 already filled. */
   const PARTLY_FILLED = partlyFilledRung("100", "10", "6", "2020-01-01 10:00:00");
 
-  it("SKIPS the restated rung and imports every other rung in the export", async () => {
+  /** The file after one import of `PARTLY_FILLED`, with the rung's id in hand. */
+  async function fileWithRestingRung(): Promise<{ first: Harness; restedId: string }> {
     const first = await harness({
       csv: ladder(PARTLY_FILLED),
       reserves: [{ id: "reserve-a", amount: 5000 }],
     });
     await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+    const [restedId] = await idsOnDisk(first.ordersPath);
+    if (restedId === undefined) throw new Error("expected the rung on disk");
+    return { first, restedId };
+  }
+
+  it("RECORDS the restatement and imports every other rung in the export", async () => {
+    const { first } = await fileWithRestingRung();
 
     // The same rung filled further at the venue, PLUS an unrelated new rung — which is
     // the whole point: that new rung used to be blocked with no local way to clear it.
@@ -420,18 +454,22 @@ describe("a restated partial is skipped per rung (#199)", () => {
     const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
 
     expect(outcome).not.toMatchObject({ status: "rejected" });
-    // The new rung landed. The restated one is NOT `alreadyKnown` — it is not a
-    // re-sighting, and calling it one is the silence #174 named.
+    // WAS `appended: 1, alreadyKnown: 0` AND STILL IS — but for a reason worth restating,
+    // because the batch now writes TWO lines and the number did not move. `appended`
+    // counts ORDERS: the new rung is one claim on capital, and the observation is none.
+    // The restated rung is not `alreadyKnown` either — it is not a re-sighting.
     expect(outcome).toMatchObject({ appended: 1, alreadyKnown: 0 });
-    expect(await idsOnDisk(first.ordersPath)).toHaveLength(2);
+    if (outcome.status === "rejected") throw new Error("expected a successful import");
+    expect(outcome.observations).toHaveLength(1);
+    // THREE LINES on disk for TWO rungs: the observation shares its rung's id, which is
+    // exactly why the append key carries `kind` as well.
+    expect(await idsOnDisk(first.ordersPath)).toHaveLength(3);
+    // And the file now claims what the venue holds: 2 on the restated rung, 1 on the new.
+    expect(await remainingOnDisk(first.ordersPath)).toEqual([2, 1]);
   });
 
-  it("QUALIFIES the status rather than reporting an unqualified success", async () => {
-    const first = await harness({
-      csv: ladder(PARTLY_FILLED),
-      reserves: [{ id: "reserve-a", amount: 5000 }],
-    });
-    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+  it("does NOT qualify the status — the work is done, not deferred", async () => {
+    const { first, restedId } = await fileWithRestingRung();
 
     await writeFile(
       first.csvPath,
@@ -443,34 +481,24 @@ describe("a restated partial is skipped per rung (#199)", () => {
     );
     const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
 
-    // `imported` now means every row read AND nothing restated — a strengthened
-    // invariant, so the status keeps meaning what a reader who opens no second field
-    // assumes it means.
-    expect(outcome).not.toMatchObject({ status: "imported" });
-    expect(outcome).toMatchObject({ status: "imported-partial", appended: 1 });
-    if (outcome.status !== "imported-partial") throw new Error("expected a partial import");
-    expect(outcome.restated).toEqual([
-      // Both remainders ride along, and here they are the strictly-over case: the file
-      // still claims the 4 its placement line implies, the venue holds 2.
-      {
-        id: expect.stringContaining(":100:"),
-        known: 6,
-        observed: 8,
-        remainingOnFile: 4,
-        remainingAtVenue: 2,
-      },
-    ]);
+    // THE INVERSION OF #199's ASSERTION, and the reason is the whole slice. #199 asserted
+    // `not imported` / `imported-partial`, because a restatement was a DEFERRAL: a rung
+    // read perfectly and then not written down, which a status calling itself unqualified
+    // would be hiding. The line is written now, so it defers nothing and the union widens
+    // back. That is a gap closing, not precision lost.
+    expect(outcome).toMatchObject({ status: "imported", appended: 1 });
+    if (outcome.status !== "imported") throw new Error("expected an unqualified import");
+    // NO REMAINDERS ON THE ENTRY. #199 carried both because they were the safety argument
+    // for a SKIP; the line lands now, so the file's remainder IS the venue's and the pair
+    // would print one number twice.
+    expect(outcome.observations).toEqual([{ id: restedId, known: 6, observed: 8 }]);
     // NOT absorbed into `skips`: `leavesRungUnweighed` is a predicate over PARSER
-    // problems, and this rung was read perfectly — it is weighed, and weighed HIGH.
+    // problems, and this rung was read perfectly.
     expect(outcome.skips).toHaveLength(0);
   });
 
-  it("LEADS its own line with the restatement and names the OPPOSITE money direction", async () => {
-    const first = await harness({
-      csv: ladder(PARTLY_FILLED),
-      reserves: [{ id: "reserve-a", amount: 5000 }],
-    });
-    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+  it("LEADS its own line with what was OBSERVED and what was recorded", async () => {
+    const { first } = await fileWithRestingRung();
 
     await writeFile(
       first.csvPath,
@@ -482,30 +510,31 @@ describe("a restated partial is skipped per rung (#199)", () => {
     );
     await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
 
-    const line = first.outputs.find((message) => message.includes("RESTATED"));
+    const line = first.outputs.find((message) => message.includes("OBSERVED"));
     expect(line).toBeDefined();
-    // The qualification OPENS the line, and the counts follow it.
-    expect(line?.startsWith("RESTATED")).toBe(true);
-    expect(line).toContain("1 order(s) appended");
-    // Its own direction, which is the REVERSE of an unread row's. Stated as a FLOOR
-    // rather than an inequality: the skip class now admits the EXACT case (the file's
-    // own fill lines having caught the venue up), where `committed` is neither high nor
-    // low, so the only claim true of every entry is that it is never understated.
-    expect(line).toContain("committed never reads LOW and available never reads HIGH");
-    expect(line).not.toContain("available reads HIGH");
-    // Both figures, and the honest consequence: this recurs until the venue resolves it.
+    // The notice OPENS the line, and the counts follow it.
+    expect(line?.startsWith("OBSERVED")).toBe(true);
     expect(line).toContain("filled 6 → 8");
-    expect(line).toContain("REPRINTS");
+    expect(line).toContain("RECORDED");
+    // WAS `expect(line).toContain("REPRINTS")`. #199's line had to promise it would come
+    // back on every import until the venue resolved the rung, because nothing was written
+    // and the condition survived the import. It is written now, so the promise is false
+    // and its absence is the assertion.
+    expect(line).not.toContain("REPRINTS");
+    // And it no longer describes a stale file, because the file is not stale.
+    expect(line).not.toContain("committed never reads LOW");
+    // WAS `1 order(s) appended` FOR A BATCH THAT WROTE ONE ORDER AND ONE OBSERVATION —
+    // true here by luck rather than by rule, since one of each happens to make the old
+    // line-count and the new order-count agree. Both figures are asserted now, so the
+    // rule is pinned rather than the coincidence.
+    expect(line).toContain("1 order(s) appended");
+    expect(line).toContain("1 observation(s) recorded");
   });
 
-  it("reports BOTH lines when one export is qualified both ways at once", async () => {
-    // The case that killed the third-status option: a sum type can say only ONE of
-    // these, so one qualification would drop silently. Two fields say both.
-    const first = await harness({
-      csv: ladder(PARTLY_FILLED),
-      reserves: [{ id: "reserve-a", amount: 5000 }],
-    });
-    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+  it("reports BOTH notices when one export carries an unread row too", async () => {
+    // A row nobody could read is now the ONLY thing that qualifies an import, so this is
+    // the case where a notice and a qualification appear together and must not merge.
+    const { first } = await fileWithRestingRung();
 
     await writeFile(
       first.csvPath,
@@ -521,34 +550,43 @@ describe("a restated partial is skipped per rung (#199)", () => {
     expect(outcome).toMatchObject({ status: "imported-partial", appended: 1 });
     if (outcome.status !== "imported-partial") throw new Error("expected a partial import");
     expect(outcome.skips).toHaveLength(1);
-    expect(outcome.restated).toHaveLength(1);
+    expect(outcome.observations).toHaveLength(1);
 
     const message = first.outputs.find((line) => line.includes("could not be read"));
     expect(message).toBeDefined();
-    // BOTH qualifications, each on its own line, each naming its own direction — and the
-    // unread row leads, being the one we can say least about.
+    // The unread row leads, being the one thing here we can say least about.
     expect(message?.startsWith("INCOMPLETE")).toBe(true);
-    expect(message).toContain("\nRESTATED");
+    expect(message).toContain("\nOBSERVED");
     expect(message).toContain("available reads HIGH");
-    expect(message).toContain("committed never reads LOW and available never reads HIGH");
-    // The counts follow both, once.
+    // WAS `1 order(s) appended` ALONE. Same rewrite as the line above, same reason: the
+    // batch wrote one order and one observation, and the report must say both.
     expect(message).toContain("1 order(s) appended");
+    expect(message).toContain("1 observation(s) recorded");
   });
 
-  it("keeps `restated` EMPTY on the unqualified status", async () => {
-    const { csvPath, io } = await harness();
+  it("renders the observation clause AT ZERO on an import that observed nothing", async () => {
+    const { csvPath, io, outputs } = await harness();
     const outcome = await importBitgetOpenOrders({ csvPath, io });
     expect(outcome).toMatchObject({ status: "imported", appended: 2 });
     if (outcome.status !== "imported") throw new Error("expected a clean import");
-    expect(outcome.restated).toEqual([]);
+    expect(outcome.observations).toEqual([]);
+    // ALWAYS, INCLUDING AT ZERO. A clause that appears only when it is non-zero is two
+    // shapes for a reader to learn and one more place for the two exits to diverge — and
+    // the zero is informative in its own right: this import created claims and observed
+    // nothing.
+    const line = outputs.find((message) => message.startsWith("Imported"));
+    expect(line).toContain("0 observation(s) recorded");
   });
 
-  it("leaves the restated rung's line on file at the OLDER, more conservative partial", async () => {
-    const first = await harness({
-      csv: ladder(PARTLY_FILLED),
-      reserves: [{ id: "reserve-a", amount: 5000 }],
-    });
-    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+  it("leaves the PLACEMENT line at the older partial and corrects the remainder on a second line", async () => {
+    // THE ASSERTION THAT HALF-SURVIVED #199, kept rather than deleted because its premise
+    // is still true and its MEANING has inverted. The placement line genuinely does still
+    // read the older partial — `orders.jsonl` is append-only and nothing rewrites it — and
+    // under #199 that was the whole story: the file stayed stale, deliberately, on the
+    // conservative side. It is now the FIRST of two observations, and the second one
+    // carries the correction, so the same durable line proves the opposite thing: the
+    // repair rides on a new line rather than on an edit.
+    const { first } = await fileWithRestingRung();
 
     await writeFile(
       first.csvPath,
@@ -557,30 +595,36 @@ describe("a restated partial is skipped per rung (#199)", () => {
     );
     await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
 
-    // `orders.jsonl` is append-only and a second placement line is ignored by the
-    // selector, so the skip cannot repair the figure — and must not pretend to. The rung
-    // still claims 4 (10 less the partial of 6 on file), NOT the 2 the venue now shows.
-    const remaining = await remainingOnDisk(first.ordersPath);
-    expect(remaining).toEqual([4]);
-    expect(remaining).not.toContain(2);
-    // No second placement line was appended for it, and no fill was synthesized.
     const load = await loadOrders(first.ordersPath, { warn: () => {} });
     if (load.status !== "loaded") throw new Error("expected a loaded sidecar");
-    expect(load.records).toHaveLength(1);
+    // TWO lines: the untouched placement and the observation that supersedes its figure.
+    expect(load.records).toHaveLength(2);
+    const placed = load.records.filter((record) => record.kind === "orderPlaced");
+    expect(placed).toHaveLength(1);
+    // STILL 6 — the older partial, exactly as #199 asserted, and for the same reason.
+    expect(placed[0]).toMatchObject({ observedFilledQuantity: 6 });
+    // WAS `expect(remaining).toEqual([4])` — the file claiming 4 while the venue held 2,
+    // which was #199's conservative staleness and is the figure that has moved. The fold
+    // takes the LATEST observation as the `consumed` baseline, so the remainder is now the
+    // venue's own 2 and the 4 it used to read is what this slice removed.
+    expect(await remainingOnDisk(first.ordersPath)).toEqual([2]);
+    // And no fill was synthesized: an `orderFilled` line is half of a fill act and would
+    // brick the fill flow. The second line is an observation.
+    expect(load.records.some((record) => record.kind === "orderFilled")).toBe(false);
   });
 
-  it("reports the qualification without prompting when EVERY rung is restated", async () => {
-    // The empty-batch path (#200 review). A one-rung export that filled further leaves
-    // NOTHING admitted, and the flow used to carry straight on: two prompts for the
-    // funding reserve of a batch of zero orders, a coverage guard over a book this
-    // import does not change, an append of nothing.
-    const first = await harness({
-      csv: ladder(PARTLY_FILLED),
-      reserves: [{ id: "reserve-a", amount: 5000 }],
-    });
-    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+  it("writes the observation WITHOUT prompting or guarding when EVERY rung is restated", async () => {
+    // WAS `reports the qualification without prompting`, and the qualification is what
+    // changed: this import writes N lines and reports an unqualified success. #199's
+    // version asserted the file was byte-identical afterwards, which is now the one thing
+    // it must not be.
+    const { first } = await fileWithRestingRung();
     const before = await readFile(first.ordersPath, "utf8");
     const askedByTheFirstImport = first.asked.length;
+    // A reserve that could not fund the book already on file. If the guard ran on this
+    // path it would refuse `over-committed` — over a PRE-EXISTING condition this import
+    // does not create and, no declaration having been prompted for, could not fix.
+    first.io.fundReview = async () => syntheticFund([{ id: "reserve-a", amount: 1 }]);
 
     await writeFile(
       first.csvPath,
@@ -589,38 +633,112 @@ describe("a restated partial is skipped per rung (#199)", () => {
     );
     const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
 
-    // Still a qualified success, and still NOT the unqualified one: `restated` is
-    // non-empty by construction on this path, since an export with no readable rows at
-    // all was already refused as `no-orders` further up.
-    expect(outcome).not.toMatchObject({ status: "imported" });
-    expect(outcome).toMatchObject({ status: "imported-partial", appended: 0, alreadyKnown: 0 });
-    if (outcome.status !== "imported-partial") throw new Error("expected a partial import");
-    expect(outcome.restated).toHaveLength(1);
-    expect(await readFile(first.ordersPath, "utf8")).toBe(before);
-    // The operator still gets the whole qualification — the short-circuit skips the
-    // prompt and the guard, never the reporting.
-    const line = first.outputs.find((message) => message.includes("RESTATED"));
+    // Not refused, and not qualified: the guard was skipped and the work was done.
+    expect(outcome).toMatchObject({ status: "imported", appended: 0, alreadyKnown: 0 });
+    if (outcome.status !== "imported") throw new Error("expected an unqualified import");
+    expect(outcome.observations).toHaveLength(1);
+    // THE FILE GREW. #199 asserted byte-equality here; the whole slice is that it no
+    // longer holds.
+    expect(await readFile(first.ordersPath, "utf8")).not.toBe(before);
+    expect(await remainingOnDisk(first.ordersPath)).toEqual([2]);
+
+    // ZERO ORDERS AND ONE OBSERVATION, in one line. This is the pair the old vocabulary
+    // could not say: it reported `1 order(s) appended` about an import that created no
+    // claim on capital at all.
+    const line = first.outputs.find((message) => message.includes("OBSERVED"));
     expect(line).toBeDefined();
     expect(line).toContain("0 order(s) appended");
+    expect(line).toContain("1 observation(s) recorded");
 
-    // NOTHING WAS ASKED, and that is what makes the blank-answer refusal unreachable.
-    // "Funding reserve for this batch:" over a batch of zero orders has no honest
-    // answer, and the honest reply — a blank line — used to return
-    // `rejected`/`no-reserve-declared`: a refusal reported over an import that had
-    // nothing to refuse and nothing to fund.
+    // NOTHING WAS ASKED. "Funding reserve for this batch:" over a batch of zero orders has
+    // no honest answer, and the honest reply — a blank line — used to come back as
+    // `no-reserve-declared`: a refusal over an import with nothing to fund.
     expect(first.asked.length).toBe(askedByTheFirstImport);
   });
 
-  it("REFUSES the batch when the same claim also changed its quantity", async () => {
-    const first = await harness({
-      csv: ladder(PARTLY_FILLED),
-      reserves: [{ id: "reserve-a", amount: 5000 }],
-    });
+  it("writes the orders and the observations in ONE append call", async () => {
+    const { first } = await fileWithRestingRung();
+    let appendCalls = 0;
+    const realAppend = first.io.appendOrders;
+    first.io.appendOrders = async (path, records) => {
+      appendCalls += 1;
+      await realAppend(path, records);
+    };
+
+    await writeFile(
+      first.csvPath,
+      ladder(
+        partlyFilledRung("100", "10", "8", "2020-01-01 10:00:00"),
+        rung("90", "1", "2020-01-01 11:00:00"),
+      ),
+      "utf8",
+    );
     await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    // ONE lock, one temp write, one rename. The selector sorts at READ time, so there is
+    // no ordering reason to split the two kinds across two writes — and a split write is
+    // a window in which the file holds an observation whose placement never landed.
+    expect(appendCalls).toBe(1);
+    expect(await idsOnDisk(first.ordersPath)).toHaveLength(3);
+  });
+
+  it("weighs the observation in the funding guard, so it cannot refuse over freed capital", async () => {
+    const { first } = await fileWithRestingRung();
+    // The book on file encumbers 400 — the rung's stale remainder of 4 at 100. The
+    // restatement frees 200 of that, and the new rung wants 90, so the import needs 290.
+    // A 300 reserve funds the import and does NOT fund the stale reading of it.
+    first.io.fundReview = async () => syntheticFund([{ id: "reserve-a", amount: 300 }]);
+
+    await writeFile(
+      first.csvPath,
+      ladder(
+        partlyFilledRung("100", "10", "8", "2020-01-01 10:00:00"),
+        rung("90", "1", "2020-01-01 11:00:00"),
+      ),
+      "utf8",
+    );
+    const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    // Excluded from the guard's view, the restated rung would still weigh 400 and the
+    // batch would be refused `over-committed` — over capital this very import is about to
+    // free. Observations only ever REDUCE a remainder, so they belong in the reading.
+    expect(outcome).toMatchObject({ status: "imported", appended: 1 });
+  });
+
+  it("marks a restated rung as ON FILE in an attribution refusal — the mark is placement ids only", async () => {
+    const { first, restedId } = await fileWithRestingRung();
+    // `reserve-a` stops being fundable, so BOTH rungs of the resting book are unmatched:
+    // the one this export just declared, and the restated one already on file.
+    first.io.fundReview = async () =>
+      syntheticFund([{ id: "reserve-a", amount: 5000, executionMode: "paper" }]);
+
+    await writeFile(
+      first.csvPath,
+      ladder(
+        partlyFilledRung("100", "10", "8", "2020-01-01 10:00:00"),
+        rung("90", "1", "2020-01-01 11:00:00"),
+      ),
+      "utf8",
+    );
+    const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    expect(outcome).toMatchObject({ status: "rejected", reason: "unattributed" });
+    if (outcome.status !== "rejected") throw new Error("expected a refusal");
+    // THE MARK CARRIES PLACEMENT IDS ONLY. An observation shares its rung's id, so adding
+    // the observations to the batch set would un-mark the restated rung and invite the
+    // operator to fix it by re-declaring — but its `fundingReserveId` comes from its
+    // original placement line and `declareFunding` never touches it, so that is a loop
+    // that changes nothing.
+    expect(outcome.message).toContain(`${restedId} — on file`);
+  });
+
+  it("REFUSES the batch when the same claim also changed its quantity", async () => {
+    const { first } = await fileWithRestingRung();
     const before = await readFile(first.ordersPath, "utf8");
 
     // Both fields at once. `quantity` is not in the synthesized id, so this is the SAME
-    // claim — and carrying the safe difference does not make the dangerous one safe.
+    // claim — and carrying the safe difference does not make the dangerous one safe. The
+    // observation verb does not help: it carries no `quantity`, deliberately.
     await writeFile(
       first.csvPath,
       ladder(partlyFilledRung("100", "12", "8", "2020-01-01 10:00:00")),
@@ -632,13 +750,14 @@ describe("a restated partial is skipped per rung (#199)", () => {
     expect(await readFile(first.ordersPath, "utf8")).toBe(before);
   });
 
-  it("REFUSES a partial that moved DOWN — the direction is what makes the skip safe", async () => {
+  it("REFUSES a partial that moved DOWN — its OWN refusal since #181", async () => {
     const first = await harness({ csv: ladder(PARTLY_FILLED) });
     await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
     const before = await readFile(first.ordersPath, "utf8");
 
-    // A fill does not un-fill. Whatever this is, the file would be left UNDER-stating
-    // the encumbrance — the permissive direction — so it gets #174's total refusal.
+    // A fill does not un-fill, so this is a contradiction rather than the ordinary life
+    // of a rung — and since #181 it is refused under its OWN token, because the remedy
+    // `changed-claim` prints is wrong for it. See the split's own describe below.
     await writeFile(
       first.csvPath,
       ladder(partlyFilledRung("100", "10", "4", "2020-01-01 10:00:00")),
@@ -646,7 +765,7 @@ describe("a restated partial is skipped per rung (#199)", () => {
     );
     const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
 
-    expect(outcome).toMatchObject({ status: "rejected", reason: "changed-claim" });
+    expect(outcome).toMatchObject({ status: "rejected", reason: "backwards-claim" });
     expect(await readFile(first.ordersPath, "utf8")).toBe(before);
 
     // THE MESSAGE, not just the reason. `quantity` is IDENTICAL here (10 both times),
@@ -655,32 +774,22 @@ describe("a restated partial is skipped per rung (#199)", () => {
     // survived a release. The operator is owed the disagreement that actually refused.
     if (outcome.status !== "rejected") throw new Error("expected a refusal");
     expect(outcome.message).not.toContain("different SIZE");
-    expect(outcome.message).toContain("observedFilledQuantity 6 → 4");
+    expect(outcome.message).toContain("filled 6 → 4");
   });
 
   it("REFUSES a restatement the file's OWN fill lines have already overtaken", async () => {
     // THE PROBE for the inverted guard. The partition used to read only the placement
-    // lines, so it concluded "the file over-states, therefore skipping is safe" without
-    // ever asking what the funding guard actually weighs — which is
-    // `pickRestingOrdersAsOf`, fill lines and all.
+    // lines, so it concluded "the file over-states, therefore this is safe" without ever
+    // asking what the funding guard actually weighs — which is `pickRestingOrdersAsOf`,
+    // fill lines and all.
     //
     // The money argument, in figures: the file records placed 10 / filled 6, the
     // operator then runs the fill flow and records the remaining 4, retiring the rung.
     // The file now counts ZERO resting. The venue's next export shows filled 8 — 2 units
-    // STILL RESTING and funded by a reserve the book believes is free. Skipping this
-    // rung would make `available` read HIGH, the direction that costs money, which is
-    // precisely #174's hazard wearing #199's clothes.
-    const first = await harness({
-      csv: ladder(PARTLY_FILLED),
-      reserves: [{ id: "reserve-a", amount: 5000 }],
-    });
-    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
-
-    // The id is DERIVED from what landed, never hand-written: it is synthesized from
-    // `(pair, side, price, submittedAt)` and spelling it out here would pin a test to a
-    // format the ingest owns.
-    const [restedId] = await idsOnDisk(first.ordersPath);
-    if (restedId === undefined) throw new Error("expected the rung on disk");
+    // STILL RESTING and funded by a reserve the book believes is free. RECORDING an
+    // observation here would not repair that: the fund has BOOKED units the venue does
+    // not corroborate, so the two statements contradict rather than supersede.
+    const { first, restedId } = await fileWithRestingRung();
     await appendOrders(first.ordersPath, [
       {
         id: restedId,
@@ -708,19 +817,11 @@ describe("a restated partial is skipped per rung (#199)", () => {
     expect(outcome.message).toContain("the file would claim 0 where the venue still holds 2");
   });
 
-  it("SKIPS the restatement when the recorded fill left the file EXACTLY level", async () => {
+  it("RECORDS the restatement when the recorded fill left the file EXACTLY level", async () => {
     // The other side of the same reading. Here the operator recorded the fill the venue
-    // actually took — 2 units — so the file claims 2 and the venue holds 2. Nothing is
-    // over-stated and nothing is under-stated, and the skip is still safe because the
-    // test the class is defined by is `fileRemaining >= venueRemaining`, not `>`.
-    const first = await harness({
-      csv: ladder(PARTLY_FILLED),
-      reserves: [{ id: "reserve-a", amount: 5000 }],
-    });
-    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
-
-    const [restedId] = await idsOnDisk(first.ordersPath);
-    if (restedId === undefined) throw new Error("expected the rung on disk");
+    // actually took — 2 units — so the file claims 2 and the venue holds 2. The class is
+    // defined by `fileRemaining >= venueRemaining`, not `>`, and the observation lands.
+    const { first, restedId } = await fileWithRestingRung();
     await appendOrders(first.ordersPath, [
       {
         id: restedId,
@@ -739,23 +840,340 @@ describe("a restated partial is skipped per rung (#199)", () => {
     );
     const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
 
-    expect(outcome).toMatchObject({ status: "imported-partial" });
-    if (outcome.status !== "imported-partial") throw new Error("expected a partial import");
-    expect(outcome.restated).toEqual([
-      { id: restedId, known: 6, observed: 8, remainingOnFile: 2, remainingAtVenue: 2 },
-    ]);
+    expect(outcome).toMatchObject({ status: "imported" });
+    if (outcome.status !== "imported") throw new Error("expected an unqualified import");
+    // WAS `{ id, known: 6, observed: 8, remainingOnFile: 2, remainingAtVenue: 2 }`, and
+    // the remainders are gone from the entry rather than merely unasserted: they existed
+    // to let an operator audit a SKIP, and this rung is not skipped.
+    expect(outcome.observations).toEqual([{ id: restedId, known: 6, observed: 8 }]);
+    // THE FOLD IS NOT MONOTONIC AND THIS IS THE CASE THAT SHOWS IT: the observation SETS
+    // `consumed` to 8, and the 2 already booked against the rung do not add to it. The
+    // remainder stays 2 — the venue's own figure — rather than dropping to 0.
+    expect(await remainingOnDisk(first.ordersPath)).toEqual([2]);
 
-    // The wording has to survive this case, which is the whole reason it changed: an
-    // EXACT rung is not over-stated, so a line claiming `committed` reads HIGH and
-    // `available` reads LOW would be flatly false about it — and that line reprints on
-    // every import by design, so a falsehood there is a falsehood the operator reads
-    // forever.
-    const line = first.outputs.find((message) => message.includes("RESTATED"));
+    // The old wording promised a stale file and both remainders; neither is true now.
+    const line = first.outputs.find((message) => message.includes("OBSERVED"));
     expect(line).toBeDefined();
-    expect(line).not.toContain("committed reads HIGH");
-    expect(line).not.toContain("available reads LOW");
-    expect(line).toContain("committed never reads LOW and available never reads HIGH");
-    expect(line).toContain("the file still claims 2, the venue holds 2");
+    expect(line).not.toContain("the file still claims 2, the venue holds 2");
+    expect(line).toContain("filled 6 → 8");
+  });
+});
+
+/**
+ * #181 slice #210 — the same-second case, and the append key it forced.
+ *
+ * ONE BATCH STAMP AT SECOND RESOLUTION plus `observedAt` in the append key means two
+ * imports inside one second key IDENTICALLY, so the second import's observation is
+ * filtered out as a repeat while the operator is told it was RECORDED and a successful
+ * status comes back. Honesty and information loss rather than money loss — and ordinary
+ * to reach: two exports back to back, or any scripted loop.
+ *
+ * THIS IS THE FIRST SECOND STAMP ANYWHERE IN THE SUITE, and that is the finding, not the
+ * fixture. `OrdersImportIo.now` was introduced correctly and no test had ever overridden
+ * it, so every import in the suite shared one uncontrolled wall-clock instant — the suite
+ * ran permanently inside the precondition of this bug and could read green over it
+ * forever. Freezing the clock is what makes the two cases distinguishable at all.
+ */
+describe("two imports inside ONE second (#181)", () => {
+  const PARTLY_FILLED = partlyFilledRung("100", "10", "6", "2020-01-01 10:00:00");
+
+  it("keeps BOTH observations when the figure MOVES inside one second", async () => {
+    const first = await harness({
+      csv: ladder(PARTLY_FILLED),
+      reserves: [{ id: "reserve-a", amount: 5000 }],
+    });
+    // ONE INSTANT for all three imports. Nothing advances it, so every observation this
+    // test writes carries a byte-identical stamp.
+    first.setClock("2026-06-01T09:00:00");
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    await writeFile(
+      first.csvPath,
+      ladder(partlyFilledRung("100", "10", "8", "2020-01-01 10:00:00")),
+      "utf8",
+    );
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    await writeFile(
+      first.csvPath,
+      ladder(partlyFilledRung("100", "10", "9", "2020-01-01 10:00:00")),
+      "utf8",
+    );
+    const second = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    const load = await loadOrders(first.ordersPath, { warn: () => {} });
+    if (load.status !== "loaded") throw new Error("expected a loaded sidecar");
+    const observed = load.records.filter((record) => record.kind === "orderFillObserved");
+    // BOTH LINES ON DISK, in the order they were written. 8 and 9 are different facts;
+    // only a key on the FIGURE can say so, because the stamps are equal.
+    expect(observed.map((record) => record.observedFilledQuantity)).toEqual([8, 9]);
+    // AND THE STAMPS REALLY ARE EQUAL — the precondition this case is about. Asserted, so
+    // the test cannot quietly stop exercising the collision if the clock ever moves.
+    expect(new Set(observed.map((record) => record.observedAt)).size).toBe(1);
+    expect(observed.every((record) => record.observedAt === "2026-06-01T09:00:00")).toBe(true);
+
+    // The fold's sort is STABLE, so file order breaks the equal-stamp tie and replays
+    // 8 then 9 — the batch stamp's own argument working as written.
+    expect(await remainingOnDisk(first.ordersPath)).toEqual([1]);
+
+    // AND THE REPORT NAMES EXACTLY WHAT WAS WRITTEN. Under the stamp key this said
+    // `1 observation(s) recorded` about a line that had been filtered out.
+    expect(second).toMatchObject({ status: "imported", appended: 0, alreadyKnown: 0 });
+    if (second.status !== "imported") throw new Error("expected an unqualified import");
+    expect(second.observations).toEqual([
+      { id: observed[0]?.id, known: 8, observed: 9 },
+    ]);
+  });
+
+  it("reports no observation at all when the figure did NOT move", async () => {
+    // The dedupe side of the same key. Idempotency is decided one layer above the append
+    // filter — `detectChangedClaims` compares against the LATEST observation and reports
+    // no difference — so nothing is even built. What the report must not do is name a
+    // recorded observation for an import that observed nothing new.
+    const first = await harness({
+      csv: ladder(PARTLY_FILLED),
+      reserves: [{ id: "reserve-a", amount: 5000 }],
+    });
+    first.setClock("2026-06-01T09:00:00");
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    await writeFile(
+      first.csvPath,
+      ladder(partlyFilledRung("100", "10", "8", "2020-01-01 10:00:00")),
+      "utf8",
+    );
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+    const before = await readFile(first.ordersPath, "utf8");
+
+    // The SAME export again, in the same second.
+    const second = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    expect(second).toMatchObject({ status: "imported", appended: 0, alreadyKnown: 1 });
+    if (second.status !== "imported") throw new Error("expected an unqualified import");
+    expect(second.observations).toEqual([]);
+    // BYTE-IDENTICAL: two observations asserting the same figure are the same fact.
+    expect(await readFile(first.ordersPath, "utf8")).toBe(before);
+    const line = first.outputs.at(-1);
+    expect(line).toContain("0 observation(s) recorded");
+  });
+});
+
+/**
+ * #181 slice #208 — detection re-based on the LATEST OBSERVATION, and the refusal split.
+ *
+ * END TO END, THROUGH THE IMPORT, and that is the point of putting these here rather than
+ * only at `detectChangedClaims`. The claim is not "the comparison returns an empty array";
+ * it is that the import ADMITS the rung, WRITES NOTHING, and COUNTS IT AS ALREADY KNOWN —
+ * three facts about three different layers, and idempotency is the conjunction of them.
+ * The unit-level basis, tie-break and epsilon cases are in the engine's
+ * `detection-basis.test.ts`.
+ *
+ * THE OBSERVATION LINES ARE HAND-APPENDED, deliberately. Slice #208 changes what is
+ * DETECTED and what is REFUSED, not what is written — the import does not construct an
+ * observation until slice #210 — so a test that waited for the writer would be testing
+ * nothing until then. `appendOrders` over a line built by `buildOrderFillObserved` is the
+ * same file the writer will produce, and the constructor is what makes that claim true
+ * rather than hopeful.
+ */
+describe("detection is re-based on the latest observation (#181)", () => {
+  const PARTLY_FILLED = partlyFilledRung("100", "10", "6", "2020-01-01 10:00:00");
+
+  /** The observation line for the rung on disk, built through the total constructor. */
+  async function recordObservation(
+    ordersPath: string,
+    id: string,
+    observedAt: string,
+    observedFilledQuantity: number,
+  ): Promise<void> {
+    const built = buildOrderFillObserved({
+      id,
+      observedAt,
+      currency: "USD",
+      observedFilledQuantity,
+    });
+    if (built.status !== "ok") throw new Error(`fixture must build: ${built.message}`);
+    await appendOrders(ordersPath, [built.record]);
+  }
+
+  /** The file after one import of `PARTLY_FILLED` plus one recorded restatement to 8. */
+  async function fileWithRecordedRestatement(): Promise<{
+    harness: Harness;
+    id: string;
+    before: string;
+  }> {
+    const first = await harness({
+      csv: ladder(PARTLY_FILLED),
+      reserves: [{ id: "reserve-a", amount: 5000 }],
+    });
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+    const [id] = await idsOnDisk(first.ordersPath);
+    if (id === undefined) throw new Error("expected the rung on disk");
+    await recordObservation(first.ordersPath, id, "2020-01-02T09:00:00", 8);
+    return { harness: first, id, before: await readFile(first.ordersPath, "utf8") };
+  }
+
+  it("re-imports an export whose restatement is ALREADY RECORDED with no difference", async () => {
+    // THE CASE THE PLACEMENT-LINE BASIS GOT WRONG FOREVER. Against the placement line's 6
+    // this export reads as a fresh restatement on every import for the life of the rung —
+    // the rung is skipped, the RESTATED line reprints, and the operator is told about work
+    // that was done days ago. Against the latest observation it reads as nothing new.
+    const { harness: first, before } = await fileWithRecordedRestatement();
+    await writeFile(
+      first.csvPath,
+      ladder(partlyFilledRung("100", "10", "8", "2020-01-01 10:00:00")),
+      "utf8",
+    );
+
+    const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    // ADMITTED, not restated: the unqualified status, and NO observation recorded.
+    expect(outcome).toMatchObject({
+      status: "imported",
+      appended: 0,
+      alreadyKnown: 1,
+      observations: [],
+    });
+    // WROTE NOTHING — byte-identical, not merely "no new orders".
+    expect(await readFile(first.ordersPath, "utf8")).toBe(before);
+    // And the operator is told nothing about a restatement, because there was not one.
+    expect(first.outputs.join("\n")).not.toContain("RESTATED");
+  });
+
+  it("still DETECTS when the venue has moved PAST the recorded restatement", async () => {
+    // The re-base must not blind the detector: 9 against a recorded 8 is a NEW
+    // restatement, on the new basis rather than the old.
+    const { harness: first, before } = await fileWithRecordedRestatement();
+    await writeFile(
+      first.csvPath,
+      ladder(partlyFilledRung("100", "10", "9", "2020-01-01 10:00:00")),
+      "utf8",
+    );
+
+    const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    // WAS `imported-partial` with the rung SKIPPED and the file byte-identical. Slice
+    // #210 writes the line, so the status widens and the file grows — what this test
+    // still pins, and all it ever pinned, is the BASIS: 8, not the placement line's 6.
+    expect(outcome).toMatchObject({ status: "imported" });
+    if (outcome.status !== "imported") throw new Error("expected an unqualified import");
+    expect(outcome.observations).toMatchObject([{ known: 8, observed: 9 }]);
+    expect(await readFile(first.ordersPath, "utf8")).not.toBe(before);
+    expect(await remainingOnDisk(first.ordersPath)).toEqual([1]);
+  });
+
+  it("REFUSES an export BELOW the latest observation, and names the export not the rung", async () => {
+    // THE DISCRIMINATING CASE for the whole split. 7 is ABOVE the placement line's 6 and
+    // BELOW the recorded 8, so the old basis read it as a restatement that moved UP and
+    // refused it — correctly — with advice to CANCEL THE RUNG AT THE VENUE. That advice
+    // destroys a live rung in response to someone selecting yesterday's CSV.
+    const { harness: first, before } = await fileWithRecordedRestatement();
+    await writeFile(
+      first.csvPath,
+      ladder(partlyFilledRung("100", "10", "7", "2020-01-01 10:00:00")),
+      "utf8",
+    );
+
+    const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    expect(outcome).toMatchObject({ status: "rejected", reason: "backwards-claim" });
+    expect(await readFile(first.ordersPath, "utf8")).toBe(before);
+    if (outcome.status !== "rejected") throw new Error("expected a refusal");
+
+    // THE WORDING IS THE DELIVERABLE. It names a stale or mistaken export and the remedy
+    // is to export again.
+    expect(outcome.message).toContain("LESS filled");
+    expect(outcome.message).toContain("filled 8 → 7");
+    expect(outcome.message).toContain("Re-export");
+    // AND IT MUST NOT SEND ANYONE TO THE VENUE. This is the assertion the slice exists
+    // for: a refusal over a wrong CSV that tells the operator to cancel or re-place costs
+    // a live rung, which is worse than the mistake it is reporting.
+    expect(outcome.message).not.toContain("Cancel the rung");
+    expect(outcome.message).not.toContain("re-place");
+  });
+
+  it("keeps TODAY'S refusal for a figure at or above the observation but below consumed", async () => {
+    // The other side of the partition — `latest observation <= export < consumed`, the
+    // fund having BOOKED past what the venue shows. Same file, same rung, one `orderFilled`
+    // line: observation 8, booked 2 more, so `consumed` is 10 and the rung is retired. The
+    // export's 9 is ABOVE the observation, so it is not backwards; it is #174's hazard,
+    // and it keeps #174's wording and #174's exit.
+    //
+    // AT the observation — the interval's closed end — there is no DIFFERENCE for the
+    // partition to classify at all, and that is unchanged by this slice rather than a hole
+    // it opens: an export agreeing with what the file last observed has always been a
+    // re-sighting, whatever the fund booked afterwards.
+    const { harness: first, id, before: withObservation } = await fileWithRecordedRestatement();
+    await appendOrders(first.ordersPath, [
+      {
+        id,
+        observedAt: "2020-01-03T09:00:00",
+        kind: "orderFilled",
+        currency: "USD",
+        filledQuantity: 2,
+      },
+    ]);
+    expect(withObservation).not.toBe(await readFile(first.ordersPath, "utf8"));
+    expect(await remainingOnDisk(first.ordersPath)).toEqual([]);
+    const before = await readFile(first.ordersPath, "utf8");
+
+    await writeFile(
+      first.csvPath,
+      ladder(partlyFilledRung("100", "10", "9", "2020-01-01 10:00:00")),
+      "utf8",
+    );
+    const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    expect(outcome).toMatchObject({ status: "rejected", reason: "changed-claim" });
+    expect(await readFile(first.ordersPath, "utf8")).toBe(before);
+    if (outcome.status !== "rejected") throw new Error("expected a refusal");
+    // TODAY'S WORDING, UNCHANGED — including the remedy, which is the right one here.
+    expect(outcome.message).toContain("the file would claim 0 where the venue still holds 1");
+    expect(outcome.message).toContain("Cancel the rung at the venue");
+  });
+
+  it("REFUSES THE WHOLE BATCH on a `quantity` difference, whatever the partial does", async () => {
+    // Unchanged by the split, and asserted against a file that carries an observation so
+    // the re-base cannot quietly demote it: `quantity` 10 → 12 with the partial EQUAL to
+    // the recorded observation, and the batch still goes as `changed-claim`.
+    const { harness: first, before } = await fileWithRecordedRestatement();
+    await writeFile(
+      first.csvPath,
+      ladder(partlyFilledRung("100", "12", "8", "2020-01-01 10:00:00")),
+      "utf8",
+    );
+    const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    expect(outcome).toMatchObject({ status: "rejected", reason: "changed-claim" });
+    expect(await readFile(first.ordersPath, "utf8")).toBe(before);
+    if (outcome.status !== "rejected") throw new Error("expected a refusal");
+    expect(outcome.message).toContain("quantity 10 → 12");
+  });
+
+  it("writes NOTHING for a filled difference below the epsilon", async () => {
+    // Float noise is not an observation. Under an exact comparison this reports a
+    // difference, and once a difference means a permanent line on an append-only file
+    // that is a file that grows on an import which observed nothing real.
+    const first = await harness({
+      csv: ladder(PARTLY_FILLED),
+      reserves: [{ id: "reserve-a", amount: 5000 }],
+    });
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+    const before = await readFile(first.ordersPath, "utf8");
+
+    await writeFile(
+      first.csvPath,
+      ladder(partlyFilledRung("100", "10", "6.0000000001", "2020-01-01 10:00:00")),
+      "utf8",
+    );
+    const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    expect(outcome).toMatchObject({
+      status: "imported",
+      appended: 0,
+      alreadyKnown: 1,
+      observations: [],
+    });
+    expect(await readFile(first.ordersPath, "utf8")).toBe(before);
   });
 });
 
@@ -1082,7 +1500,16 @@ describe("a rung that filled before the import is not a gap in the read", () => 
     if (outcome.status !== "imported") throw new Error("expected a clean import");
     expect(outputs.some((message) => message.includes("INCOMPLETE"))).toBe(false);
     expect(
-      outputs.some((message) => message.startsWith(`Imported ${csvPath}: 2 order(s) appended, 0 already known.`)),
+      // THE COUNTS LINE CARRIES THREE FIGURES NOW (#181). The observation clause renders
+      // ALWAYS, including at zero, so a clean order-only import states plainly that it
+      // observed nothing — rather than leaving the reader to infer it from a missing
+      // clause they have to know to look for.
+      outputs.some((message) =>
+        message.startsWith(
+          `Imported ${csvPath}: 2 order(s) appended, 0 already known, ` +
+            `0 observation(s) recorded.`,
+        ),
+      ),
     ).toBe(true);
     // The skip is still CARRIED and still REPORTED — only the discrimination changed.
     expect(outcome.skips).toHaveLength(1);

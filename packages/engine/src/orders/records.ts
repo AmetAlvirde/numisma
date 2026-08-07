@@ -32,7 +32,7 @@ import type { Currency } from "../contracts.js";
  * `orderFilled` is declared here because the selector must know a filled rung stops
  * resting; WRITING one is the atomic two-file fill act, which is a later slice.
  */
-export type OrderKind = "orderPlaced" | "orderCancelled" | "orderFilled";
+export type OrderKind = "orderPlaced" | "orderCancelled" | "orderFilled" | "orderFillObserved";
 
 /** Which side of the book the claim rests on. Resting sells are named, not designed. */
 export type OrderSide = "buy" | "sell";
@@ -95,27 +95,24 @@ export interface OrderPlacedRecord extends OrderRecordBase {
    *     and a cash leg behind it. This is something the venue SHOWED about the row at the
    *     moment it was observed. Collapsing them into one verb would lose that.
    *
-   * KNOWN LIMIT, named rather than papered over: the id is synthesized from the venue's
-   * SUBMISSION stamp, so a later export showing the same rung further filled arrives under
-   * the same id, and THIS FIELD CANNOT BE UPDATED — the file is append-only and a second
-   * placement line is ignored by the selector. So the value here is the partial as of the
-   * FIRST import that saw the rung, not the venue's current one, until the observation
-   * verb #181 designs exists.
+   * THIS FIELD IS THE FIRST OBSERVATION, NOT THE ONLY ONE (#181). The id is synthesized
+   * from the venue's SUBMISSION stamp, so a later export showing the same rung further
+   * filled arrives under the SAME id — the ordinary life of a ladder, not an amendment.
+   * The file is append-only and a second placement line is ignored by the selector, so
+   * this value is never rewritten. It does not need to be: an
+   * {@link OrderFillObservedRecord} states the venue's later figure on its own line, and
+   * `./select.ts` folds this field and every observation since into ONE `consumed`
+   * baseline on the same cumulative basis. The value here is the partial as of the first
+   * import that saw the rung; the SELECTOR's answer is as of the latest line.
    *
-   * The handling of that has moved twice. It was originally SKIPPED AS ALREADY KNOWN,
-   * silently. #174 made it a `changed-claim` refusal — loud, with nothing written — which
-   * fixed the silence and created a worse problem: the refusal is batch-wide, so one
-   * further-filled rung blocked every unrelated new rung in every later export from that
-   * venue, indefinitely. THE EXIT THIS PARAGRAPH USED TO NAME — "the operator records the
-   * fill" — DOES NOT WORK, and never did: `recordFill` appends an `orderFilled` line and
-   * never rewrites this one, so it repairs `committed`/`available` and leaves the refusal
-   * exactly where it was.
-   *
-   * Since #199 the rung is SKIPPED PER RUNG and reported as `restated`: the rest of the
-   * export imports, and this field keeps the older partial. That is safe only because of
-   * the direction — a stale partial over-states what is still resting, so the funding
-   * guard reads the encumbrance HIGH and can only ever be too strict. A stale `quantity`
-   * points the other way and is still a total refusal.
+   * The handling of a restatement moved three times, and the history is kept because the
+   * append-only file makes the shape permanent. It was originally SKIPPED AS ALREADY
+   * KNOWN, silently. #174 made it a `changed-claim` refusal — loud, with nothing written —
+   * which fixed the silence and created a worse problem: the refusal was batch-wide, so
+   * one further-filled rung blocked every unrelated new rung in every later export from
+   * that venue, indefinitely. #199 narrowed that to a PER-RUNG skip reported as
+   * `restated`, which stopped the collateral damage and still left this field holding a
+   * figure the venue had moved past. #181 records the restatement instead.
    */
   observedFilledQuantity?: number;
   /**
@@ -143,7 +140,75 @@ export interface OrderFilledRecord extends OrderRecordBase {
   filledQuantity: number;
 }
 
-export type OrderRecord = OrderPlacedRecord | OrderCancelledRecord | OrderFilledRecord;
+/**
+ * A type-only witness that a record came through {@link buildOrderFillObserved}.
+ *
+ * It exists at COMPILE TIME ONLY — `declare const` emits nothing, the key never appears
+ * on a real object, and `serializeOrderRecord` writes `KEY_ORDER` rather than the
+ * caller's keys, so no line on disk carries a trace of it. What it buys is that
+ * "constructed only through the constructor" is checked by `pnpm typecheck` instead of
+ * asserted by a comment: an object literal of the right shape is NOT assignable to
+ * {@link OrderFillObservedRecord}, so the `?? 0`-over-a-literal defect this slice exists
+ * to close cannot be written at all.
+ */
+declare const OBSERVED_THROUGH_CONSTRUCTOR: unique symbol;
+
+/**
+ * THE VENUE SHOWED THIS ROW FURTHER FILLED (#181) — the observation verb.
+ *
+ * WHY A NEW KIND, AND NOT ONE OF THE THREE ALREADY HERE. Not a synthesized `orderFilled`:
+ * that line is HALF OF A FILL ACT, paired by `reconcileFillActs` with a lot in
+ * `events.jsonl`, so one written at import would read as a permanent `fill-without-lot`
+ * torn act and brick the fill flow (`./fill.ts` excludes this kind deliberately, and says
+ * so). Not a repeat `orderPlaced` either: `./select.ts` ignores a second placement line
+ * for a known id BY DESIGN — that is what makes a re-import idempotent — so a restatement
+ * carried that way would be unreachable.
+ *
+ * `observedFilledQuantity` REUSES THE PLACEMENT LINE'S FIELD NAME because it asserts the
+ * SAME FACT at a later moment: cumulative since the rung was placed, one basis (#176).
+ * A second name would make that illegible in the one artifact where it matters — the
+ * file itself. `./select.ts` folds both into one `consumed` baseline.
+ *
+ * NO COPY OF `quantity`. Quantity is the one figure nothing may go stale on, and a second
+ * copy of it manufactures exactly the drift the import's batch refusal exists to prevent.
+ * A reader that needs the placed size joins to the `orderPlaced` line by id.
+ */
+export interface OrderFillObservedRecord extends OrderRecordBase {
+  kind: "orderFillObserved";
+  /**
+   * The venue's CUMULATIVE filled quantity for this rung as of `observedAt` — REQUIRED
+   * and POSITIVE. A line is only ever written because the figure moved UP, so absent and
+   * zero are both unreachable and both mean the writer failed to say what it observed.
+   */
+  observedFilledQuantity: number;
+  /** Compile-time only; see {@link OBSERVED_THROUGH_CONSTRUCTOR}. Never on disk. */
+  readonly [OBSERVED_THROUGH_CONSTRUCTOR]: never;
+}
+
+export type OrderRecord =
+  | OrderPlacedRecord
+  | OrderCancelledRecord
+  | OrderFilledRecord
+  | OrderFillObservedRecord;
+
+/** What the writer asserts. Every field is required — there is no absent figure to fall back over. */
+export interface ObservedFillClaim {
+  id: string;
+  observedAt: string;
+  currency: Currency;
+  observedFilledQuantity: number;
+}
+
+/**
+ * The outcome of building an observation line. A REFUSAL IS A VALUE the caller must
+ * handle, which is what makes the constructor total: it is defined on every input, it
+ * never throws, and there is no path on which it returns a record it could not justify.
+ */
+export type OrderFillObservedBuild =
+  | { status: "ok"; record: OrderFillObservedRecord }
+  | { status: "refused"; message: string };
+
+/** Built below, beside the validators it shares with {@link parseOrderRecord}. */
 
 /**
  * Every `OrderKind` the union knows, as a runtime value derived from the union itself:
@@ -155,6 +220,7 @@ const KNOWN_KINDS: Record<OrderKind, true> = {
   orderPlaced: true,
   orderCancelled: true,
   orderFilled: true,
+  orderFillObserved: true,
 };
 
 const CURRENCIES: Record<Currency, true> = { USD: true, MXN: true };
@@ -217,6 +283,9 @@ const KEY_ORDER: Record<OrderKind, readonly string[]> = {
   ],
   orderCancelled: ["id", "observedAt", "kind", "currency"],
   orderFilled: ["id", "observedAt", "kind", "currency", "filledQuantity"],
+  // FIVE KEYS. No `quantity`, no `symbol`, no `price` — an observation restates ONE fact
+  // and joins to its placement line by id for the rest.
+  orderFillObserved: ["id", "observedAt", "kind", "currency", "observedFilledQuantity"],
 };
 
 /** Serialize ONE record to its canonical JSON line (no trailing newline). */
@@ -246,6 +315,54 @@ function isNonEmptyString(value: unknown): value is string {
 
 function isFinitePositive(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+/**
+ * THE ONLY WAY TO BUILD AN OBSERVATION LINE (#181). Total: every input gets an answer.
+ *
+ * WHAT THIS REPLACES, AND WHY IT IS A FUNCTION RATHER THAN A COMMENT. The shape this
+ * supersedes was an object literal with a `?? 0` fallback annotated "positive by
+ * construction". The annotation was false — the fallback was a LIVE BRANCH — and the
+ * failure mode is asymmetric: a zero SERIALIZES CLEANLY and only reads back as
+ * `malformed` on every subsequent load, at which point the four TUI shells refuse to
+ * render a committed figure at all. One bad line poisons the readability of the whole
+ * book, and an append-only file has no way to take it back.
+ *
+ * So the figure is checked HERE, before the line can exist, on the same rule
+ * {@link parseOrderRecord} applies on the way back in — it lives beside that reader and
+ * shares its validators, so the write gate and the read gate cannot drift. The stamp and
+ * the id are checked for the same reason {@link isObservedAtStamp} exists at all: the
+ * reader is the last line of defence, but by the time it runs the line is on disk.
+ */
+export function buildOrderFillObserved(claim: ObservedFillClaim): OrderFillObservedBuild {
+  if (!isNonEmptyString(claim.id)) {
+    return { status: "refused", message: "id must be a non-empty string" };
+  }
+  if (!isObservedAtStamp(claim.observedAt)) {
+    return { status: "refused", message: "observedAt must be YYYY-MM-DDTHH:MM:SS" };
+  }
+  if (!(claim.currency in CURRENCIES)) {
+    return { status: "refused", message: "currency must be a known currency" };
+  }
+  if (!isFinitePositive(claim.observedFilledQuantity)) {
+    return {
+      status: "refused",
+      message: "observedFilledQuantity must be a finite positive number",
+    };
+  }
+  return {
+    status: "ok",
+    // The one cast in the module, and the reason the witness works: it is unforgeable
+    // outside these lines, so every `OrderFillObservedRecord` anywhere passed the checks
+    // directly above.
+    record: {
+      id: claim.id,
+      observedAt: claim.observedAt,
+      kind: "orderFillObserved",
+      currency: claim.currency,
+      observedFilledQuantity: claim.observedFilledQuantity,
+    } as OrderFillObservedRecord,
+  };
 }
 
 /**
@@ -358,6 +475,24 @@ export function parseOrderRecord(value: unknown): OrderRecordParse {
         status: "ok",
         record: { ...base, kind: "orderFilled", filledQuantity: value.filledQuantity },
       };
+    }
+    case "orderFillObserved": {
+      // THE SAME GATE THE WRITER PASSED, and not a second copy of it: the reader routes
+      // through the constructor, so "required and finite-positive" is stated once. A
+      // refusal here is `malformed` — a line that fails to say what it observed is
+      // corruption, not a forward-compatibility problem, and it is NEVER read as zero.
+      const built = buildOrderFillObserved({
+        id: base.id,
+        observedAt: base.observedAt,
+        currency: base.currency,
+        // `as number` is the untrusted value going INTO the gate, not past it: the
+        // constructor's own check is what decides, on exactly this value.
+        observedFilledQuantity: value.observedFilledQuantity as number,
+      });
+      if (built.status !== "ok") {
+        return { status: "skip", problem: "malformed", message: built.message };
+      }
+      return { status: "ok", record: built.record };
     }
   }
 }
