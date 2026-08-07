@@ -35,8 +35,13 @@ import type { RestingOrder } from "./select.js";
  * Pure float noise floor for comparing observed quantities. NOT a business tolerance:
  * quantities are the venue's own authoritative column and a real partial is orders of
  * magnitude larger than this.
+ *
+ * EXPORTED so `./ingest.js` compares the venue's filled figure against the file's on the
+ * SAME floor this module already uses (#181). Two independently-chosen noise floors for
+ * the same column is the drift `./committed.ts` keeps one formula to avoid; one constant
+ * with one argument behind it is the whole point.
  */
-const QUANTITY_EPSILON = 1e-9;
+export const QUANTITY_EPSILON = 1e-9;
 
 /**
  * What the venue STILL SHOWS for one rung at the observation moment. A rung that was

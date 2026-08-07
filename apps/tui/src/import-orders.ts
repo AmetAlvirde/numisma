@@ -74,14 +74,17 @@ export type OrdersImportRejection =
    * the file claiming LESS than the venue still holds (#174).
    *
    * NOT "a different `quantity`", which is what this said until the #200 review: that is
-   * the commonest member, not the definition, and it left the branch's own proudest case
-   * — a partial that moved DOWN, `quantity` identical — described by a sentence that is
-   * false about it. Two disagreements land here:
+   * the commonest member, not the definition. Two disagreements land here:
    *
    *   - a different `quantity`, the venue having amended the size (or the two simply
    *     disagreeing about it);
    *   - a restated partial the file's OWN fill lines have already overtaken, so what the
-   *     file still counts as resting is smaller than the remainder the venue shows.
+   *     file still counts as resting is smaller than the remainder the venue shows —
+   *     `latest observation <= export figure < consumed`.
+   *
+   * A PARTIAL THAT MOVED DOWN NO LONGER LANDS HERE (#181). It is the other half of the
+   * split — see {@link OrdersImportRejection}'s `backwards-claim` — and it left because the
+   * remedy this member prints is wrong for it, not because it stopped being a refusal.
    *
    * Refused rather than recorded, and this is the ONE place the "proceed with the
    * arithmetic" reasoning behind the within-batch merge does not extend. Recording a
@@ -104,6 +107,30 @@ export type OrdersImportRejection =
    * way the leftover staleness points, not about the change itself.
    */
   | "changed-claim"
+  /**
+   * THE EXPORT'S FILLED COLUMN WENT BACKWARDS: a row names a claim already on file and
+   * shows it LESS filled than the file's LATEST OBSERVATION of it (#181).
+   *
+   * SPLIT OUT OF `changed-claim`, and the reason is the remedy rather than the arithmetic.
+   * A fill does not un-fill, so this cannot be the venue reporting the ordinary life of a
+   * rung; the likeliest cause by far is the FILE the operator selected — yesterday's
+   * export, or the wrong one — and the second likeliest is a venue rendering fault. Both
+   * are repaired by exporting again. `changed-claim`'s remedy is to CANCEL the rung at the
+   * venue or re-place it, and printing that here told an operator to destroy a live rung
+   * over a wrong CSV: the refusal was right and the advice was worse than the mistake.
+   *
+   * DISJOINT FROM `changed-claim` BY CONSTRUCTION, not by ordering luck: `consumed` is the
+   * latest observation plus every `orderFilled` booked since, so `consumed >= latest
+   * observation` always holds and the two conditions partition the line at that figure.
+   * The argument, with the fold citation, is on `partitionChangedClaims`.
+   *
+   * STILL A TOTAL REFUSAL, and nothing is written. The direction that reaches here leaves
+   * the file claiming NO LESS than the venue holds — the conservative side — so the case
+   * for refusing is not the funding hazard `changed-claim` names. It is that the two
+   * statements cannot both be true, and this build will not record a contradiction into an
+   * append-only file to get an import past.
+   */
+  | "backwards-claim"
   /**
    * ATTRIBUTION FAILED: at least one rung of the whole resting book cannot be placed
    * against a fundable reserve. ONE rejection may name rungs of BOTH classes the engine
@@ -160,13 +187,36 @@ export type OrdersImportRejection =
  * file's remainder below the venue's and INVERT the safety claim while the partials still
  * read as "moved up". Those rungs are refused as `changed-claim`; only a rung whose
  * remainder on file is at least the venue's reaches this type. A partial moving DOWN is
- * excluded by the same test rather than by a rule of its own — the algebra is on
- * `partitionChangedClaims` — and it is a venue contradiction besides (a fill does not
- * un-fill).
+ * refused too, and since #181 by a rule of its OWN — `backwards-claim`, taken before the
+ * remainder test, because a fill does not un-fill and the remedy that case is owed is
+ * nothing like this one's. The algebra for both is on `partitionChangedClaims`.
  */
+/**
+ * A rung the export shows LESS filled than the file's latest observation of it (#181) —
+ * the refusal `backwards-claim` is raised over.
+ *
+ * TWO FIGURES AND NO REMAINDERS, unlike {@link RestatedPartial}. The remainders are what
+ * makes a per-rung skip safe, so that type carries them to let the operator check the
+ * claim; this one is refused on the two partials ALONE, because they are already a
+ * contradiction and no third figure makes them less of one. Printing a remainder here
+ * would send the operator after a disagreement this refusal does not have.
+ */
+interface BackwardsClaim {
+  id: string;
+  /** The file's latest observation — see {@link RestatedPartial.known} for the basis. */
+  known: number;
+  /** The SMALLER partial the export shows. */
+  observed: number;
+}
+
 export interface RestatedPartial {
   id: string;
-  /** The partial the placement line on file records. */
+  /**
+   * The file's LATEST OBSERVATION of this rung's partial — a later `orderFillObserved`
+   * line when one exists, else the placement line's own figure, else `0` (#181). Was "the
+   * partial the placement line records", which stopped being the same number the moment a
+   * restatement could be written down.
+   */
   known: number;
   /** The larger partial the venue's export now shows. */
   observed: number;
@@ -489,31 +539,77 @@ function isAffirmative(answer: string): boolean {
  *
  * THE SKIP CLASS IS DECIDED BY THE REMAINDER THE GUARD ACTUALLY WEIGHS, which is why
  * `resting` is a parameter rather than something this could work out from `changed`
- * (#200 review). `detectChangedClaims` is fed only the `orderPlaced` lines, so reasoning
- * from its two figures answers a question nobody downstream asks: `pickRestingOrdersAsOf`
- * replays `orderFilled` and `orderCancelled` too, and a fill already recorded against the
- * rung can shrink the file's remainder BELOW the venue's while the partials still read as
- * "moved up". The traced case: file holds placed 10 / filled 6, the operator runs the
- * fill flow and accepts the default remainder of 4, retiring the rung — the file now
- * counts ZERO resting — and the venue's next export shows filled 8, i.e. 2 units still
- * resting. Skipping that would make `available` read HIGH, which is #174's own hazard.
+ * (#200 review). A difference is a statement about the venue's column; the guard weighs
+ * `pickRestingOrdersAsOf`, which replays `orderFilled` and `orderCancelled` too, so a fill
+ * already recorded against the rung can shrink the file's remainder BELOW the venue's
+ * while the partials still read as "moved up". The traced case: file holds placed 10 /
+ * filled 6, the operator runs the fill flow and accepts the default remainder of 4,
+ * retiring the rung — the file now counts ZERO resting — and the venue's next export shows
+ * filled 8, i.e. 2 units still resting. Skipping that would make `available` read HIGH,
+ * which is #174's own hazard.
  *
- * Three things must hold, and anything else refuses the batch:
+ * Three things must hold for a per-rung skip, and anything else refuses the batch:
  *
  *  1. NO `quantity` DIFFERENCE — unchanged policy, and not merely because of today's
  *     encumbrance. `placed.quantity` is the ORIGINAL size a cumulative venue reading is
  *     compared against (#176), so a stale one corrupts every future comparison of this
- *     rung, not just this guard's sum. It is the one figure nothing may go stale on.
+ *     rung, not just this guard's sum. It is the one figure nothing may go stale on. It
+ *     refuses the WHOLE BATCH, and it refuses it whichever way the partial points.
  *  2. EVERY REMAINING difference is `observedFilledQuantity` — today that means exactly
  *     one, since `detectChangedClaims` emits only those two fields and never an empty
  *     list, so nothing can fail this test until a third field exists. Guarded rather than
  *     asserted precisely so that third field lands in the REFUSAL class by default
  *     instead of silently riding in beside a safe fill as a per-rung skip.
- *  3. `fileRemaining >= venueRemaining`. This SUBSUMES the down-check that used to sit
- *     here, exactly rather than approximately, which is why that branch is gone: when the
- *     partial moved down, `fileRemaining <= quantity − known < quantity − observed =
- *     venueRemaining`, so a downward partial cannot pass this test by any route. The `<=`
- *     on the left is where later fill lines live; they only make it stricter.
+ *  3. `fileRemaining >= venueRemaining`. The `<=` on the left is where later fill lines
+ *     live; they only make it stricter.
+ *
+ * THE REFUSAL SPLITS TWO WAYS, AND THE TWO CANNOT OVERLAP (#181). One refusal used to
+ * serve two conditions that are not the same animal, and the wrong one is actively
+ * harmful: an operator who imports YESTERDAY's export against a file holding an observed 6
+ * was refused correctly and then told to cancel the rung at the venue or re-place it —
+ * advice that destroys a live rung in response to someone picking the wrong CSV.
+ *
+ *   - `backwards` — the export figure is BELOW the latest observation. A fill does not
+ *     un-fill, so the column went backwards and the likeliest cause is the file, not the
+ *     book: an older export, or not the export the operator meant. It gets its own wording
+ *     and NEVER tells anyone to touch the rung at the venue.
+ *   - `amended` — `latest observation <= export figure < consumed`. The fund has BOOKED
+ *     beyond what the venue shows, so calling the row already known would leave the file
+ *     claiming LESS than the venue still holds. Today's wording, today's exit.
+ *
+ * WHY THEY CANNOT BOTH FIRE, stated here because the split relies on it: `consumed >=
+ * latest observation` ALWAYS holds. The fold SETs `consumed` to the latest observation and
+ * `orderFilled` only ever ADDS to it, so `consumed` is that observation plus a
+ * non-negative sum of bookings made since. The two intervals are therefore
+ * `[0, latestObserved)` and `[latestObserved, consumed)` — adjacent, disjoint, and empty
+ * only when they should be. The `backwards` test is taken FIRST so the partition reads in
+ * the same order the argument does; either order gives the same answer.
+ *
+ * THE CLOSED END OF THE SECOND INTERVAL IS NOT REACHED FROM HERE, and that is unchanged by
+ * the split rather than a hole it opens. An export exactly AT the latest observation is not
+ * a DIFFERENCE, so no `ChangedClaim` is raised for it and this function never sees it —
+ * whatever the fund booked afterwards. That is the same reading a re-import of an unchanged
+ * export has always had, and widening this to every observed row would turn an ordinary
+ * re-import into a batch refusal.
+ *
+ * AN EXPORT FIGURE ABOVE THE PLACED QUANTITY GETS NO CHECK, AND THAT IS THE DECISION. It
+ * is unreachable, by two gates upstream of this line:
+ *
+ *   - the VENUE's own export cannot render `filled_quantity > quantity` on the same row —
+ *     the two columns come from one order and a venue that filled more than it placed
+ *     would be contradicting itself, not reporting; and
+ *   - `parseBitgetOpenOrdersCsv`'s own admission gate drops any row whose remainder is not
+ *     POSITIVE — `quantity − filled_quantity <= 0` is a `not-resting` SKIP — so a
+ *     hand-edited CSV never reaches this partition as a claim at all. `mergeCollidingClaims`
+ *     preserves that, summing both columns of a collision and so both sides of the same
+ *     inequality.
+ *
+ * If such a line ever did reach the file anyway, the fold degrades correctly rather than
+ * lying: `remaining = quantity − consumed` goes negative, `pickRestingOrdersAsOf` drops
+ * the rung (`remaining > 0` is its resting test), and the fill-admission ceiling
+ * `min(remainingQuantity, quantity − bookedFills(id))` cannot authorize anything. Adding a
+ * runtime check here would put a third opinion about the same impossibility in the one
+ * place least able to explain it; RECORDING WHY IT CANNOT ARRIVE is the deliverable.
  *
  * An id ABSENT from `resting` reads as `0`, not as a missing case: absent means the
  * stream already retired the claim — its fills exhausted it, or a cancellation took it —
@@ -525,9 +621,11 @@ function partitionChangedClaims(
   observed: readonly BitgetOpenOrder[],
 ): {
   amended: ChangedClaim[];
+  backwards: BackwardsClaim[];
   restated: RestatedPartial[];
 } {
   const amended: ChangedClaim[] = [];
+  const backwards: BackwardsClaim[] = [];
   const restated: RestatedPartial[] = [];
 
   for (const claim of changed) {
@@ -548,6 +646,13 @@ function partitionChangedClaims(
       amended.push(claim);
       continue;
     }
+    // `fill.known` IS the latest observation (see `ClaimDifference`), so this is the
+    // backwards test exactly as the argument above states it — and the difference exists
+    // at all only because the two figures are further apart than `QUANTITY_EPSILON`.
+    if (fill.observed < fill.known) {
+      backwards.push({ id: claim.id, known: fill.known, observed: fill.observed });
+      continue;
+    }
     if (remainders.onFile < remainders.atVenue) {
       amended.push(claim);
       continue;
@@ -561,7 +666,7 @@ function partitionChangedClaims(
     });
   }
 
-  return { amended, restated };
+  return { amended, backwards, restated };
 }
 
 /**
@@ -696,19 +801,24 @@ export async function importBitgetOpenOrders(
   // before the guard — the guard would read the claim's size off the file, not off this
   // row (a repeat placement is ignored by the selector), so proceeding would check
   // coverage against a book the export no longer describes.
-  const changed = detectChangedClaims(
-    existingRecords.filter(
-      (record): record is OrderPlacedRecord => record.kind === "orderPlaced",
-    ),
-    orders,
-  );
+  // THE WHOLE STREAM, not the placement lines (#181). The comparison basis is the LATEST
+  // observation, so an export whose restatement is already on file agrees with it and
+  // reports no difference — which is what makes a re-import idempotent one layer above the
+  // append filter.
+  const changed = detectChangedClaims(existingRecords, orders);
   // The SAME reading the `O1` guard takes below, over `[...existingRecords, ...records]`
   // — and for these already-known ids the two agree by construction, because a repeat
   // placement line is ignored by the selector, so this batch's own records cannot move
   // the remainder of a rung already on file. Taken here because the partition needs it
   // before anything is prompted for or built.
   const restingOnFile = pickRestingOrdersAsOf(existingRecords);
-  const { amended, restated } = partitionChangedClaims(changed, restingOnFile, orders);
+  const { amended, backwards, restated } = partitionChangedClaims(changed, restingOnFile, orders);
+  // TWO REFUSALS, AND `amended` GOES FIRST. Per RUNG the two conditions cannot both hold —
+  // that is the partition's own argument — but a BATCH can raise one of each over different
+  // rungs, and then something has to be printed first. `amended` wins because it is the
+  // one with a funding hazard behind it: a batch carrying an amended `quantity` is refused
+  // with exactly the token and the message it was refused with before this split, whatever
+  // else the export also got wrong.
   if (amended.length > 0) {
     const detail = amended
       .map((claim) => {
@@ -738,6 +848,22 @@ export async function importBitgetOpenOrders(
         `still holds, so the guard would admit a batch the reserve cannot fund. Cancel the ` +
         `rung at the venue and record the cancellation, or re-place it at a different price ` +
         `so it arrives as a new claim`,
+    );
+  }
+
+  if (backwards.length > 0) {
+    const detail = backwards
+      .map((claim) => `${claim.id} (filled ${claim.known} → ${claim.observed})`)
+      .join("; ");
+    return reject(
+      io,
+      "backwards-claim",
+      `${csvPath} shows ${plural(backwards.length, "rung")} LESS filled than this file has ` +
+        `already observed — ${detail}. A fill does not un-fill, so these two statements ` +
+        `cannot both be true and nothing was written. The likeliest cause is the export ` +
+        `itself: an OLDER one, or not the one you meant. Re-export the open orders from the ` +
+        `venue and import that. Nothing here needs doing at the venue — the rungs on file ` +
+        `are untouched and still resting`,
     );
   }
 
