@@ -959,6 +959,113 @@ describe("two imports inside ONE second (#181)", () => {
 });
 
 /**
+ * #181 slice #212 — the append filter is scoped to the rung's LATEST observation.
+ *
+ * THE KEY ANSWERS "is this figure already recorded?"; the filter needs "is this figure
+ * still the rung's CURRENT claim?". Built from EVERY existing record, `alreadyOnFile`
+ * answered the first question in the second's place: a figure some later line had already
+ * superseded still filtered a legitimate re-assertion of it, and — because the report
+ * describes the lines that were WRITTEN — the operator was told `0 observation(s)
+ * recorded` about an observation the flow had just decided to record.
+ */
+describe("the append filter reads the LATEST observation, not the whole history (#212)", () => {
+  const PARTLY_FILLED = partlyFilledRung("100", "10", "6", "2020-01-01 10:00:00");
+
+  it("LANDS a re-assertion of a figure a later observation had superseded", async () => {
+    const first = await harness({
+      csv: ladder(PARTLY_FILLED),
+      reserves: [{ id: "reserve-a", amount: 5000 }],
+    });
+    // 1. The rung goes on file: placed 10, the venue showing 6 filled.
+    first.setClock("2026-06-01T09:00:00");
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+    const [id] = await idsOnDisk(first.ordersPath);
+    if (id === undefined) throw new Error("expected the rung on disk");
+
+    // 2. An import observes 8. `orderFillObserved <id> 8` is now on file.
+    await writeFile(
+      first.csvPath,
+      ladder(partlyFilledRung("100", "10", "8", "2020-01-01 10:00:00")),
+      "utf8",
+    );
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+    expect(await remainingOnDisk(first.ordersPath)).toEqual([2]);
+
+    // 3. A hand-authored observation asserting 5, at a LATER stamp, supersedes it. The
+    //    file's current claim about this rung is 5 filled, 5 still resting — the 8 is
+    //    history now, and history is exactly what the filter must stop reading.
+    const built = buildOrderFillObserved({
+      id,
+      observedAt: "2026-06-01T10:00:00",
+      currency: "USD",
+      observedFilledQuantity: 5,
+    });
+    if (built.status !== "ok") throw new Error(`fixture must build: ${built.message}`);
+    await appendOrders(first.ordersPath, [built.record]);
+    expect(await remainingOnDisk(first.ordersPath)).toEqual([5]);
+    const before = await readFile(first.ordersPath, "utf8");
+
+    // 4. The venue's next export shows 8 again. Against the latest observation that is a
+    //    RESTATEMENT — 8 is above 5, and the file's 5 resting covers the venue's 2 — so
+    //    the observation is built and must be WRITTEN.
+    first.setClock("2026-06-01T11:00:00");
+    const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    expect(outcome).toMatchObject({ status: "imported" });
+    if (outcome.status !== "imported") throw new Error("expected an unqualified import");
+    expect(outcome.observations).toEqual([{ id, known: 5, observed: 8 }]);
+
+    // THE LINE IS ON DISK — the whole point. Under the old filter the file was
+    // byte-identical here and the operator was told nothing was recorded.
+    expect(await readFile(first.ordersPath, "utf8")).not.toBe(before);
+    const load = await loadOrders(first.ordersPath, { warn: () => {} });
+    if (load.status !== "loaded") throw new Error("expected a loaded sidecar");
+    const observed = load.records.filter((record) => record.kind === "orderFillObserved");
+    expect(observed.map((record) => record.observedFilledQuantity)).toEqual([8, 5, 8]);
+    expect(observed.at(-1)?.observedAt).toBe("2026-06-01T11:00:00");
+    // And the rung now claims what the venue holds: 10 placed, 8 observed filled.
+    expect(await remainingOnDisk(first.ordersPath)).toEqual([2]);
+    expect(first.outputs.at(-1)).toContain("1 observation(s) recorded");
+  });
+
+  it("still FILTERS the ordinary repeat — the same export twice, one line written", async () => {
+    // THE DEDUPE THAT MUST NOT REGRESS, on both kinds at once: the placement line from the
+    // first import and the observation line from the second. The third import re-states a
+    // figure that IS still the rung's latest, so nothing is built and nothing is written.
+    const first = await harness({
+      csv: ladder(PARTLY_FILLED),
+      reserves: [{ id: "reserve-a", amount: 5000 }],
+    });
+    first.setClock("2026-06-01T09:00:00");
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    await writeFile(
+      first.csvPath,
+      ladder(partlyFilledRung("100", "10", "8", "2020-01-01 10:00:00")),
+      "utf8",
+    );
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+    const before = await readFile(first.ordersPath, "utf8");
+
+    // The SAME export again, and again at a LATER second — so the stamp cannot be what
+    // filters it. Only the figure can.
+    first.setClock("2026-06-01T11:00:00");
+    const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    expect(outcome).toMatchObject({ status: "imported", appended: 0, alreadyKnown: 1 });
+    if (outcome.status !== "imported") throw new Error("expected an unqualified import");
+    expect(outcome.observations).toEqual([]);
+    expect(await readFile(first.ordersPath, "utf8")).toBe(before);
+    const load = await loadOrders(first.ordersPath, { warn: () => {} });
+    if (load.status !== "loaded") throw new Error("expected a loaded sidecar");
+    expect(load.records.map((record) => record.kind)).toEqual([
+      "orderPlaced",
+      "orderFillObserved",
+    ]);
+  });
+});
+
+/**
  * #181 slice #208 — detection re-based on the LATEST OBSERVATION, and the refusal split.
  *
  * END TO END, THROUGH THE IMPORT, and that is the point of putting these here rather than
