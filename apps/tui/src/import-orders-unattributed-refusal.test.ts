@@ -249,3 +249,68 @@ describe("the closing paragraph — the honest cost of batching, and not droppab
     )).toBe(true);
   });
 });
+
+describe("SECTION ORDER — nothing compared positions before this file", () => {
+  it("puts the unfundable section BEFORE the currency-mismatch one", () => {
+    // Every end-to-end assertion is a `toContain`, so the two sections could swap places
+    // without a single test noticing. `indexOf`, not `toContain`, is the whole point here.
+    const unmatched = [
+      mismatched(orderId("1000"), "reserve-mxn"),
+      unfundable(orderId("1100"), "reserve-paper"),
+    ];
+
+    const refusal = renderUnattributedRefusal(unmatched, allOf(unmatched));
+
+    const unfundableAt = refusal.indexOf("  unfundable reserve —");
+    const mismatchAt = refusal.indexOf("  currency mismatch —");
+    expect(unfundableAt).toBeGreaterThanOrEqual(0);
+    expect(mismatchAt).toBeGreaterThanOrEqual(0);
+    expect(unfundableAt).toBeLessThan(mismatchAt);
+  });
+});
+
+describe("LABEL → ADVICE → RUNGS inside a section — a comment was the only thing holding it", () => {
+  it("puts the advice under the LABEL, never after the rungs, with TWO unfundable reserves", () => {
+    // THE CASE WHERE THE ORDERING ACTUALLY MATTERS, and the one a single-reserve fixture
+    // cannot expose: with two reserves, advice-last sits directly under the SECOND
+    // reserve's rungs and reads as advice about that reserve alone. That is what the
+    // prototype exposed and what the grill's one-reserve example could not. Advice under
+    // the label plainly governs everything beneath it.
+    const firstRung = orderId("1000");
+    const secondRung = orderId("1100");
+    const unmatched = [
+      unfundable(firstRung, "reserve-paper"),
+      unfundable(secondRung, "reserve-odd"),
+    ];
+
+    const refusal = renderUnattributedRefusal(unmatched, allOf(unmatched));
+
+    const labelAt = refusal.indexOf("  unfundable reserve — 2 reserves, 2 rungs");
+    const adviceAt = refusal.indexOf("    The fold excluded these reserves");
+    const firstReserveAt = refusal.indexOf("      reserve-paper");
+    const secondReserveAt = refusal.indexOf("      reserve-odd");
+    expect(labelAt).toBeGreaterThanOrEqual(0);
+    expect(adviceAt).toBeGreaterThanOrEqual(0);
+    expect(labelAt).toBeLessThan(adviceAt);
+    expect(adviceAt).toBeLessThan(firstReserveAt);
+    expect(firstReserveAt).toBeLessThan(secondReserveAt);
+    // And the advice is not repeated per reserve — it is one paragraph governing both.
+    expect(refusal.split("The fold excluded these reserves")).toHaveLength(2);
+  });
+
+  it("puts the mismatch advice under its label too, before the first id", () => {
+    const unmatched = [
+      mismatched(orderId("1000"), "reserve-mxn"),
+      mismatched(orderId("1100"), "reserve-mxn"),
+    ];
+
+    const refusal = renderUnattributedRefusal(unmatched, allOf(unmatched));
+
+    expect(refusal.indexOf("  currency mismatch — 2 rungs")).toBeLessThan(
+      refusal.indexOf("    Cross-currency funding is not supported"),
+    );
+    expect(refusal.indexOf("    Cross-currency funding is not supported")).toBeLessThan(
+      refusal.indexOf(`      ${orderId("1000")}`),
+    );
+  });
+});
