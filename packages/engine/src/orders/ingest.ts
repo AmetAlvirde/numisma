@@ -678,7 +678,7 @@ export type FundingCoverage =
  * was argued and accepted on #183, which is CLOSED because what it owed was a decision;
  * the citations above are to that decision and stay pointed at it. This one is different:
  * it names a cost still being PAID, so it points at the durable record of the accepted
- * cost — `context/adr/ADR-014-a-skipped-export-row-leaves-no-durable-trace.md`, which
+ * cost — `context/adr/ADR-014-a-skipped-export-row-not-persisted-because-it-could-never-be-retired.md`, which
  * carries the re-trigger that would re-open it. It is an ADR and not an issue because an
  * issue's affordance is CLOSING, and there is nothing here to close. `OrderRecord` is four
  * kinds — `orderPlaced`, `orderCancelled`, `orderFilled` and `orderFillObserved`

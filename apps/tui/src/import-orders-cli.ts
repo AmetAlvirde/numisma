@@ -60,8 +60,8 @@ if (!csvPath) {
       // are the real channel. If this import is ever automated or piped, the exit code
       // becomes the only surface left and this branch must be revisited BEFORE that lands,
       // not after. (#183 DECIDED this and is closed; the accepted cost and that re-trigger
-      // are recorded in ADR-014, `a skipped export row leaves no durable trace`, under
-      // `context/adr/`.)
+      // are recorded in ADR-014, `a skipped export row: not persisted, because it could
+      // never be retired`, under `context/adr/`.)
       process.exitCode = 0;
     }
   } catch (error) {
