@@ -231,6 +231,12 @@ export function partitionChangedClaims(
  * operator is shown are the same ones the decision was made on rather than a second
  * derivation that can drift from it.
  *
+ * THE VENUE'S CUMULATIVE COLUMN IS READ WITHOUT A FALLBACK, deliberately (PR #218 review).
+ * `BitgetOpenOrder.filledQuantity` is a required, non-nullable `number`, so a `?? 0` here
+ * could never fire — and it would say, in the one place this module's arithmetic most needs
+ * certainty, that the column might be absent. An honest absence would be a parse problem
+ * and belongs to the parser, not to a defaulted subtraction here.
+ *
  * `undefined` only when the observed row is missing, which cannot happen for a
  * `ChangedClaim` (every one of them is raised FROM an observed row) — reported rather
  * than defaulted, so a future caller that does not hold that invariant cannot get a
@@ -248,6 +254,6 @@ export function weighRemainders(
   const open = resting.find((order) => order.placed.id === id);
   return {
     onFile: open?.remainingQuantity ?? 0,
-    atVenue: row.quantity - (row.filledQuantity ?? 0),
+    atVenue: row.quantity - row.filledQuantity,
   };
 }
