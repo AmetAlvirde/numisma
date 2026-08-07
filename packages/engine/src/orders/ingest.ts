@@ -230,18 +230,90 @@ export function mergeCollidingClaims<T extends ObservedOpenOrder>(
   return { orders: [...byId.values()].map((entry) => entry.order), merges };
 }
 
-/** One field of a known claim that the venue is now rendering differently. */
-export interface ClaimDifference {
-  field: "quantity" | "observedFilledQuantity";
+/**
+ * The fields a difference may be reported over that carry a NUMBER on both sides.
+ *
+ * `triggerPrice` is here and not with the string descriptors because it is a price: the
+ * refusal detail renders it as a figure, and a comparison over its rendered spelling
+ * would make `1100` and `1100.00` a difference.
+ */
+export type NumericClaimField = "quantity" | "observedFilledQuantity" | "triggerPrice";
+
+/** The descriptor fields that carry a STRING on both sides. */
+export type TextClaimField = "orderType" | "timeInForce";
+
+/**
+ * One field of a known claim that the venue is now rendering differently.
+ *
+ * A DISCRIMINATED UNION OVER `field`, not one interface with `known: string | number`
+ * (#205). Two of the placement descriptors are strings, and widening the single shape
+ * would have made `fill.known` a `string | number` at every site that reads it
+ * numerically — `partitionChangedClaims` compares it against a remainder — so the
+ * comparison would have needed a cast or a non-null assertion to stay compilable, which
+ * is precisely the check being given up. Narrowing by `field` keeps it a `number` at the
+ * type level with no cast at all.
+ *
+ * BOTH MEMBERS RENDER THE SAME WAY: `` `${field} ${known} → ${observed}` `` is well-typed
+ * over the union, so the refusal detail template is shared rather than branched.
+ */
+export interface NumericClaimDifference {
+  field: NumericClaimField;
   /**
    * WHAT THE FILE SAYS, on each field's own basis (#181): for `quantity`, the FIRST
    * placement line's size; for `observedFilledQuantity`, the LATEST OBSERVATION — a later
    * `orderFillObserved` when the file carries one, else the placement line's own figure,
    * else `0`. Not "the placement line's figure", which is what this was while placements
-   * were the only observation on the file.
+   * were the only observation on the file. For `triggerPrice`, the placement line's own
+   * value, which is the only line that carries one.
    */
   known: number;
   observed: number;
+}
+
+export interface TextClaimDifference {
+  field: TextClaimField;
+  known: string;
+  observed: string;
+}
+
+export type ClaimDifference = NumericClaimDifference | TextClaimDifference;
+
+/**
+ * The three placement descriptors, as a runtime value derived from the union above: a
+ * field added to {@link TextClaimField} with no entry here fails `pnpm typecheck`, and so
+ * does an entry here that is not one of the descriptor fields.
+ */
+const DESCRIPTOR_FIELDS: Record<TextClaimField | "triggerPrice", true> = {
+  orderType: true,
+  timeInForce: true,
+  triggerPrice: true,
+};
+
+/**
+ * Is this difference about HOW the rung was placed rather than about WHAT it claims?
+ *
+ * Lives here, beside the union it reads, so the boundary that routes a difference to a
+ * refusal class cannot drift from the field list — the same reason `leavesRungUnweighed`
+ * sits beside `BitgetRowProblem` rather than at its consumer.
+ */
+export function isDescriptorDifference(difference: ClaimDifference): boolean {
+  return difference.field in DESCRIPTOR_FIELDS;
+}
+
+/**
+ * The restatement difference, as a TYPE PREDICATE.
+ *
+ * It exists because `Array.prototype.find` cannot narrow a union on its own, and the one
+ * caller — `partitionChangedClaims` at the import boundary — reads `known` NUMERICALLY
+ * against a remainder. A bare `find` there would hand back a `ClaimDifference` whose
+ * `known` is `string | number`, and the shortest way past that is a cast or a `!`, which
+ * is exactly the check the discriminated union was chosen to keep. Narrowing here states
+ * the relation between the field and its value shape once, beside the union.
+ */
+export function isFilledDifference(
+  difference: ClaimDifference,
+): difference is NumericClaimDifference {
+  return difference.field === "observedFilledQuantity";
 }
 
 /** A row that names a claim already on file, but does NOT say the same thing about it. */
@@ -295,18 +367,36 @@ export interface ChangedClaim {
  * figure — it is one authored number against another — so there is nothing for a floor to
  * absorb there, and an exact test is the stricter and more honest one.
  *
- * KNOWN LIMIT, stated rather than papered over: the sidecar persists neither
- * `orderType`, `timeInForce` nor `triggerPrice` — `KEY_ORDER.orderPlaced` in `records.ts`
- * is ten fields and none of them is a descriptor — so a change confined to those cannot be
- * detected here. There is nothing on file to compare against.
+ * THE PLACEMENT DESCRIPTORS ARE PERSISTED AND ARE COMPARED HERE (#205). `orderType`,
+ * `timeInForce` and `triggerPrice` are optional fields on `OrderPlacedRecord` and members
+ * of `KEY_ORDER.orderPlaced`, and a difference in one is reported like any other.
  *
- * Accepted deliberately: no descriptor moves the encumbrance, which is `price * quantity`,
- * so the funding guard stays correct across such a change. Closing it means WIDENING the
- * durable record, and that is not free — every line already on file carries no descriptors,
- * so every re-imported row would differ from its known claim and an UNCHANGED batch would
- * refuse on every rung until a migration rewrote an append-only file. That widening is
- * issue #205's question, and #205 is where the decision about what a later sighting of a
- * known rung may carry belongs. When these fields are persisted, compare them here too.
+ * THEY ARE COMPARED ONLY WHEN BOTH SIDES CARRY THEM, and that is a NEW convention this
+ * file now holds two of — the contrast with `observedFilledQuantity` directly below is the
+ * point, not an inconsistency to be tidied away. A fill figure COALESCES (`?? 0`) and so an
+ * absent one DOES raise a difference, because zero is a real claim about the venue:
+ * "nothing filled" is something the export can say. A descriptor has no meaningful empty
+ * value, so an absent one can only mean *we never recorded this* — never *the order had no
+ * time-in-force* — and coalescing it to `""` would report a difference on every line
+ * written before this widening, refusing an UNCHANGED batch on every rung until a
+ * migration rewrote an append-only file. Compare-when-present is what makes the widening
+ * cost no migration at all: every existing line simply has nothing to compare.
+ *
+ * KNOWN LIMIT, in the place its predecessor stood so the next reader finds a true
+ * statement where a false one used to be: a rung whose descriptor is ABSENT on file and
+ * PRESENT in the export raises no difference, so a rung that later GAINS a trigger price
+ * cannot be detected. That is the same gap every pre-widening line already had rather than
+ * a new hole, and it closes for a rung the moment a placement line carrying the descriptor
+ * exists — which is every rung imported from here on. A `triggerPrice` the venue renders
+ * as its blank sentinel is `null` on the observed row and is likewise not compared: `null`
+ * is the venue saying there is no trigger, and there is no honest figure to render as the
+ * `observed` side of a difference.
+ *
+ * Accepted for the same reason the gap was acceptable before: no descriptor moves the
+ * encumbrance, which is `price * quantity`, so the funding guard stays correct across
+ * such a change. That is also why a descriptor difference does NOT refuse as an
+ * amendment — see `partitionChangedClaims` in `apps/tui/src/import-orders.ts`, which
+ * routes it to its own class with its own wording.
  */
 export function detectChangedClaims(
   known: readonly OrderRecord[],
@@ -360,6 +450,44 @@ export function detectChangedClaims(
         field: "observedFilledQuantity",
         known: knownFilled,
         observed: observedFilled,
+      });
+    }
+    // COMPARE-WHEN-PRESENT, on BOTH sides — the argument is in the docstring above. An
+    // absent descriptor is not a value to be defaulted; it is the absence of a recording,
+    // and there is no `known → observed` pair to be made out of it.
+    if (
+      placed.orderType !== undefined &&
+      order.orderType !== undefined &&
+      placed.orderType !== order.orderType
+    ) {
+      differences.push({ field: "orderType", known: placed.orderType, observed: order.orderType });
+    }
+    if (
+      placed.timeInForce !== undefined &&
+      order.timeInForce !== undefined &&
+      placed.timeInForce !== order.timeInForce
+    ) {
+      differences.push({
+        field: "timeInForce",
+        known: placed.timeInForce,
+        observed: order.timeInForce,
+      });
+    }
+    // `null` is the venue's own "there is no trigger here" and is treated as absent, for
+    // the reason the docstring gives: it has no honest spelling as the `observed` side of
+    // a difference. EXACT equality, like `quantity` and unlike the filled figure: this is
+    // one authored number against another rather than a comparison with a folded figure,
+    // so there is nothing for a floor to absorb.
+    if (
+      placed.triggerPrice !== undefined &&
+      order.triggerPrice !== undefined &&
+      order.triggerPrice !== null &&
+      placed.triggerPrice !== order.triggerPrice
+    ) {
+      differences.push({
+        field: "triggerPrice",
+        known: placed.triggerPrice,
+        observed: order.triggerPrice,
       });
     }
     if (differences.length > 0) {

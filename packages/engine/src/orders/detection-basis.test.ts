@@ -32,6 +32,8 @@ function placed(
   observedAt: string,
   quantity: number,
   observedFilledQuantity?: number,
+  /** The #205 descriptors, absent by default — which is the shape of every existing line. */
+  descriptors: Descriptors = {},
 ): OrderPlacedRecord {
   return {
     id: RUNG,
@@ -43,8 +45,15 @@ function placed(
     price: 100,
     quantity,
     ...(observedFilledQuantity === undefined ? {} : { observedFilledQuantity }),
+    ...descriptors,
     fundingReserveId: "reserve-synthetic",
   };
+}
+
+interface Descriptors {
+  orderType?: string;
+  timeInForce?: string;
+  triggerPrice?: number;
 }
 
 /** Built THROUGH THE CONSTRUCTOR — the witness makes a literal untypeable (#206). */
@@ -71,6 +80,15 @@ function exported(quantity: number, filledQuantity: number): ObservedOpenOrder {
     quantity,
     filledQuantity,
   };
+}
+
+/** The same export row, plus whatever the venue says about how the rung was placed. */
+function exportedWith(descriptors: {
+  orderType?: string;
+  timeInForce?: string;
+  triggerPrice?: number | null;
+}): ObservedOpenOrder {
+  return { ...exported(10, 0), ...descriptors };
 }
 
 describe("detectChangedClaims compares against the LATEST observation (#181)", () => {
@@ -161,6 +179,89 @@ describe("the epsilon is on the FILLED comparison only (#181)", () => {
     const stream: OrderRecord[] = [placed("2026-01-01T10:00:00", 10, 6)];
     expect(detectChangedClaims(stream, [exported(10 + 1e-12, 6)])).toEqual([
       { id: RUNG, differences: [{ field: "quantity", known: 10, observed: 10 + 1e-12 }] },
+    ]);
+  });
+});
+
+/**
+ * THE PLACEMENT DESCRIPTORS AND THEIR OWN CONVENTION (#205).
+ *
+ * The comparison rule here DIVERGES from `observedFilledQuantity`'s, which coalesces
+ * (`?? 0`) and is pinned above — deliberately, and the contrast is the point. A fill figure
+ * has a meaningful zero, so an absent one is a real claim about the venue and DOES raise a
+ * difference. A descriptor has no meaningful empty value, so an absent one can only mean
+ * *we never recorded this* — and coalescing it would report a difference on every line
+ * written before the widening, refusing an unchanged batch on every rung until a migration
+ * rewrote an append-only file.
+ *
+ * Synthetic throughout: invented pair, round sizes, round prices, invented descriptors.
+ */
+describe("the placement descriptors are compared only when PRESENT (#205)", () => {
+  it("reports NOTHING for a pre-widening line against an export that carries all three", () => {
+    // THE NO-MIGRATION PROPERTY, at the seam that decides it. Every line already on the
+    // file looks exactly like this one: no `orderType`, no `timeInForce`, no
+    // `triggerPrice`. If absence were coalesced, this single assertion would be a
+    // difference on all three fields — i.e. a refused batch on every rung of every
+    // re-import, forever.
+    const stream: OrderRecord[] = [placed("2026-01-01T10:00:00", 10)];
+    expect(
+      detectChangedClaims(stream, [
+        exportedWith({ orderType: "Limit", timeInForce: "GTC", triggerPrice: 90 }),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("reports a difference once the FILE carries the descriptor too", () => {
+    const stream: OrderRecord[] = [
+      placed("2026-01-01T10:00:00", 10, undefined, { orderType: "Limit", timeInForce: "GTC" }),
+    ];
+    expect(
+      detectChangedClaims(stream, [exportedWith({ orderType: "Limit", timeInForce: "IOC" })]),
+    ).toEqual([{ id: RUNG, differences: [{ field: "timeInForce", known: "GTC", observed: "IOC" }] }]);
+  });
+
+  it("compares `triggerPrice` as a NUMBER, exactly, and reports both sides", () => {
+    const stream: OrderRecord[] = [placed("2026-01-01T10:00:00", 10, undefined, { triggerPrice: 90 })];
+    expect(detectChangedClaims(stream, [exportedWith({ triggerPrice: 90 })])).toEqual([]);
+    expect(detectChangedClaims(stream, [exportedWith({ triggerPrice: 95 })])).toEqual([
+      { id: RUNG, differences: [{ field: "triggerPrice", known: 90, observed: 95 }] },
+    ]);
+  });
+
+  it("treats the venue's BLANK trigger as absent rather than as a change to zero", () => {
+    // `null` is the sentinel the parser produces for `-- / --`. There is no honest figure
+    // to render as the `observed` side of a difference, and reading it as `0` would refuse
+    // a batch over a rung the venue simply never triggered.
+    const stream: OrderRecord[] = [placed("2026-01-01T10:00:00", 10, undefined, { triggerPrice: 90 })];
+    expect(detectChangedClaims(stream, [exportedWith({ triggerPrice: null })])).toEqual([]);
+  });
+
+  it("KNOWN LIMIT, asserted rather than described: a rung that GAINS a descriptor is not detected", () => {
+    // Absent on file means there is nothing to compare, so this is the one direction the
+    // widening does not close. It is the same gap every pre-widening line already had, and
+    // it closes for every rung placed from here on — the placement line will carry the
+    // descriptor. Pinned so that a later change of mind about it is a deliberate one.
+    const stream: OrderRecord[] = [placed("2026-01-01T10:00:00", 10, undefined, { orderType: "Limit" })];
+    expect(detectChangedClaims(stream, [exportedWith({ orderType: "Limit", timeInForce: "IOC" })])).toEqual(
+      [],
+    );
+  });
+
+  it("reports a descriptor difference BESIDE a fill difference, not instead of it", () => {
+    // Both land on the one claim. Which refusal class that claim goes to is the import
+    // boundary's decision; the detector's job is to say everything it found.
+    const stream: OrderRecord[] = [
+      placed("2026-01-01T10:00:00", 10, 6, { timeInForce: "GTC" }),
+    ];
+    const differing: ObservedOpenOrder = { ...exported(10, 8), timeInForce: "IOC" };
+    expect(detectChangedClaims(stream, [differing])).toEqual([
+      {
+        id: RUNG,
+        differences: [
+          { field: "observedFilledQuantity", known: 6, observed: 8 },
+          { field: "timeInForce", known: "GTC", observed: "IOC" },
+        ],
+      },
     ]);
   });
 });

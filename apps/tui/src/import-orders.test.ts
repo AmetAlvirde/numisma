@@ -1284,6 +1284,261 @@ describe("detection is re-based on the latest observation (#181)", () => {
   });
 });
 
+/**
+ * #205 — THE PLACEMENT DESCRIPTORS, END TO END OVER A REAL FILE.
+ *
+ * The widening's whole premise is that it costs no migration: `orderType`, `timeInForce`
+ * and `triggerPrice` are optional on the record and compared only when the line being
+ * compared against carries them, so every line already on an append-only file keeps
+ * reading exactly as it did. The first case here is that premise, stated directly.
+ *
+ * The refusal cases are about the REMEDY. A descriptor difference has no funding hazard —
+ * the encumbrance is `price × quantity` and no descriptor is in that product — so it must
+ * not be handed `changed-claim`'s cancel-the-rung-at-the-venue advice, which would destroy
+ * a live rung over a discrepancy that costs nothing. Assertions are on the MESSAGE, because
+ * the message is the whole reason the class exists.
+ */
+describe("the placement descriptors (#205)", () => {
+  /** One synthetic rung, with the venue's placement descriptors under the test's control. */
+  function describedRung(
+    price: string,
+    quantity: string,
+    at: string,
+    descriptors: { orderType?: string; timeInForce?: string; triggerPrice?: string } = {},
+  ): string {
+    const fields: Record<string, string> = {
+      timestamp: at,
+      pair: "XYZ/USDT",
+      time_in_force: descriptors.timeInForce ?? "GTC",
+      order_type: descriptors.orderType ?? "Limit",
+      side: "Buy",
+      price,
+      quantity,
+      trigger_price: descriptors.triggerPrice ?? "-- / --",
+      order_value: "0",
+      filled_quantity: "0",
+      total_quantity: quantity,
+      filled_percent: "0.00%",
+      status: "Unfilled",
+      action: "Cancel",
+    };
+    return BITGET_OPEN_ORDERS_HEADER.map((column) => fields[column] ?? "").join(",");
+  }
+
+  /** The placement line as it was written BEFORE this widening: ten keys, no descriptors. */
+  async function seedPreWideningLine(ordersPath: string, csvText: string): Promise<string> {
+    const parsed = parseBitgetOpenOrdersCsv(csvText);
+    if (parsed.status !== "ok") throw new Error("fixture must parse");
+    const [order] = parsed.orders;
+    if (order === undefined) throw new Error("fixture must carry one row");
+    const record: OrderRecord = {
+      id: order.id,
+      observedAt: order.observedAt,
+      kind: "orderPlaced",
+      currency: order.currency,
+      symbol: order.symbol,
+      side: order.side,
+      price: order.price,
+      quantity: order.quantity,
+      fundingReserveId: "reserve-a",
+    };
+    await appendOrders(ordersPath, [record]);
+    return order.id;
+  }
+
+  /** The placement record on disk for one id, read back through the real loader. */
+  async function placedOnDisk(path: string, id: string): Promise<OrderRecord> {
+    const load = await loadOrders(path, { warn: () => {} });
+    if (load.status !== "loaded") throw new Error(`expected a loaded sidecar, got ${load.status}`);
+    const record = load.records.find(
+      (candidate) => candidate.id === id && candidate.kind === "orderPlaced",
+    );
+    if (record === undefined) throw new Error("expected the placement line on disk");
+    return record;
+  }
+
+  it("reads a PRE-WIDENING file against a descriptor-carrying export with NO difference", async () => {
+    // THE HEADLINE PROPERTY, and the whole reason the fields are optional. The file holds
+    // a line written before descriptors existed; the export carries all three. If absence
+    // were coalesced to `""` and `0`, this import would refuse on the rung — and so would
+    // every re-import of every unchanged export, on every rung, until a migration rewrote
+    // an append-only file.
+    const csv = ladder(describedRung("1000", "0.1", "2020-01-01 10:00:00", { triggerPrice: "900" }));
+    const first = await harness({ csv });
+    await seedPreWideningLine(first.ordersPath, csv);
+    const before = await readFile(first.ordersPath, "utf8");
+
+    const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    expect(outcome).not.toMatchObject({ status: "rejected" });
+    expect(outcome).toMatchObject({ status: "imported", appended: 0, alreadyKnown: 1 });
+    // Nothing written, byte for byte — the pre-widening line is not re-shaped either.
+    expect(await readFile(first.ordersPath, "utf8")).toBe(before);
+    expect(first.errors.join("\n")).not.toContain("REFUSED");
+  });
+
+  it("WRITES the descriptors and reads them back off the real file", async () => {
+    const first = await harness({
+      csv: ladder(
+        describedRung("1000", "0.1", "2020-01-01 10:00:00", {
+          orderType: "Limit",
+          timeInForce: "GTC",
+          triggerPrice: "900",
+        }),
+      ),
+    });
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    const [id] = await idsOnDisk(first.ordersPath);
+    if (id === undefined) throw new Error("expected the rung on disk");
+    // Through `loadOrders`/`parseOrderRecord`, not off the in-memory record: a descriptor
+    // missing from `KEY_ORDER.orderPlaced` never reaches the file at all.
+    expect(await placedOnDisk(first.ordersPath, id)).toMatchObject({
+      orderType: "Limit",
+      timeInForce: "GTC",
+      triggerPrice: 900,
+    });
+  });
+
+  it("writes NO `triggerPrice` key for the venue's blank sentinel", async () => {
+    const first = await harness({
+      csv: ladder(describedRung("1000", "0.1", "2020-01-01 10:00:00")),
+    });
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    const raw = await readFile(first.ordersPath, "utf8");
+    expect(raw).not.toContain("triggerPrice");
+    expect(raw).not.toContain("null");
+    const [id] = await idsOnDisk(first.ordersPath);
+    if (id === undefined) throw new Error("expected the rung on disk");
+    expect(await placedOnDisk(first.ordersPath, id)).not.toHaveProperty("triggerPrice");
+  });
+
+  it("REFUSES a changed descriptor with its OWN token and NO cancel-the-rung advice", async () => {
+    const first = await harness({
+      csv: ladder(
+        describedRung("1000", "0.1", "2020-01-01 10:00:00", { timeInForce: "GTC" }),
+      ),
+    });
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+    const before = await readFile(first.ordersPath, "utf8");
+
+    // The SAME rung by every id component and by size, described differently.
+    await writeFile(
+      first.csvPath,
+      ladder(describedRung("1000", "0.1", "2020-01-01 10:00:00", { timeInForce: "IOC" })),
+      "utf8",
+    );
+    const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    expect(outcome).toMatchObject({ status: "rejected", reason: "descriptor-changed" });
+    expect(await readFile(first.ordersPath, "utf8")).toBe(before);
+    if (outcome.status !== "rejected") throw new Error("expected a refusal");
+
+    // THE WORDING IS THE DELIVERABLE. It names the rung, the field and both values.
+    expect(outcome.message).toContain("timeInForce GTC → IOC");
+    // It says plainly that no money moved, which is what justifies not sending anyone to
+    // the venue.
+    expect(outcome.message).toContain("price × quantity");
+    // And the remedy is to reconcile the file with the venue.
+    expect(outcome.message).toContain("Reconcile the export");
+    // THE ASSERTION THE CLASS EXISTS FOR: `changed-claim`'s remedy destroys a live rung,
+    // and it is justified by a funding hazard a descriptor cannot create.
+    expect(outcome.message).not.toContain("Cancel the rung");
+    expect(outcome.message).not.toContain("re-place");
+  });
+
+  it("names a changed `triggerPrice` as a figure pair", async () => {
+    const first = await harness({
+      csv: ladder(describedRung("1000", "0.1", "2020-01-01 10:00:00", { triggerPrice: "900" })),
+    });
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    await writeFile(
+      first.csvPath,
+      ladder(describedRung("1000", "0.1", "2020-01-01 10:00:00", { triggerPrice: "950" })),
+      "utf8",
+    );
+    const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    expect(outcome).toMatchObject({ status: "rejected", reason: "descriptor-changed" });
+    if (outcome.status !== "rejected") throw new Error("expected a refusal");
+    expect(outcome.message).toContain("triggerPrice 900 → 950");
+  });
+
+  it("keeps `amended` for a `quantity` difference even when a descriptor ALSO differs", async () => {
+    // A funding hazard outranks everything: `quantity` is the figure the encumbrance is
+    // computed from, so this rung is refused with exactly the token and the message it was
+    // refused with before the descriptors existed — cancel-the-rung advice included,
+    // because there it IS the right remedy.
+    const first = await harness({
+      csv: ladder(describedRung("1000", "0.1", "2020-01-01 10:00:00", { timeInForce: "GTC" })),
+      reserves: [{ id: "reserve-a", amount: 5000 }],
+    });
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+    const before = await readFile(first.ordersPath, "utf8");
+
+    await writeFile(
+      first.csvPath,
+      ladder(describedRung("1000", "0.5", "2020-01-01 10:00:00", { timeInForce: "IOC" })),
+      "utf8",
+    );
+    const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    expect(outcome).toMatchObject({ status: "rejected", reason: "changed-claim" });
+    expect(await readFile(first.ordersPath, "utf8")).toBe(before);
+    if (outcome.status !== "rejected") throw new Error("expected a refusal");
+    expect(outcome.message).toContain("quantity 0.1 → 0.5");
+    expect(outcome.message).toContain("Cancel the rung at the venue");
+  });
+
+  it("takes a rung whose descriptor AND fill both moved into the descriptor class", async () => {
+    // The mixed claim. It must not ride into the permissive per-rung skip beside a safe
+    // fill — that is what the partition's length guard protects — and it must not be told
+    // to cancel a live rung either, because this wording is the accurate one for it.
+    const first = await harness({
+      csv: ladder(
+        partlyFilledRung("100", "10", "6", "2020-01-01 10:00:00"),
+      ),
+      reserves: [{ id: "reserve-a", amount: 5000 }],
+    });
+    await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+    const before = await readFile(first.ordersPath, "utf8");
+
+    // The same rung, filled further AND re-described. `partlyFilledRung` writes `GTC`, so
+    // this row disagrees on `time_in_force` as well as on `filled_quantity`.
+    const mixed = BITGET_OPEN_ORDERS_HEADER.map(
+      (column) =>
+        ({
+          timestamp: "2020-01-01 10:00:00",
+          pair: "XYZ/USDT",
+          time_in_force: "IOC",
+          order_type: "Limit",
+          side: "Buy",
+          price: "100",
+          quantity: "10",
+          trigger_price: "-- / --",
+          order_value: "0",
+          filled_quantity: "8",
+          total_quantity: "10",
+          filled_percent: "80.00%",
+          status: "PartiallyFilled",
+          action: "Cancel",
+        })[column] ?? "",
+    ).join(",");
+    await writeFile(first.csvPath, ladder(mixed), "utf8");
+    const outcome = await importBitgetOpenOrders({ csvPath: first.csvPath, io: first.io });
+
+    expect(outcome).toMatchObject({ status: "rejected", reason: "descriptor-changed" });
+    // NOTHING WRITTEN — not the observation either, which a skip-class reading would have
+    // recorded while quietly ignoring the descriptor.
+    expect(await readFile(first.ordersPath, "utf8")).toBe(before);
+    if (outcome.status !== "rejected") throw new Error("expected a refusal");
+    expect(outcome.message).toContain("timeInForce GTC → IOC");
+    expect(outcome.message).not.toContain("Cancel the rung");
+  });
+});
+
 describe("a re-priced rung round-trips as cancel-and-place", () => {
   it("drops the old id and gains a new one, with no re-price branch anywhere", async () => {
     const first = await harness();
