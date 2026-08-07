@@ -674,10 +674,13 @@ export type FundingCoverage =
  * `unattributed` list to the whole report list, over all three arms. #183's conclusion
  * above is untouched by that; only these citations are.
  *
- * KNOWINGLY OPEN, tracked on #203 — A SKIPPED EXPORT ROW IS NEVER PERSISTED. The gap was
- * argued and accepted on #183, which is CLOSED because what it owed was a decision; the
- * citations above are to that decision and stay pointed at it. This one is different: it
- * names a cost still being paid, so it points at an OPEN issue. `OrderRecord` is four
+ * KNOWINGLY OPEN, recorded in ADR-014 — A SKIPPED EXPORT ROW IS NEVER PERSISTED. The gap
+ * was argued and accepted on #183, which is CLOSED because what it owed was a decision;
+ * the citations above are to that decision and stay pointed at it. This one is different:
+ * it names a cost still being PAID, so it points at the durable record of the accepted
+ * cost — `context/adr/ADR-014-a-skipped-export-row-not-persisted-because-it-could-never-be-retired.md`, which
+ * carries the re-trigger that would re-open it. It is an ADR and not an issue because an
+ * issue's affordance is CLOSING, and there is nothing here to close. `OrderRecord` is four
  * kinds — `orderPlaced`, `orderCancelled`, `orderFilled` and `orderFillObserved`
  * (`OrderRecord` in `./records.ts`, cited BY NAME for the reason the paragraph above
  * gives; that line number had already drifted once) — and `appendOrders`
