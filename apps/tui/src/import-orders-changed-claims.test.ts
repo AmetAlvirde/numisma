@@ -93,9 +93,15 @@ describe("partitionChangedClaims — the branch ordering", () => {
 
     const remainders = weighRemainders("rung-1", [resting("rung-1", 4)], [row("rung-1", 4)]);
     // The overlap, stated as an assertion rather than as a claim in a comment: the
-    // `amended` branch's own test is satisfied by this very claim.
+    // `amended` branch's own test is satisfied by this very claim. The narrowing carries
+    // its own type evidence rather than two `!`s — `weighRemainders` returns `undefined`
+    // on a missing row, and a test that asserted the overlap through an assertion operator
+    // would be suppressing exactly the possibility it needs ruled out.
+    if (remainders === undefined) {
+      throw new Error("fixture is wrong: weighRemainders saw no observed row for `rung-1`");
+    }
     expect(remainders).toEqual({ onFile: 4, atVenue: 6 });
-    expect(remainders!.onFile < remainders!.atVenue).toBe(true);
+    expect(remainders.onFile < remainders.atVenue).toBe(true);
 
     expect(result.backwards).toEqual([{ id: "rung-1", known: 6, observed: 4 }]);
     expect(result.amended).toEqual([]);
@@ -185,6 +191,46 @@ describe("partitionChangedClaims — #205's routing, by hazard", () => {
     expect(result.descriptors).toEqual([mixed]);
     expect(result.restated).toEqual([]);
     expect(result.amended).toEqual([]);
+  });
+});
+
+describe("partitionChangedClaims — the skip class refuses what it does not recognise", () => {
+  it("REFUSES A SAFE FILL CARRYING AN UNRECOGNISED DIFFERENCE, rather than skipping the rung", () => {
+    // THE `claim.differences.length !== 1` GUARD, which nothing else in this file holds
+    // (PR #218 review): the descriptor test above reads like coverage for it but passes via
+    // the `isDescriptorDifference` branch, one test earlier, and never reaches this line.
+    //
+    // The guard is written for a SIXTH `ClaimDifference` field — one that is neither
+    // `quantity` nor a descriptor. Today no such field exists, so the branch is
+    // unreachable-by-construction and this test is the ONLY thing that can hold it against
+    // the future it was written for. Without it, that field rides into the per-rung SKIP
+    // class alongside a safe fill: the batch is admitted, the observation is recorded, and
+    // the unknown disagreement is never shown to anyone — silently, and in the permissive
+    // direction, which is the one direction an admission guard must never default to.
+    //
+    // The fill half is deliberately the `restated` fixture — placed 10, observed 6, export
+    // showing 8, file counting 4 resting against the venue's 2 — so the ONLY thing keeping
+    // this claim out of `restated` is the length guard itself.
+    //
+    // THE CAST IS THE POINT AND IS AS NARROW AS IT CAN BE. `ClaimDifference` is a
+    // discriminated union over a closed `field` list, so the type system cannot express a
+    // field that does not exist yet — expressing it honestly would mean widening the
+    // engine's union, which would put the sixth field into production types purely to make
+    // a test compile. The cast is confined to this one fixture line and asserts nothing
+    // about behaviour; the assertions below do that.
+    const unrecognised = {
+      field: "postOnly",
+      known: 0,
+      observed: 1,
+    } as unknown as ChangedClaim["differences"][number];
+    const mixed = claim("rung-1", filledDifference(6, 8), unrecognised);
+
+    const result = partitionChangedClaims([mixed], [resting("rung-1", 4)], [row("rung-1", 8)]);
+
+    expect(result.amended).toEqual([mixed]);
+    expect(result.restated).toEqual([]);
+    expect(result.backwards).toEqual([]);
+    expect(result.descriptors).toEqual([]);
   });
 });
 
