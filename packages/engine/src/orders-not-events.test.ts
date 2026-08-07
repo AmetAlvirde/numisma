@@ -10,7 +10,7 @@
 import { describe, expect, it } from "vitest";
 import { EVENT_SCHEMA_VERSION, parseEvent } from "./events/parse.js";
 import type { PortfolioEvent } from "./events/types.js";
-import { parseOrderRecord, serializeOrderRecord } from "./orders/records.js";
+import { buildOrderFillObserved, parseOrderRecord, serializeOrderRecord } from "./orders/records.js";
 import type { OrderPlacedRecord } from "./orders/records.js";
 import { buildFillAct, fillEventId } from "./orders/fill.js";
 
@@ -56,6 +56,21 @@ describe("O4 — the orders sidecar leaves the durable log untouched", () => {
     const line = serializeOrderRecord(SYNTHETIC_ORDER);
     const result = parseEvent(JSON.parse(line));
     expect(result.kind).toBe("event-error");
+
+    // FED THE NEWEST KIND, not just the placement line this test was written with (#181).
+    // A new record kind is the one way this obligation could quietly stop holding, and a
+    // version of this assertion that never touches the new kind proves nothing about it.
+    const observation = buildOrderFillObserved({
+      id: SYNTHETIC_ORDER.id,
+      observedAt: "2026-01-02T10:00:00",
+      currency: "USD",
+      observedFilledQuantity: 0.5,
+    });
+    if (observation.status !== "ok") {
+      throw new Error(`fixture refused: ${observation.message}`);
+    }
+    const observationLine = serializeOrderRecord(observation.record);
+    expect(parseEvent(JSON.parse(observationLine)).kind).toBe("event-error");
   });
 
   it("parseEvent still rejects the line if someone hands it a schemaVersion", () => {

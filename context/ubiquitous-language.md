@@ -14,6 +14,8 @@
 | **Capital Tier** | A capital provenance classification that tracks generated capital lineage.                       | tranche            |
 | **Reserve**      | The Tempo for liquidity and opportunity readiness.                                               | cash bucket        |
 | **Order**        | A claim on capital that has not yet become a transaction. A resting order encumbers **availability**, never **value** — it is what the venue shows, not what the Fund did. | trade, fill, transaction |
+| **Observation**  | What the venue SHOWED about a resting Order at a moment — a cumulative reading, restated whenever a later export moves it. It has no Lot and no cash leg behind it, and it never reaches the event log. | fill, partial fill |
+| **Fill**         | What the Fund DID against a resting Order — a booked act with a Lot and a cash leg, recorded in the event log. Every Fill implies an Observation; no Observation is ever a Fill. | observation, execution |
 
 A resting **Order** never changes a number that already exists. It adds a
 **third** number: a Reserve's **value** is unchanged and NAV-safe, its

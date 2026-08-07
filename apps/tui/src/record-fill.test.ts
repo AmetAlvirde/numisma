@@ -18,6 +18,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildCompositionReport,
+  buildOrderFillObserved,
   committedRungs,
   foldEvents,
   parseFundReview,
@@ -925,5 +926,102 @@ describe("the cash-debited override is weighed against the reserve's available",
 
     const outcome = expectRecorded(await recordFill(harness.io));
     expect(outcome.act.event.funding.amount).toBe(400 * 10);
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// THE BOOKED-FILLS CEILING (#181, slice #207) — seam `S-C`, at the gate that lets a lot
+// and a cash leg into `events.jsonl`.
+//
+// Slice #206 made `consumed` NON-MONOTONIC: an `orderFillObserved` SETS the baseline, so
+// an observation below it takes a retired rung's `remainingQuantity` from zero back to
+// positive. `remainingQuantity` is therefore a REPORT and not an AUTHORIZATION, and this
+// flow was using it as one. The gate is now
+//
+//     admissible = min(rung.remainingQuantity, rung.quantity − bookedFills(id))
+//
+// and NEITHER ADMISSION GATE HAD EVER SEEN THIS RECORD KIND before these cases.
+describe("the fill recorder ceilings admission at the rung's PLACED quantity", () => {
+  it("refuses a resurrected rung instead of booking a SECOND lot and cash leg", async () => {
+    // Fill the top rung in full, honestly, through the real flow — so the 10 booked units
+    // have a real lot and a real funding leg answering for them in the log.
+    const first = new Harness({ answers: openTopRungAnswers() });
+    expectRecorded(await recordFill(first.io));
+    expect(pickRestingOrdersAsOf(first.orderRecords()).map((order) => order.placed.id)).toEqual([
+      "rung-300",
+      "rung-200",
+    ]);
+
+    // Now the hand-authored line. `appendOrders` constrains no kind and this flow's own
+    // torn-act guidance instructs hand-authoring, so this is a reachable file state and
+    // not a contrived one. It asserts the venue showed 3 filled — BELOW what the fund has
+    // already booked — which SETS `consumed` back to 3 and resurrects the rung at 7.
+    const observation = buildOrderFillObserved({
+      id: "rung-400",
+      observedAt: "2026-01-06T09:00:00",
+      currency: "USD",
+      observedFilledQuantity: 3,
+    });
+    if (observation.status !== "ok") throw new Error("synthetic observation refused");
+
+    const second = new Harness({
+      records: [...first.orderRecords(), observation.record],
+      events: first.logEvents(),
+      answers: [
+        "rung-400", // the resurrected rung is genuinely back on the list
+        "2026-01-07T12:00:00",
+        "", // defaults to the 7 the fold reports as still resting
+      ],
+    });
+    const ordersBefore = second.ordersImage;
+    const logBefore = second.logImage;
+
+    // The fold really does offer it — this is not a case where the rung is simply absent.
+    expect(pickRestingOrdersAsOf(second.orderRecords()).map((order) => order.placed.id)).toContain(
+      "rung-400",
+    );
+
+    const outcome = await recordFill(second.io);
+
+    expect(outcome.status).toBe("rejected");
+    if (outcome.status !== "rejected") throw new Error("expected a rejection");
+    expect(outcome.reason).toBe("exceeds-booked-fills");
+    // Actionable: it names the placed size, what is already booked, and the repair.
+    expect(outcome.message).toContain("placed for 10");
+    expect(outcome.message).toContain("10 is already booked");
+    expect(outcome.message).toContain("orderFillObserved");
+    // Both files byte-identical. Every refusal in this flow writes nothing.
+    expect(second.ordersImage).toBe(ordersBefore);
+    expect(second.logImage).toBe(logBefore);
+  });
+
+  it("is a NO-OP on an ordinary partial — placed 10, venue showed 2, nothing booked", async () => {
+    // The no-regression property, at the gate rather than in the arithmetic. `consumed` is
+    // 2 off the placement line and nothing is booked, so the headroom is the full 10 and
+    // the remainder of 8 is what binds — exactly the figure admitted before this slice.
+    const records = ladderRecords().map((record) =>
+      record.id === "rung-400" ? { ...record, observedFilledQuantity: 2 } : record,
+    );
+    const harness = new Harness({ records, answers: openTopRungAnswers() });
+
+    const outcome = expectRecorded(await recordFill(harness.io));
+
+    expect(outcome.act.order.filledQuantity).toBe(8);
+    expect(outcome.act.event.funding.amount).toBe(400 * 8);
+  });
+
+  it("keeps the remainder refusal's own trigger and WORDING unchanged", async () => {
+    // The `min`'s other term. When the remainder binds — every ordinary stream — the
+    // operator must meet the refusal they always met, word for word.
+    const harness = new Harness({
+      answers: ["rung-400", "2026-01-05T12:00:00", "11"],
+    });
+
+    const outcome = await recordFill(harness.io);
+
+    expect(outcome.status).toBe("rejected");
+    if (outcome.status !== "rejected") throw new Error("expected a rejection");
+    expect(outcome.reason).toBe("bad-quantity");
+    expect(outcome.message).toBe("11 exceeds the 10 still claimed by this rung");
   });
 });
