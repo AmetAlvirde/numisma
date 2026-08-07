@@ -497,7 +497,9 @@ export async function importBitgetOpenOrders(
   // this flow can perform — so exiting early over it would skip the feature's best case.
   const records: OrderPlacedRecord[] = [];
   if (admitted.length > 0) {
-    const declaration = await declareFunding(io, admitted);
+    // `io.ask` ALONE, not the bag: that module reads the prompt channel and nothing else,
+    // and its signature says so — see its header.
+    const declaration = await declareFunding(io.ask, admitted);
     if (declaration === undefined) {
       return reject(io, "no-reserve-declared", "no funding reserve was declared for this batch");
     }
