@@ -25,6 +25,7 @@ import {
   type FundReviewData,
 } from "@numisma/engine";
 import type { OrdersLoad } from "@numisma/preferences";
+import { renderSkipMessage } from "./skip-message.js";
 
 /** Everything not pure, in one injectable bag — so the whole flow is testable. */
 export interface AvailableCapitalIo {
@@ -74,12 +75,10 @@ export async function loadAvailableCapital(
   const records = load.status === "absent" ? [] : load.records;
   const skips = load.status === "loaded" ? load.skips : [];
   if (skips.length > 0) {
-    return {
-      status: "refused",
-      message:
-        `${io.ordersPath} has ${skips.length} unreadable line(s); a committed figure ` +
-        `over a partially-read book would understate what is encumbered.`,
-    };
+    // Still refuses on ANY skip; only the sentence changed (#181). The wording is the
+    // shared renderer's, so a `malformed` line and a line from a newer build no longer
+    // read as the same problem here or at the other three shells.
+    return { status: "refused", message: renderSkipMessage(io.ordersPath, skips) };
   }
 
   return {

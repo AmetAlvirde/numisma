@@ -36,6 +36,7 @@ import {
 } from "@numisma/engine";
 import type { OrdersLoad } from "@numisma/preferences";
 import { plural } from "./plural.js";
+import { renderSkipMessage } from "./skip-message.js";
 
 /** Everything this flow touches that is not a pure function, in one injectable bag. */
 export interface OrdersImportIo {
@@ -788,12 +789,9 @@ export async function importBitgetOpenOrders(
     return reject(io, "unreadable-sidecar", `could not read ${io.ordersPath}: ${existing.message}`);
   }
   if (existing.status === "loaded" && existing.skips.length > 0) {
-    return reject(
-      io,
-      "unreadable-sidecar-lines",
-      `${io.ordersPath} has ${existing.skips.length} line(s) this build cannot read, so the ` +
-        `committed sum would be computed over a partially-read book`,
-    );
+    // Same refusal, same reason code, same exit — one shared sentence (#181). Nothing is
+    // appended over a partially-read book either way.
+    return reject(io, "unreadable-sidecar-lines", renderSkipMessage(io.ordersPath, existing.skips));
   }
   const existingRecords: OrderRecord[] = existing.status === "loaded" ? existing.records : [];
 
