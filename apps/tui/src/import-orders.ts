@@ -9,7 +9,7 @@
  * `O1` reject — is testable without a terminal, a real export or the real data dir.
  *
  * THE ORDERING IS THE CONTRACT: parse → merge id collisions → load the sidecar → refuse
- * changed claims → skip the restated rungs → prompt → check coverage → append. The
+ * changed claims → record the restated rungs → prompt → check coverage → append. The
  * coverage check is the LAST thing before the only write, and every refusal before it
  * returns having written nothing at all. `orders.jsonl` is append-only, so a
  * wrong claim written here is not edited away later — it costs a compensating line
@@ -247,9 +247,9 @@ interface BackwardsClaim {
  * What an import that REFUSED NOTHING reports, in the two shapes it can honestly take.
  *
  * Not "an import that WROTE" (#200 review): an export whose every readable rung was
- * restated writes no line at all and still reports here, because the flow reached its end
- * with nothing refused. Writing is what these outcomes usually DO; not refusing is what
- * they all MEAN.
+ * already on file saying the same thing writes no line at all and still reports here,
+ * because the flow reached its end with nothing refused. Writing is what these outcomes
+ * usually DO; not refusing is what they all MEAN.
  */
 interface OrdersImportWrite {
   /**
@@ -600,13 +600,26 @@ function isAffirmative(answer: string): boolean {
  *     beyond what the venue shows, so calling the row already known would leave the file
  *     claiming LESS than the venue still holds. Today's wording, today's exit.
  *
- * WHY THEY CANNOT BOTH FIRE, stated here because the split relies on it: `consumed >=
- * latest observation` ALWAYS holds. The fold SETs `consumed` to the latest observation and
- * `orderFilled` only ever ADDS to it, so `consumed` is that observation plus a
- * non-negative sum of bookings made since. The two intervals are therefore
- * `[0, latestObserved)` and `[latestObserved, consumed)` — adjacent, disjoint, and empty
- * only when they should be. The `backwards` test is taken FIRST so the partition reads in
- * the same order the argument does; either order gives the same answer.
+ * THE ORDER OF THE TWO TESTS IS LOAD-BEARING, NOT PRESENTATIONAL, and the two outcome
+ * classes are disjoint only BECAUSE `backwards` is taken first. `consumed >= latest
+ * observation` ALWAYS holds — the fold SETs `consumed` to the latest observation and
+ * `orderFilled` only ever ADDS to it, so `consumed` is that observation plus a non-negative
+ * sum of bookings made since — and that is exactly what makes the two PREDICATES a superset
+ * relation rather than a partition. `backwards` fires on `export figure < latest
+ * observation`. `amended`'s remainder test reduces to `export figure < consumed`, because
+ * the `quantity` branch further down has already taken every claim whose placed size
+ * differs, so `quantity` is equal on both sides and cancels out of
+ * `onFile < atVenue`. `[0, consumed)` therefore CONTAINS `[0, latestObserved)`: THE
+ * PREDICATES OVERLAP, and only the `continue` after the `backwards` push separates them.
+ * Placed 10, the file's latest observation 6, the export showing 4: both tests are true,
+ * and the order alone decides which one the operator is told.
+ *
+ * The intervals the two OUTCOMES occupy — `[0, latestObserved)` and
+ * `[latestObserved, consumed)`, adjacent and disjoint — describe the classes AFTER that
+ * ordering; they are not a property of the predicates and must not be read as one.
+ * Reordering the tests is therefore not a rearrangement of the same answer: every backwards
+ * claim would fall into `amended` and be handed the cancel-the-rung-at-the-venue advice
+ * #208 exists to keep it away from — the exact harm the split above was made to remove.
  *
  * THE CLOSED END OF THE SECOND INTERVAL IS NOT REACHED FROM HERE, and that is unchanged by
  * the split rather than a hole it opens. An export exactly AT the latest observation is not
@@ -1164,6 +1177,11 @@ export async function importBitgetOpenOrders(
  * WHY `kind` IS IN THE KEY AT ALL: an observation shares its rung's id, so an id-only key
  * would read the first observation of a known rung as a repeat of its placement line and
  * drop it — the whole feature, filtered out by its own dedupe.
+ *
+ * KNOWINGLY OPEN, tracked on #212 — THIS KEY ANSWERS *"is this figure already recorded?"*,
+ * but the filter at its one call site needs *"is this figure still the rung's CURRENT
+ * claim?"*: `alreadyOnFile` is built from EVERY existing record, so a figure some later
+ * line already superseded still filters a legitimate re-assertion of it.
  */
 function appendKey(record: OrderRecord): string {
   return record.kind === "orderFillObserved"

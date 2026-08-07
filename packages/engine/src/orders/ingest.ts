@@ -505,19 +505,24 @@ export type FundingCoverage =
  * KNOWINGLY OPEN, tracked on #203 — A SKIPPED EXPORT ROW IS NEVER PERSISTED. The gap was
  * argued and accepted on #183, which is CLOSED because what it owed was a decision; the
  * citations above are to that decision and stay pointed at it. This one is different: it
- * names a cost still being paid, so it points at an OPEN issue. `OrderRecord`
- * is exactly three kinds — `orderPlaced`, `orderCancelled`, `orderFilled`
- * (`./records.ts:132`) — and `appendOrders` (`packages/preferences/src/orders.ts:244`)
- * writes only fresh `orderPlaced` rows. There is no record for "line N of the export
- * could not be read": the skip reaches stderr and the returned outcome, then dies with
- * the process. So `orders.jsonl` carries no trace that the rung exists, and every later
- * reader — tomorrow's available-capital report, any adherence question about that date —
- * sees a book that looks complete, with nothing to warn it otherwise. Persisting the gap
- * was CONSIDERED AND REJECTED: a skipped row has no id, because the id is synthesized
- * from venue, pair, side, price and submitted-at (`synthesizeOrderId`, :119) and those
- * are the very tokens that failed to parse. An un-idable durable "something was here"
- * could never be matched to a later import and so could never be RETIRED — a permanent
- * blot on every future report with no verb to close it.
+ * names a cost still being paid, so it points at an OPEN issue. `OrderRecord` is four
+ * kinds — `orderPlaced`, `orderCancelled`, `orderFilled` and `orderFillObserved`
+ * (`OrderRecord` in `./records.ts`, cited BY NAME for the reason the paragraph above
+ * gives; that line number had already drifted once) — and `appendOrders`
+ * (`packages/preferences/src/orders.ts:244`) writes fresh `orderPlaced` and
+ * `orderFillObserved` rows. NEITHER ADDITION GIVES THE SKIP A HOME, which is the first
+ * thing a reader who counts four kinds will want ruled out: an observation restates a rung
+ * ALREADY placed and finds it BY ID, so it is reachable only for a row that parsed. There
+ * is no record for "line N of the export could not be read": the skip reaches stderr and
+ * the returned outcome, then dies with the process. So `orders.jsonl` carries no trace
+ * that the rung exists, and every later reader — tomorrow's available-capital report, any
+ * adherence question about that date — sees a book that looks complete, with nothing to
+ * warn it otherwise. Persisting the gap was CONSIDERED AND REJECTED: a skipped row has no
+ * id, because the id is synthesized from venue, pair, side, price and submitted-at
+ * (`synthesizeOrderId`, :119) and those are the very tokens that failed to parse. An
+ * un-idable durable "something was here" could never be matched to a later import and so
+ * could never be RETIRED — a permanent blot on every future report with no verb to close
+ * it.
  */
 export function checkFundingCoverage(
   resting: readonly RestingOrder[],

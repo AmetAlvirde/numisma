@@ -50,9 +50,12 @@ if (!csvPath) {
       // HANDLED, AND DELIBERATELY 0 (`D3`, #177). NOTHING WAS REFUSED, so exiting 1 would
       // tell a caller the run failed when it did not — replacing one overstatement with
       // another. Not "lines were written", which is what this said until the #200 review
-      // and is not true of every member: an export whose every readable rung was restated
-      // appends nothing and still ends here, and it is no more a failure than a re-import
-      // that appends nothing. The flow is interactive, and the operator's lines (one per
+      // and is not true of every member: an export with an unreadable row whose every
+      // READABLE rung was already on file appends nothing and still ends here, and it is no
+      // more a failure than a re-import that appends nothing. An export of nothing but
+      // RESTATED rungs no longer arrives here at all — #210 records the restatement, so it
+      // qualifies nothing and the run ends at `imported`; only an unread row reaches this
+      // branch now. The flow is interactive, and the operator's lines (one per
       // qualification, each opening on its own gap and naming its own money direction)
       // are the real channel. If this import is ever automated or piped, the exit code
       // becomes the only surface left and this branch must be revisited — that is #203.
