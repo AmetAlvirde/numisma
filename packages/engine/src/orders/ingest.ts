@@ -13,7 +13,8 @@
 import type { Currency, FundReviewData } from "../contracts.js";
 import { attributeRungs, type UnmatchedRung } from "./attribution.js";
 import { isNegativeSlack } from "./committed.js";
-import type { OrderPlacedRecord, OrderSide } from "./records.js";
+import { QUANTITY_EPSILON } from "./monotonicity.js";
+import type { OrderPlacedRecord, OrderRecord, OrderSide } from "./records.js";
 import type { RestingOrder } from "./select.js";
 
 /**
@@ -203,6 +204,13 @@ export function mergeCollidingClaims<T extends ObservedOpenOrder>(
 /** One field of a known claim that the venue is now rendering differently. */
 export interface ClaimDifference {
   field: "quantity" | "observedFilledQuantity";
+  /**
+   * WHAT THE FILE SAYS, on each field's own basis (#181): for `quantity`, the FIRST
+   * placement line's size; for `observedFilledQuantity`, the LATEST OBSERVATION — a later
+   * `orderFillObserved` when the file carries one, else the placement line's own figure,
+   * else `0`. Not "the placement line's figure", which is what this was while placements
+   * were the only observation on the file.
+   */
   known: number;
   observed: number;
 }
@@ -221,31 +229,88 @@ export interface ChangedClaim {
  * change is not a re-sighting: folding it into `alreadyKnown` reported "nothing to do"
  * about a rung whose size on file is now wrong, which is exactly the silence #174 names.
  *
+ * THE INPUT IS THE WHOLE RECORD STREAM, NOT THE PLACEMENT LINES (#181). This took only
+ * `orderPlaced` records while placements were the only thing on the file, and compared the
+ * export against the PLACEMENT LINE's own figure. With `orderFillObserved` lines on the
+ * file the placement line is merely the FIRST observation, so that basis re-reports every
+ * already-recorded restatement forever — the import would say "the venue restated this"
+ * about a restatement the file already carries, on every import, permanently. IDEMPOTENCY
+ * LIVES HERE, one layer above the append filter: no key shape at the write can repair a
+ * comparison that reports a difference where there is none, because the report is written
+ * from the decision, not from the line.
+ *
+ * THE COMPARISON BASIS is therefore the fold's own unification applied to the comparison:
+ *
+ *     latest observation ?? the placement line's own observed figure ?? 0
+ *
+ * — the same three-way reading `pickRestingOrdersAsOf` folds into one `consumed` baseline.
+ * `quantity` keeps its own basis: the FIRST placement line, because a repeat placement is
+ * ignored by the selector and an observation carries no `quantity` at all (deliberately —
+ * see `OrderFillObservedRecord`; a second copy of the one figure nothing may go
+ * stale on is the drift the batch refusal exists to prevent).
+ *
+ * AN EXPORT FIGURE ABOVE THE PLACED QUANTITY GETS NO CHECK HERE, AND THAT IS THE DECISION
+ * — see the partition rule in `apps/tui/src/import-orders.ts`, which states why it cannot
+ * arrive and names both gates that make it so.
+ *
+ * TIES ON EQUAL STAMPS RESOLVE TO THE LAST LINE IN FILE ORDER — `>=` on the scan below,
+ * over the records in the order the caller holds them. That is exactly the tie-break the
+ * selector's STABLE sort gives the fold, so detection and the fold can never disagree
+ * about which observation is current. Choosing `>` here would be a second, silently
+ * different rule for the same question.
+ *
+ * THE EPSILON IS ON THE FILLED COMPARISON ONLY, and `quantity` keeps EXACT equality. Exact
+ * inequality was harmless while a difference meant a SKIP; once a difference means a
+ * permanent line on an append-only file, float noise below the meaningful floor would grow
+ * the file on an import that observed nothing real. `quantity` is not compared to a folded
+ * figure — it is one authored number against another — so there is nothing for a floor to
+ * absorb there, and an exact test is the stricter and more honest one.
+ *
  * KNOWN LIMIT, stated rather than papered over: the sidecar persists neither
  * `orderType`, `timeInForce` nor `triggerPrice` — `KEY_ORDER.orderPlaced` in `records.ts`
  * is ten fields and none of them is a descriptor — so a change confined to those cannot be
  * detected here. There is nothing on file to compare against.
  *
- * Accepted for increment two, deliberately: no descriptor moves the encumbrance, which is
- * `price * quantity`, so the funding guard stays correct across such a change. Closing it
- * means WIDENING the durable record, and that is not free — every line already on file
- * carries no descriptors, so every re-imported row would differ from its known claim and an
- * UNCHANGED batch would refuse on every rung until a migration rewrote an append-only file.
- * That widening belongs with the observation verb #181 designs, which is the next thing to
- * decide what a later sighting of a known rung may carry. When these fields are persisted,
- * compare them here too.
+ * Accepted deliberately: no descriptor moves the encumbrance, which is `price * quantity`,
+ * so the funding guard stays correct across such a change. Closing it means WIDENING the
+ * durable record, and that is not free — every line already on file carries no descriptors,
+ * so every re-imported row would differ from its known claim and an UNCHANGED batch would
+ * refuse on every rung until a migration rewrote an append-only file. That widening is
+ * issue #205's question, and #205 is where the decision about what a later sighting of a
+ * known rung may carry belongs. When these fields are persisted, compare them here too.
  */
 export function detectChangedClaims(
-  known: readonly OrderPlacedRecord[],
+  known: readonly OrderRecord[],
   observed: readonly ObservedOpenOrder[],
 ): ChangedClaim[] {
   const placedById = new Map<string, OrderPlacedRecord>();
+  // The latest observation per id, and the stamp it was made at — the stamp is kept only
+  // to compare the NEXT candidate against, never returned.
+  const latestObserved = new Map<string, { observedAt: string; quantity: number }>();
   for (const record of known) {
-    // FIRST placement wins, matching `pickRestingOrdersAsOf`: a repeat placement line is
-    // ignored there, so it must not be what a change is measured against here.
-    if (!placedById.has(record.id)) {
-      placedById.set(record.id, record);
+    if (record.kind === "orderPlaced") {
+      // FIRST placement wins, matching `pickRestingOrdersAsOf`: a repeat placement line is
+      // ignored there, so it must not be what a change is measured against here.
+      if (!placedById.has(record.id)) {
+        placedById.set(record.id, record);
+      }
+      continue;
     }
+    if (record.kind === "orderFillObserved") {
+      const seen = latestObserved.get(record.id);
+      // `>=` — the LAST line in file order wins an equal-stamp tie, as above.
+      if (seen === undefined || record.observedAt >= seen.observedAt) {
+        latestObserved.set(record.id, {
+          observedAt: record.observedAt,
+          quantity: record.observedFilledQuantity,
+        });
+      }
+    }
+    // `orderFilled` and `orderCancelled` are deliberately not read here. This function
+    // answers "does the export AGREE with what the file last OBSERVED", which is a
+    // question about the venue's column; what the fund has BOOKED against the rung, and
+    // whether the claim was retired, is what the caller's partition weighs next, off
+    // `pickRestingOrdersAsOf`.
   }
 
   const changed: ChangedClaim[] = [];
@@ -258,9 +323,10 @@ export function detectChangedClaims(
     if (placed.quantity !== order.quantity) {
       differences.push({ field: "quantity", known: placed.quantity, observed: order.quantity });
     }
-    const knownFilled = placed.observedFilledQuantity ?? 0;
+    const knownFilled =
+      latestObserved.get(order.id)?.quantity ?? placed.observedFilledQuantity ?? 0;
     const observedFilled = order.filledQuantity ?? 0;
-    if (knownFilled !== observedFilled) {
+    if (Math.abs(knownFilled - observedFilled) > QUANTITY_EPSILON) {
       differences.push({
         field: "observedFilledQuantity",
         known: knownFilled,
