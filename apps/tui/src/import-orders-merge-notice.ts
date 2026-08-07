@@ -26,19 +26,41 @@
 import type { MergedOrderClaim } from "@numisma/engine";
 
 /**
- * The operator-facing line for one merged claim — FIRST-CLASS output, not an aside.
+ * The operator-facing notice for one merged claim — FIRST-CLASS output, not an aside.
  *
  * Two rows the venue rendered under one id have been summed, and the operator is owed
  * the whole arithmetic: which rung, at what second, both sizes, the total that will be
  * written, and the remedy if the two were meant to stay distinct claims.
+ *
+ * WRAPPED, WHICH IT WAS NOT (#221). This emitted ONE unbroken ~450-character line, so
+ * every terminal soft-wrapped it at a column nothing here chose — mid-word, mid-number,
+ * and differently on every screen. The budget is 100 and the prose is hard-wrapped at
+ * 88, the same target `renderUnattributedRefusal` now uses, so the two renderers of this
+ * flow do not disagree about how wide the operator's terminal is.
+ *
+ * THE FIRST THREE LINES ARE THE VARIABLE ONES and the last three are fixed prose. The
+ * header carries the symbol, the side, the price and the stamp; the second carries the
+ * row count and EVERY quantity; the third carries the total.
+ *
+ * THE TOTAL IS ON ITS OWN LINE BECAUSE THE LISTING ABOVE IT IS UNBOUNDED. `quantities`
+ * has no ceiling — six rows at four decimals measures 113 columns, past any budget a
+ * terminal offers — so no wrap width can promise that line fits. What CAN be promised is
+ * which line pays for the overflow: with the listing and the total on one line, a wide
+ * collision soft-wraps away the single number the operator most needs; split, the worst
+ * case soft-wraps a list of sizes the operator can still read, and `ONE claim of N`
+ * arrives intact every time.
+ *
+ * THE REMEDY GETS ITS OWN LINE, because it is the one sentence here that asks the
+ * operator to DO something. Everything above it explains a decision already applied.
  */
 export function describeMerge(merge: MergedOrderClaim): string {
   return (
-    `MERGED — ${merge.symbol} ${merge.side} at ${merge.price}, submitted ${merge.observedAt}: ` +
-    `${merge.quantities.length} rows sharing one id (${merge.quantities.join(" + ")}) were ` +
-    `summed into ONE claim of ${merge.mergedQuantity}. The venue's export carries no order ` +
-    `id, and these rows agree on every field identity is built from, so the sum is the only ` +
-    `reading that neither invents a second claim nor frees committed capital. To keep two ` +
-    `rungs distinct, re-place one a tick apart so their prices differ.`
+    `MERGED — ${merge.symbol} ${merge.side} at ${merge.price}, submitted ${merge.observedAt}:\n` +
+    `${merge.quantities.length} rows sharing one id (${merge.quantities.join(" + ")})\n` +
+    `were summed into ONE claim of ${merge.mergedQuantity}.\n` +
+    `The venue's export carries no order id, and these rows agree on every field identity is\n` +
+    `built from, so the sum is the only reading that neither invents a second claim nor frees\n` +
+    `committed capital.\n` +
+    `To keep two rungs distinct, re-place one a tick apart so their prices differ.`
   );
 }

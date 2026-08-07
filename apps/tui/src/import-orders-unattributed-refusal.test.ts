@@ -11,7 +11,7 @@
  * FOUR OF THEM NOTHING HELD AT ALL, and they are the reason this file exists rather than
  * a nicety: the `default: never` fallback (unreachable by types, so no end-to-end fixture
  * can reach it), the ORDER of the sections, the LABEL → ADVICE → RUNGS order inside one,
- * and the 80-column wrap. No test in this suite measured a line length anywhere before
+ * and the wrap budget. No test in this suite measured a line length anywhere before
  * this one.
  *
  * THE THREE END-TO-END TESTS IN `import-orders.test.ts` STAY. They hold that this
@@ -21,7 +21,7 @@
  *
  * FIXTURE IDS ARE REALISTIC ON PURPOSE. The renderer's own risk is width, and a real
  * synthesized order id (`bitget:BTCUSDT:buy:1000:2020-01-01T10:00:00`) is the widest
- * thing it indents. Ids invented shorter than the real ones would make the 80-column
+ * thing it indents. Ids invented shorter than the real ones would make the width
  * assertion pass by fixture rather than by the renderer's own wrapping.
  */
 import type { CommittedRung, UnmatchedRung } from "@numisma/engine";
@@ -94,8 +94,8 @@ describe("provenance — which listed rungs are this batch's to re-declare (#202
 
     expect(refusal).toContain(`        ${id} — on file\n`);
     expect(refusal).toContain(
-      'Coverage weighs the WHOLE resting book, so rungs marked "on file" below were\n' +
-        "already in the sidecar before this import, not in the export just read.\n",
+      'Coverage weighs the WHOLE resting book, so rungs marked "on file" below were already in\n' +
+        "the sidecar before this import, not in the export just read.\n",
     );
   });
 
@@ -143,9 +143,9 @@ describe("the unfundable-reserve section — grouped by RESERVE, because the fix
     // against "place them".
     const one = [unfundable(orderId("1000"), "reserve-paper")];
     expect(renderUnattributedRefusal(one, allOf(one))).toContain(
-      "    The fold excluded this reserve: paper execution mode, an unsupported\n" +
-        "    currency, or a dangling account reference. It cannot fund a live order,\n" +
-        "    and the available-capital report would not be able to place it either.\n",
+      "    The fold excluded this reserve: paper execution mode, an unsupported currency, or a\n" +
+        "    dangling account reference. It cannot fund a live order, and the available-capital\n" +
+        "    report would not be able to place it either.\n",
     );
 
     const two = [
@@ -153,9 +153,9 @@ describe("the unfundable-reserve section — grouped by RESERVE, because the fix
       unfundable(orderId("1100"), "reserve-odd"),
     ];
     expect(renderUnattributedRefusal(two, allOf(two))).toContain(
-      "    The fold excluded these reserves: paper execution mode, an unsupported\n" +
-        "    currency, or a dangling account reference. They cannot fund a live order,\n" +
-        "    and the available-capital report would not be able to place them either.\n",
+      "    The fold excluded these reserves: paper execution mode, an unsupported currency, or\n" +
+        "    a dangling account reference. They cannot fund a live order, and the available-\n" +
+        "    capital report would not be able to place them either.\n",
     );
   });
 
@@ -243,9 +243,8 @@ describe("the closing paragraph — the honest cost of batching, and not droppab
     const refusal = renderUnattributedRefusal(unmatched, allOf(unmatched));
 
     expect(refusal.endsWith(
-      "Reserve balances were NOT weighed: an unplaceable rung has no balance to\n" +
-        "compare against, so a coverage refusal may still follow once every rung\n" +
-        "above is placeable.\n",
+      "Reserve balances were NOT weighed: an unplaceable rung has no balance to compare\n" +
+        "against, so a coverage refusal may still follow once every rung above is placeable.\n",
     )).toBe(true);
   });
 });
@@ -369,8 +368,8 @@ describe("the `default: never` fallback — unreachable by types, so nothing rea
 
     expect(refusal).toContain(
       "  dangling-account — 1 rung\n" +
-        "    This refusal has no section for that reason; it is named as the engine\n" +
-        "    gave it, so no rung counted above goes unlisted.\n" +
+        "    This refusal has no section for that reason; it is named as the engine gave it, so\n" +
+        "    no rung counted above goes unlisted.\n" +
         `      ${unknown}`,
     );
     // The known rung still renders its own section: one unknown reason does not cost the
@@ -438,13 +437,22 @@ describe("the `default: never` fallback — unreachable by types, so nothing rea
 });
 
 /**
+ * THE WRAP BUDGET (#221). It was 80 and is now 100 — not because the prose was failing
+ * at 80 (it was not; the widest line this renderer emitted measured 77), but because the
+ * lines it indents are built from synthesized order ids of unbounded width, and 80 had
+ * no room to absorb a symbol longer than `BTCUSDT`. The renderer's own prose is wrapped
+ * at 88, so what this asserts is that nothing — prose or id — reaches the budget.
+ */
+const BUDGET = 100;
+
+/**
  * Every line of `refusal`, with its length, for the ones that do not fit `width`.
  *
  * Reported as `line N (M cols): <text>` rather than as a bare boolean, because a failure
  * here is a re-wrapping job and the only useful thing to hand back is WHICH line and how
  * far over it ran.
  */
-function overWide(refusal: string, width = 80): string[] {
+function overWide(refusal: string, width = BUDGET): string[] {
   return refusal
     .split("\n")
     .map((line, index) => ({ line, index }))
@@ -452,13 +460,13 @@ function overWide(refusal: string, width = 80): string[] {
     .map(({ line, index }) => `line ${index + 1} (${line.length} cols): ${line}`);
 }
 
-describe("80 COLUMNS — no test in this suite measured a line length before this one", () => {
-  it("keeps every line of the widest refusal it can render inside 80 columns", () => {
+describe(`${BUDGET} COLUMNS — no test in this suite measured a line length before this one`, () => {
+  it(`keeps every line of the widest refusal it can render inside ${BUDGET} columns`, () => {
     // The renderer's own prose is what is pinned here — the advice paragraphs, the "on
-    // file" legend, and the closing balances paragraph #202's review re-wrapped at 72/71/19
-    // because it was the one paragraph that wrapped on an 80-column terminal, which is the
-    // worst place to spend the reader's attention: it is the paragraph admitting what the
-    // operator has NOT been told.
+    // file" legend, and the closing balances paragraph #202's review re-wrapped because it
+    // was the one paragraph the terminal soft-wrapped, which is the worst place to spend
+    // the reader's attention: it is the paragraph admitting what the operator has NOT been
+    // told. That argument is why the budget moved rather than why it stayed — see #221.
     //
     // Both classes, both plural advice paragraphs, the legend, the markers and the
     // fallback section all present at once, over REAL synthesized ids — the widest thing
@@ -473,7 +481,7 @@ describe("80 COLUMNS — no test in this suite measured a line length before thi
     expect(overWide(renderUnattributedRefusal(unmatched, NONE))).toEqual([]);
   });
 
-  it("keeps the SINGULAR advice paragraph and the unmarked layout inside 80 columns too", () => {
+  it(`keeps the SINGULAR advice paragraph and the unmarked layout inside ${BUDGET} columns too`, () => {
     // The singular paragraph is a different string, not the plural one with an `s` removed,
     // so it needs its own measurement; and dropping the legend changes which lines are
     // emitted at all.
@@ -482,7 +490,7 @@ describe("80 COLUMNS — no test in this suite measured a line length before thi
     expect(overWide(renderUnattributedRefusal(unmatched, allOf(unmatched)))).toEqual([]);
   });
 
-  it("keeps the mismatch clause inside 80 columns — id, currency and reserve on two lines", () => {
+  it(`keeps the mismatch clause inside ${BUDGET} columns — id, currency and reserve on two lines`, () => {
     // The one clause built from THREE variable-width pieces at once. Kept on two lines
     // precisely so it fits; a future edit folding it back onto one would fail here.
     const unmatched = [mismatched(orderId("1200"), "reserve-mxn")];
