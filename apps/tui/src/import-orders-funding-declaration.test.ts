@@ -74,6 +74,8 @@ function scriptedAsk(answers: readonly string[]): {
 
 const BATCH_QUESTION = "Funding reserve for this batch: ";
 const OVERRIDE_QUESTION = "Override the funding reserve for any individual order? [y/N] ";
+/** What the default {@link order} renders as, under the batch answer `reserve-a`. */
+const PER_ORDER_PROMPT = "  BTCUSDT buy 0.5 @ 1000 (2026-08-07T10:00:00) [reserve-a]: ";
 
 describe("the batch answer", () => {
   it("is the declared reserve, and a declined override pass leaves no overrides", async () => {
@@ -110,8 +112,9 @@ describe("the batch answer", () => {
 /**
  * The override question is a yes/no, and the whitelist is the rule — `M1`, `M2` and `M3`
  * all live here. Each case is read off the OBSERVABLE consequence: an affirmative answer
- * opens the per-order pass, so the prompt count is what says whether the answer was read
- * as yes.
+ * opens the per-order pass, so the QUESTION THAT FOLLOWS is what says whether the answer
+ * was read as yes. Named in full rather than counted — a third question is not evidence,
+ * the per-order prompt is.
  */
 describe("the override question's answer", () => {
   const AFFIRMATIVE = ["y", "yes", "Y", "YES", " yes ", "  Y  ", "Yes"];
@@ -121,7 +124,7 @@ describe("the override question's answer", () => {
     it(`opens the per-order pass on ${JSON.stringify(answer)} (\`M2\`, \`M3\`)`, async () => {
       const { ask, asked } = scriptedAsk(["reserve-a", answer, ""]);
       await declareFunding(ask, [order()]);
-      expect(asked).toHaveLength(3);
+      expect(asked).toEqual([BATCH_QUESTION, OVERRIDE_QUESTION, PER_ORDER_PROMPT]);
     });
   }
 
@@ -199,9 +202,7 @@ describe("the per-order prompt", () => {
   }
 
   it("renders the rung AND the batch default, exactly (`M6`, `M7`)", async () => {
-    expect(await promptFor(order())).toBe(
-      "  BTCUSDT buy 0.5 @ 1000 (2026-08-07T10:00:00) [reserve-a]: ",
-    );
+    expect(await promptFor(order())).toBe(PER_ORDER_PROMPT);
   });
 
   it("carries the SYMBOL (`M8`)", async () => {
