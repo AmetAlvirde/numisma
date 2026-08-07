@@ -176,11 +176,17 @@ export {
   checkFundingCoverage,
   mergeCollidingClaims,
   detectChangedClaims,
+  isDescriptorDifference,
+  isFilledDifference,
 } from "./orders/ingest.js";
 export type {
   MergedOrderClaim,
   ChangedClaim,
   ClaimDifference,
+  NumericClaimDifference,
+  TextClaimDifference,
+  NumericClaimField,
+  TextClaimField,
 } from "./orders/ingest.js";
 export type {
   BitgetOpenOrder,
