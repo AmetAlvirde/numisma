@@ -18,6 +18,7 @@
  */
 import {
   buildOrderFillObserved,
+  type OrderCancelledRecord,
   type OrderFillObservedRecord,
   type OrderPlacedRecord,
 } from "@numisma/engine";
@@ -36,6 +37,16 @@ function placed(id: string, observedAt = "2026-08-07T10:00:00"): OrderPlacedReco
     quantity: 10,
     fundingReserveId: "cash-core",
   };
+}
+
+/**
+ * A cancellation of the same rung — the SECOND non-observed kind, and the only fixture in
+ * this file that can put two records through {@link appendKey}'s `(kind, id, observedAt)`
+ * branch at once. It carries nothing beyond the base, because a cancellation asserts
+ * nothing beyond "this rung left the book".
+ */
+function cancelled(id: string, observedAt = "2026-08-07T10:00:00"): OrderCancelledRecord {
+  return { id, observedAt, kind: "orderCancelled", currency: "USD" };
 }
 
 function observedLine(
@@ -70,15 +81,41 @@ describe("currentClaimKeys — is this line already what the rung currently clai
     expect(keys.has(appendKey(observedLine("rung-1", 9)))).toBe(false);
   });
 
-  it("KEEPS `kind` LOAD-BEARING: the FIRST observation of a known rung is not its placement", () => {
+  it("LETS THE FIRST OBSERVATION OF A KNOWN RUNG LAND — it is not a repeat of its placement", () => {
     // An observation shares its rung's id, so an id-only key would read this line as a
     // repeat of the placement already on file and drop it — the whole feature, filtered
     // out by its own dedupe. Asserted as the PROPERTY (the two lines do not collide),
     // never as the key's spelling.
+    //
+    // THIS TEST DOES NOT HOLD `kind` (PR #218 review), and its title used to claim it did.
+    // The two records go down DIFFERENT branches of `appendKey`, whose third components are
+    // a fill figure and a `YYYY-MM-DDTHH:MM:SS` stamp — shapes that cannot collide whatever
+    // the first component is. The property below is still worth holding; the rule `kind`
+    // actually guards is the next test's.
     const placement = placed("rung-1");
     const firstObservation = observedLine("rung-1", 3);
     expect(appendKey(firstObservation)).not.toBe(appendKey(placement));
     expect(currentClaimKeys([placement]).has(appendKey(firstObservation))).toBe(false);
+  });
+
+  it("KEEPS `kind` LOAD-BEARING: two DIFFERENT non-observed kinds at the same stamp are two claims", () => {
+    // THE RULE `kind` ACTUALLY GUARDS, and the only case that can hold it. Every record
+    // that is not an observation keys on `(kind, id, observedAt)`, so `kind` is the ONLY
+    // component separating a placement from a cancellation of the same rung at the same
+    // second — which is not a corner: one export is one look, so a whole batch shares one
+    // second-granular stamp, and a rung placed and pulled inside that second renders both
+    // lines at it.
+    //
+    // Drop `kind` and the two key identically: `currentClaimKeys` holds ONE key where the
+    // file states TWO facts, so a genuinely fresh placement is filtered out of `fresh` in
+    // `import-orders.ts` as a supposed repeat — while `reportOrdersImport` counts from
+    // `written` and tells the operator the line was already known. Silent loss reported as
+    // success, which is the failure mode this whole module is shaped to refuse.
+    const placement = placed("rung-1");
+    const cancellation = cancelled("rung-1");
+    expect(placement.observedAt).toBe(cancellation.observedAt);
+    expect(appendKey(cancellation)).not.toBe(appendKey(placement));
+    expect(currentClaimKeys([placement, cancellation]).size).toBe(2);
   });
 
   it("still dedupes a REPEAT PLACEMENT — the id-only reading, unchanged", () => {
