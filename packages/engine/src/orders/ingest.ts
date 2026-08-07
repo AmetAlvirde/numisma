@@ -14,6 +14,9 @@ import type { Currency, FundReviewData } from "../contracts.js";
 import { attributeRungs, type UnmatchedRung } from "./attribution.js";
 import { isNegativeSlack } from "./committed.js";
 import { QUANTITY_EPSILON } from "./monotonicity.js";
+// The DESCRIPTOR GATES, shared with `parseOrderRecord` so the write gate and the read gate
+// are one rule rather than two copies that can drift (#205).
+import { isDescriptorText, isTriggerPrice } from "./records.js";
 import type { OrderPlacedRecord, OrderRecord, OrderSide } from "./records.js";
 import type { RestingOrder } from "./select.js";
 
@@ -37,6 +40,32 @@ export interface ObservedOpenOrder {
    * dropped, which is exactly what #173 was.
    */
   filledQuantity?: number;
+  /**
+   * THE PLACEMENT DESCRIPTORS (#205) — how the venue says the rung was placed, as opposed
+   * to what it claims. All three are OPTIONAL here and optional on the record, and the
+   * optionality carries the meaning: a venue that does not report one omits it, and an
+   * omission says *"we never recorded this"* — never *"the order had no time-in-force"*.
+   *
+   * They are declared on the VENUE-NEUTRAL type rather than only on `BitgetOpenOrder`
+   * because the record they feed is venue-neutral: without them here the values were
+   * present at runtime and unreachable through {@link buildOrderPlacedRecords}' declared
+   * parameter type. Narrowing that parameter to the Bitget row instead would have pulled
+   * "what this venue's rendered table looks like" back across the seam this module's
+   * header draws.
+   *
+   * NONE OF THEM MOVES THE ENCUMBRANCE, which is `price * quantity`. That is why a
+   * difference in one is refused with its own wording rather than with the amendment
+   * refusal's cancel-the-rung remedy — see `partitionChangedClaims` in the TUI.
+   */
+  orderType?: string;
+  timeInForce?: string;
+  /**
+   * `null` is the venue POSITIVELY rendering "there is no trigger on this rung" (Bitget
+   * draws it `-- / --`); `undefined` is this build never having been told. Both omit the
+   * field from the record, because the record has no honest spelling for either and a
+   * written `null` would be a third state every later reader would have to interpret.
+   */
+  triggerPrice?: number | null;
 }
 
 /**
@@ -385,6 +414,20 @@ export function buildOrderPlacedRecords(
     ...(order.filledQuantity !== undefined && order.filledQuantity > 0
       ? { observedFilledQuantity: order.filledQuantity }
       : {}),
+    // THE DESCRIPTORS, ON THE SAME CONDITIONAL-SPREAD IDIOM (#205) and on the SAME GATE
+    // the reader applies on the way back in — `records.ts` refuses a blank descriptor and
+    // a non-positive `triggerPrice` as malformed, so writing one would put a line on an
+    // append-only file that every later load skips. Stating the rule twice is the point:
+    // the write gate and the read gate must not drift, exactly as `buildOrderFillObserved`
+    // argues for the observation line.
+    //
+    // An absent, blank or `null` value writes NO KEY. It is not `""` and not `null`: a
+    // descriptor has no meaningful empty value, so absence is the only honest spelling of
+    // "we were never told", and the field's own comparison is skipped rather than
+    // manufacturing a difference out of it.
+    ...(isDescriptorText(order.orderType) ? { orderType: order.orderType } : {}),
+    ...(isDescriptorText(order.timeInForce) ? { timeInForce: order.timeInForce } : {}),
+    ...(isTriggerPrice(order.triggerPrice) ? { triggerPrice: order.triggerPrice } : {}),
     fundingReserveId: attribution.overrides?.[order.id] ?? attribution.fundingReserveId,
   }));
 }
