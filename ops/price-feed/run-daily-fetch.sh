@@ -8,8 +8,17 @@
 # a doomed mark is never appended and never silently lost.
 #
 # Idempotency is free (ADR-005 / #106): the deterministic id `pm-<id>-<asOf>` means
-# a missed run catches up on the next fire and a doubled run adds 0 new marks — so
-# this wrapper needs no locking of its own.
+# a doubled run adds 0 new marks — so this wrapper needs no locking of its own, and
+# the schedule can fire this script repeatedly without thought.
+#
+# IT DOES NOT MEAN A MISSED RUN CATCHES UP (an earlier version of this comment said
+# it did). Idempotency makes a REPEATED run harmless; it does nothing for a run that
+# never happened. `asOf` is the CDMX calendar date, so once midnight passes,
+# `isFreshBar` refuses yesterday's bar permanently — the day is unrecoverable, and
+# launchd drops a slept-through interval rather than backfilling it. What actually
+# recovers a missed evening is the SCHEDULE: the plist fires this script hourly from
+# 18:00 to 23:00 (#185 S2), so any hour the machine is awake within the CDMX day
+# still marks it. Past midnight, only the gap report can name the loss (#186).
 #
 # Edit the two placeholders below (or export them from the launchd plist), install
 # per docs/price-feed-ops.md, then verify with the documented manual dry run.

@@ -2,13 +2,43 @@
 <!--
   launchd definition for the hands-off daily price run (slice #108).
 
-  Fires the wrapper (run-daily-fetch.sh) at 18:00 in the MACHINE's local timezone.
-  The mark-instant contract's default mark time is 18:00 America/Mexico_City
-  (ADR-005 / config.ts), so this assumes the Mac's System Settings timezone is
-  CDMX. If the machine runs another timezone, set Hour/Minute to the local clock
-  that equals 18:00 CDMX, or keep the OS on CDMX. Missed fires (laptop asleep at
-  18:00) are harmless: launchd runs the job at the next wake, and the deterministic
-  id makes the catch-up run add no duplicate marks.
+  Fires the wrapper (run-daily-fetch.sh) EVERY HOUR from 18:00 through 23:00 in the
+  MACHINE's local timezone. The mark-instant contract's default mark time is 18:00
+  America/Mexico_City (ADR-005 / config.ts), so this assumes the Mac's System
+  Settings timezone is CDMX. If the machine runs another timezone, shift all six
+  Hours to the local clock equal to 18:00–23:00 CDMX, or keep the OS on CDMX.
+
+  WHY SIX FIRES AND NOT ONE (#185 S2). A MISSED FIRE IS NOT RECOVERED BY
+  IDEMPOTENCY. Those are two different properties and the old note here conflated
+  them: the deterministic id `pm-<id>-<asOf>` makes a REPEATED run harmless, which
+  is not the same as making a MISSED run recoverable. launchd DROPS a calendar
+  interval the machine slept through — it does not backfill it at wake — and `asOf`
+  is the CDMX CALENDAR DATE, so once midnight passes, `isFreshBar` refuses
+  yesterday's bar permanently and the day is gone. That is how 2026-06-27 and
+  friends were lost with no signal.
+
+  So recovery is the SCHEDULE's job, and it has two halves:
+    - The hourly 18:00–23:00 window (this array) is the half that does the work. A
+      laptop shut at 18:00 but open by 23:00 still marks the day, within the same
+      CDMX date. Six retries, all at/after the 18:00 mark time — an earlier fire
+      would store quotes and emit ZERO marks.
+    - RunAtLoad true (below) is the belt-and-braces half: a machine booted inside
+      the window runs immediately rather than waiting for the next hour.
+  Neither recovers a day the machine was off for all six hours. Nothing can; only
+  the gap report names it after the fact.
+
+  THE COST FITS THE FREE TIER, which is what unparked this slice. Twelve Data Basic
+  is 8 credits/minute and 800/day; the registry has 9 TD symbols at 1 credit each.
+  Six fires x 9 = 54 credits/day against 800 — 6.75%. The per-minute cap is already
+  handled in code (twelveDataMaxSymbolsPerMinute: 8 + a 60s pause,
+  apps/price-feed/src/config.ts), so each fire just takes ~1 extra minute. Adding
+  intervals here, or equities to the registry, spends against that 800 — the guard
+  is apps/price-feed/src/schedule-window.test.ts.
+
+  Repeat fires are harmless, which is what makes a six-fire window affordable at
+  all: the second run of an evening appends 0 new marks (deterministic id), step 3
+  commits nothing, step 4 passes, and step 6 `pnpm backfill` upserts under
+  `ON CONFLICT ... DO UPDATE`.
 
   The schedule fires EVERY day (7 days/week) ON PURPOSE. Crypto (Binance) trades
   24/7 and SHOULD mark every day, weekends included. Equities do NOT trade
@@ -29,7 +59,10 @@
     cp ops/price-feed/com.numisma.pricefeed.daily.plist \
        ~/Library/LaunchAgents/com.numisma.pricefeed.daily.plist
     launchctl load  ~/Library/LaunchAgents/com.numisma.pricefeed.daily.plist
-  Trigger a manual dry run (does not wait for 18:00):
+  NOTE: with RunAtLoad true, that `load` RUNS THE JOB IMMEDIATELY. That is intended
+  (it is the belt-and-braces half), and it is safe at any hour — but it means the
+  reinstall itself is a live run, so watch its log rather than assuming it waited.
+  Trigger a manual dry run (does not wait for the next hour):
     launchctl start com.numisma.pricefeed.daily
   Remove:
     launchctl unload ~/Library/LaunchAgents/com.numisma.pricefeed.daily.plist
@@ -64,18 +97,57 @@
     <string>/Users/amet/Dev/accumulus/data</string>
   </dict>
 
-  <!-- 18:00 local, EVERY day (7-day schedule; see the header note on why). -->
+  <!-- Hourly 18:00-23:00 local, EVERY day (7-day schedule; see the header note on
+       why 7 days, and on why six fires rather than one). An ARRAY of dicts, which
+       is how launchd expresses several calendar intervals for one job. The first
+       fire that lands with the machine awake marks the day; the rest are cheap
+       no-ops (0 new marks). No interval past 23:00: `asOf` rolls at midnight. -->
   <key>StartCalendarInterval</key>
-  <dict>
-    <key>Hour</key>
-    <integer>18</integer>
-    <key>Minute</key>
-    <integer>0</integer>
-  </dict>
+  <array>
+    <dict>
+      <key>Hour</key>
+      <integer>18</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+    <dict>
+      <key>Hour</key>
+      <integer>19</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+    <dict>
+      <key>Hour</key>
+      <integer>20</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+    <dict>
+      <key>Hour</key>
+      <integer>21</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+    <dict>
+      <key>Hour</key>
+      <integer>22</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+    <dict>
+      <key>Hour</key>
+      <integer>23</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+  </array>
 
-  <!-- Do not run at load; only on the calendar interval (and manual `start`). -->
+  <!-- Run at load: the belt-and-braces half of the recovery (see header). A machine
+       booted or a job reloaded INSIDE the window runs at once instead of waiting for
+       the next hour; outside the window the run is a cheap no-op (pre-18:00 stores
+       quotes and emits no marks; post-midnight is the next day's asOf). -->
   <key>RunAtLoad</key>
-  <false/>
+  <true/>
 
   <!-- launchd's own capture of the wrapper's stdout/stderr (outside the repo). -->
   <key>StandardOutPath</key>

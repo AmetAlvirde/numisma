@@ -15,7 +15,7 @@ Everything here is machine-local. Nothing secret or trade-derived enters the rep
 | File | Role |
 | --- | --- |
 | `ops/price-feed/run-daily-fetch.sh` | Wrapper the scheduler calls. Sets a PATH that can find `pnpm`, sources tokens, runs `pnpm prices:fetch`; on a clean fetch: (2) `pnpm spine` then (3) an auto-commit of any new data-repo changes scoped to `$NUMISMA_DATA_DIR` — idempotent if no new marks, never pushes — then (4) a post-check that **fails the job** if the durable event log is still uncommitted (lenient warn for the `head-digest.json` breadcrumb). Only once the log is verified does it touch anything derived, local before networked: (5) `pnpm gap-report -- --write` to rewrite `gap-report.json` beside the log and (6) `pnpm backfill` to refresh the hosted projection. Preserves the non-zero exit code so the scheduler notices a failure or rejection. |
-| `ops/price-feed/com.numisma.pricefeed.daily.plist` | launchd definition firing the wrapper at 18:00 local (the default mark time), **every day** (see "Why the schedule fires 7 days/week" below). |
+| `ops/price-feed/com.numisma.pricefeed.daily.plist` | launchd definition firing the wrapper **hourly from 18:00 to 23:00 local** (six intervals; 18:00 is the default mark time), **every day** — plus `RunAtLoad` true. The first fire with the machine awake marks the day; the rest are 0-mark no-ops. See "Why the window is hourly, not a single 18:00 fire" and "Why the schedule fires 7 days/week" below. |
 
 Both files are templates: replace `__REPO_DIR__` / `__HOME__` before installing.
 
@@ -137,8 +137,9 @@ threat model does not need.
 
 ## Install the daily schedule (macOS launchd)
 
-1. Set the Mac's timezone to America/Mexico_City (or adjust the plist `Hour`/`Minute`
-   to the local clock equal to 18:00 CDMX).
+1. Set the Mac's timezone to America/Mexico_City (or shift **all six** of the plist's
+   `Hour` entries to the local clock equal to 18:00–23:00 CDMX — they must stay
+   at/after the mark time and inside the same CDMX day).
 2. Edit both placeholders in `run-daily-fetch.sh` (`REPO_DIR`) and the plist
    (`__REPO_DIR__`, `__HOME__`).
 3. Set the durable-data home in the plist. The wrapper forwards `NUMISMA_DATA_DIR`
@@ -160,6 +161,24 @@ threat model does not need.
       ~/Library/LaunchAgents/com.numisma.pricefeed.daily.plist
    launchctl load ~/Library/LaunchAgents/com.numisma.pricefeed.daily.plist
    ```
+
+   **The installed copy is a RESOLVED COPY, so a change to the template in this repo
+   does nothing until you reinstall by hand.** `cp` expands nothing — you edit
+   `__REPO_DIR__` / `__HOME__` in the installed file, so the two files diverge by
+   design and no automation reconciles them. After pulling a change to the plist
+   (e.g. the hourly window), redo the copy, re-edit the placeholders, then:
+
+   ```sh
+   launchctl unload ~/Library/LaunchAgents/com.numisma.pricefeed.daily.plist
+   launchctl load   ~/Library/LaunchAgents/com.numisma.pricefeed.daily.plist
+   # verify the six intervals are what launchd now holds, not what the repo holds:
+   launchctl print gui/$(id -u)/com.numisma.pricefeed.daily | grep -A20 'start interval\|periodic'
+   ```
+
+   **`RunAtLoad` is true, so that `load` runs the job immediately** — intended (it is
+   the belt-and-braces half of the recovery), safe at any hour, but it means the
+   reinstall is itself a live run. Watch `~/Library/Logs/numisma/price-feed-*.log`
+   rather than assuming it waited for the next hour.
 
 ### PATH: the scheduler must be able to find `pnpm` **and** `node`
 
@@ -201,9 +220,52 @@ If `pnpm` or `node` is still unresolvable the wrapper fails LOUD with a named er
 If you prefer cron over launchd (again assuming the box is on CDMX time):
 
 ```cron
-# m h  dom mon dow  command
-  0 18  *   *   *   /bin/bash /ABSOLUTE/PATH/numisma/ops/price-feed/run-daily-fetch.sh
+# m h     dom mon dow  command
+  0 18-23  *   *   *   /bin/bash /ABSOLUTE/PATH/numisma/ops/price-feed/run-daily-fetch.sh
 ```
+
+The `18-23` hour range is the same window as the plist, and for the same reason
+(below). cron has no `RunAtLoad` equivalent, so a cron install gets the working
+half of the recovery but not the belt-and-braces half.
+
+## Why the window is hourly, not a single 18:00 fire
+
+**A missed fire is not recovered by idempotency.** These are two different
+properties, and conflating them is what let 2026-06-27 and its siblings disappear
+without a signal (issue #185):
+
+- The deterministic mark id `pm-<id>-<asOf>` makes a **repeated** run harmless — it
+  appends 0 new marks.
+- It does nothing at all for a run that **never happened**. launchd *drops* a
+  calendar interval the machine slept through rather than backfilling it at wake,
+  and `asOf` is the CDMX **calendar date**, so once midnight passes `isFreshBar`
+  refuses yesterday's bar permanently. The day is then unrecoverable by any rerun.
+
+So recovery has to come from the schedule, and it does, in two halves:
+
+- **The hourly 18:00–23:00 window is the half that does the work.** A laptop shut
+  at 18:00 but open at any hour through 23:00 still marks the day, inside the same
+  CDMX date. Every fire is at/after the 18:00 mark time on purpose: an earlier one
+  would store quotes and emit **zero** marks.
+- **`RunAtLoad` true is the belt-and-braces half.** A machine booted (or the job
+  reloaded) inside the window runs at once instead of waiting for the next hour.
+
+Neither recovers a day the machine was off for all six hours. Nothing can — that
+loss is permanent, and naming it after the fact is the gap report's job (#186).
+
+**Why six fires fit the free tier.** Twelve Data Basic allows 8 credits/minute and
+**800/day**; the registry holds **9** Twelve Data symbols at 1 credit each. Six
+fires × 9 = **54 credits/day against 800** (6.75%), so the daily cap was never the
+constraint it looked like — the *per-minute* cap is, and that is already handled in
+code by `twelveDataMaxSymbolsPerMinute: 8` plus a 60 s pause, which costs each fire
+about one extra minute and nothing else. This is why the 18/20/22 three-fire
+fallback was not needed. Adding intervals here, or equities to the registry, spends
+against that 800; `apps/price-feed/src/schedule-window.test.ts` fails if the product
+ever exceeds it.
+
+**Repeat fires are cheap by construction**, which is what makes six affordable: the
+second run of an evening appends 0 new marks, step 3 commits nothing, step 4 passes,
+and step 6 `pnpm backfill` upserts under `ON CONFLICT … DO UPDATE`.
 
 ## Why the schedule fires 7 days/week (crypto vs. equities)
 
@@ -232,7 +294,7 @@ by unit tests (there is nothing meaningful to unit-test in a plist). Run it afte
 install and record the result below.
 
 ```sh
-# Exercise the wrapper exactly as the scheduler will (does not wait for 18:00):
+# Exercise the wrapper exactly as the scheduler will (does not wait for the window):
 /bin/bash ops/price-feed/run-daily-fetch.sh ; echo "wrapper exit: $?"
 
 # Or drive it through launchd itself:
@@ -246,6 +308,8 @@ Confirm, in order:
    `N new PriceMarked candidate(s)`.
 2. Running it **again the same day** logs `0 new ... already pending — skipped`
    and `pnpm spine` reports `0 new` (idempotency — the deterministic id, #106).
+   This is no longer an edge case to check once: with the hourly window it is what
+   the 19:00–23:00 fires do on every normal evening.
 3. The wrapper exit code is `0` on a clean run, non-zero if any symbol failed or a
    mark was rejected.
 4. **On a weekend/holiday**, the equity lines read
@@ -341,8 +405,12 @@ bad day never appends a bad mark. The console/log distinguishes the two cases �
 
 - The provider returned an error, a malformed payload, or timed out. Partial
   progress is kept (other symbols still stored/queued) and the run exits non-zero.
-- **Action:** usually none. A missed or partial fetch is harmless under the
-  idempotent id — the next daily run (or a manual `pnpm prices:fetch`) catches up.
+- **Action:** usually none *if there is still an hour left in the CDMX day* — one
+  of the remaining fires in the 18:00–23:00 window re-fetches the symbol, and the
+  idempotent id means the retry costs nothing (the marks that already landed are
+  not duplicated). A manual `pnpm prices:fetch` does the same thing sooner.
+  **After midnight it is not "caught up" by anything**: `asOf` is the calendar
+  date, so the missed day stays missed and only the gap report will name it.
   Investigate only if a symbol fails repeatedly (registry/symbol drift, provider
   outage). The failing symbol is named in the message.
 
