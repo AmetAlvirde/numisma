@@ -22,6 +22,8 @@ import {
   checkFundingCoverage,
   detectChangedClaims,
   formatObservedAt,
+  isDescriptorDifference,
+  isFilledDifference,
   leavesRungUnweighed,
   mergeCollidingClaims,
   parseBitgetOpenOrdersCsv,
@@ -159,6 +161,35 @@ export type OrdersImportRejection =
    * append-only file to get an import past.
    */
   | "backwards-claim"
+  /**
+   * A ROW DESCRIBES A KNOWN RUNG'S PLACEMENT DIFFERENTLY (#205): its `orderType`,
+   * `timeInForce` or `triggerPrice` disagrees with what the placement line on file
+   * recorded, and nothing about the rung's SIZE or PRICE does.
+   *
+   * ITS OWN CLASS BECAUSE THE REMEDY IS ITS OWN, which is the same argument that split
+   * `backwards-claim` out of `changed-claim` (#208) and it applies here with more force.
+   * `changed-claim` ends by telling the operator to CANCEL the rung at the venue or
+   * re-place it — destructive advice, justified there by a funding hazard: a file claiming
+   * LESS than the venue still holds leaves the guard free to admit a batch the reserve
+   * cannot fund. THAT HAZARD CANNOT EXIST HERE. The encumbrance is `price * quantity` and
+   * no descriptor is in it, so a descriptor difference moves no money in either direction
+   * and the funding guard's reading of this book is exactly as correct as it was. Handing
+   * cancel-the-rung to someone whose `trigger_price` merely differs would destroy a live
+   * rung over a discrepancy that costs nothing.
+   *
+   * STILL A TOTAL REFUSAL, and nothing is written — for `backwards-claim`'s reason rather
+   * than `changed-claim`'s: the file and the venue are saying two different things about
+   * one rung, and this build will not record a contradiction into an append-only file to
+   * get an import past. A second `orderPlaced` line would be ignored by the selector
+   * anyway, so there is no verb here even if there were an appetite for one.
+   *
+   * IT WINS OVER A FILL DIFFERENCE ON THE SAME RUNG. A claim carrying both is refused
+   * here, not as an amendment: this wording is accurate for it and `changed-claim`'s
+   * remedy is not. What it must NOT do is ride into the permissive per-rung skip class
+   * beside a safe fill, which is exactly what `partitionChangedClaims`' length guard was
+   * built to prevent.
+   */
+  | "descriptor-changed"
   /**
    * ATTRIBUTION FAILED: at least one rung of the whole resting book cannot be placed
    * against a fundable reserve. ONE rejection may name rungs of BOTH classes the engine
@@ -462,11 +493,11 @@ function isAffirmative(answer: string): boolean {
  *     compared against (#176), so a stale one corrupts every future comparison of this
  *     rung, not just this guard's sum. It is the one figure nothing may go stale on. It
  *     refuses the WHOLE BATCH, and it refuses it whichever way the partial points.
- *  2. EVERY REMAINING difference is `observedFilledQuantity` — today that means exactly
- *     one, since `detectChangedClaims` emits only those two fields and never an empty
- *     list, so nothing can fail this test until a third field exists. Guarded rather than
- *     asserted precisely so that third field lands in the REFUSAL class by default
- *     instead of silently riding in beside a safe fill as a per-rung skip.
+ *  2. EVERY REMAINING difference is `observedFilledQuantity`. The third, fourth and fifth
+ *     fields ARRIVED (#205) — the placement descriptors — and they are taken by their own
+ *     branch above this one rather than by this guard. The guard stays exactly as it was,
+ *     for the sixth: an unknown difference must land in a REFUSAL class by default instead
+ *     of silently riding in beside a safe fill as a per-rung skip.
  *  3. `fileRemaining >= venueRemaining`. The `<=` on the left is where later fill lines
  *     live; they only make it stricter.
  *
@@ -534,6 +565,22 @@ function isAffirmative(answer: string): boolean {
  * An id ABSENT from `resting` reads as `0`, not as a missing case: absent means the
  * stream already retired the claim — its fills exhausted it, or a cancellation took it —
  * and zero is the honest statement of what the file now counts against that rung.
+ *
+ * A FOURTH CLASS, AND THE ROUTING IS BY HAZARD (#205). The placement descriptors —
+ * `orderType`, `timeInForce`, `triggerPrice` — are compared now, and a difference in one
+ * must not be handed `amended`'s cancel-the-rung remedy, which is justified by a funding
+ * hazard that cannot arise from a field the encumbrance does not contain. The three tests
+ * run in this order and the order is the argument:
+ *
+ *  1. ANY `quantity` DIFFERENCE → `amended`, exactly as before. A funding hazard outranks
+ *     everything, so a rung whose size changed is refused with today's token and today's
+ *     message whatever else it also disagrees about.
+ *  2. OTHERWISE ANY DESCRIPTOR DIFFERENCE → `descriptors`, EVEN IF a fill difference rides
+ *     along on the same claim. Two things follow from taking it here. The wording the
+ *     operator gets is accurate for that claim, where `amended`'s is not; and a mixed
+ *     claim still cannot reach the permissive per-rung skip below, which is what the
+ *     length guard in test 2 of the skip rule exists to protect.
+ *  3. OTHERWISE the fill logic, untouched.
  */
 function partitionChangedClaims(
   changed: readonly ChangedClaim[],
@@ -542,10 +589,12 @@ function partitionChangedClaims(
 ): {
   amended: ChangedClaim[];
   backwards: BackwardsClaim[];
+  descriptors: ChangedClaim[];
   restated: RecordedObservation[];
 } {
   const amended: ChangedClaim[] = [];
   const backwards: BackwardsClaim[] = [];
+  const descriptors: ChangedClaim[] = [];
   const restated: RecordedObservation[] = [];
 
   for (const claim of changed) {
@@ -553,9 +602,13 @@ function partitionChangedClaims(
       amended.push(claim);
       continue;
     }
-    const fill = claim.differences.find(
-      (difference) => difference.field === "observedFilledQuantity",
-    );
+    // The predicate is the ENGINE's, beside the field union it reads, so this boundary
+    // cannot fall out of step with the list of fields a descriptor difference can name.
+    if (claim.differences.some(isDescriptorDifference)) {
+      descriptors.push(claim);
+      continue;
+    }
+    const fill = claim.differences.find(isFilledDifference);
     const remainders = weighRemainders(claim.id, resting, observed);
     // The restatement must be the ONLY difference left, not merely one of them. The
     // `quantity` branch above already took the field that exists today, so this length
@@ -586,7 +639,7 @@ function partitionChangedClaims(
     restated.push({ id: claim.id, known: fill.known, observed: fill.observed });
   }
 
-  return { amended, backwards, restated };
+  return { amended, backwards, descriptors, restated };
 }
 
 /**
@@ -729,13 +782,23 @@ export async function importBitgetOpenOrders(
   // the remainder of a rung already on file. Taken here because the partition needs it
   // before anything is prompted for or built.
   const restingOnFile = pickRestingOrdersAsOf(existingRecords);
-  const { amended, backwards, restated } = partitionChangedClaims(changed, restingOnFile, orders);
-  // TWO REFUSALS, AND `amended` GOES FIRST. Per RUNG the two conditions cannot both hold —
-  // that is the partition's own argument — but a BATCH can raise one of each over different
-  // rungs, and then something has to be printed first. `amended` wins because it is the
-  // one with a funding hazard behind it: a batch carrying an amended `quantity` is refused
-  // with exactly the token and the message it was refused with before this split, whatever
-  // else the export also got wrong.
+  const { amended, backwards, descriptors, restated } = partitionChangedClaims(
+    changed,
+    restingOnFile,
+    orders,
+  );
+  // THREE REFUSALS, ORDERED BY HAZARD, AND `amended` STILL GOES FIRST. Per RUNG the
+  // conditions cannot both hold — that is the partition's own argument — but a BATCH can
+  // raise one of each over different rungs, and then something has to be printed first.
+  // `amended` wins because it is the one with a funding hazard behind it: a batch carrying
+  // an amended `quantity` is refused with exactly the token and the message it was refused
+  // with before this split, whatever else the export also got wrong.
+  //
+  // `descriptors` GOES LAST for the same reasoning read the other way (#205): it is the
+  // one class with NO funding hazard at all, because the encumbrance is `price * quantity`
+  // and no descriptor is in it. `backwards` sits between them — no funding hazard either,
+  // but it says the operator may be holding the wrong export, which casts doubt on every
+  // other row of the batch in a way a differing `time_in_force` does not.
   if (amended.length > 0) {
     const detail = amended
       .map((claim) => {
@@ -781,6 +844,34 @@ export async function importBitgetOpenOrders(
         `itself: an OLDER one, or not the one you meant. Re-export the open orders from the ` +
         `venue and import that. Nothing here needs doing at the venue — the rungs on file ` +
         `are untouched and still resting`,
+    );
+  }
+
+  if (descriptors.length > 0) {
+    // The SAME detail template the amendment refusal renders, over the same
+    // `ClaimDifference` union — `known` and `observed` are a number pair or a string pair
+    // depending on the field, and the template is well-typed over both.
+    const detail = descriptors
+      .map((claim) => {
+        const differences = claim.differences
+          .map((difference) => `${difference.field} ${difference.known} → ${difference.observed}`)
+          .join(", ");
+        return `${claim.id} (${differences})`;
+      })
+      .join("; ");
+    return reject(
+      io,
+      "descriptor-changed",
+      `${csvPath} describes ${plural(descriptors.length, "rung")} as PLACED differently ` +
+        `from the placement line already on file — ${detail}. NOTHING ABOUT THE MONEY ` +
+        `MOVED: what a rung encumbers is price × quantity, no descriptor is in that ` +
+        `product, and neither the size nor the price of these rungs changed — so the ` +
+        `funding guard's reading of this book is exactly as correct as it was, and ` +
+        `nothing was written. The file and the venue are simply saying two different ` +
+        `things about one rung, and this build will not record a contradiction into an ` +
+        `append-only file. Reconcile the export against the venue's open-orders screen and ` +
+        `import the one that matches it. Nothing here needs doing at the venue — the rungs ` +
+        `on file are untouched and still resting`,
     );
   }
 
