@@ -25,6 +25,11 @@ if (!csvPath) {
       csvPath,
       io: {
         readExport: (path) => readFile(path, "utf8"),
+        // THE REAL CLOCK, and the only place it is read (#181). An observation line is
+        // stamped with the import moment, so the one adapter that runs against a real
+        // venue export is the one that supplies a real instant; the test harness supplies
+        // a frozen one, which is what makes the same-second case assertable at all.
+        now: () => new Date(),
         ordersPath: resolveOrdersPath(),
         loadOrders,
         appendOrders,
