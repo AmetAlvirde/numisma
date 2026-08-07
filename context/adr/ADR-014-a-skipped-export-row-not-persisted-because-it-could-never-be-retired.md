@@ -1,4 +1,4 @@
-# A skipped export row leaves no durable trace
+# A skipped export row: not persisted, because it could never be retired
 
 _Made during: MVI — BTC DCA tracker increment / the decision was argued and taken
 on #183 ("The funding guard cannot see a rung the export skipped", closed
