@@ -913,9 +913,46 @@ export async function importBitgetOpenOrders(
   // ONE `appendOrders` CALL for both kinds: one lock, one temp write, one `rename`. There
   // is no ordering reason to split them — the selector sorts by `observedAt` at READ time,
   // so the file's byte order cannot change what it means.
-  const alreadyOnFile = new Set(existingRecords.map((record) => appendKey(record)));
+  // THE SET IS THE RUNG'S CURRENT CLAIM, NOT ITS WHOLE HISTORY (#212). `appendKey` is a
+  // pure function of ONE record and structurally cannot see what came after it, so it can
+  // only answer *"is this figure already recorded?"*; what the filter must answer is *"is
+  // this figure still the rung's CURRENT claim?"*. The scoping therefore lives HERE, in
+  // what the set is built from, and the key is left alone.
+  //
+  // The two questions part company the moment one observation supersedes another: observe
+  // 8, record a backwards restatement of 5, and the venue's next export of 8 is a
+  // legitimate RE-ASSERTION that a whole-history set drops as a repeat. Nothing lands —
+  // and the report describes the lines that were WRITTEN, so the operator is told
+  // `0 observation(s) recorded` about an observation this flow had just decided to record.
+  //
+  // ONLY THE LATEST OBSERVATION PER RUNG goes in, by the SAME last-wins-by-stamp rule
+  // `detectChangedClaims` uses — `>=`, so the last line in file order wins an equal-stamp
+  // tie. That function is what decides an observation is worth building; were the two to
+  // disagree about which figure is current, one layer would build a line the other refused
+  // to write. Every other kind goes in whole, which for a placement is equivalent to
+  // keying on the id alone, since `synthesizeOrderId` already includes `observedAt`.
+  const latestObserved = new Map<string, OrderFillObservedRecord>();
+  const currentOnFile = new Set<string>();
+  for (const record of existingRecords) {
+    if (record.kind !== "orderFillObserved") {
+      currentOnFile.add(appendKey(record));
+      continue;
+    }
+    const seen = latestObserved.get(record.id);
+    if (seen === undefined || record.observedAt >= seen.observedAt) {
+      latestObserved.set(record.id, record);
+    }
+  }
+  for (const record of latestObserved.values()) {
+    currentOnFile.add(appendKey(record));
+  }
+  // ONE SET, BUILT ONCE, over both arrays in a single pass — so a second line for the same
+  // rung inside ONE batch would not see the first. It cannot arise: `mergeCollidingClaims`
+  // has already summed id collisions, so `orders` holds at most one row per id, and
+  // `records` and `observations` are derived from it by complementary filters on
+  // `restatedIds`. Re-keying per record would buy nothing and cost a quadratic pass.
   const fresh: OrderRecord[] = [...records, ...observations].filter(
-    (record) => !alreadyOnFile.has(appendKey(record)),
+    (record) => !currentOnFile.has(appendKey(record)),
   );
   try {
     await io.appendOrders(io.ordersPath, fresh);
@@ -975,10 +1012,13 @@ export async function importBitgetOpenOrders(
  * would read the first observation of a known rung as a repeat of its placement line and
  * drop it — the whole feature, filtered out by its own dedupe.
  *
- * KNOWINGLY OPEN, tracked on #212 — THIS KEY ANSWERS *"is this figure already recorded?"*,
- * but the filter at its one call site needs *"is this figure still the rung's CURRENT
- * claim?"*: `alreadyOnFile` is built from EVERY existing record, so a figure some later
- * line already superseded still filters a legitimate re-assertion of it.
+ * ONE OF TWO QUESTIONS, AND THE CALL SITE ANSWERS THE OTHER. This key answers *"is this
+ * figure already recorded?"* — all a pure function of ONE record can answer, since nothing
+ * in a record says what came after it. *"Is this figure still the rung's CURRENT claim?"*
+ * is answered where it can be: the filter builds its set from the LATEST observation per
+ * rung rather than from every existing record, so a superseded figure no longer filters a
+ * legitimate re-assertion of it. Keep the scoping there; widening this key to reach for
+ * history would only move the second question somewhere it still cannot be answered.
  */
 function appendKey(record: OrderRecord): string {
   return record.kind === "orderFillObserved"
