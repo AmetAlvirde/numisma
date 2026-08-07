@@ -40,6 +40,7 @@ import {
   type UnmatchedRung,
 } from "@numisma/engine";
 import type { OrdersLoad } from "@numisma/preferences";
+import { appendKey, currentClaimKeys } from "./import-orders-append-filter.js";
 import {
   reportOrdersImport,
   type OrdersImportRecorded,
@@ -63,8 +64,8 @@ export interface OrdersImportIo {
    * ONE EXPORT IS ONE LOOK, so every observation of a batch shares one stamp, and the
    * stamp is second-granular because {@link isObservedAtStamp} is the shape the whole
    * repo string-compares. Two imports inside one second therefore carry the SAME stamp,
-   * and nothing downstream may depend on the stamp to tell them apart — see the append
-   * key at {@link appendKey}, which keys an observation on what it ASSERTS.
+   * and nothing downstream may depend on the stamp to tell them apart — see `appendKey` in
+   * `./import-orders-append-filter.js`, which keys an observation on what it ASSERTS.
    */
   now: () => Date;
   /** The sidecar's resolved path — resolved by the caller, never by this flow. */
@@ -1004,39 +1005,10 @@ export async function importBitgetOpenOrders(
   // ONE `appendOrders` CALL for both kinds: one lock, one temp write, one `rename`. There
   // is no ordering reason to split them — the selector sorts by `observedAt` at READ time,
   // so the file's byte order cannot change what it means.
-  // THE SET IS THE RUNG'S CURRENT CLAIM, NOT ITS WHOLE HISTORY (#212). `appendKey` is a
-  // pure function of ONE record and structurally cannot see what came after it, so it can
-  // only answer *"is this figure already recorded?"*; what the filter must answer is *"is
-  // this figure still the rung's CURRENT claim?"*. The scoping therefore lives HERE, in
-  // what the set is built from, and the key is left alone.
-  //
-  // The two questions part company the moment one observation supersedes another: observe
-  // 8, record a backwards restatement of 5, and the venue's next export of 8 is a
-  // legitimate RE-ASSERTION that a whole-history set drops as a repeat. Nothing lands —
-  // and the report describes the lines that were WRITTEN, so the operator is told
-  // `0 observation(s) recorded` about an observation this flow had just decided to record.
-  //
-  // ONLY THE LATEST OBSERVATION PER RUNG goes in, by the SAME last-wins-by-stamp rule
-  // `detectChangedClaims` uses — `>=`, so the last line in file order wins an equal-stamp
-  // tie. That function is what decides an observation is worth building; were the two to
-  // disagree about which figure is current, one layer would build a line the other refused
-  // to write. Every other kind goes in whole, which for a placement is equivalent to
-  // keying on the id alone, since `synthesizeOrderId` already includes `observedAt`.
-  const latestObserved = new Map<string, OrderFillObservedRecord>();
-  const currentOnFile = new Set<string>();
-  for (const record of existingRecords) {
-    if (record.kind !== "orderFillObserved") {
-      currentOnFile.add(appendKey(record));
-      continue;
-    }
-    const seen = latestObserved.get(record.id);
-    if (seen === undefined || record.observedAt >= seen.observedAt) {
-      latestObserved.set(record.id, record);
-    }
-  }
-  for (const record of latestObserved.values()) {
-    currentOnFile.add(appendKey(record));
-  }
+  // WHAT THE FILE CURRENTLY CLAIMS, AS KEYS — the rung's CURRENT claim rather than its
+  // whole history (#212), built by `currentClaimKeys` in `./import-orders-append-filter.js`
+  // where the argument for that scoping is recorded beside the key it scopes.
+  const currentOnFile = currentClaimKeys(existingRecords);
   // ONE SET, BUILT ONCE, over both arrays in a single pass — so a second line for the same
   // rung inside ONE batch would not see the first. It cannot arise: `mergeCollidingClaims`
   // has already summed id collisions, so `orders` holds at most one row per id, and
@@ -1068,51 +1040,4 @@ export async function importBitgetOpenOrders(
   });
   io.out(message);
   return outcome;
-}
-
-/**
- * THE APPEND FILTER'S KEY — what makes a line a REPEAT of one already on file (#181).
- *
- * KEYED ON WHAT THE LINE ASSERTS, not on when it was looked at, and the two kinds assert
- * different things:
- *
- *   - `orderFillObserved` → `(kind, id, observedFilledQuantity)`. Two observations of the
- *     same cumulative figure are the SAME FACT stated twice and dedupe; 8 then 9 are
- *     genuine movement and both land.
- *   - everything else → `(kind, id, observedAt)`. For a placement this is exactly
- *     equivalent to keying on the id alone, since `synthesizeOrderId` already includes
- *     `observedAt`, so repeat-placement dedupe is unchanged.
- *
- * WHY NOT `observedAt` FOR AN OBSERVATION, which is what an id-and-stamp key would give.
- * One export is one look, so a whole batch shares one second-granular stamp — and two
- * imports inside the SAME second would then key identically, so the second import's
- * observation was silently dropped while the operator was told it was RECORDED and a
- * successful status came back. Honesty and information loss rather than money loss, and
- * ordinary to reach: two exports back to back, or any scripted loop.
- *
- * MILLISECOND PRECISION WAS REJECTED as the fix, not overlooked. `isObservedAtStamp`
- * validates `YYYY-MM-DDTHH:MM:SS`, the stamp is string-compared across the whole repo and
- * is a component of a durable event id — and milliseconds only SHRINK the collision
- * window rather than closing it, while keying on the figure closes it.
- *
- * THE EQUAL STAMPS ARE FINE DOWNSTREAM. `pickRestingOrdersAsOf` sorts stably, so file
- * order breaks the tie and replays 8 then 9 — the batch stamp's own argument working as
- * written.
- *
- * WHY `kind` IS IN THE KEY AT ALL: an observation shares its rung's id, so an id-only key
- * would read the first observation of a known rung as a repeat of its placement line and
- * drop it — the whole feature, filtered out by its own dedupe.
- *
- * ONE OF TWO QUESTIONS, AND THE CALL SITE ANSWERS THE OTHER. This key answers *"is this
- * figure already recorded?"* — all a pure function of ONE record can answer, since nothing
- * in a record says what came after it. *"Is this figure still the rung's CURRENT claim?"*
- * is answered where it can be: the filter builds its set from the LATEST observation per
- * rung rather than from every existing record, so a superseded figure no longer filters a
- * legitimate re-assertion of it. Keep the scoping there; widening this key to reach for
- * history would only move the second question somewhere it still cannot be answered.
- */
-function appendKey(record: OrderRecord): string {
-  return record.kind === "orderFillObserved"
-    ? `${record.kind} ${record.id} ${record.observedFilledQuantity}`
-    : `${record.kind} ${record.id} ${record.observedAt}`;
 }
