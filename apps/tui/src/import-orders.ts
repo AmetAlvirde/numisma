@@ -28,7 +28,6 @@ import {
   pickRestingOrdersAsOf,
   type BitgetOpenOrder,
   type BitgetRowSkip,
-  type MergedOrderClaim,
   type OrderFillObservedRecord,
   type OrderPlacedRecord,
   type OrderRecord,
@@ -37,6 +36,7 @@ import {
 import type { OrdersLoad } from "@numisma/preferences";
 import { appendKey, currentClaimKeys } from "./import-orders-append-filter.js";
 import { partitionChangedClaims, weighRemainders } from "./import-orders-changed-claims.js";
+import { describeMerge } from "./import-orders-merge-notice.js";
 import {
   reportOrdersImport,
   type OrdersImportRecorded,
@@ -253,24 +253,6 @@ function reject(
   // be able to mistake a refusal for a quiet no-op.
   io.err(`REFUSED — ${message}\nNothing was written to ${io.ordersPath}.`);
   return { status: "rejected", reason, message };
-}
-
-/**
- * The operator-facing line for one merged claim — FIRST-CLASS output, not an aside.
- *
- * Two rows the venue rendered under one id have been summed, and the operator is owed
- * the whole arithmetic: which rung, at what second, both sizes, the total that will be
- * written, and the remedy if the two were meant to stay distinct claims.
- */
-function describeMerge(merge: MergedOrderClaim): string {
-  return (
-    `MERGED — ${merge.symbol} ${merge.side} at ${merge.price}, submitted ${merge.observedAt}: ` +
-    `${merge.quantities.length} rows sharing one id (${merge.quantities.join(" + ")}) were ` +
-    `summed into ONE claim of ${merge.mergedQuantity}. The venue's export carries no order ` +
-    `id, and these rows agree on every field identity is built from, so the sum is the only ` +
-    `reading that neither invents a second claim nor frees committed capital. To keep two ` +
-    `rungs distinct, re-place one a tick apart so their prices differ.`
-  );
 }
 
 /** How one rung is shown when the operator asks to override it. */

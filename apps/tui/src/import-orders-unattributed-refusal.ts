@@ -13,7 +13,7 @@
  * FOUR RULES NOTHING COULD HOLD THROUGH THAT APPARATUS, and they are what the extraction
  * bought: the `default: never` fallback below (unreachable by types, so no end-to-end
  * fixture can reach it), the ORDER of the sections, the LABEL → ADVICE → RUNGS order
- * inside one, and the 80-column wrap the closing paragraph is wrapped for. All four are
+ * inside one, and the wrap budget the closing paragraph is wrapped for. All four are
  * argued in the docstring below and now asserted in
  * `import-orders-unattributed-refusal.test.ts`.
  *
@@ -100,8 +100,10 @@ export function renderUnattributedRefusal(
   // It marks the LINE, not the id: a marker wedged between an id and the clause that
   // follows it reads as part of that clause rather than as a note about the rung. Keeping
   // the marker at end-of-line is why the currency-mismatch section puts the id alone on
-  // its line and indents the mismatch beneath it — end-of-line and inside 80 columns are
-  // both wanted, and the id plus the clause plus the marker do not fit one line.
+  // its line and indents the mismatch beneath it — end-of-line and inside the budget are
+  // both wanted, and the id plus the clause plus the marker do not fit one line. That was
+  // true at 80 and is still true at 100: the pieces are three variable-width ids, and no
+  // budget a terminal offers makes their concatenation safe to assume.
   const mark = (line: string, orderId: string): string =>
     batchIds.has(orderId) ? line : `${line} — on file`;
   const anyOnFile = unmatched.some((entry) => !batchIds.has(entry.rung.orderId));
@@ -119,12 +121,12 @@ export function renderUnattributedRefusal(
     }
     const many = byReserve.size !== 1;
     const advice = many
-      ? `    The fold excluded these reserves: paper execution mode, an unsupported\n` +
-        `    currency, or a dangling account reference. They cannot fund a live order,\n` +
-        `    and the available-capital report would not be able to place them either.`
-      : `    The fold excluded this reserve: paper execution mode, an unsupported\n` +
-        `    currency, or a dangling account reference. It cannot fund a live order,\n` +
-        `    and the available-capital report would not be able to place it either.`;
+      ? `    The fold excluded these reserves: paper execution mode, an unsupported currency, or\n` +
+        `    a dangling account reference. They cannot fund a live order, and the available-\n` +
+        `    capital report would not be able to place them either.`
+      : `    The fold excluded this reserve: paper execution mode, an unsupported currency, or a\n` +
+        `    dangling account reference. It cannot fund a live order, and the available-capital\n` +
+        `    report would not be able to place it either.`;
     const listing = [...byReserve].map(
       ([reserveId, orderIds]) =>
         `      ${reserveId}\n` +
@@ -157,8 +159,8 @@ export function renderUnattributedRefusal(
     // token and the rungs are what can be said honestly, and they are enough to report.
     sections.push(
       `  ${token} — ${plural(orderIds.length, "rung")}\n` +
-        `    This refusal has no section for that reason; it is named as the engine\n` +
-        `    gave it, so no rung counted above goes unlisted.\n` +
+        `    This refusal has no section for that reason; it is named as the engine gave it, so\n` +
+        `    no rung counted above goes unlisted.\n` +
         `${orderIds.map((orderId) => mark(`      ${orderId}`, orderId)).join("\n")}`,
     );
   }
@@ -168,19 +170,20 @@ export function renderUnattributedRefusal(
     // Only when there is something to explain: a batch whose every unplaceable rung came
     // out of the export just read owes the operator no marker and no legend for one.
     (anyOnFile
-      ? `Coverage weighs the WHOLE resting book, so rungs marked "on file" below were\n` +
-        `already in the sidecar before this import, not in the export just read.\n`
+      ? `Coverage weighs the WHOLE resting book, so rungs marked "on file" below were already in\n` +
+        `the sidecar before this import, not in the export just read.\n`
       : ``) +
     `\n` +
     `${sections.join("\n\n")}\n\n` +
-    // Wrapped at 72/71/19 rather than 80/83 (#202 review). Every other line this renderer
-    // emits sits inside 76, and these two were the only ones that did not — so on an
-    // 80-column terminal the one paragraph that admits what the operator has NOT been told
-    // was also the one paragraph that wrapped, which is the worst place to spend the
-    // reader's attention.
-    `Reserve balances were NOT weighed: an unplaceable rung has no balance to\n` +
-    `compare against, so a coverage refusal may still follow once every rung\n` +
-    `above is placeable.\n`
+    // #202'S ARGUMENT, RE-APPLIED AT 100 RATHER THAN OVERWRITTEN (#221). It was never that
+    // 80 was the number. It was that the paragraph admitting what the operator has NOT been
+    // told must not be the one paragraph the terminal soft-wraps — the worst place in the
+    // whole refusal to spend the reader's attention. At 80 that meant 72/71/19 against
+    // prose sitting inside 76. The budget is now 100 and this renderer's prose is wrapped
+    // at 88, so the same rule gives 80/83: still the narrowest paragraph here, still short
+    // of every other line the renderer emits, and now with twelve columns of slack.
+    `Reserve balances were NOT weighed: an unplaceable rung has no balance to compare\n` +
+    `against, so a coverage refusal may still follow once every rung above is placeable.\n`
     // That trailing newline is the blank line before `reject()`'s "Nothing was written to
     // …" tail. Without it the tail reads as a continuation of the balances sentence —
     // invisible when the body was one paragraph, plainly wrong now that it is several.
