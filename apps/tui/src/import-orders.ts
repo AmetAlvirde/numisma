@@ -36,6 +36,7 @@ import {
 import type { OrdersLoad } from "@numisma/preferences";
 import { appendKey, currentClaimKeys } from "./import-orders-append-filter.js";
 import { partitionChangedClaims, weighRemainders } from "./import-orders-changed-claims.js";
+import { declareFunding } from "./import-orders-funding-declaration.js";
 import { describeMerge } from "./import-orders-merge-notice.js";
 import {
   reportOrdersImport,
@@ -253,52 +254,6 @@ function reject(
   // be able to mistake a refusal for a quiet no-op.
   io.err(`REFUSED — ${message}\nNothing was written to ${io.ordersPath}.`);
   return { status: "rejected", reason, message };
-}
-
-/** How one rung is shown when the operator asks to override it. */
-function describe(order: BitgetOpenOrder): string {
-  return `${order.symbol} ${order.side} ${order.quantity} @ ${order.price} (${order.observedAt})`;
-}
-
-function isAffirmative(answer: string): boolean {
-  const normalized = answer.trim().toLowerCase();
-  return normalized === "y" || normalized === "yes";
-}
-
-/**
- * Prompt for the ONE declared field.
- *
- * Once per BATCH, then overridable per order — the granularity is the venue's own
- * argument: a ladder is homogeneous by construction, so eight rungs is one decision
- * copied eight times, and asking eight times is eight chances to disagree with yourself.
- * The per-order pass is opt-in and defaults to the batch answer on a blank line, so the
- * homogeneous case costs exactly one keystroke and the dissenting rung is still
- * expressible.
- */
-async function declareFunding(
-  io: OrdersImportIo,
-  orders: readonly BitgetOpenOrder[],
-): Promise<{ fundingReserveId: string; overrides: Record<string, string> } | undefined> {
-  const batch = (await io.ask("Funding reserve for this batch: ")).trim();
-  if (batch === "") {
-    return undefined;
-  }
-
-  const overrides: Record<string, string> = {};
-  const wantsOverrides = isAffirmative(
-    await io.ask(`Override the funding reserve for any individual order? [y/N] `),
-  );
-  if (!wantsOverrides) {
-    return { fundingReserveId: batch, overrides };
-  }
-
-  for (const order of orders) {
-    const answer = (await io.ask(`  ${describe(order)} [${batch}]: `)).trim();
-    if (answer !== "" && answer !== batch) {
-      overrides[order.id] = answer;
-    }
-  }
-  return { fundingReserveId: batch, overrides };
 }
 
 /**
@@ -542,7 +497,9 @@ export async function importBitgetOpenOrders(
   // this flow can perform — so exiting early over it would skip the feature's best case.
   const records: OrderPlacedRecord[] = [];
   if (admitted.length > 0) {
-    const declaration = await declareFunding(io, admitted);
+    // `io.ask` ALONE, not the bag: that module reads the prompt channel and nothing else,
+    // and its signature says so — see its header.
+    const declaration = await declareFunding(io.ask, admitted);
     if (declaration === undefined) {
       return reject(io, "no-reserve-declared", "no funding reserve was declared for this batch");
     }
