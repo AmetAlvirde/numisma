@@ -17,9 +17,11 @@
  * warnings the operator can walk past.
  */
 import {
+  buildOrderFillObserved,
   buildOrderPlacedRecords,
   checkFundingCoverage,
   detectChangedClaims,
+  formatObservedAt,
   leavesRungUnweighed,
   mergeCollidingClaims,
   parseBitgetOpenOrdersCsv,
@@ -28,6 +30,7 @@ import {
   type BitgetRowSkip,
   type ChangedClaim,
   type MergedOrderClaim,
+  type OrderFillObservedRecord,
   type OrderPlacedRecord,
   type OrderRecord,
   type FundReviewData,
@@ -42,6 +45,21 @@ import { renderSkipMessage } from "./skip-message.js";
 export interface OrdersImportIo {
   /** Read the venue's export. Rejects (throws) if it is unreadable; we catch it. */
   readExport: (path: string) => Promise<string>;
+  /**
+   * THE CLOCK, injected (#181, `D3`). An observation line is stamped with the IMPORT
+   * MOMENT — the instant this look at the venue happened — and never with the export row's
+   * own `timestamp` column. That column is the SUBMISSION stamp and an id component
+   * (`bitget.ts`), so a line stamped from it would sort to the placement's own instant,
+   * where `pickRestingOrdersAsOf` has no tie-break and would replay the two in an order
+   * nothing decides.
+   *
+   * ONE EXPORT IS ONE LOOK, so every observation of a batch shares one stamp, and the
+   * stamp is second-granular because {@link isObservedAtStamp} is the shape the whole
+   * repo string-compares. Two imports inside one second therefore carry the SAME stamp,
+   * and nothing downstream may depend on the stamp to tell them apart — see the append
+   * key at {@link appendKey}, which keys an observation on what it ASSERTS.
+   */
+  now: () => Date;
   /** The sidecar's resolved path — resolved by the caller, never by this flow. */
   ordersPath: string;
   loadOrders: (path: string) => Promise<OrdersLoad>;
@@ -88,11 +106,15 @@ export type OrdersImportRejection =
    * remedy this member prints is wrong for it, not because it stopped being a refusal.
    *
    * Refused rather than recorded, and this is the ONE place the "proceed with the
-   * arithmetic" reasoning behind the within-batch merge does not extend. Recording a
-   * change needs a verb this build does not have: a second `orderPlaced` line is ignored
-   * by `pickRestingOrdersAsOf` by construction (that guard is what makes re-import
-   * idempotent), and an observation verb is a later design that must not be pre-empted
-   * by one invented here, in an append-only file, to get past this import.
+   * arithmetic" reasoning behind the within-batch merge does not extend. THE OBSERVATION
+   * VERB EXISTS NOW (#181) and does not help here, which is the point: an
+   * `orderFillObserved` line restates ONE figure — the venue's cumulative fill — and
+   * neither member landing here is that. An amended `quantity` is the one figure nothing
+   * may go stale on and the verb deliberately carries no copy of it; a restatement the
+   * file's own fill lines have already overtaken is a contradiction between the book and
+   * the venue, and recording it would write the contradiction down rather than settle it.
+   * A second `orderPlaced` line remains ignored by `pickRestingOrdersAsOf` by construction
+   * (that guard is what makes re-import idempotent), so there is no verb here either way.
    *
    * NARROWED BY #199, and the DIRECTION is the whole reason. Refusing the batch never
    * repaired the stale line — nothing is written on a refusal — so what the refusal
@@ -103,9 +125,9 @@ export type OrdersImportRejection =
    * REMAINDER the guard actually weighs — `pickRestingOrdersAsOf` over the whole stream,
    * fill and cancellation lines included — not off the placement line alone, because a
    * recorded fill can flip a restatement from the safe side to this one. A restatement
-   * that leaves the file claiming NO LESS than the venue holds is handled per rung
-   * instead — see {@link RestatedPartial}. The argument for refusing here is about which
-   * way the leftover staleness points, not about the change itself.
+   * that leaves the file claiming NO LESS than the venue holds is RECORDED per rung
+   * instead — see {@link RecordedObservation}. The argument for refusing here is about
+   * which way the leftover staleness points, not about the change itself.
    */
   | "changed-claim"
   /**
@@ -166,51 +188,32 @@ export type OrdersImportRejection =
   | "write-failed";
 
 /**
- * A rung the venue has filled FURTHER since its placement line was written (#199).
+ * A rung the venue has filled FURTHER since the file last observed it, RECORDED (#181).
  *
  * The id is synthesized from the SUBMISSION stamp, so a rung that fills between two
  * exports comes back under the same id carrying a larger `filled_quantity`. That is not
- * an amendment and not a re-sighting — it is the ordinary life of a resting ladder — but
- * the placement line cannot be rewritten (`orders.jsonl` is append-only and a second
- * placement line is ignored by the selector), so the file keeps the OLDER partial until
- * the observation verb #181 designs exists.
+ * an amendment and not a re-sighting — it is the ordinary life of a resting ladder — and
+ * it now gets its own durable line: an `orderFillObserved`, stamped with the IMPORT
+ * moment, which `pickRestingOrdersAsOf` folds as a new `consumed` baseline.
  *
- * Carrying the stale figure is safe in a way an amended `quantity` is not, and only
- * because of the direction: what the file still counts as resting is NO LESS than what
- * the venue actually holds, so the encumbrance it computes is never too small. That can
- * refuse a batch the reserve could have funded; it can never admit one it cannot. So the
- * rung is skipped and the rest of the export imports normally, rather than the whole
- * batch being refused over it.
+ * IT REPLACES `RestatedPartial` RATHER THAN REPURPOSING IT (#199 → #181). That type
+ * carried BOTH remainders because the pair WAS the safety argument for a per-rung SKIP:
+ * printing them let an operator check that the stale line still encumbered no less than
+ * the venue held. There is no skip left to justify, and after the observation lands the
+ * pair is redundant by construction — the file's remainder becomes `quantity − observed`,
+ * which is exactly the venue's. What an operator still wants is the one thing this
+ * carries: what the file knew, and what it now records.
  *
- * THE DIRECTION IS READ OFF THE REMAINDER, not off the two partials (#200 review). The
- * guard downstream weighs `pickRestingOrdersAsOf`, which replays fills and cancellations
- * as well as placements, so a fill already recorded against this rung can shrink the
- * file's remainder below the venue's and INVERT the safety claim while the partials still
- * read as "moved up". Those rungs are refused as `changed-claim`; only a rung whose
- * remainder on file is at least the venue's reaches this type. A partial moving DOWN is
- * refused too, and since #181 by a rule of its OWN — `backwards-claim`, taken before the
- * remainder test, because a fill does not un-fill and the remedy that case is owed is
- * nothing like this one's. The algebra for both is on `partitionChangedClaims`.
+ * IT IS NOT A QUALIFICATION. A restatement qualified the status while it was a DEFERRAL —
+ * a rung read perfectly and then not written down — and this build writes it down. See
+ * {@link OrdersImportOutcome}'s `imported` member for what that does to the union.
+ *
+ * THE DIRECTION IS STILL READ OFF THE REMAINDER, not off the two figures (#200 review).
+ * A restatement the file's OWN fill lines have already overtaken is not a restatement at
+ * all — the fund has BOOKED units the venue does not corroborate — and those rungs stay a
+ * batch-wide `changed-claim` refusal. The algebra is on `partitionChangedClaims`.
  */
-/**
- * A rung the export shows LESS filled than the file's latest observation of it (#181) —
- * the refusal `backwards-claim` is raised over.
- *
- * TWO FIGURES AND NO REMAINDERS, unlike {@link RestatedPartial}. The remainders are what
- * makes a per-rung skip safe, so that type carries them to let the operator check the
- * claim; this one is refused on the two partials ALONE, because they are already a
- * contradiction and no third figure makes them less of one. Printing a remainder here
- * would send the operator after a disagreement this refusal does not have.
- */
-interface BackwardsClaim {
-  id: string;
-  /** The file's latest observation — see {@link RestatedPartial.known} for the basis. */
-  known: number;
-  /** The SMALLER partial the export shows. */
-  observed: number;
-}
-
-export interface RestatedPartial {
+export interface RecordedObservation {
   id: string;
   /**
    * The file's LATEST OBSERVATION of this rung's partial — a later `orderFillObserved`
@@ -219,20 +222,25 @@ export interface RestatedPartial {
    * restatement could be written down.
    */
   known: number;
-  /** The larger partial the venue's export now shows. */
+  /** The larger cumulative partial the venue's export now shows, and what was written. */
   observed: number;
-  /**
-   * What this rung STILL CLAIMS on file — the selector's remainder, net of the placement
-   * line's own partial and every `orderFilled` line since, and `0` when the stream has
-   * already retired the id.
-   *
-   * Carried rather than left implicit because it, not `known`, is what makes the skip
-   * safe: this pair IS the safety argument, and printing both lets an operator check the
-   * claim instead of taking it on faith.
-   */
-  remainingOnFile: number;
-  /** What the venue's export says is still resting: `quantity` less its filled figure. */
-  remainingAtVenue: number;
+}
+
+/**
+ * A rung the export shows LESS filled than the file's latest observation of it (#181) —
+ * the refusal `backwards-claim` is raised over.
+ *
+ * SPELLED SEPARATELY FROM {@link RecordedObservation} even though the two carry the same
+ * three fields, because they are opposite outcomes of the same comparison: one names a
+ * line this import WROTE, the other a line it REFUSED to write. Collapsing them into one
+ * type would let a refusal be handed to the reporter that describes what was recorded.
+ */
+interface BackwardsClaim {
+  id: string;
+  /** The file's latest observation — see {@link RecordedObservation.known} for the basis. */
+  known: number;
+  /** The SMALLER partial the export shows. */
+  observed: number;
 }
 
 /**
@@ -245,11 +253,19 @@ export interface RestatedPartial {
  */
 interface OrdersImportWrite {
   /**
-   * Lines actually appended. ZERO in two different ways, and the distinction is visible
-   * only in the other fields: every rung was already known — the same export imported
-   * twice, so `alreadyKnown` carries them — or nothing was admitted at all, every
-   * readable rung having been restated, so `alreadyKnown` is 0 too and `restated` holds
-   * them.
+   * ORDERS appended — placement lines, and never a line count (#181). The two were the
+   * same number until an import could write a second kind, and the moment it could, a
+   * pure-observation import reported `1 order(s) appended` about ZERO orders.
+   *
+   * `appended` KEEPS MEANING ORDERS because that is the question the number is read for:
+   * *how many claims on my capital did this import create?* An observation creates none —
+   * it only ever REDUCES what a rung still claims — so counting it here would answer that
+   * question wrongly in the direction that matters. Observations are counted by
+   * {@link observations}, whose length IS the count.
+   *
+   * ZERO in three different ways now, and the other fields tell them apart: every rung was
+   * already known (`alreadyKnown` carries them), every readable rung was restated
+   * (`observations` carries them), or the export named nothing this build admitted.
    */
   appended: number;
   /**
@@ -257,39 +273,50 @@ interface OrdersImportWrite {
    * thing about it — the id components plus `quantity` and the observed partial.
    *
    * A row that differs NEVER reaches this count, whichever way it goes: it either
-   * refuses the whole batch as `changed-claim` (#174) or is skipped per rung and
-   * reported in `restated` (#199). Calling either one "already known" is the silence
-   * #174 named — it reports "nothing to do" about a rung the file now describes wrongly.
+   * refuses the whole batch as `changed-claim` / `backwards-claim` (#174, #181) or is
+   * recorded as an observation and reported in {@link observations} (#181). Calling
+   * either one "already known" is the silence #174 named — it reports "nothing to do"
+   * about a rung the file now describes wrongly.
    */
   alreadyKnown: number;
   /**
    * The export rows this build could not read — NOT empty on `imported`, and the
-   * asymmetry with `restated` is deliberate rather than an oversight. A `not-resting` row
-   * was read COMPLETELY and the parser's finding about it is that nothing is still
-   * claimed, so it rides here and qualifies nothing (#184). What `imported` promises
-   * about this field is that none of its entries left a rung UNWEIGHED — that is
-   * `leavesRungUnweighed`'s question, not this array's length.
+   * asymmetry with {@link observations} is deliberate rather than an oversight. A
+   * `not-resting` row was read COMPLETELY and the parser's finding about it is that
+   * nothing is still claimed, so it rides here and qualifies nothing (#184). What
+   * `imported` promises about this field is that none of its entries left a rung
+   * UNWEIGHED — that is `leavesRungUnweighed`'s question, not this array's length.
    */
   skips: BitgetRowSkip[];
   /**
-   * The rungs skipped because the venue has restated their partial (#199). EMPTY on
-   * `imported`, by construction — the one field whose own length decides the status,
-   * because every entry in it is a qualification and `skips` needs a predicate to say
-   * which of its entries are.
+   * The restatements this import RECORDED — exactly one `orderFillObserved` line each
+   * (#181), and never a superset of what was written.
    *
-   * A SECOND FIELD RATHER THAN A THIRD STATUS, and that is the load-bearing choice: an
-   * export can carry an unreadable row AND a restated rung at once, and a sum type can
-   * say only one of those, so a third member would drop one qualification silently. Two
-   * fields under one qualified status say both.
+   * DERIVED FROM THE LINES THAT WERE WRITTEN, not from the decision that proposed them,
+   * and that is the whole shape of `report`. A decision the append filter did not let
+   * through is ABSENT here, so the operator is never told a line was RECORDED that is not
+   * on disk. The `known`/`observed` pair is the one thing joined back from the decision —
+   * the written line carries the new figure, and only the decision remembers the old one.
+   *
+   * NOT A QUALIFICATION, unlike the `restated` field it replaces. That field's own length
+   * decided the status, because a skipped rung was work DEFERRED; this one records work
+   * DONE, so `imported` widens back over it. A reader who never opens this field is not
+   * misled by one, which is the test that decides what may qualify a status.
    */
-  restated: RestatedPartial[];
+  observations: RecordedObservation[];
 }
 
 export type OrdersImportOutcome =
   /**
-   * Every row of the export was read AND nothing was restated. The unqualified success,
-   * and the only one — its invariant STRENGTHENED by #199 rather than widened, so the
-   * status keeps meaning what a reader who never opens a second field assumes it means.
+   * Every row of the export was read. The unqualified success, and the only one.
+   *
+   * ITS INVARIANT WIDENS BACK HERE (#199 → #181), and this union has never shrunk before,
+   * so it is worth saying plainly: this is a GAP CLOSING, not precision lost. #199
+   * strengthened the member to "every row read AND nothing restated" because a
+   * restatement was then a DEFERRAL — a rung read perfectly and then not written down —
+   * and a status that called that unqualified would be lying to the reader who opens no
+   * second field. The restatement is now RECORDED, so it defers nothing and qualifies
+   * nothing, and the only thing left qualifying an import is a row nobody could read.
    */
   | ({ status: "imported" } & OrdersImportWrite)
   /**
@@ -303,20 +330,15 @@ export type OrdersImportOutcome =
    * used to make and which an export of nothing but restated rungs falsifies while still
    * being a perfectly honest run. The CLI exits 0 either way (`D3`).
    *
-   * TWO qualifications reach it, with OPPOSITE money directions, each carrying its own
-   * field and printing its own operator line:
+   * ONE qualification reaches it now (#181): `skips` — a row was not read, so a rung
+   * resting at the venue is `committed` that nobody counted and `available` reads HIGH.
+   * A restated rung used to be the second, and it is a RECORDED line rather than a
+   * deferral since #181, so it no longer qualifies anything.
    *
-   * - `skips` — a row was not read, so a rung resting at the venue is `committed` that
-   *   nobody counted and `available` reads HIGH.
-   * - `restated` — a rung was read perfectly and its partial on file is stale, so what
-   *   the file still claims is NO LESS than the venue holds: `committed` never reads LOW
-   *   and `available` never reads HIGH. (Never LOW, rather than always HIGH: a fill
-   *   already recorded against the rung can leave the two exactly level, and that case is
-   *   in the skip class too.)
-   *
-   * That opposition is why `restated` could not reuse `skips`: `leavesRungUnweighed` is
-   * a predicate over PARSER problems, and a restated rung is not unweighed — it is
-   * weighed, and never weighed short.
+   * STILL A DISTINCT MEMBER RATHER THAN A PREDICATE OVER `skips`, because `skips` is
+   * heterogeneous: a `not-resting` row was read completely and qualifies nothing, so the
+   * status is decided by `leavesRungUnweighed` over the entries rather than by the
+   * array's length. It is still a SUCCESS, and the test is that NOTHING WAS REFUSED.
    */
   | ({ status: "imported-partial" } & OrdersImportWrite)
   | { status: "rejected"; reason: OrdersImportRejection; message: string };
@@ -623,11 +645,11 @@ function partitionChangedClaims(
 ): {
   amended: ChangedClaim[];
   backwards: BackwardsClaim[];
-  restated: RestatedPartial[];
+  restated: RecordedObservation[];
 } {
   const amended: ChangedClaim[] = [];
   const backwards: BackwardsClaim[] = [];
-  const restated: RestatedPartial[] = [];
+  const restated: RecordedObservation[] = [];
 
   for (const claim of changed) {
     if (claim.differences.some((difference) => difference.field === "quantity")) {
@@ -658,13 +680,13 @@ function partitionChangedClaims(
       amended.push(claim);
       continue;
     }
-    restated.push({
-      id: claim.id,
-      known: fill.known,
-      observed: fill.observed,
-      remainingOnFile: remainders.onFile,
-      remainingAtVenue: remainders.atVenue,
-    });
+    // THE REMAINDERS ARE WEIGHED AND NOT CARRIED (#181). They still DECIDE the class —
+    // `remainders.onFile < remainders.atVenue` is the test directly above — but they were
+    // carried onto the outcome to let an operator audit a SKIP's safety claim, and this
+    // build writes the observation instead of skipping. Once the line lands, the file's
+    // remainder IS the venue's, so the pair would print two equal numbers and invite an
+    // audit of nothing.
+    restated.push({ id: claim.id, known: fill.known, observed: fill.observed });
   }
 
   return { amended, backwards, restated };
@@ -865,22 +887,112 @@ export async function importBitgetOpenOrders(
     );
   }
 
-  // THE PER-RUNG SKIP (#199). The restated rung is dropped from THIS batch and its line
-  // on file is left exactly as it was — so the guard below still weighs it, at a remainder
-  // no smaller than the venue's, which is the conservative reading. Everything after this
-  // point sees `admitted`: the rung is not prompted for, not built into a record, and not
-  // counted as `alreadyKnown`, because it is not a re-sighting.
+  // THE RESTATED RUNG LEAVES THE PLACEMENT PATH AND TAKES THE OBSERVATION PATH (#181).
+  // It is already on file under this id, so it is not prompted for and not built into a
+  // second placement record — the selector ignores a repeat placement line anyway. It is
+  // not `alreadyKnown` either: it is not a re-sighting, it is new information, and this
+  // build records it rather than skipping it.
   const restatedIds = new Set(restated.map((claim) => claim.id));
   const admitted = orders.filter((order) => !restatedIds.has(order.id));
 
+  // ONE STAMP FOR THE WHOLE BATCH: one export is one look at the venue, so every
+  // observation this import writes was observed at the same moment. Read from the
+  // injected clock exactly once — a second read could straddle a second boundary and
+  // scatter one look across two instants.
+  const observedAt = formatObservedAt(io.now());
+
+  // A SEPARATE ARRAY FROM `records`, and the separation is load-bearing twice over.
+  // It rides INTO the funding guard — an observation only ever REDUCES a remainder, so
+  // leaving it out would let the guard refuse over capital this very import is about to
+  // free. It stays OUT of the attribution mark, which exists to say which rungs a
+  // re-declaration cannot fix: a restated rung's `fundingReserveId` comes from its
+  // original placement line and `declareFunding` never touches it, so marking it would
+  // send the operator round a loop that changes nothing.
+  //
+  // BUILT THROUGH THE TOTAL CONSTRUCTOR, from the EXPORT ROW rather than from `restated`,
+  // so the figure and the currency come off the same row the decision was made on and no
+  // field needs a default. `filledQuantity` is REQUIRED on a `BitgetOpenOrder`, so there
+  // is no `?? 0` here and could not be one: the parser admits a row only when
+  // `quantity − filledQuantity > 0`, having read both columns.
+  const observations: OrderFillObservedRecord[] = [];
+  for (const order of orders) {
+    if (!restatedIds.has(order.id)) {
+      continue;
+    }
+    const built = buildOrderFillObserved({
+      id: order.id,
+      observedAt,
+      currency: order.currency,
+      observedFilledQuantity: order.filledQuantity,
+    });
+    if (built.status === "ok") {
+      observations.push(built.record);
+      continue;
+    }
+    // UNREACHABLE, AND HANDLED ANYWAY — that is what makes the constructor total rather
+    // than decorative. A rung reaches `restated` only because its figure moved UP from
+    // what the file knew, and the file's floor is 0, so the figure is positive; the stamp
+    // comes from `formatObservedAt` and the currency from a parsed row. If one ever did
+    // refuse, the line is NOT written and — because `report` describes the lines that were
+    // written — the operator is not told it was recorded. The refusal is loud rather than
+    // silent, on the channel every other per-row problem in this flow uses.
+    io.err(
+      `${order.id} skipped — the restatement could not be recorded: ${built.message}`,
+    );
+  }
+
+  // The old figure lives ONLY in the decision — the written line carries the new one and
+  // nothing else — so this is the one thing `report` joins back out of `restated`, and it
+  // joins rather than iterates: a decision with no line on disk is never reached.
+  const knownFigures = new Map(restated.map((claim) => [claim.id, claim.known] as const));
+
   /**
-   * THE ONE TAIL, reached by both exits (#200 review). Extracted rather than duplicated
-   * at the short-circuit below, because a qualification added to one exit and forgotten
-   * on the other is exactly the silent half-report this whole flow is built to refuse.
+   * THE REPORT, FED THE LINES THAT WERE ACTUALLY WRITTEN (#181).
+   *
+   * It used to be handed two bare numbers from ABOVE the write and then reach past its own
+   * parameter list into the DECISION array for the rest — so it described what the flow
+   * DECIDED while the file held what the append filter LET THROUGH. One defect with three
+   * faces, and the visible one was a dropped line surfacing as a confident `RECORDED`.
+   *
+   * Every count and every operator line is now derived HERE, from `written`. `placements`
+   * is passed as an ARRAY rather than as a count for the same reason: `alreadyKnown` is
+   * "what this batch proposed, less what landed", and both halves of that subtraction must
+   * be counted by one rule in one place. The only thing read out of the decision is the
+   * `known` figure joined per line, because the line itself cannot remember it.
+   *
+   * ONE `io.out`, reached by every exit, so the `OBSERVED —` detail is constructed once BY
+   * CONSTRUCTION rather than by discipline. It was written out verbatim at two exits
+   * before, eight lines under a comment stating the very invariant that duplication breaks.
    */
-  const report = (appended: number, alreadyKnown: number): OrdersImportOutcome => {
-    const counts = `${appended} order(s) appended, ${alreadyKnown} already known`;
-    const write = { appended, alreadyKnown, skips: parsed.skips, restated };
+  const report = (
+    written: readonly OrderRecord[],
+    placements: readonly OrderPlacedRecord[],
+  ): OrdersImportOutcome => {
+    const appended = written.filter((record) => record.kind === "orderPlaced").length;
+    const alreadyKnown = placements.length - appended;
+    const observed: RecordedObservation[] = [];
+    for (const record of written) {
+      if (record.kind !== "orderFillObserved") {
+        continue;
+      }
+      const known = knownFigures.get(record.id);
+      // A written observation with no decision behind it cannot exist — every one of them
+      // was built from a `restated` entry a few lines above. Dropped rather than defaulted
+      // if it ever did: inventing a `known` would print an arithmetic nobody performed.
+      if (known !== undefined) {
+        observed.push({ id: record.id, known, observed: record.observedFilledQuantity });
+      }
+    }
+
+    // THE OBSERVATION CLAUSE RENDERS ALWAYS, INCLUDING AT ZERO. A clause that appears
+    // conditionally is two shapes for a reader to learn and two for a test to assert, and
+    // it is one more place for the two exits to diverge again. `appended` counts ORDERS,
+    // so a pure-observation import reads `0 order(s) appended` beside a non-zero
+    // observation count — which is the honest pair, not a contradiction.
+    const counts =
+      `${appended} order(s) appended, ${alreadyKnown} already known, ` +
+      `${observed.length} observation(s) recorded`;
+    const write = { appended, alreadyKnown, skips: parsed.skips, observations: observed };
 
     // NOT `parsed.skips.length` (#184). `skips` is heterogeneous, and a `not-resting` row
     // was read COMPLETELY — the parser's finding about it is that nothing is still
@@ -890,23 +1002,16 @@ export async function importBitgetOpenOrders(
     // every one of them.
     const unweighed = parsed.skips.filter((entry) => leavesRungUnweighed(entry.problem));
 
-    if (unweighed.length === 0 && restated.length === 0) {
-      io.out(`Imported ${csvPath}: ${counts}.\n`);
-      return { status: "imported", ...write };
-    }
-
-    // EVERY QUALIFICATION GETS ITS OWN LINE, EACH OPENING ON THE GAP AND NAMING ITS OWN
-    // MONEY DIRECTION (`D3`, #177; #199). The counts follow all of them, once — they used
-    // to be the whole line, with the qualification a suffix (`..., 1 row(s) skipped.`) in
-    // exactly the position an operator skims past. An export qualified BOTH ways prints
-    // BOTH lines; that case is why this is two fields and not a third status.
+    // EACH NOTICE GETS ITS OWN LINE, OPENING ON WHAT IT IS ABOUT (`D3`, #177; #199). The
+    // counts follow all of them, once — they used to be the whole line, with the notice a
+    // suffix (`..., 1 row(s) skipped.`) in exactly the position an operator skims past.
     //
-    // Unread rows lead, because they are the qualification we know least about: a restated
-    // rung was read perfectly and we can state its figures, an unread one we cannot.
-    const qualifications: string[] = [];
+    // Unread rows lead, because they are the one thing here we know least about: a
+    // restatement was read perfectly and we can state its figures, an unread row we cannot.
+    const notices: string[] = [];
 
     if (unweighed.length > 0) {
-      qualifications.push(
+      notices.push(
         `INCOMPLETE — ${unweighed.length} row(s) of ${csvPath} could not be read, so that ` +
           `many rung(s) resting at the venue are NOT counted as committed and available reads ` +
           `HIGH by whatever they encumber. Re-export and re-import to pick the missing ` +
@@ -914,103 +1019,106 @@ export async function importBitgetOpenOrders(
       );
     }
 
-    if (restated.length > 0) {
-      // BOTH REMAINDERS, not just the two partials: the remainders are what the skip was
-      // decided on, so printing them lets the operator check the safety claim the rest of
-      // this line makes rather than take it on faith.
-      const detail = restated
-        .map(
-          (claim) =>
-            `${claim.id} (filled ${claim.known} → ${claim.observed}; the file still claims ` +
-            `${claim.remainingOnFile}, the venue holds ${claim.remainingAtVenue})`,
-        )
+    if (observed.length > 0) {
+      // BOTH FIGURES AND NO REMAINDERS. The remainders were printed while the rung was
+      // SKIPPED, because they were the safety argument an operator was owed a way to
+      // check; the line is written now, so the file's remainder IS the venue's and the
+      // pair would print the same number twice.
+      const detail = observed
+        .map((claim) => `${claim.id} (filled ${claim.known} → ${claim.observed})`)
         .join("; ");
-      qualifications.push(
-        `RESTATED — ${restated.length} rung(s) of ${csvPath} have filled FURTHER at the ` +
-          `venue since this file recorded them — ${detail} — and were SKIPPED; every other ` +
-          `rung imported normally. Their lines on file still read the OLDER partial, so they ` +
-          `encumber NO LESS than the venue still holds: committed never reads LOW and ` +
-          `available never reads HIGH. That is the safe direction — it can refuse a batch ` +
-          `you could fund, never fund one you cannot — but it is not free, and recording the ` +
-          `restatement needs an observation verb this build does not have. This line ` +
-          `REPRINTS on every import until the rung fills out or is cancelled at the venue.`,
+      notices.push(
+        `OBSERVED — ${observed.length} rung(s) of ${csvPath} have filled FURTHER at the ` +
+          `venue since this file last observed them — ${detail} — and the restatement was ` +
+          `RECORDED. Their remainders now read what the venue shows. This is NOT a ` +
+          `qualification: the work is done, and the line does not reprint on the next ` +
+          `import unless the venue moves again.`,
       );
     }
 
-    io.out(`${qualifications.join("\n")}\nImported ${csvPath}: ${counts}.\n`);
+    io.out([...notices, `Imported ${csvPath}: ${counts}.`].join("\n") + `\n`);
 
-    return { status: "imported-partial", ...write };
+    // A ROW NOBODY COULD READ IS THE ONLY THING LEFT THAT QUALIFIES AN IMPORT (#181). A
+    // restatement qualified while it was deferred; it is recorded here, so it does not.
+    return unweighed.length === 0
+      ? { status: "imported", ...write }
+      : { status: "imported-partial", ...write };
   };
 
-  // NOTHING LEFT TO IMPORT — every readable rung of this export was restated (#200
-  // review). Reported here rather than walked through the rest of the flow, which used to
-  // prompt TWICE for the funding reserve of a batch of ZERO orders and then, on the only
-  // honest answer to that question — a blank line — return `no-reserve-declared`: a
-  // refusal raised over an import that had nothing to fund and nothing to refuse.
+  // AN OBSERVATIONS-ONLY IMPORT SKIPS BOTH THE PROMPT AND THE GUARD. There is nothing to
+  // attribute — every rung here is already on file under its own placement line, with a
+  // `fundingReserveId` `declareFunding` would not touch — so prompting would ask a
+  // question with no honest answer, and the honest answer (a blank line) used to come back
+  // as `no-reserve-declared`: a refusal over an import with nothing to fund. A guard here
+  // would weigh only the book already on file, raising a NEW refusal over a PRE-EXISTING
+  // condition, unfixable because no declaration was prompted for.
   //
-  // The status is honest BY CONSTRUCTION rather than by choice. An export with no readable
-  // rows at all was already refused as `no-orders` above, and `admitted` is `orders` less
-  // the restated ids, so an empty `admitted` means `restated` is non-empty — this path
-  // cannot reach the unqualified `imported`, and `report` does not have to be told so.
-  //
-  // NO COVERAGE GUARD HERE, deliberately. It would weigh only the book already on file,
-  // which this import does not change by a single line, so a refusal from it would be a
-  // NEW refusal raised over a PRE-EXISTING condition — and unfixable at that, since we
-  // did not prompt for the declaration that is the only thing the operator could correct.
-  if (admitted.length === 0) {
-    return report(0, 0);
-  }
+  // AND THE `nothing-to-import` SHORT-CIRCUIT THAT USED TO SIT HERE IS GONE. An export of
+  // nothing but restated rungs now writes N observation lines — the most useful import
+  // this flow can perform — so exiting early over it would skip the feature's best case.
+  const records: OrderPlacedRecord[] = [];
+  if (admitted.length > 0) {
+    const declaration = await declareFunding(io, admitted);
+    if (declaration === undefined) {
+      return reject(io, "no-reserve-declared", "no funding reserve was declared for this batch");
+    }
+    records.push(...buildOrderPlacedRecords(admitted, declaration));
 
-  const declaration = await declareFunding(io, admitted);
-  if (declaration === undefined) {
-    return reject(io, "no-reserve-declared", "no funding reserve was declared for this batch");
-  }
-
-  const records = buildOrderPlacedRecords(admitted, declaration);
-
-  // `O1`. Coverage is checked over the WHOLE resting book — what is already on file plus
-  // this batch — because a reserve funds every claim against it, not one import's slice.
-  // The selector dedupes by id, so a re-import does not double-count the same rung.
-  const resting = pickRestingOrdersAsOf([...existingRecords, ...records]);
-  const coverage = checkFundingCoverage(resting, await io.fundReview());
-  if (coverage.status === "unattributed") {
-    // ONE refusal for BOTH classes. Cross-currency funding is not designed and an
-    // unadmitted reserve cannot fund a live claim; either way the rung is refused here
-    // and in the report, and the operator is told about every one of them at once rather
-    // than paying a second full pass — declaration prompt included — to learn the second
-    // class (#179).
+    // `O1`. Coverage is checked over the WHOLE resting book — what is already on file plus
+    // this batch — because a reserve funds every claim against it, not one import's slice.
+    // The selector dedupes by id, so a re-import does not double-count the same rung.
     //
-    // `records` is passed so the message can mark which listed rungs are NOT this batch's:
-    // `resting` above is the whole book, and only the caller knows which half the operator
-    // just exported.
-    return reject(
-      io,
-      "unattributed",
-      renderUnattributedRefusal(
-        coverage.unmatched,
-        new Set(records.map((record) => record.id)),
-      ),
-    );
-  }
-  if (coverage.status === "over-committed") {
-    const detail = coverage.shortfalls
-      .map(
-        (shortfall) =>
-          `${shortfall.fundingReserveId}: committed ${shortfall.committed} against a balance ` +
-          `of ${shortfall.balance} (slack ${shortfall.slack})`,
-      )
-      .join("; ");
-    return reject(
-      io,
-      "over-committed",
-      `the declared reserve cannot fund this book — ${detail}. The venue would not have ` +
-        `accepted these orders against that balance, so the ATTRIBUTION is wrong; fix the ` +
-        `declaration rather than the file`,
-    );
+    // THE OBSERVATIONS RIDE IN. Excluded, the guard would weigh the restated rungs at their
+    // STALE remainders and could return `over-committed` over capital this very import is
+    // about to free — a false refusal, in the direction of blocking legitimate work.
+    const resting = pickRestingOrdersAsOf([...existingRecords, ...records, ...observations]);
+    const coverage = checkFundingCoverage(resting, await io.fundReview());
+    if (coverage.status === "unattributed") {
+      // ONE refusal for BOTH classes. Cross-currency funding is not designed and an
+      // unadmitted reserve cannot fund a live claim; either way the rung is refused here
+      // and in the report, and the operator is told about every one of them at once rather
+      // than paying a second full pass — declaration prompt included — to learn the second
+      // class (#179).
+      //
+      // PLACEMENT IDS ONLY in the mark. `resting` above is the whole book, and the mark
+      // says which listed rungs are NOT this batch's to re-declare. An observation carries
+      // no `fundingReserveId` and the prompt never offered one for it, so marking a
+      // restated rung as "this batch's" would point the operator at a declaration that
+      // does not exist.
+      return reject(
+        io,
+        "unattributed",
+        renderUnattributedRefusal(
+          coverage.unmatched,
+          new Set(records.map((record) => record.id)),
+        ),
+      );
+    }
+    if (coverage.status === "over-committed") {
+      const detail = coverage.shortfalls
+        .map(
+          (shortfall) =>
+            `${shortfall.fundingReserveId}: committed ${shortfall.committed} against a balance ` +
+            `of ${shortfall.balance} (slack ${shortfall.slack})`,
+        )
+        .join("; ");
+      return reject(
+        io,
+        "over-committed",
+        `the declared reserve cannot fund this book — ${detail}. The venue would not have ` +
+          `accepted these orders against that balance, so the ATTRIBUTION is wrong; fix the ` +
+          `declaration rather than the file`,
+      );
+    }
   }
 
-  const known = new Set(existingRecords.map((record) => record.id));
-  const fresh: OrderPlacedRecord[] = records.filter((record) => !known.has(record.id));
+  // ONE `appendOrders` CALL for both kinds: one lock, one temp write, one `rename`. There
+  // is no ordering reason to split them — the selector sorts by `observedAt` at READ time,
+  // so the file's byte order cannot change what it means.
+  const alreadyOnFile = new Set(existingRecords.map((record) => appendKey(record)));
+  const fresh: OrderRecord[] = [...records, ...observations].filter(
+    (record) => !alreadyOnFile.has(appendKey(record)),
+  );
   try {
     await io.appendOrders(io.ordersPath, fresh);
   } catch (error) {
@@ -1021,5 +1129,44 @@ export async function importBitgetOpenOrders(
     return reject(io, "write-failed", `could not append to ${io.ordersPath}: ${detail}`);
   }
 
-  return report(fresh.length, records.length - fresh.length);
+  return report(fresh, records);
+}
+
+/**
+ * THE APPEND FILTER'S KEY — what makes a line a REPEAT of one already on file (#181).
+ *
+ * KEYED ON WHAT THE LINE ASSERTS, not on when it was looked at, and the two kinds assert
+ * different things:
+ *
+ *   - `orderFillObserved` → `(kind, id, observedFilledQuantity)`. Two observations of the
+ *     same cumulative figure are the SAME FACT stated twice and dedupe; 8 then 9 are
+ *     genuine movement and both land.
+ *   - everything else → `(kind, id, observedAt)`. For a placement this is exactly
+ *     equivalent to keying on the id alone, since `synthesizeOrderId` already includes
+ *     `observedAt`, so repeat-placement dedupe is unchanged.
+ *
+ * WHY NOT `observedAt` FOR AN OBSERVATION, which is what an id-and-stamp key would give.
+ * One export is one look, so a whole batch shares one second-granular stamp — and two
+ * imports inside the SAME second would then key identically, so the second import's
+ * observation was silently dropped while the operator was told it was RECORDED and a
+ * successful status came back. Honesty and information loss rather than money loss, and
+ * ordinary to reach: two exports back to back, or any scripted loop.
+ *
+ * MILLISECOND PRECISION WAS REJECTED as the fix, not overlooked. `isObservedAtStamp`
+ * validates `YYYY-MM-DDTHH:MM:SS`, the stamp is string-compared across the whole repo and
+ * is a component of a durable event id — and milliseconds only SHRINK the collision
+ * window rather than closing it, while keying on the figure closes it.
+ *
+ * THE EQUAL STAMPS ARE FINE DOWNSTREAM. `pickRestingOrdersAsOf` sorts stably, so file
+ * order breaks the tie and replays 8 then 9 — the batch stamp's own argument working as
+ * written.
+ *
+ * WHY `kind` IS IN THE KEY AT ALL: an observation shares its rung's id, so an id-only key
+ * would read the first observation of a known rung as a repeat of its placement line and
+ * drop it — the whole feature, filtered out by its own dedupe.
+ */
+function appendKey(record: OrderRecord): string {
+  return record.kind === "orderFillObserved"
+    ? `${record.kind} ${record.id} ${record.observedFilledQuantity}`
+    : `${record.kind} ${record.id} ${record.observedAt}`;
 }

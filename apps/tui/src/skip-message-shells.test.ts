@@ -213,6 +213,10 @@ const SHELLS: Shell[] = [
         csvPath,
         io: {
           readExport: async () => syntheticExport(),
+          // Frozen, and never reached: this case refuses over an unreadable sidecar long
+          // before an observation could be stamped. Supplied because the seam is required,
+          // not because the refusal depends on it.
+          now: () => new Date("2026-01-01T09:00:00"),
           ordersPath: ORDERS_PATH,
           loadOrders: async () => loadedWith(skips),
           appendOrders: async () => {
