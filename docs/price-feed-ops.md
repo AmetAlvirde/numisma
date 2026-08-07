@@ -280,6 +280,22 @@ exactly the morning after a lost day. So the heartbeat now carries `markWindow`
 (schema version 2) plus the last in-window finish, and staleness is judged against
 the latter. See `packages/event-store/src/heartbeat.ts`.
 
+Two refinements of that rule are worth knowing, because both are the difference
+between a warning that fires and one that does not:
+
+- **Being in the window is not evidence of marking.** A run only stamps itself as
+  the last in-window run if it got past `pnpm spine`, the step that appends. A
+  provider outage kills every fire at `prices-fetch` — six in-window runs, zero
+  marks — and stamping those would record the outage as proof the day was covered.
+  The predicate is deliberately *not* "exit 0": a failure at `gap-report` or
+  `backfill` (steps 5–6) comes **after** the day was marked and committed, so
+  gating on the exit code would under-stamp and cry wolf about a day the log holds.
+- **The window is judged in CDMX, not in the machine's local time.** The wrapper
+  reads `TZ="$MARK_TZ" date +%H`, matching the mark-instant contract. This is what
+  makes the "shift the plist hours instead of the OS timezone" option above safe:
+  on a UTC box with plist hours 00–05, a bare local-hour test would classify every
+  scheduled fire as out-of-window and silently disable the staleness trigger.
+
 **Why six fires fit the free tier.** Twelve Data Basic allows 8 credits/minute and
 **800/day**; the registry holds **9** Twelve Data symbols at 1 credit each. Six
 fires × 9 = **54 credits/day against 800** (6.75%), so the daily cap was never the

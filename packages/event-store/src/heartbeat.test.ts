@@ -326,6 +326,40 @@ describe("a run outside the mark window is not evidence that the day was marked"
     expect(formatHeartbeatWarning(parseHeartbeat(ranOn("2026-08-03")), NOW)).toHaveLength(1);
   });
 
+  it("REPORTS A DAY LOST TO A PROVIDER OUTAGE, even after a clean login run next morning", () => {
+    // The full scenario, end to end. Provider outage on 2026-08-04 (the ceiling):
+    // all six fires die at `prices-fetch`, in-window, zero marks — so none of them
+    // stamps, and the last in-window finish stays 08-03's evening. Next morning the
+    // provider is back and a 09:00 login run exits 0, overwriting the red exit code.
+    // The failure is gone from the exitCode trigger, so staleness is the only thing
+    // left holding the lost day — and it must not be fooled by the carried date
+    // belonging to a run that is now two days old.
+    const lines = formatHeartbeatWarning(
+      parseHeartbeat(loginRunOn("2026-08-05", { carried: "2026-08-04T00:05:00Z" })),
+      NOW,
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("has not completed since 2026-08-03");
+  });
+
+  it("does not credit an in-window run that never stamped itself", () => {
+    // The reader half of the same bug. A v2 breadcrumb that is in-window but carries
+    // NO stamp is a run that did not reach the marks — deriving the date from its own
+    // `finishedAt` would re-create the failure the writer just took care to avoid.
+    const failedEvening = heartbeatFileBody({
+      schemaVersion: 2,
+      startedAt: "2026-08-05T00:00:00Z",
+      finishedAt: "2026-08-05T00:05:00Z", // 18:05 CDMX on the ceiling day
+      exitCode: 1,
+      lastStep: "prices-fetch",
+      markWindow: true,
+    });
+    const parsed = parseHeartbeat(failedEvening);
+    expect(parsed?.lastMarkWindowFinishedAt).toBeUndefined();
+    // It still says the run FAILED; it just refuses to call it a marked day.
+    expect(formatHeartbeatWarning(parsed, NOW).join(" ")).toContain("FAILED");
+  });
+
   it("refuses a markWindow that is not a boolean rather than coercing it", () => {
     expect(
       parseHeartbeat(
@@ -347,18 +381,47 @@ describe("a run outside the mark window is not evidence that the day was marked"
  * `cd` in well under a second, which is enough: the heartbeat is written from an
  * EXIT trap installed before anything else, and a failing run is the case the
  * breadcrumb exists for.
+ *
+ * TWO THINGS ARE CONTROLLED SO NOTHING HERE DEPENDS ON THE WALL CLOCK. The window
+ * branch is forced by rewriting the script's own `MARK_HOUR` constant in a copy — 0
+ * is always in-window, 99 never is — because the wrapper reads the CDMX hour itself
+ * and no ambient `TZ` can move it. And the data dir is SEEDED, because a fresh
+ * `mkdtemp` per run means no previous breadcrumb exists and the entire carry-forward
+ * path goes unreached. An earlier version of this describe did both the other way
+ * and its assertions were vacuous for part of every day.
  */
 describe("the wrapper's own bytes, read by the reader that must consume them", () => {
   const wrapper = fileURLToPath(
     new URL("../../../ops/price-feed/run-daily-fetch.sh", import.meta.url),
   );
 
-  /** Run the wrapper against a throwaway data dir and return the breadcrumb it left. */
-  async function runWrapper(): Promise<string> {
+  /**
+   * Run the wrapper and return the breadcrumb it left.
+   *
+   * `window` rewrites ONE constant — the mark hour — so the in/out-of-window branch
+   * becomes an input rather than a function of the time of day. Everything else is
+   * the real script, including the `sed` carry-forward read and the printf.
+   */
+  async function runWrapper(
+    options: { window?: "in" | "out"; seed?: string } = {},
+  ): Promise<string> {
     const dataDir = await mkdtemp(join(tmpdir(), "numisma-heartbeat-wrapper-"));
     created.push(dataDir);
+    if (options.seed !== undefined) {
+      await writeFile(join(dataDir, "job-heartbeat.json"), options.seed, "utf8");
+    }
+    let script = wrapper;
+    if (options.window !== undefined) {
+      const forced = options.window === "in" ? "0" : "99";
+      const source = await readFile(wrapper, "utf8");
+      const rewritten = source.replace(/^MARK_HOUR=18$/m, `MARK_HOUR=${forced}`);
+      // Fail loudly rather than silently testing the unmodified script.
+      expect(rewritten).not.toBe(source);
+      script = join(dataDir, "run-daily-fetch.sh");
+      await writeFile(script, rewritten, "utf8");
+    }
     try {
-      execFileSync("/bin/bash", [wrapper], {
+      execFileSync("/bin/bash", [script], {
         env: {
           ...process.env,
           NUMISMA_DATA_DIR: dataDir,
@@ -375,6 +438,17 @@ describe("the wrapper's own bytes, read by the reader that must consume them", (
     return readFile(join(dataDir, "job-heartbeat.json"), "utf8");
   }
 
+  /** A healthy evening on 2026-08-04 (18:05 CDMX = 2026-08-05T00:05Z), as v2. */
+  const HEALTHY_EVENING = heartbeatFileBody({
+    schemaVersion: 2,
+    startedAt: "2026-08-05T00:00:00Z",
+    finishedAt: "2026-08-05T00:05:00Z",
+    exitCode: 0,
+    lastStep: "complete",
+    markWindow: true,
+    lastMarkWindowFinishedAt: "2026-08-05T00:05:00Z",
+  });
+
   it("writes a heartbeat parseHeartbeat accepts, at the version this reader expects", async () => {
     const parsed = parseHeartbeat(await runWrapper());
     // Unparseable here means the printf and the parser have drifted — the exact
@@ -383,20 +457,82 @@ describe("the wrapper's own bytes, read by the reader that must consume them", (
     expect(parsed?.schemaVersion).toBe(HEARTBEAT_SCHEMA_VERSION);
     expect(parsed?.lastStep).toBe("startup");
     expect(parsed?.exitCode).not.toBe(0);
-    // Asserted as a TYPE, not a value: which branch it takes depends on the wall
-    // clock, and pinning that would make this test pass or fail by time of day.
-    expect(typeof parsed?.markWindow).toBe("boolean");
+  });
+
+  it("DOES NOT STAMP AN IN-WINDOW RUN THAT DIED BEFORE THE MARKS LANDED", async () => {
+    // The regression this pins: being in the window is not evidence of marking. A
+    // provider outage kills every fire at `prices-fetch`, all six in-window with zero
+    // marks — stamping them records the outage as proof the day was covered.
+    const parsed = parseHeartbeat(await runWrapper({ window: "in" }));
+    expect(parsed?.markWindow).toBe(true);
+    expect(parsed?.lastStep).toBe("startup");
+    expect(parsed?.lastMarkWindowFinishedAt).toBeUndefined();
+  });
+
+  it("lets a real evening survive a later in-window failure, rather than clobbering it", async () => {
+    // Same run as above, but an evening IS on record. The failure must not overwrite
+    // it — otherwise the next successful login run carries the failure's own stamp
+    // forward while resetting the exit code, and the lost day leaves every trigger.
+    const parsed = parseHeartbeat(await runWrapper({ window: "in", seed: HEALTHY_EVENING }));
+    expect(parsed?.exitCode).not.toBe(0);
+    expect(parsed?.lastMarkWindowFinishedAt).toBe("2026-08-05T00:05:00Z");
+  });
+
+  it("carries the last in-window finish across an out-of-window run", async () => {
+    const parsed = parseHeartbeat(await runWrapper({ window: "out", seed: HEALTHY_EVENING }));
+    expect(parsed?.markWindow).toBe(false);
+    expect(parsed?.lastMarkWindowFinishedAt).toBe("2026-08-05T00:05:00Z");
+  });
+
+  it("adopts a v1 file's finishedAt, since every v1 run counted as in-window", async () => {
+    const v1 = heartbeatFileBody({
+      startedAt: "2026-08-05T00:00:00Z",
+      finishedAt: "2026-08-05T00:05:00Z",
+      exitCode: 0,
+      lastStep: "complete",
+    });
+    const parsed = parseHeartbeat(await runWrapper({ window: "out", seed: v1 }));
+    expect(parsed?.lastMarkWindowFinishedAt).toBe("2026-08-05T00:05:00Z");
+  });
+
+  it("does not adopt finishedAt from a previous OUT-of-window run", async () => {
+    // That run's finish is not evidence of marking either, so the v1 fallback must
+    // not fire for it — otherwise the carry-forward launders a non-marking run.
+    const priorLogin = heartbeatFileBody({
+      schemaVersion: 2,
+      startedAt: "2026-08-05T15:00:00Z",
+      finishedAt: "2026-08-05T15:02:00Z",
+      exitCode: 0,
+      lastStep: "complete",
+      markWindow: false,
+    });
+    const parsed = parseHeartbeat(await runWrapper({ window: "out", seed: priorLogin }));
+    expect(parsed?.lastMarkWindowFinishedAt).toBeUndefined();
   });
 
   it("emits no lastMarkWindowFinishedAt at all when there is none to carry", async () => {
-    // Written EMPTY it would fail the ISO-instant check and take the whole file
-    // down as unreadable — losing the exit code too, on a first-ever failing run.
-    const raw = await runWrapper();
-    const parsed = parseHeartbeat(raw);
-    expect(parsed).toBeDefined();
-    if (!raw.includes("lastMarkWindowFinishedAt")) {
-      expect(parsed?.lastMarkWindowFinishedAt).toBeUndefined();
-    }
+    // Written EMPTY it would fail the ISO-instant check and take the whole file down
+    // as unreadable — losing the exit code too, on a first-ever failing run. Forced
+    // out-of-window so this asserts something every hour of the day.
+    const raw = await runWrapper({ window: "out" });
+    expect(raw).not.toContain("lastMarkWindowFinishedAt");
+    expect(parseHeartbeat(raw)?.lastMarkWindowFinishedAt).toBeUndefined();
+  });
+
+  it("drops a CORRUPT carried value instead of re-emitting it into unparseable JSON", async () => {
+    // The carried value is copied verbatim into the next file, so a torn write or a
+    // hand-edit can break the whole record — and it is self-sustaining, since every
+    // later out-of-window run re-reads and re-emits it. Dropping it costs one
+    // staleness date; keeping it costs the exit code and the step name as well.
+    const corrupt = HEALTHY_EVENING.replace(
+      /"lastMarkWindowFinishedAt": "[^"]*"/,
+      String.raw`"lastMarkWindowFinishedAt": "2026-08-05T00:05:00\Z"`,
+    );
+    expect(corrupt).not.toBe(HEALTHY_EVENING);
+    const raw = await runWrapper({ window: "out", seed: corrupt });
+    expect(() => JSON.parse(raw)).not.toThrow();
+    expect(parseHeartbeat(raw)).toBeDefined();
+    expect(parseHeartbeat(raw)?.lastMarkWindowFinishedAt).toBeUndefined();
   });
 });
 
