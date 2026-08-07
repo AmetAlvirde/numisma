@@ -15,6 +15,7 @@ import { appendOrders, loadOrders, resolveOrdersPath } from "@numisma/preference
 import {
   BITGET_OPEN_ORDERS_HEADER,
   buildOrderFillObserved,
+  mergeCollidingClaims,
   parseBitgetOpenOrdersCsv,
   parseFundReview,
   pickRestingOrdersAsOf,
@@ -22,6 +23,7 @@ import {
   type OrderRecord,
 } from "@numisma/engine";
 import { afterEach, describe, expect, it } from "vitest";
+import { describeMerge } from "./import-orders-merge-notice.js";
 import { importBitgetOpenOrders, type OrdersImportIo } from "./import-orders.js";
 
 const createdDirs: string[] = [];
@@ -346,23 +348,33 @@ describe("one id identifies exactly ONE claim (#174)", () => {
     expect(await remainingOnDisk(ordersPath)).toEqual([3]);
   });
 
-  it("REPORTS the merge to the operator, naming both quantities and the total", async () => {
+  it("REPORTS the merge to the operator on the NORMAL channel, not silently", async () => {
+    // THE WIRING, AND ONLY THE WIRING (#221). What the notice SAYS — both quantities as
+    // the `a + b` arithmetic, the total, the symbol, the side, the price, the stamp, the
+    // row count and the remedy — is asserted exactly in
+    // `import-orders-merge-notice.test.ts`, over a plain record and without this
+    // apparatus. What only THIS test can hold is that the merge branch calls the
+    // renderer at all and that its output reaches the operator: arithmetic applied on
+    // the `out` channel, never whispered and never routed to `err` as if it were a
+    // warning about something skipped.
     const { csvPath, io, outputs } = await harness({
       csv: COLLIDING_LADDER,
       reserves: [{ id: "reserve-a", amount: 5000 }],
     });
     await importBitgetOpenOrders({ csvPath, io });
 
-    const merge = outputs.find((message) => message.toLowerCase().includes("merged"));
-    expect(merge).toBeDefined();
-    const text = merge ?? "";
-    expect(text).toContain("1000"); // the price
-    expect(text).toContain("2020-01-01T10:00:00"); // the second
-    expect(text).toContain("1"); // the first quantity
-    expect(text).toContain("2"); // the second quantity
-    expect(text).toContain("3"); // the merged total
-    // And how to keep two genuinely separate rungs distinct next time.
-    expect(text).toContain("tick");
+    const notice = outputs.find((message) => message.includes("MERGED"));
+    expect(notice).toBeDefined();
+    // The one content check that stays here, and it is a wiring check: the message on
+    // `out` is THIS renderer applied to THE ENGINE'S OWN merge for this batch, not some
+    // other message that happens to carry the word. Derived rather than transcribed, so
+    // it duplicates none of the notice's content rules.
+    const parsed = parseBitgetOpenOrdersCsv(COLLIDING_LADDER);
+    expect(parsed.status).toBe("ok");
+    if (parsed.status !== "ok") return;
+    const { merges } = mergeCollidingClaims(parsed.orders);
+    expect(merges).toHaveLength(1);
+    expect(notice).toContain(describeMerge(merges[0]!));
   });
 
   it("puts the SUMMED claim in front of `O1`, so an over-committed batch is caught", async () => {
@@ -1687,9 +1699,8 @@ describe("`O1` — the over-commitment reject (testing decision 6)", () => {
     // The honest cost of batching, and not droppable: `over-committed` never ran, so the
     // operator has NOT been told everything, and one sentence says so.
     expect(refusal).toContain(
-      "Reserve balances were NOT weighed: an unplaceable rung has no balance to\n" +
-        "compare against, so a coverage refusal may still follow once every rung\n" +
-        "above is placeable.",
+      "Reserve balances were NOT weighed: an unplaceable rung has no balance to compare\n" +
+        "against, so a coverage refusal may still follow once every rung above is placeable.",
     );
     // A blank line before `reject()`'s tail, so it does not read as a continuation of the
     // balances sentence.
