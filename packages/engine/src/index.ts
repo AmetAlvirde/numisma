@@ -123,6 +123,10 @@ export {
 // The `orders.jsonl` sidecar (ADR-013) — recorded BESIDE the log, never in it. The
 // record contract and the pure as-of selector only; the file IO lives in
 // `@numisma/preferences`, per ADR-001.
+// MANUAL BLOCK, and saying so is the point: this list is NOT derived from the
+// `OrderRecord` union, so a kind added to the union is exported only if it is added HERE
+// too. A missing entry is not a type error anywhere — it just leaves the new record
+// unnameable outside the package.
 export type {
   OrderKind,
   OrderSide,
@@ -130,12 +134,16 @@ export type {
   OrderPlacedRecord,
   OrderCancelledRecord,
   OrderFilledRecord,
+  OrderFillObservedRecord,
+  ObservedFillClaim,
+  OrderFillObservedBuild,
   OrderRecordProblem,
   OrderRecordParse,
 } from "./orders/records.js";
 export {
   serializeOrderRecord,
   parseOrderRecord,
+  buildOrderFillObserved,
   isObservedAtStamp,
   formatObservedAt,
 } from "./orders/records.js";
