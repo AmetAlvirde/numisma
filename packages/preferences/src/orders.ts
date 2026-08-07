@@ -155,6 +155,22 @@ function tempPathFor(path: string): string {
   return `${path}.${process.pid}.${tempCounter}.tmp`;
 }
 
+/**
+ * Read a file that may not exist, mapping ENOENT to `undefined`.
+ *
+ * A DELIBERATE PRIVATE COPY OF `@numisma/event-store`'s `readOptional`, NOT DRIFT (#198).
+ * Importing the canonical one would draw a permanent `@numisma/preferences ->
+ * @numisma/event-store` edge — this package's only dependency today is `@numisma/engine`.
+ * ADR-013 makes the sidecar's separation from the durable log load-bearing: an `Order` is
+ * recorded BESIDE `events.jsonl`, `parseEvent` never sees one, and the module that writes
+ * `orders.jsonl` has no business knowing the event store exists.
+ *
+ * The duplication is affordable because the helper carries ZERO POLICY — its entire
+ * content is "ENOENT means absent", a rule of the filesystem rather than of either file
+ * format. There is nothing here that can drift into disagreeing with the other copy.
+ * #141 once required exactly one definition repo-wide; that criterion is retired, because
+ * counting definitions was the wrong test for a policy-free adapter.
+ */
 async function readOptional(path: string): Promise<string | undefined> {
   try {
     return await readFile(path, "utf8");

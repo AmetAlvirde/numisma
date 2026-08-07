@@ -199,8 +199,18 @@ export async function loadFoldedReview(
 
 /**
  * Read a file that may not exist, mapping ENOENT to `undefined` and rethrowing every
- * other IO error. Exported: the TUI's ingest and migration paths read the inbox and
- * the log through the same helper, so this package owns the single definition.
+ * other IO error.
+ *
+ * THE CANONICAL DEFINITION — the one other packages import. The TUI's ingest and
+ * migration paths read the inbox and the log through it (`apps/tui/src/event-store.ts`,
+ * `record-fill-cli.ts`), and the price feed reads its own INBOX through it
+ * (`apps/price-feed/src/inbox.ts`) — a file this package never touches, which is fine:
+ * the helper carries no log-specific policy, only "ENOENT means absent".
+ *
+ * IT IS NOT THE ONLY DEFINITION REPO-WIDE, DELIBERATELY. `@numisma/preferences` keeps a
+ * private copy rather than take a dependency on this package; the reasoning lives beside
+ * that copy (`packages/preferences/src/orders.ts`, #198). Do not "fix" the duplication by
+ * pointing that module here.
  */
 export async function readOptional(filePath: string): Promise<string | undefined> {
   try {
