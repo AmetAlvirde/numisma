@@ -15,7 +15,7 @@ Everything here is machine-local. Nothing secret or trade-derived enters the rep
 | File | Role |
 | --- | --- |
 | `ops/price-feed/run-daily-fetch.sh` | Wrapper the scheduler calls. Sets a PATH that can find `pnpm`, sources tokens, runs `pnpm prices:fetch`; on a clean fetch: (2) `pnpm spine` then (3) an auto-commit of any new data-repo changes scoped to `$NUMISMA_DATA_DIR` — idempotent if no new marks, never pushes — then (4) a post-check that **fails the job** if the durable event log is still uncommitted (lenient warn for the `head-digest.json` breadcrumb). Only once the log is verified does it touch anything derived, local before networked: (5) `pnpm gap-report -- --write` to rewrite `gap-report.json` beside the log and (6) `pnpm backfill` to refresh the hosted projection. Preserves the non-zero exit code so the scheduler notices a failure or rejection. |
-| `ops/price-feed/com.numisma.pricefeed.daily.plist` | launchd definition firing the wrapper **hourly from 18:00 to 23:00 local** (six intervals; 18:00 is the default mark time), **every day** — plus `RunAtLoad` true. The first fire with the machine awake marks the day; the rest are 0-mark no-ops. See "Why the window is hourly, not a single 18:00 fire" and "Why the schedule fires 7 days/week" below. |
+| `ops/price-feed/com.numisma.pricefeed.daily.plist` | launchd definition firing the wrapper **hourly from 18:00 to 23:00 local** (six intervals; 18:00 is the default mark time), **every day** — plus `RunAtLoad` true. The first fire on an awake machine marks the day; later fires add 0 new marks (though they still spend credits and time). See "Why the window is hourly, not a single 18:00 fire" and "Why the schedule fires 7 days/week" below. |
 
 Both files are templates: replace `__REPO_DIR__` / `__HOME__` before installing.
 
@@ -103,7 +103,7 @@ from the log — not to touch the source of truth, and not to move money. That i
 real step up from "reads public prices," and still short of the trigger below.
 
 Against that threat, a `chmod 600` file outside the repo is proportionate, and it
-keeps the hands-off 18:00 launchd run dead-simple: no interactive keychain/vault
+keeps the hands-off evening launchd run dead-simple: no interactive keychain/vault
 unlock that could block a scheduled, non-login job.
 
 **Your real defense is fast revocation, not encryption-at-rest.** If a key ever
@@ -119,7 +119,7 @@ leaks (committed by mistake, copied into a shared backup, pasted somewhere):
   role's password at the database and update **both** copies
   (`~/.config/numisma/price-feed.env` and `apps/web/.env.push.local`). Two copies
   is the price of the single `source` line; a rotation that updates only one
-  leaves either the hand-run push or the 18:00 job failing.
+  leaves either the hand-run push or the scheduled evening job failing.
 
 After rotating, re-run the manual dry run to confirm the new credential works.
 
@@ -185,7 +185,7 @@ threat model does not need.
 launchd and cron start the job with a **bare, non-login PATH**
 (`/usr/bin:/bin:/usr/sbin:/sbin`), which does **not** include the directory holding
 `pnpm` (typically `~/Library/pnpm` or a Homebrew prefix like `/opt/homebrew/bin`).
-Without a fix the 18:00 run dies immediately with `pnpm: command not found` (exit
+Without a fix every scheduled run dies immediately with `pnpm: command not found` (exit
 127), even though a manual dry run in your interactive shell passes (it inherits
 your login PATH).
 
@@ -236,10 +236,29 @@ without a signal (issue #185):
 
 - The deterministic mark id `pm-<id>-<asOf>` makes a **repeated** run harmless — it
   appends 0 new marks.
-- It does nothing at all for a run that **never happened**. launchd *drops* a
-  calendar interval the machine slept through rather than backfilling it at wake,
-  and `asOf` is the CDMX **calendar date**, so once midnight passes `isFreshBar`
-  refuses yesterday's bar permanently. The day is then unrecoverable by any rerun.
+- It does nothing at all for a run that **never happened**, and `asOf` is the CDMX
+  **calendar date** — so once midnight passes `isFreshBar` refuses yesterday's bar
+  permanently. The day is then unrecoverable by any rerun.
+
+**What launchd actually does with a slept-through interval**, since the intuitive
+answer is wrong and #185 was filed on the wrong one. From `man 5 launchd.plist`:
+
+> Unlike cron which skips job invocations when the computer is asleep, launchd will
+> start the job the next time the computer wakes up. If multiple intervals transpire
+> before the computer is woken, those events will be coalesced into one event upon
+> wake from sleep.
+
+So launchd does **not** drop the interval — it runs one catch-up at wake. That
+changes the mechanism but not the conclusion: the catch-up executes under a **new**
+`asOf`, so it marks *today* and cannot reach the day that was missed. Two things
+follow that are easy to get backwards:
+
+- **Six intervals coalesce into ONE event on wake, not six.** They are six chances
+  at a machine that is *awake* during the evening, not six retries against a
+  sleeping one.
+- **The distinction that matters is asleep vs. powered-off/logged-out.** Asleep →
+  a coalesced catch-up fires, uselessly. Powered off or logged out → the LaunchAgent
+  was never loaded, so there is nothing to coalesce across the boot.
 
 So recovery has to come from the schedule, and it does, in two halves:
 
@@ -247,11 +266,19 @@ So recovery has to come from the schedule, and it does, in two halves:
   at 18:00 but open at any hour through 23:00 still marks the day, inside the same
   CDMX date. Every fire is at/after the 18:00 mark time on purpose: an earlier one
   would store quotes and emit **zero** marks.
-- **`RunAtLoad` true is the belt-and-braces half.** A machine booted (or the job
-  reloaded) inside the window runs at once instead of waiting for the next hour.
+- **`RunAtLoad` true is the belt-and-braces half**, and the boot/login case above is
+  precisely what it covers — the one case where no coalesced catch-up exists.
 
-Neither recovers a day the machine was off for all six hours. Nothing can — that
+Neither recovers a day the machine was off for the whole window. Nothing can — that
 loss is permanent, and naming it after the fact is the gap report's job (#186).
+
+**`RunAtLoad` has a cost on the reading side, and it is paid explicitly.** A load can
+happen at any hour, and a pre-18:00 run stores quotes, emits **zero** marks and exits
+`0`. That is indistinguishable from a healthy evening unless someone records the
+difference — and read naively it *silenced* the heartbeat's staleness warning on
+exactly the morning after a lost day. So the heartbeat now carries `markWindow`
+(schema version 2) plus the last in-window finish, and staleness is judged against
+the latter. See `packages/event-store/src/heartbeat.ts`.
 
 **Why six fires fit the free tier.** Twelve Data Basic allows 8 credits/minute and
 **800/day**; the registry holds **9** Twelve Data symbols at 1 credit each. Six
@@ -263,9 +290,21 @@ fallback was not needed. Adding intervals here, or equities to the registry, spe
 against that 800; `apps/price-feed/src/schedule-window.test.ts` fails if the product
 ever exceeds it.
 
-**Repeat fires are cheap by construction**, which is what makes six affordable: the
-second run of an evening appends 0 new marks, step 3 commits nothing, step 4 passes,
-and step 6 `pnpm backfill` upserts under `ON CONFLICT … DO UPDATE`.
+**Read 54 as a floor, not a total.** It is the *scheduled* spend. `RunAtLoad` adds an
+unbudgeted 9 credits per boot, login and `launchctl load`, and none of that is
+knowable in advance — so the guard bounds the schedule, which is the part that can be
+bounded. The headroom is large (roughly 82 extra loads in one day before 800), so
+this is a thing to state rather than a thing to fix. One practical note: the install
+sequence below is itself a live run followed by a `start` dry run, i.e. two runs
+inside a minute against the 8/min cap — the second's Twelve Data calls may pace or
+fail, which is expected and self-heals on the next hour.
+
+**Repeat fires are cheap, but not free**, which is worth stating precisely because a
+`RunAtLoad` run can land at any hour: a second run of an evening appends 0 new marks,
+commits nothing at step 3, passes step 4, and re-upserts at step 6 under
+`ON CONFLICT … DO UPDATE`. What it still spends is 9 Twelve Data credits and about
+two minutes of wall time (the 60 s pacing sleep runs regardless). "No new marks" and
+"no cost" are different claims.
 
 ## Why the schedule fires 7 days/week (crypto vs. equities)
 
@@ -287,11 +326,21 @@ failure. The run stays clean (exit 0), the crypto marks still ingest, and the
 `*-mxn` derived marks naturally skip too (their USD leg is stale). A weekday-only
 schedule was rejected: it would starve crypto AND still misfire on weekday holidays.
 
-## Manual dry run (the schedule's only verification)
+## Manual dry run (the schedule's main verification)
 
-The wrapper and the launchd/cron definition are verified by a MANUAL dry run, not
-by unit tests (there is nothing meaningful to unit-test in a plist). Run it after
-install and record the result below.
+The wrapper and the launchd/cron definition are verified mainly by a MANUAL dry run.
+Run it after install and record the result below.
+
+Two narrow automated guards exist alongside it, and they are worth knowing the limits
+of. `apps/price-feed/src/schedule-window.test.ts` checks only the properties of the
+plist that have an oracle elsewhere — that it lints, that no fire precedes the mark
+time or leaves the CDMX day, that every interval pins both `Hour` and `Minute` (a
+missing field is a launchd wildcard), that the credit budget fits, and that the
+wrapper's `MARK_HOUR` still matches `DEFAULT_CONFIG.markTime`. The last describe in
+`packages/event-store/src/heartbeat.test.ts` runs the wrapper and feeds its heartbeat
+to the real parser. **Neither tells you the installed job works** — they read the
+repo's templates, and the installed LaunchAgent is a separately-resolved copy. That
+is still what the dry run is for.
 
 ```sh
 # Exercise the wrapper exactly as the scheduler will (does not wait for the window):
