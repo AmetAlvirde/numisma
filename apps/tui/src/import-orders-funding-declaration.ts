@@ -26,6 +26,10 @@
  * is now named by an assertion in `import-orders-funding-declaration.test.ts` that fails
  * when the thing it names is removed.
  *
+ * ONE OF THE SEVEN IS NOT AN OUTPUT RULE, and pretending otherwise would mislead the next
+ * reader: the `answer !== batch` guard cannot change a written record, only the shape of
+ * the map that feeds it. The argument is at the guard itself.
+ *
  * `isAffirmative` IS DUPLICATED IN `record-fill.ts` AND STAYS THAT WAY. De-duplicating it
  * means choosing a shared home for a TUI-wide prompt primitive — a decision, not a move —
  * so neither module imports the other.
@@ -76,6 +80,13 @@ export async function declareFunding(
 
   for (const order of orders) {
     const answer = (await ask(`  ${describe(order)} [${batch}]: `)).trim();
+    // A REDUNDANT OVERRIDE IS NOT AN OVERRIDE — and this guard is a SHAPE rule, not an
+    // output rule, which is worth saying because the difference is invisible downstream.
+    // `buildOrderPlacedRecords` resolves attribution as
+    // `overrides?.[order.id] ?? fundingReserveId` (`packages/engine/src/orders/ingest.ts`),
+    // so an entry whose value equals the batch answer writes the IDENTICAL record either
+    // way. What the guard keeps is the map's meaning: a key here says the operator
+    // DISSENTED on that rung, and a rung they answered the batch back on did not.
     if (answer !== "" && answer !== batch) {
       overrides[order.id] = answer;
     }
