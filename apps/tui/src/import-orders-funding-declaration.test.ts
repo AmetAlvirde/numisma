@@ -143,6 +143,11 @@ describe("the per-order override pass", () => {
    * and an answer equal to the batch, so the guards are exercised together rather than one
    * per fixture. The end-to-end test at `import-orders.test.ts:1743` exercises only the
    * first two, which is exactly why `M4` survived.
+   *
+   * AND `M4` COULD ONLY EVER BE KILLED HERE, at the map. `buildOrderPlacedRecords` reads
+   * `overrides?.[order.id] ?? fundingReserveId`, so a redundant entry writes the identical
+   * record and no end-to-end test over the written file can see the difference. This
+   * assertion is over the map's MEANING — a key is a dissent — not over an output.
    */
   it("records the dissenting rung only — blank falls through, equal-to-batch is NOT an override (`M4`)", async () => {
     const orders = [
