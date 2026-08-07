@@ -267,6 +267,25 @@ describe("SECTION ORDER — nothing compared positions before this file", () => 
     expect(mismatchAt).toBeGreaterThanOrEqual(0);
     expect(unfundableAt).toBeLessThan(mismatchAt);
   });
+
+  it("puts a fallback section LAST, after both classes the renderer knows", () => {
+    // The known classes lead because their advice is actionable; the fallback admits the
+    // renderer has no section for the reason and must not displace either.
+    const unmatched = [
+      unknownReason(orderId("1000"), "reserve-paper", "dangling-account"),
+      mismatched(orderId("1100"), "reserve-mxn"),
+      unfundable(orderId("1200"), "reserve-paper"),
+    ];
+
+    const refusal = renderUnattributedRefusal(unmatched, allOf(unmatched));
+
+    expect(refusal.indexOf("  unfundable reserve —")).toBeLessThan(
+      refusal.indexOf("  currency mismatch —"),
+    );
+    expect(refusal.indexOf("  currency mismatch —")).toBeLessThan(
+      refusal.indexOf("  dangling-account —"),
+    );
+  });
 });
 
 describe("LABEL → ADVICE → RUNGS inside a section — a comment was the only thing holding it", () => {
@@ -312,5 +331,108 @@ describe("LABEL → ADVICE → RUNGS inside a section — a comment was the only
     expect(refusal.indexOf("    Cross-currency funding is not supported")).toBeLessThan(
       refusal.indexOf(`      ${orderId("1000")}`),
     );
+  });
+});
+
+/**
+ * A rung carrying a reason the renderer has no section for — the THIRD
+ * `UnmatchedReason` that does not exist yet.
+ *
+ * THE CAST IS THE POINT AND IS AS NARROW AS IT CAN BE. `UnmatchedReason` is a closed
+ * union of two members, so the type system cannot express a third — expressing it
+ * honestly would mean widening the engine's union, putting a member into production types
+ * purely to make a test compile. The cast is confined to this one fixture helper and
+ * asserts nothing about behaviour; the assertions below do that.
+ *
+ * The premise is live rather than theoretical: splitting `unfundable-reserve` into its
+ * three causes — paper mode, unsupported currency, dangling account — is a change
+ * `UnmatchedReason` needs no new shape for.
+ */
+function unknownReason(id: string, fundingReserveId: string, token: string): UnmatchedRung {
+  return { rung: rung(id, fundingReserveId), reason: token } as unknown as UnmatchedRung;
+}
+
+describe("the `default: never` fallback — unreachable by types, so nothing reached it", () => {
+  it("NAMES THE UNKNOWN REASON UNDER ITS RAW TOKEN and lists its rungs", () => {
+    // Degrading honestly is the fallback's whole job. It does NOT throw, unlike
+    // `foldEvents`'s latch: the message IS the deliverable here, and `import-orders-cli.ts`
+    // would collapse a throw into one bare error line — losing every rung the operator was
+    // owed, to protect them from a rendering gap. Degrade the section, never the refusal.
+    const known = orderId("1000");
+    const unknown = orderId("1100");
+    const unmatched = [
+      unfundable(known, "reserve-paper"),
+      unknownReason(unknown, "reserve-ghost", "dangling-account"),
+    ];
+
+    const refusal = renderUnattributedRefusal(unmatched, allOf(unmatched));
+
+    expect(refusal).toContain(
+      "  dangling-account — 1 rung\n" +
+        "    This refusal has no section for that reason; it is named as the engine\n" +
+        "    gave it, so no rung counted above goes unlisted.\n" +
+        `      ${unknown}`,
+    );
+    // The known rung still renders its own section: one unknown reason does not cost the
+    // operator the classes the renderer DOES know.
+    expect(refusal).toContain("  unfundable reserve — 1 reserve, 1 rung\n");
+    expect(refusal).toContain(`        ${known}`);
+  });
+
+  it("OFFERS NO ADVICE LINE — nothing here knows the remedy for a reason it does not know", () => {
+    const unmatched = [unknownReason(orderId("1000"), "reserve-ghost", "dangling-account")];
+
+    const refusal = renderUnattributedRefusal(unmatched, allOf(unmatched));
+
+    expect(refusal).not.toContain("The fold excluded");
+    expect(refusal).not.toContain("Cross-currency funding is not supported");
+  });
+
+  it("KEEPS THE HEADER COUNT AND THE LISTING IN AGREEMENT — every counted rung is named", () => {
+    // THE MASKING DEFECT THIS GUARDS, and the reason the partition is a SWITCH rather than
+    // two `.filter` calls: the header counts off `unmatched.length` while the body lists
+    // only what the partition matched, so under two filters a third reason was COUNTED AND
+    // NEVER NAMED. That is #179's own defect rebuilt at the render boundary.
+    const ids = [orderId("1000"), orderId("1100"), orderId("1200")];
+    const unmatched = [
+      unfundable(ids[0] as string, "reserve-paper"),
+      mismatched(ids[1] as string, "reserve-mxn"),
+      unknownReason(ids[2] as string, "reserve-ghost", "dangling-account"),
+    ];
+
+    const refusal = renderUnattributedRefusal(unmatched, allOf(unmatched));
+
+    expect(refusal).toContain("3 rungs cannot be placed against a fundable reserve.");
+    for (const id of ids) {
+      expect(refusal).toContain(id);
+    }
+  });
+
+  it("NAMES THE RUNGS OF A HOMOGENEOUS UNKNOWN BATCH — the exact case two filters emptied", () => {
+    // Under two `.filter` calls this book rendered `sections` EMPTY: a refusal claiming a
+    // rung could not be placed while naming zero rungs. The switch is what stops it, and
+    // this is the fixture that can tell the difference.
+    const ids = [orderId("1000"), orderId("1100")];
+    const unmatched = ids.map((id) => unknownReason(id, "reserve-ghost", "dangling-account"));
+
+    const refusal = renderUnattributedRefusal(unmatched, allOf(unmatched));
+
+    expect(refusal).toContain("2 rungs cannot be placed against a fundable reserve.");
+    expect(refusal).toContain("  dangling-account — 2 rungs\n");
+    expect(refusal).toContain(`      ${ids[0] as string}\n      ${ids[1] as string}`);
+  });
+
+  it("groups the rungs of DIFFERENT unknown reasons under their own tokens", () => {
+    // One bucket per raw token, so two unrelated future reasons are not fused into a
+    // section whose label is true of only half its rungs.
+    const unmatched = [
+      unknownReason(orderId("1000"), "reserve-ghost", "dangling-account"),
+      unknownReason(orderId("1100"), "reserve-ghost", "unsupported-currency"),
+    ];
+
+    const refusal = renderUnattributedRefusal(unmatched, allOf(unmatched));
+
+    expect(refusal).toContain("  dangling-account — 1 rung\n");
+    expect(refusal).toContain("  unsupported-currency — 1 rung\n");
   });
 });
