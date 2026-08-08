@@ -11,6 +11,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BITGET_OPEN_ORDERS_HEADER,
+  leavesRungUnweighed,
   parseBitgetOpenOrdersCsv,
   type BitgetOpenOrder,
 } from "./bitget.js";
@@ -230,6 +231,139 @@ describe("#173 — the venue's filled_quantity is carried, and the REMAINDER dec
     if (!record) throw new Error("expected one record");
     expect(record).not.toHaveProperty("observedFilledQuantity");
     expect(serializeOrderRecord(record)).not.toContain("observedFilledQuantity");
+  });
+});
+
+// The remainder is computed BEFORE the vocabulary check — and AFTER the row's identity
+// columns — so the one ordinary event the #184 apparatus exists for (a rung filling
+// between the operator's export and their import) is answered by the quantities rather
+// than refused on a guessed word, while a row we cannot even identify still reaches the
+// alarm. The vocabulary is NOT widened: no terminal status word was added to the known
+// list, and a row that still has a remainder open is still refused when its word is
+// unknown.
+describe("the remainder is decided before the status vocabulary is consulted", () => {
+  it("reads a TERMINAL status word with nothing left as not-resting, not unknown-status", () => {
+    const parsed = parseBitgetOpenOrdersCsv(
+      csv(row({ status: "Filled", quantity: "10", filled_quantity: "10" })),
+    );
+    expect(parsed.status).toBe("ok");
+    if (parsed.status !== "ok") return;
+    expect(parsed.orders).toHaveLength(0);
+    expect(parsed.skips.map((entry) => entry.problem)).toEqual(["not-resting"]);
+  });
+
+  it("does not fire the money-direction alarm for that ordinary fill (#184)", () => {
+    const parsed = parseBitgetOpenOrdersCsv(
+      csv(row({ status: "Filled", quantity: "10", filled_quantity: "10" })),
+    );
+    expect(parsed.status).toBe("ok");
+    if (parsed.status !== "ok") return;
+    expect(parsed.skips.filter((entry) => leavesRungUnweighed(entry.problem))).toEqual([]);
+  });
+
+  it("answers ANY unknown word by the quantities when nothing is left claimed", () => {
+    for (const status of ["Cancelled", "Expired", "Fully Filled", "已成交"]) {
+      const parsed = parseBitgetOpenOrdersCsv(
+        csv(row({ status, quantity: "10", filled_quantity: "10" })),
+      );
+      // `continue`, never `return`: one bad spelling must not silently take the other
+      // three words' coverage with it.
+      expect(parsed.status, status).toBe("ok");
+      if (parsed.status !== "ok") continue;
+      expect(parsed.skips.map((entry) => entry.problem), status).toEqual(["not-resting"]);
+    }
+  });
+
+  it("also reads an OVER-filled row as not-resting rather than as an unknown word", () => {
+    const parsed = parseBitgetOpenOrdersCsv(
+      csv(row({ status: "Filled", quantity: "10", filled_quantity: "10.0001" })),
+    );
+    expect(parsed.status).toBe("ok");
+    if (parsed.status !== "ok") return;
+    expect(parsed.skips.map((entry) => entry.problem)).toEqual(["not-resting"]);
+  });
+
+  it("does NOT widen the vocabulary — an unknown word with a remainder OPEN is still refused", () => {
+    const parsed = parseBitgetOpenOrdersCsv(
+      csv(row({ status: "Filled", quantity: "10", filled_quantity: "6" })),
+    );
+    expect(parsed.status).toBe("ok");
+    if (parsed.status !== "ok") return;
+    expect(parsed.orders).toHaveLength(0);
+    expect(parsed.skips.map((entry) => entry.problem)).toEqual(["unknown-status"]);
+    // And it still counts as an unweighed rung: the row may be claiming capital.
+    expect(parsed.skips.every((entry) => leavesRungUnweighed(entry.problem))).toBe(true);
+  });
+
+  it("keeps a KNOWN resting word admitted on the same ordering", () => {
+    const parsed = parseBitgetOpenOrdersCsv(csv(row({ quantity: "10", filled_quantity: "6" })));
+    expect(parsed.status).toBe("ok");
+    if (parsed.status !== "ok") return;
+    expect(parsed.skips).toEqual([]);
+    expect(parsed.orders).toHaveLength(1);
+  });
+
+  // THE ACCEPTED RECLASSIFICATION. The quantities are now read just above the status word,
+  // so a row that is unreadable in BOTH the quantity columns and the status word is
+  // reported as `malformed` rather than `unknown-status`. Both classes are unweighed, so
+  // the #184 alarm is unchanged; only the operator-facing label moves, and `malformed` is
+  // the more actionable of the two — the quantity cell is what could not be read.
+  it("reports an unknown word with an unreadable quantity as malformed, not unknown-status", () => {
+    const parsed = parseBitgetOpenOrdersCsv(csv(row({ status: "Filled", quantity: "abc" })));
+    expect(parsed.status).toBe("ok");
+    if (parsed.status !== "ok") return;
+    expect(parsed.skips.map((entry) => entry.problem)).toEqual(["malformed"]);
+    // Still on the safe side of the alarm — nothing about this row is known.
+    expect(parsed.skips.every((entry) => leavesRungUnweighed(entry.problem))).toBe(true);
+  });
+
+  it("reports a NEGATIVE filled_quantity as malformed whatever the word says", () => {
+    // Parseable but impossible: a venue cannot have filled less than nothing.
+    const parsed = parseBitgetOpenOrdersCsv(
+      csv(row({ status: "Filled", quantity: "10", filled_quantity: "-1" })),
+    );
+    expect(parsed.status).toBe("ok");
+    if (parsed.status !== "ok") return;
+    expect(parsed.skips.map((entry) => entry.problem)).toEqual(["malformed"]);
+  });
+
+  it("reports an UNPARSEABLE filled_quantity as malformed whatever the word says", () => {
+    // Not a number at all — the other half of "unreadable", and the one a negative
+    // fixture never exercised.
+    const parsed = parseBitgetOpenOrdersCsv(
+      csv(row({ status: "Filled", quantity: "10", filled_quantity: "n/a" })),
+    );
+    expect(parsed.status).toBe("ok");
+    if (parsed.status !== "ok") return;
+    expect(parsed.skips.map((entry) => entry.problem)).toEqual(["malformed"]);
+  });
+
+  // THE PLACEMENT ITSELF, PINNED. The quantity reads sit above the STATUS WORD and below
+  // the row's IDENTITY columns (timestamp, pair, side, price) — no higher. Hoisting them
+  // to the top of the pipeline would reclassify a settled row whose timestamp cannot be
+  // read from `malformed` to `not-resting`, and `not-resting` is the ONE class excluded
+  // from `leavesRungUnweighed` — the incomplete-import alarm would go quiet on a corrupt
+  // row. This case fails against any such re-hoist.
+  it("still reports a SETTLED row with an unreadable timestamp as malformed", () => {
+    const parsed = parseBitgetOpenOrdersCsv(
+      csv(row({ status: "Filled", quantity: "10", filled_quantity: "10", timestamp: "nonsense" })),
+    );
+    expect(parsed.status).toBe("ok");
+    if (parsed.status !== "ok") return;
+    expect(parsed.orders).toHaveLength(0);
+    expect(parsed.skips.map((entry) => entry.problem)).toEqual(["malformed"]);
+    // The alarm SURVIVES: we cannot weigh a row we cannot even identify.
+    expect(parsed.skips.every((entry) => leavesRungUnweighed(entry.problem))).toBe(true);
+  });
+
+  it("still reports a SETTLED row in an unpriced pair as unknown-quote-currency", () => {
+    const parsed = parseBitgetOpenOrdersCsv(
+      csv(row({ status: "Filled", quantity: "10", filled_quantity: "10", pair: "XYZ/ZZZ" })),
+    );
+    expect(parsed.status).toBe("ok");
+    if (parsed.status !== "ok") return;
+    expect(parsed.skips.map((entry) => entry.problem)).toEqual(["unknown-quote-currency"]);
+    expect(parsed.skips.every((entry) => leavesRungUnweighed(entry.problem))).toBe(true);
   });
 });
 
