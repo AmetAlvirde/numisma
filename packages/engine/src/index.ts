@@ -250,6 +250,17 @@ export {
   SETTLEMENT_MAGNITUDE_THRESHOLD,
 } from "./events/crossref.js";
 
+// The ONE pending-inbox walk both ingest paths fold with (audit finding 9): the
+// TUI spine's `ingestInbox` and the price-feed's fetch-time rejection pre-check.
+// Each keeps its own error policy; the walk itself cannot drift.
+export type {
+  IngestWalkInvalid,
+  IngestWalkRejection,
+  IngestWalkResult,
+  IngestWalkOptions,
+} from "./events/ingest-walk.js";
+export { walkPendingInbox } from "./events/ingest-walk.js";
+
 // Pure derivations for the git-backed durable event log — a compact Head Digest
 // of a folded read model, and a deterministic ingest commit message.
 export type { HeadDigest, IngestCommitInput } from "./durable-log.js";
