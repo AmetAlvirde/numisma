@@ -37,7 +37,7 @@ Enumerated explicitly in `src/index.ts`:
 - **No general preferences write surface.** `preferences.jsonl` has exactly one
   writer, `seedDefaultPreferences`, whose single-line append is inline. The
   package used to export an `appendPreference` — documented and tested, with
-  zero callers, on the weaker `appendFile` contract above. It was deleted rather
+  no caller outside the seeder, on the weaker `appendFile` contract above. It was deleted rather
   than hardened, so a future `preferences:set` cannot inherit the rejected
   shape: whoever needs to write a policy must add that entry point deliberately,
   on `appendOrders`' lock + temp + rename contract.

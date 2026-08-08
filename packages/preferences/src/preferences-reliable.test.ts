@@ -1,4 +1,4 @@
-// The RELIABLE half of the hardened preferences sidecar IO. The package has NO public
+// The RELIABLE half of the hardened preferences sidecar IO. The package has no GENERAL
 // write surface: seeding is the only writer, and it must be genuinely append-only (no
 // whole-file overwrite — a seed onto a file of quarantined lines preserves them). The
 // validating loader QUARANTINES malformed/garbage lines (bad JSON/shape, invalid ratio,

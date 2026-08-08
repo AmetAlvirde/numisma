@@ -166,7 +166,7 @@ export async function loadPreferences(path: string): Promise<ProfitPolicyEntry[]
  * Seed a NEW sidecar with this fund's locked default policy if it holds no valid entry
  * yet. The one-line append is INLINE here on purpose: this package exposes no general
  * write surface (audit finding 34). A public `appendPreference` was exported, documented
- * and tested with zero callers, carrying a weaker durability contract than
+ * and tested with no caller outside this seeder, carrying a weaker durability contract than
  * `appendOrders` — a plain `appendFile` with no lock and no torn-line handling, the shape
  * that has concretely lost records before. Rather than harden a writer nothing used, the
  * write surface was DELETED. Any future caller that genuinely needs to write a policy
