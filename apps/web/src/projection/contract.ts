@@ -12,8 +12,16 @@
  * This module is the right home for the narrowing (D8): the engine must stay
  * unaware that a cloud exists, so the "what may leave the machine" decision
  * lives on the web side, next to the row shape it governs.
+ *
+ * IT IS PG-FREE, AND THAT IS LOAD-BEARING (audit finding 8). The Postgres reader
+ * that used to sit at the bottom of this file now lives in `./snapshot-reader.ts`.
+ * Because everything imports the contract and only the server-side dashboard
+ * imports the reader, keeping the driver out of THIS module's reach is what lets a
+ * shared RUNTIME value live here without dragging `pg` toward the client bundle
+ * (`client-bundle.integration.test.ts`). `contract.test.ts` asserts the property
+ * from the module graph, so it cannot rot into a comment. Add values here freely;
+ * add an import of `pg`, or of anything that reaches it, and that suite goes red.
  */
-import { Pool } from "pg";
 import type { CompositionReport } from "@numisma/engine";
 import { asOfSortKey } from "./as-of.ts";
 
@@ -323,7 +331,8 @@ export function toProjectionReport(
  *    floor, the derived `feedGap` conclusion, and the `suppressed` key list. The
  *    engine's contract is UNCHANGED by this bump (C1) — the block is authored here.
  *    A v2 row read by a v3 reader is `status: "stale"`, and v2 rows are dropped
- *    from `anchors` entirely (see {@link getSnapshotHistory}), which is what makes
+ *    from `anchors` entirely (see `getSnapshotHistory` in `./snapshot-reader.ts`),
+ *    which is what makes
  *    the cutover graceful: the next daily push writes a v3 row that renders
  *    immediately, and leftover v2 rows are simply unresolvable as references until
  *    the backfill upgrades them.
@@ -346,6 +355,23 @@ export function fundIdOf(report: CompositionReport): string {
     .replace(/^-+|-+$/g, "");
 }
 
+/**
+ * Chronologically-comparable sort key for an `as_of` calendar date — see
+ * {@link asOfSortKey} in `./as-of.ts` for why the ordering is typed rather than
+ * lexical.
+ *
+ * IMPLEMENTED IN `./as-of.ts`, re-exported here. `asOf` ordering is part of the
+ * stored contract — every consumer that compares two anchors must compare them the
+ * same way, and re-deriving date ordering by string comparison anywhere else would
+ * re-introduce exactly the lexical trap that function exists to stop. So it is
+ * named on the contract surface, alongside the {@link SnapshotAnchor} it orders.
+ *
+ * It sits ABOVE the reader seam deliberately: `./snapshot-reader.ts` is one of its
+ * callers, not its owner. When the reader lived in this file, this re-export was
+ * the last thing standing between the wire contract and the driver.
+ */
+export { asOfSortKey };
+
 /** One stored anchor: a single `(fund_id, as_of)` row's identity plus its payload. */
 export interface SnapshotAnchor {
   fundId: string;
@@ -354,7 +380,11 @@ export interface SnapshotAnchor {
 }
 
 /**
- * Discriminated result of {@link getSnapshotHistory}.
+ * Discriminated result of `getSnapshotHistory` (`./snapshot-reader.ts`).
+ *
+ * The TYPE lives here, with the row shape it is built from; the query that
+ * produces it lives with the driver. Every consumer of the result — the session
+ * gate, the render surfaces — imports only this, and so imports no `pg`.
  *
  * Same `empty | stale | ok` union the single-day reader always returned, widened on
  * the `ok` branch to carry BOTH `latest` and the full `anchors` history. D4's named
@@ -369,142 +399,3 @@ export type SnapshotHistory =
   | { status: "empty" }
   | { status: "stale"; storedVersion: number; expectedVersion: number }
   | { status: "ok"; latest: SnapshotAnchor; anchors: SnapshotAnchor[] };
-
-interface SnapshotRow {
-  fund_id: string;
-  as_of: string;
-  schema_version: number;
-  report: ProjectionReport;
-}
-
-let readerPool: Pool | undefined;
-
-/**
- * Lazily-constructed READ-ONLY projection pool, from PROJECTION_DATABASE_URL.
- * Lazy so merely importing this module (e.g. from the push shell, which uses a
- * different write credential) never opens the read pool. The credential behind
- * this URL is expected to hold SELECT-only grants (see schema.sql, ADR-007).
- */
-export function getReaderPool(): Pool {
-  if (!readerPool) {
-    const connectionString = process.env.PROJECTION_DATABASE_URL;
-    if (!connectionString) {
-      throw new Error("PROJECTION_DATABASE_URL is not set");
-    }
-    readerPool = new Pool({ connectionString });
-  }
-  return readerPool;
-}
-
-/**
- * TEST-ONLY seam for the module-level `readerPool` singleton. NOT part of the
- * production reader/writer contract — do not call from app code.
- *
- * `getReaderPool()` memoizes a lazily-constructed pool in module scope, which
- * would otherwise leak across tests (a pool set up in one test would be returned
- * to the next). This lets a test reset the singleton (`setReaderPoolForTests()`
- * with no argument) or inject a stub pool (`setReaderPoolForTests(stub)`) so each
- * test starts from a known state. Production lazy construction from
- * PROJECTION_DATABASE_URL in `getReaderPool()` is unchanged.
- */
-export function setReaderPoolForTests(pool?: Pool): void {
-  readerPool = pool;
-}
-
-/**
- * Chronologically-comparable sort key for an `as_of` calendar date — see
- * {@link asOfSortKey} in `./as-of.ts` for why the ordering is typed rather than
- * lexical.
- *
- * EXPORTED (it was module-private) so `anchors` can be ordered THROUGH the same key
- * the "latest" arbitration uses, and so slice 4's nearest-anchor resolution can too.
- * Re-deriving date ordering by string comparison anywhere else would re-introduce
- * exactly the lexical trap it exists to stop, in a second place.
- *
- * IT LIVES IN A SEPARATE, PG-FREE MODULE and is re-exported here. The reader/writer
- * contract is unchanged — every existing importer still gets it from `contract.ts` —
- * but slice 4's verdict module runs in the BROWSER, and a value import of THIS file
- * would pull the `pg` driver and the `composition_snapshot` literal into the client
- * bundle and fail `client-bundle.integration.test.ts`.
- */
-export { asOfSortKey };
-
-/**
- * Read the projection's ANCHOR HISTORY. Returns a refusal result rather than throwing
- * for the two "expected" bad states:
- *  - no rows yet            -> { status: "empty" }
- *  - stored schema mismatch -> { status: "stale", storedVersion, expectedVersion }
- * Only an actual DB/query failure — or an `as_of` we cannot order (see
- * {@link asOfSortKey}) — rejects.
- *
- * "Latest" is arbitrated in-process on a typed date key, NOT by a SQL
- * `ORDER BY as_of ... LIMIT 1`: `as_of` is a TEXT column, so a SQL sort is lexical
- * and mis-picks the latest for any non-zero-padded date. It is also decided by the
- * snapshot's logical `as_of` date, never by `pushed_at` — `pushed_at` is refreshed
- * on every upsert, so an old-dated snapshot re-pushed must not win.
- *
- * SCOPE — single fund (ADR-007). The product is single-tenant/single-fund, so
- * this deliberately scans the whole `composition_snapshot` table with no
- * `WHERE fund_id` filter and arbitrates across every row. That is intentional,
- * not an oversight: the in-process typed-date arbitration above requires reading
- * all candidate rows anyway, and a `LIMIT` would have to follow a (lexically
- * unsafe) SQL sort. If funds ever coexist, add a `fund_id` parameter + filter
- * here so one fund's snapshots can't out-date another's.
- *
- * THIS IS A RETURN-SHAPE WIDENING, NOT A NEW QUERY AND NOT A PAYLOAD CHANGE. The
- * SELECT below is byte-identical to the one the single-day reader ran: no WHERE, no
- * LIMIT. It has ALWAYS pulled full history into memory and thrown all but the newest
- * away. The AAR's "apps/web can only ever show a single day" was true of the return
- * TYPE, never of the query. Measured cost: 3,093 bytes/row — 28 anchors ≈ 87 KB, a
- * year ≈ 1.1 MB.
- *
- * `anchors` is filtered to `COMPOSITION_SNAPSHOT_SCHEMA_VERSION` and ordered
- * ASCENDING through {@link asOfSortKey}. The version filter is not defensive
- * decoration — it is what makes the v2→v3 cutover graceful: leftover v2 rows stay in
- * the table (no credential in this system can DELETE one, V6) and are simply
- * unresolvable as references until the backfill upgrades them, instead of being
- * handed to a v3 reader that would mis-render them.
- */
-export async function getSnapshotHistory(pool: Pool): Promise<SnapshotHistory> {
-  const { rows } = await pool.query<SnapshotRow>(
-    `SELECT fund_id, as_of, schema_version, report
-       FROM composition_snapshot`,
-  );
-
-  let latest: SnapshotRow | undefined;
-  let latestKey = -Infinity;
-  for (const row of rows) {
-    const key = asOfSortKey(row.as_of);
-    if (key > latestKey) {
-      latest = row;
-      latestKey = key;
-    }
-  }
-
-  if (!latest) {
-    return { status: "empty" };
-  }
-
-  // Staleness is judged on the LATEST row, not on an older ok one: if the newest
-  // thing the projection holds is a version this build does not understand, the
-  // honest answer is a refusal, not a render of some older row that happens to fit.
-  if (latest.schema_version !== COMPOSITION_SNAPSHOT_SCHEMA_VERSION) {
-    return {
-      status: "stale",
-      storedVersion: latest.schema_version,
-      expectedVersion: COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
-    };
-  }
-
-  const anchors = rows
-    .filter((row) => row.schema_version === COMPOSITION_SNAPSHOT_SCHEMA_VERSION)
-    .map((row) => ({ key: asOfSortKey(row.as_of), row }))
-    .sort((a, b) => a.key - b.key)
-    .map(({ row }) => toAnchor(row));
-
-  return { status: "ok", latest: toAnchor(latest), anchors };
-}
-
-function toAnchor(row: SnapshotRow): SnapshotAnchor {
-  return { fundId: row.fund_id, asOf: row.as_of, report: row.report };
-}

@@ -1,14 +1,21 @@
 /**
- * Calendar-date arithmetic over the projection's `as_of` key — PURE, and with no
- * `pg` import anywhere in its reach.
+ * The projection's AS-OF VOCABULARY: every operation on the `as_of` calendar-date
+ * key, in one place — the ordering key, the wall-clock reading, and the day
+ * arithmetic the engine owns. Pure, and with no `pg` import anywhere in its reach.
  *
- * WHY IT IS ITS OWN FILE. {@link asOfSortKey} was born in `contract.ts` and is
- * re-exported from there, so nothing about the reader/writer contract moved. But
- * `contract.ts` imports the `pg` driver, and slice #150's verdict module — which
- * runs in the BROWSER — needs this ordering key. A value import of `contract.ts`
- * from a render surface would pull the driver and the `composition_snapshot`
- * literal into the client bundle and fail `client-bundle.integration.test.ts`. One
- * implementation, two importers, no driver on the wire.
+ * WHY IT IS ITS OWN FILE. Not for the reason it was originally split out: back then
+ * `contract.ts` imported the `pg` driver, and this file was the escape hatch that
+ * let the browser-side verdict module reach {@link asOfSortKey} without dragging
+ * the driver into the client bundle. Audit finding 8 removed that pressure — the
+ * driver now lives in `./snapshot-reader.ts` and `contract.ts` is pg-free — so this
+ * module survives on the reason that actually holds: `asOfSortKey`,
+ * {@link calendarDateOf} and the re-exported `addDays`/`daysBetween` are ONE
+ * vocabulary with one rationale (UTC throughout, typed ordering never lexical), and
+ * splitting them across the contract and the engine would leave that rationale
+ * nowhere to live.
+ *
+ * `asOfSortKey` is re-exported from `contract.ts` because ordering is part of the
+ * stored contract's surface. This file is where it is IMPLEMENTED and explained.
  */
 
 /**
