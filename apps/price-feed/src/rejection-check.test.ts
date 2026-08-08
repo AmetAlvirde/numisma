@@ -452,7 +452,7 @@ describe("scanFetchedMarks folds the pending inbox exactly as ingestInbox does",
     const paths = resolvePriceFeedPaths(dataDir);
     await writeGenesisAt(paths);
     // Today's mark was already ingested (66k, in the log). A same-day re-run reconstructs
-    // the same id with a wild price; spine dedup-skips it at event-store.ts:259 BEFORE the
+    // the same id with a wild price; spine dedup-skips it in `walkPendingInbox` BEFORE the
     // guard, so the pre-check must not flag it — even though 999k would trip the guard.
     await writeLog(paths, [btcMark(66_000, "2026-07-03")]);
     const reRun = btcMark(999_000, "2026-07-03"); // same id pm-btc-2026-07-03
