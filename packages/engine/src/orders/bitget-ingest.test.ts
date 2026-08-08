@@ -395,11 +395,11 @@ describe("the null sentinel and the authoritative column (testing decision 4)", 
  * #205 — THE DESCRIPTORS SURVIVE THE WRITE.
  *
  * These are the `KEY_ORDER` guard. `serializeOrderRecord` copies ONLY the keys named in
- * `KEY_ORDER.orderPlaced`, so a field added to `OrderPlacedRecord` and forgotten there is
- * dropped at write with a green `pnpm typecheck` and no other failing test — the value is
- * on the object in memory and absent from every line on disk. Asserting the round trip
- * (build → serialize → parse) rather than the record's own properties is what makes that
- * omission fail here.
+ * `KEY_ORDER.orderPlaced`, so a field added to `OrderPlacedRecord` and forgotten there
+ * would be dropped at write — the value on the object in memory, absent from every line
+ * on disk. Since `records.ts` derives `KEY_ORDER` from `Record<keyof …, true>` tables,
+ * that omission is a compile error first; asserting the round trip (build → serialize →
+ * parse) rather than the record's own properties keeps the runtime backstop.
  */
 describe("the placement descriptors round-trip through the record contract (#205)", () => {
   function placedFrom(overrides: Partial<Record<string, string>> = {}) {
@@ -416,8 +416,8 @@ describe("the placement descriptors round-trip through the record contract (#205
     const parsed = parseOrderRecord(JSON.parse(line));
     expect(parsed.status).toBe("ok");
     if (parsed.status !== "ok") return;
-    // THROUGH the line, not off the in-memory record: a missing `KEY_ORDER` entry fails
-    // exactly here.
+    // THROUGH the line, not off the in-memory record: a dropped key would fail exactly
+    // here (the compile-time table latch in records.ts fires first).
     expect(parsed.record).toMatchObject({ orderType: "Limit", timeInForce: "GTC" });
     // Byte-equal on the way back out, which is what `KEY_ORDER` exists to guarantee.
     expect(serializeOrderRecord(parsed.record)).toBe(line);
