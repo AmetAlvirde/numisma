@@ -45,7 +45,7 @@ execution behavior, and decision history across Tempos.
   automatically from free sources. Manual `PriceMarked` authoring remains the
   permanent fallback.
 - **Resting Orders are tracked as availability, never automated execution
-  (ADR-013/ADR-014).** A trader-exported Bitget open-orders file is imported
+  (ADR-013/ADR-014).** A trader-exported <exchange> open-orders file is imported
   into a durable sidecar (`data/orders.jsonl`, outside the event log) so the
   Fund can show `available = value − committed` per Reserve. This is manual
   export-then-import, not a live broker connection or automated order

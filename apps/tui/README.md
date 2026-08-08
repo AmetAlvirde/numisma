@@ -34,9 +34,9 @@ root-level script from the repo's `package.json` (all of them delegate to
 | `dev` | `app.ts` | no (ingests inbox) | Bun openTUI dashboard: `prepareStartup` (ingest → fold) then `mountApp`. |
 | `report` | `report.ts` | yes | Folds genesis + log and prints the composition report. Never ingests. |
 | `spine` | `spine.ts` | no (ingests inbox) | Node tracer: ingest → fold (`--as-of <date>`, optional) → render. `--magnitude-threshold=<n>` / `SPINE_MAGNITUDE_THRESHOLD` opts into a wider fat-finger guard for one run. |
-| `spine:reset` | `spine-reset.ts` | no (destructive, guarded) | Deletes `events.jsonl` and restores the latest archived inbox. Refuses on the default `accumulus` `dataDir`; needs an explicit `NUMISMA_DATA_DIR`. |
+| `spine:reset` | `spine-reset.ts` | no (destructive, guarded) | Deletes `events.jsonl` and restores the latest archived inbox. Refuses on the default `<fund>` `dataDir`; needs an explicit `NUMISMA_DATA_DIR`. |
 | `migrate:log` | `migrate-legacy-log.ts` | no (rewrites the log) | One-shot ADR-003 v2 cash-leg migration from an operator-authored `data/migration-cash-legs.json`. Fails loud, writes nothing on any invalid/missing leg. |
-| `orders:import <csv>` | `import-orders-cli.ts` | no (appends orders) | Interactive Bitget open-orders import into `orders.jsonl`. Never touches the event log. Exit 0 on `imported-partial` (ADR-014). |
+| `orders:import <csv>` | `import-orders-cli.ts` | no (appends orders) | Interactive `<exchange>` open-orders import into `orders.jsonl`. Never touches the event log. Exit 0 on `imported-partial` (ADR-014). |
 | `orders:fill` | `record-fill-cli.ts` | no (appends orders + log) | Interactive fill recording: retires the claim in `orders.jsonl` and appends the resulting transaction to `events.jsonl`. |
 | `orders:cancel <orderId> [observedAt]` | `cancel-order-cli.ts` | no (appends orders) | Scriptable (argv-only, no prompt) retirement of one resting rung in `orders.jsonl`. Never touches the event log. |
 | `smoke:tui` | `smoke-openTui.ts` | yes (in-memory) | Bun keypress smoke against a synthetic fund review; no disk IO. |
@@ -94,7 +94,7 @@ under Node while the terminal glue stays isolated in a Bun-only layer.
 - `spine-reset.ts` — the `tsx` iteration helper (`pnpm spine:reset`): deletes the
   append-only log and, if the inbox is already gone, restores the most recent
   archived inbox so it can be re-folded. Genesis is untouched; idempotent. Refuses
-  to run when the resolved `dataDir` is the default `accumulus` sibling repo — it
+  to run when the resolved `dataDir` is the default `<fund>` sibling repo — it
   requires an explicit, non-default `NUMISMA_DATA_DIR` — so it cannot delete the
   real durable log. Destructive within its guarded scope, not read-only.
 - `app.ts` — the self-executing `pnpm dev` entry: path resolution, `prepareStartup`,

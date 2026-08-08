@@ -10,6 +10,10 @@ alongside the schedule — the schedule is an addition, never a replacement (C5)
 Everything here is machine-local. Nothing secret or trade-derived enters the repo
 (transaction-data-is-private): tokens and logs live outside the checkout.
 
+Throughout this page, `<fund>` stands for your own private data repository — the same
+convention as `<dataDir>` — so substitute your actual repo name/path before running
+any command below.
+
 ## Components
 
 | File | Role |
@@ -66,8 +70,8 @@ path, else `__REPO_DIR__`/the plist's `EnvironmentVariables`), `NUMISMA_PRICEFEE
   The wrapper `source`s it if present. If a key is absent, only that provider's
   instruments fail (loud, per-symbol) — crypto still runs keyless. The file is never
   committed and never printed (only its path is logged). This mirrors the
-  ledger-privacy posture: the durable store lives in the private sibling `accumulus`
-  repo (`~/Dev/accumulus/data` by default, or wherever `NUMISMA_DATA_DIR` points),
+  ledger-privacy posture: the durable store lives in the private sibling `<fund>`
+  repo (`~/Dev/<fund>/data` by default, or wherever `NUMISMA_DATA_DIR` points),
   never inside the numisma checkout; secrets likewise are a machine-local artifact
   beside the repo, not in it.
 
@@ -76,7 +80,7 @@ path, else `__REPO_DIR__`/the plist's `EnvironmentVariables`), `NUMISMA_PRICEFEE
   this file, because the heartbeat trap must know where to write before the
   exit-127 checks run. A `NUMISMA_DATA_DIR` set here would therefore reach every
   node command but not the wrapper's own git steps: the commit and post-check would
-  guard `~/Dev/accumulus/data` while `spine` wrote somewhere else, and the job would
+  guard `~/Dev/<fund>/data` while `spine` wrote somewhere else, and the job would
   stay green over an unverified log. Set it in the launchd plist's
   `EnvironmentVariables` (or the shell environment) instead, where both halves see
   it.
@@ -153,15 +157,15 @@ threat model does not need.
    (`__REPO_DIR__`, `__HOME__`).
 3. Set the durable-data home in the plist. The wrapper forwards `NUMISMA_DATA_DIR`
    to every `pnpm` invocation; it is the **single machine-specific override** that
-   points the ledger at the sibling private `accumulus` repo. launchd **cannot expand
+   points the ledger at the sibling private `<fund>` repo. launchd **cannot expand
    `~`**, so the plist's `NUMISMA_DATA_DIR` must be an **absolute** path (e.g.
-   `/Users/you/Dev/accumulus/data`) — unlike the code default, which derives
-   `~/Dev/accumulus/data` from `os.homedir()`. If left unset the wrapper's step-3
-   auto-commit and step-4 post-check both fall back to that **same** `~/Dev/accumulus/data`
+   `/Users/you/Dev/<fund>/data`) — unlike the code default, which derives
+   `~/Dev/<fund>/data` from `os.homedir()`. If left unset the wrapper's step-3
+   auto-commit and step-4 post-check both fall back to that **same** `~/Dev/<fund>/data`
    default — the exact tree the in-process capture writes to — so an unset var is still
    committed and still post-checked (no silent "log left uncommitted" gap). Setting it
-   explicitly is only required when your `accumulus` checkout lives somewhere else.
-   (On a fresh box with no `accumulus` checkout at all, the default path is not a git
+   explicitly is only required when your `<fund>` checkout lives somewhere else.
+   (On a fresh box with no `<fund>` checkout at all, the default path is not a git
    repo, so step 3 degrades gracefully — a logged warning and skip, never a FATAL.)
 4. Install and load:
 
@@ -400,19 +404,19 @@ Confirm, in order:
    the equity marks emit normally; re-check this on the first weekend run.
 5. **Auto-commit (step 3):** after a run that appended new marks, the log reads
    `committed durable-log changes (not pushed)` and `git -C "$NUMISMA_DATA_DIR" log
-   -1` (or the `~/Dev/accumulus/data` default when the var is unset) shows a commit
+   -1` (or the `~/Dev/<fund>/data` default when the var is unset) shows a commit
    from this run. A same-day re-run reads `no tracked data changes to commit
    (idempotent no-op run)`. A first-time **untracked** source-of-truth file (e.g. an
    initial `genesis.json`) is staged and committed too — the backstop is not limited
    to tracked modifications. If instead it reads `WARNING: … is not inside a git repo
-   — skipping`, the resolved data dir has no `accumulus` checkout: create/clone it, or
+   — skipping`, the resolved data dir has no `<fund>` checkout: create/clone it, or
    point `NUMISMA_DATA_DIR` at the right path (see install step 3 above), and re-run.
 6. **Post-check (step 4):** a clean run ends with `post-check OK: durable log
    committed clean`. If the source-of-truth log is somehow left uncommitted after
    both the in-process capture and the step-3 backstop, the run logs `FATAL: durable
    LOG uncaptured …` and **exits non-zero so launchd surfaces a red job** — the miss
    is never silent (issue #132). The post-check targets the same resolved data dir as
-   step 3 (`NUMISMA_DATA_DIR`, else the `~/Dev/accumulus/data` default the in-process
+   step 3 (`NUMISMA_DATA_DIR`, else the `~/Dev/<fund>/data` default the in-process
    capture writes to), so an unset var no longer disables it. A lagging
    `head-digest.json` warns but does not fail the run (it is a forensic breadcrumb,
    not the source of truth); the warning uses `git status --ignored` so it fires even
@@ -503,8 +507,8 @@ bad day never appends a bad mark. The console/log distinguishes the two cases �
   of as a silent gap.
 - **Action:**
   1. Look at the price. If it is a data error (unit slip, bad payload), delete that
-     mark from `<dataDir>/inbox/transactions.json` (the `accumulus` data root,
-     `~/Dev/accumulus/data` by default or `$NUMISMA_DATA_DIR`) and let the next run
+     mark from `<dataDir>/inbox/transactions.json` (the `<fund>` data root,
+     `~/Dev/<fund>/data` by default or `$NUMISMA_DATA_DIR`) and let the next run
      re-fetch.
   2. If the move is **real** (a genuine >50% day, or a long gap since the last
      mark), keep the mark and re-run the spine with the magnitude guard raised for
@@ -544,6 +548,6 @@ bad day never appends a bad mark. The console/log distinguishes the two cases �
 - The disposable quotes (always upserted, even pre-mark-time): `<dataDir>/prices/`.
 
 `<dataDir>` is the durable-data root resolved by `NUMISMA_DATA_DIR` — the sibling
-private `accumulus` repo, `~/Dev/accumulus/data` by default. The `inbox/` and
-`prices/` subtrees are the disposable cache: `accumulus`'s allowlist `.gitignore`
+private `<fund>` repo, `~/Dev/<fund>/data` by default. The `inbox/` and
+`prices/` subtrees are the disposable cache: `<fund>`'s allowlist `.gitignore`
 keeps them (and `ingested/`, `*.tmp`, `*.quarantine`) out of the versioned history.

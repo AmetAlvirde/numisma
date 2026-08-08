@@ -11,7 +11,7 @@ _Status: accepted (amended 2026-07-24 — see "Amendment: payload narrowed to re
 The web-app leg places a **read-only projection of private fund data** (positions,
 portfolio/fund USD values, realized/unrealized P&L) in an **internet-reachable,
 cloud-hosted database** — the first time real portfolio data leaves the local
-machine and the private `accumulus` sibling repo (ADR-006). This ADR **permits
+machine and the private `<fund>` sibling repo (ADR-006). This ADR **permits
 that regime**, under guardrails that make it a bounded, reversible-at-the-data-layer
 extension of the existing architecture rather than a new source of truth: the
 append-only event log stays the **sole permanent system of record** (ADR-003) and
