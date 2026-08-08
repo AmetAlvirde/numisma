@@ -1,11 +1,11 @@
-// PROTOTYPE (mvi 2026-06-30-cash-settlement). Behavior lock for the cash leg of
-// every capital move: the six verbs (Open→debit, Close→credit, Deposit, Withdraw,
-// Transfer) all route through the one `applyReserveDelta` seam, tier-preserving;
-// the ingest sufficiency + settlement-magnitude gates reject a non-conserving
-// event before it reaches the log. These are the synthetic paths with no pending
-// real data — the close→credit path is additionally proven on the real GRAM/RENDER
-// drift by `pnpm spine` (see the prototype note). Real-shaped / versioning /
-// un-marked / cross-ref-shadow scenarios live in cash-settlement-scenarios.test.ts.
+// Behavior lock for the cash leg of every capital move: the verbs (Open→debit,
+// Close→credit, Deposit, Withdraw, Transfer) all route through the one
+// `applyReserveDelta` seam, tier-preserving; the ingest sufficiency +
+// settlement-magnitude gates reject a non-conserving event before it reaches the
+// log. These are the synthetic paths, built from in-file fixtures; the
+// close→credit path is additionally exercised end-to-end against the real log by
+// `pnpm spine`. Real-shaped / versioning / un-marked / cross-ref-shadow scenarios
+// live in cash-settlement-scenarios.test.ts.
 import {
   applyReserveDelta,
   buildEventReference,

@@ -1,20 +1,21 @@
 /**
- * PROTOTYPE (mvi 2026-06-29-portfolio-persistence). WRITE half of the
- * event-sourcing spine — the inbox ingest, dedup persistence, atomic append,
- * archival, the one-shot legacy migration, and the argv/env operator knobs that
- * ADR-001 keeps OUT of `@numisma/engine`. The pure fold + event validation live in
- * the engine (`foldEvents` / `parseEvent`); the durable log's READ path (path
- * resolution, genesis load, log load, quarantine, the folded review) lives in
- * `@numisma/event-store`, shared with the web push, and is imported back here.
+ * WRITE half of the event-sourcing spine — the inbox ingest, dedup persistence,
+ * atomic append, archival, the one-shot legacy migration, and the argv/env
+ * operator knobs that ADR-001 keeps OUT of `@numisma/engine`. The pure fold +
+ * event validation live in the engine (`foldEvents` / `parseEvent`); the durable
+ * log's READ path — path resolution, genesis load, log load, quarantine, the
+ * folded review — has moved to `@numisma/event-store`, shared with the web push,
+ * and is imported back here (`loadGenesis`, `loadEventLog`, `readOptional`,
+ * `assertLogFullyLoaded`, `EventStorePaths`).
  *
- * Durable truth on disk:
+ * Durable truth on disk (paths resolved by `@numisma/event-store`):
  *   - data/genesis.json          immutable t0 seed (a FundReviewData shape)
  *   - data/events.jsonl          append-only log, one JSON event per line
  *   - data/inbox/transactions.json  disposable write channel (array of events)
  *   - data/ingested/<wall-clock>.json  archive of a consumed inbox
  *   - data/events.jsonl.quarantine  the lane for surfaced corrupt log lines
  *
- * DURABILITY (reliable conversion, ADR-003 slice 3):
+ * DURABILITY (ADR-003):
  *   - Archives are stamped with the wall-clock ingest moment and refuse to clobber
  *     a prior archive; a zero-new re-drop archives nothing.
  *   - A corrupt log line is quarantined to a side lane and surfaced; the read path

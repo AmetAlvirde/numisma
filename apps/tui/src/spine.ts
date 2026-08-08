@@ -1,7 +1,7 @@
 /**
- * PROTOTYPE (mvi 2026-06-29-portfolio-persistence). Node-runnable tracer for the
- * event-sourcing spine — the verifiable end-to-end path that does NOT need Bun
- * or openTUI. Mirrors `report.ts`, but the read model comes from the fold:
+ * Node-runnable entry point for the event-sourcing spine — the end-to-end path
+ * that does NOT need Bun or openTUI. Mirrors `report.ts`, but the read model
+ * comes from the fold:
  *
  *   1. ingest the inbox (dedup by id, append, archive) and report counts
  *   2. fold genesis + log to `--as-of <date>` (or current state)
