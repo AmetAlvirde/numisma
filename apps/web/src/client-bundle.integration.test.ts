@@ -5,7 +5,8 @@
  * the client. Today this holds structurally (the `.tsx` render surfaces import
  * only `import type` from `@numisma/engine` and the pure `@numisma/engine/format`
  * helpers), but "structurally" is a manual claim — a future value-import of
- * `contract.ts` / `dashboard.ts` / `auth.ts` into a client component would
+ * `projection/snapshot-reader.ts` / `dashboard.ts` / `auth.ts` into a client
+ * component would
  * re-leak the driver and secrets into the browser bundle SILENTLY. This test
  * turns that invariant into a build-time fact.
  *
@@ -77,7 +78,7 @@ if (!hasBuild) {
  * become load-bearing again.
  */
 const FORBIDDEN = [
-  "composition_snapshot", // the projection table — only in contract.ts / schema.sql
+  "composition_snapshot", // the projection table — server-only SQL (snapshot-reader.ts, push/, provision.ts, schema.sql)
   "PROJECTION_DATABASE_URL",
   "PROJECTION_WRITE_DATABASE_URL",
   "PROJECTION_ADMIN_DATABASE_URL",
