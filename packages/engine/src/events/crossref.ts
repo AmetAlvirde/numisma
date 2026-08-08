@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE (mvi 2026-06-29-portfolio-persistence). Event-sourcing spine — cross-ref.
+ * Event-sourcing spine — cross-ref.
  *
  * The SECOND ingest gate (after `./parse.ts`): validate a structurally-sound event
  * against the known world — the {@link EventReference} built from the immutable

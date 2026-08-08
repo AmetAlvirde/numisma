@@ -1,5 +1,5 @@
-// PROTOTYPE (mvi 2026-06-30-cash-settlement). Scenario-level behavior locks for the
-// cash leg, split out of cash-settlement.test.ts to keep both files navigable: the
+// Scenario-level behavior locks for the cash leg, split out of
+// cash-settlement.test.ts to keep both files navigable: the
 // durable-log migration/versioning contract, the real-shaped mixed-tier close, the
 // deliberate un-marked-instrument gate-skip, and the cross-ref shadow equivalence
 // guard. The core per-verb legs + seam + ingest gates live in cash-settlement.test.ts.

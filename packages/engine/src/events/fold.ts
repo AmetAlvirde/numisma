@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE (mvi 2026-06-29-portfolio-persistence). Event-sourcing spine — fold.
+ * Event-sourcing spine — fold.
  *
  * The fold to the read model plus the reserve/tier cash-math seam it and the
  * cross-ref shadow (`./crossref.ts`) share. `foldEvents` replays the genesis seed

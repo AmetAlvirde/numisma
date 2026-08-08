@@ -1,6 +1,7 @@
-// PROTOTYPE (mvi 2026-06-30-cash-settlement). Shared fixtures/helpers for the cash
-// leg behavior locks. Split out of cash-settlement.test.ts so the specs stay
-// navigable; contains NO describe/it/test. (Coverage excludes **/*.fixtures.ts.)
+// Shared fixtures/helpers for the cash-leg behavior locks, used by both
+// cash-settlement.test.ts and cash-settlement-scenarios.test.ts. Split out so the
+// specs stay navigable; contains NO describe/it/test. (Coverage excludes
+// **/*.fixtures.ts.)
 import {
   parseFundReview,
   type FundReviewData,
