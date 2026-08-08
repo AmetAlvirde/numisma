@@ -22,6 +22,12 @@ Everything here is machine-local. Nothing secret or trade-derived enters the rep
 Both `.plist` / `.sh` files are templates: replace `__REPO_DIR__` / `__HOME__`
 before installing.
 
+The wrapper also honors three lower-traffic overrides, each with a sensible
+default so most installs never need them: `NUMISMA_REPO_DIR` (repo checkout
+path, else `__REPO_DIR__`/the plist's `EnvironmentVariables`), `NUMISMA_PRICEFEED_ENV`
+(the token env file, else `~/.config/numisma/price-feed.env`), and
+`NUMISMA_PRICEFEED_LOG_DIR` (per-run log directory, else `~/Library/Logs/numisma`).
+
 ## Where provider tokens live (scheduled environment)
 
 - **Crypto needs no token.** Binance public REST is keyless, so a crypto-only run
