@@ -14,12 +14,8 @@ import {
   parseBitgetOpenOrdersCsv,
   type BitgetOpenOrder,
 } from "./bitget.js";
-import {
-  buildOrderPlacedRecords,
-  canonicalDecimal,
-  checkFundingCoverage,
-  synthesizeOrderId,
-} from "./ingest.js";
+import { buildOrderPlacedRecords, canonicalDecimal, synthesizeOrderId } from "./ingest.js";
+import { checkFundingCoverage } from "./coverage.js";
 import { committedRungs } from "./committed.js";
 import { parseOrderRecord, serializeOrderRecord } from "./records.js";
 import { pickRestingOrdersAsOf } from "./select.js";
