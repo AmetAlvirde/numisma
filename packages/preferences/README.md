@@ -21,8 +21,7 @@ Enumerated explicitly in `src/index.ts`:
 | --- | --- | --- |
 | `resolvePreferencesPath` | function | Resolve `<dataDir>/preferences.jsonl` under the shared `resolveDataDir` root (never CWD-relative). |
 | `loadPreferences` | function | Read the append-only sidecar into ordered, validated `ProfitPolicyEntry[]`. A missing file is `[]`; a malformed/out-of-range line is quarantined (dropped), not thrown. |
-| `appendPreference` | function | Genuinely append-only: add one `ProfitPolicyEntry` line without touching prior entries. |
-| `seedDefaultPreferences` | function | Seed a **new** sidecar with the fund's locked default policy only if it holds no valid entry yet — not a read-gap fallback; never call it to paper over a missing/quarantined policy. |
+| `seedDefaultPreferences` | function | The **only** preferences writer: seed a **new** sidecar with the fund's locked default policy, only if it holds no valid entry yet — not a read-gap fallback; never call it to paper over a missing/quarantined policy. Its one-line append is inline; there is no general `appendPreference` entry point (see below). |
 | `resolveOrdersPath` | function | Resolve `<dataDir>/orders.jsonl` under the shared `resolveDataDir` root. |
 | `loadOrders` | function | Read the sidecar into a total `OrdersLoad` outcome: `{status: "loaded", records, skips}` \| `{status: "absent"}` \| `{status: "unreadable", message}`. Never throws. |
 | `appendOrders` | function | Genuinely append-only: build the full next image, write to a same-directory unique temp file, then `rename` over the sidecar (crash-atomic), serialized across processes by an exclusive-create lock file. |
@@ -35,6 +34,13 @@ Enumerated explicitly in `src/index.ts`:
   temp-file + `rename` for crash-atomicity (the stronger contract, chosen
   because a plain `appendFile` suffix-write on a torn last line has
   concretely lost records before — see `orders.ts`'s header).
+- **No general preferences write surface.** `preferences.jsonl` has exactly one
+  writer, `seedDefaultPreferences`, whose single-line append is inline. The
+  package used to export an `appendPreference` — documented and tested, with
+  zero callers, on the weaker `appendFile` contract above. It was deleted rather
+  than hardened, so a future `preferences:set` cannot inherit the rejected
+  shape: whoever needs to write a policy must add that entry point deliberately,
+  on `appendOrders`' lock + temp + rename contract.
 - **Cross-process write serialization for orders.** `appendOrders` takes an
   exclusive-create lock file (`<path>.lock`) before its read-modify-write,
   because two overlapping appends reading the same image would otherwise let

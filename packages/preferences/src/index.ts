@@ -1,5 +1,4 @@
 export {
-  appendPreference,
   loadPreferences,
   resolvePreferencesPath,
   seedDefaultPreferences,
