@@ -40,9 +40,19 @@
  *  - every row's `percentOfFund` EXCEPT the Reserve row's;
  *  - the fund NAME, which becomes {@link SYNTHETIC_FUND_NAME} — the loudest possible
  *    signal, at a glance, that nothing in this file is a real position;
- *  - the fund ID, which becomes {@link SYNTHETIC_FUND_ID}, the slug of that name. It
- *    is not a magnitude, but it IS the real fund's identifier, and it appeared on
- *    every anchor of a file this public repository checks in.
+ *  - the fund ID, which is re-derived as the slug of that synthetic name rather than
+ *    carried over. It is not a magnitude, but it WAS the real fund's identifier, and
+ *    it appeared on every anchor of a file this public repository checks in.
+ *
+ * ── WHAT THIS IS NOT ────────────────────────────────────────────────────────────
+ * This is not de-identification, and the committed fixture is not identity-clean.
+ * Row IDs and row LABELS are PRESERVED VERBATIM, deliberately: they are load-bearing
+ * shape (see the structural bullet above) and the file carries the project's own
+ * names — `portfolio:accumulus` and `"Accumulus"` appear on every anchor, dozens of
+ * times each. That is repo policy, not an oversight: `docs/local-data.md` holds the
+ * line that code identifiers keep their literal names. What synthesis withholds is
+ * exactly four things — MAGNITUDES, the NAV series' scale, the fund NAME and the fund
+ * ID — and nothing else should be inferred from the fact that this module ran.
  *
  * ── THE NAV SERIES, AND WHY IT IS JITTERED ──────────────────────────────────────
  * Preserving every day-over-day NAV change EXACTLY would be mathematically the same
@@ -104,11 +114,13 @@
  * structural drift now that magnitudes deliberately differ.
  */
 import type {
+  CompositionReport,
   CompositionRow,
   DashboardFocus,
   DashboardSection,
 } from "@numisma/engine";
 import type { SnapshotAnchor } from "../projection/contract.ts";
+import { fundIdOf } from "../projection/contract.ts";
 import { NAV_MOVE_THRESHOLD_PCT } from "../glance/verdict.ts";
 
 /** The round, obviously fictional NAV the synthetic series starts at. */
@@ -146,21 +158,33 @@ export { NAV_MOVE_THRESHOLD_PCT };
 export const SYNTHETIC_FUND_NAME = "Sanitized Exploratory Fund";
 
 /**
- * The fund id every synthetic anchor carries — the SLUG of {@link SYNTHETIC_FUND_NAME},
- * exactly as `fundIdOf` would derive it from that name.
+ * `fundIdOf` over a bare fund name. The slug reads nothing but
+ * `dashboard.summary.fundName`, so a name-shaped stand-in is enough — and going
+ * through the REAL derivation, rather than a second copy of its regex, is what keeps
+ * the synthetic id from drifting away from the synthetic name.
+ */
+function fundIdOfName(fundName: string): string {
+  return fundIdOf({
+    dashboard: { summary: { fundName } },
+  } as unknown as CompositionReport);
+}
+
+/**
+ * The fund id every synthetic anchor carries — {@link SYNTHETIC_FUND_NAME} put through
+ * the system's own `fundIdOf`, which is also how {@link synthesizeAnchor} derives the
+ * id it writes onto each anchor. Both come from one derivation, so there is no literal
+ * left here to hand-maintain and nothing for a pin test to catch.
  *
  * The id used to pass through untouched, which meant the committed fixture named the
  * real fund on every one of its anchors while its `fundName` said otherwise. `fundName`
  * is the loud signal; `fund_id` is the quiet one, and a public repository publishes
  * both equally.
  *
- * WHY A LITERAL AND NOT `fundIdOf(...)`. `fundIdOf` takes a whole `CompositionReport`,
- * and synthesis has no report to hand at module scope — only the name. Re-implementing
- * the slug regex here would be the drift `NAV_MOVE_THRESHOLD_PCT` is re-exported to
- * avoid, so the agreement is PINNED IN THE TEST against the real `fundIdOf` instead:
- * this constant cannot silently stop being the slug of the name above.
+ * Exported for `anchor-fixture.test.ts`, whose guard reads the COMMITTED BYTES: the
+ * file on disk must carry this id on every anchor, not merely whatever the generator
+ * would produce if it were re-run.
  */
-export const SYNTHETIC_FUND_ID = "sanitized-exploratory-fund";
+export const SYNTHETIC_FUND_ID = fundIdOfName(SYNTHETIC_FUND_NAME);
 
 /** Each rank holds this fraction of the one above it, before the wobble. */
 const RANK_DECAY = 0.72;
@@ -549,10 +573,11 @@ function synthesizeAnchor(anchor: SnapshotAnchor, nav: number): SnapshotAnchor {
   }
 
   return {
-    // NOT `anchor.fundId`: the id is a slug of the fund name, and the name above is
-    // fictional, so carrying the real id through would have the fixture contradict
-    // itself while publishing the one string the rename was meant to withhold.
-    fundId: SYNTHETIC_FUND_ID,
+    // NOT `anchor.fundId`: the id is a slug of the fund name, and the name just
+    // assembled is fictional, so carrying the real id through would have the fixture
+    // contradict itself while publishing the fund's identifier on every anchor.
+    // Derived from the summary that ships, through the system's own `fundIdOf`.
+    fundId: fundIdOfName(summary.fundName),
     asOf,
     report: {
       totals: { ...totals, fundValueUsd: nav },
