@@ -17,7 +17,10 @@ Everything here is machine-local. Nothing secret or trade-derived enters the rep
 | `ops/price-feed/run-daily-fetch.sh` | Wrapper the scheduler calls. Sets a PATH that can find `pnpm`, sources tokens, runs `pnpm prices:fetch`; on a clean fetch: (2) `pnpm spine` then (3) an auto-commit of any new data-repo changes scoped to `$NUMISMA_DATA_DIR` — idempotent if no new marks, never pushes — then (4) a post-check that **fails the job** if the durable event log is still uncommitted (lenient warn for the `head-digest.json` breadcrumb). Only once the log is verified does it touch anything derived, local before networked: (5) `pnpm gap-report -- --write` to rewrite `gap-report.json` beside the log and (6) `pnpm backfill` to refresh the hosted projection. Preserves the non-zero exit code so the scheduler notices a failure or rejection. |
 | `ops/price-feed/com.numisma.pricefeed.daily.plist` | launchd definition firing the wrapper **hourly from 18:00 to 23:00 local** (six intervals; 18:00 is the default mark time), **every day** — plus `RunAtLoad` true. The first fire on an awake machine marks the day; later fires add 0 new marks (though they still spend credits and time). See "Why the window is hourly, not a single 18:00 fire" and "Why the schedule fires 7 days/week" below. |
 
-Both files are templates: replace `__REPO_DIR__` / `__HOME__` before installing.
+| `ops/price-feed/launchagent-reinstall.md` | Runbook for pushing a plist change into the job launchd actually runs. Not executed by anything — it exists because the wrapper installs via `git pull` (launchd runs it in place) while the plist is a resolved copy, so merging a plist change does nothing on its own. |
+
+Both `.plist` / `.sh` files are templates: replace `__REPO_DIR__` / `__HOME__`
+before installing.
 
 ## Where provider tokens live (scheduled environment)
 
@@ -172,8 +175,15 @@ threat model does not need.
    launchctl unload ~/Library/LaunchAgents/com.numisma.pricefeed.daily.plist
    launchctl load   ~/Library/LaunchAgents/com.numisma.pricefeed.daily.plist
    # verify the six intervals are what launchd now holds, not what the repo holds:
-   launchctl print gui/$(id -u)/com.numisma.pricefeed.daily | grep -A20 'start interval\|periodic'
+   launchctl print gui/$(id -u)/com.numisma.pricefeed.daily | grep -A14 -iE 'calendar|runatload'
    ```
+
+   **`ops/price-feed/launchagent-reinstall.md` is the full reinstall runbook** —
+   the ordered sequence, the two traps that make a reinstall fail silently (the
+   installed plist carries a `NUMISMA_PATH_PREPEND` key this repo's template does
+   not, and a raw `diff` buries the functional change under header prose), the
+   verification checklist, and rollback. Follow it rather than the two lines above
+   whenever the plist template changes.
 
    **`RunAtLoad` is true, so that `load` runs the job immediately** — intended (it is
    the belt-and-braces half of the recovery), safe at any hour, but it means the
