@@ -95,7 +95,7 @@ function rung(overrides: Partial<CommittedRung> = {}): CommittedRung {
     currency: "USD",
     fundingReserveId: "reserve-synthetic",
     ...overrides,
-  } as CommittedRung;
+  } satisfies CommittedRung;
 }
 
 /** Answers keyed by a prompt SUBSTRING; an unanticipated prompt throws rather than blanks. */
