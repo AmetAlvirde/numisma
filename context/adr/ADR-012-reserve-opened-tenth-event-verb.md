@@ -3,19 +3,32 @@
 _Made during: MVI — BTC DCA tracker increment / 2026-07-28 grill
 ([[2026-07-28-btc-dca-tracker-tempo-position-grill]], decision `T2`) → 2026-07-28
 prototype ([[2026-07-28-reserve-opened-prototype]]), branch
-`prototype/reserve-opened` (commits `cf5ba3f`, `ccee3cd`), unmerged._
+`prototype/reserve-opened` (commits `cf5ba3f`, `ccee3cd`) → converted to
+`feature/reserve-opened`, merged to `main` via PR #162 (2026-07-28), with
+follow-up review fixes in `71c6e56`._
 _Scope: product_
-_Status: accepted — decision taken by the fund's operator; **implementation is at
-`assurance: prototype` on an unmerged branch**, not shipped code. This ADR
-records the decision and the prototype's findings so the reliable-conversion
-increment has ratified ground to build from._
+_Status: accepted — decision taken by the fund's operator; **implementation is
+shipped on `main`** (`assurance: reliable`), not merely prototype. This ADR
+records the decision and the prototype's findings that shaped the shipped
+code._
+
+> **Status update (2026-08-07, docs audit):** the metadata above originally read
+> *"implementation is at `assurance: prototype` on an unmerged branch."* That is
+> stale — `ReserveOpened` merged to `main` in PR #162 (`54a1c0b`, 2026-07-28)
+> with follow-up fixes in `71c6e56` the same day, and the verb is live in
+> `packages/engine/src/events/{types,parse,fold,crossref}.ts`. One artifact
+> still carries the prototype framing verbatim:
+> `packages/engine/src/reserve-opened.test.ts` opens with a `// PROTOTYPE.`
+> comment header describing itself as pinning only two silent holes — that
+> comment is now inaccurate to the file's role as the shipped verb's test
+> suite and is out of this ADR's edit scope (code, not `context/`).
 
 No verb creates a Reserve. Every `reserveId` a `Deposit` / `Withdraw` / `Transfer`
 / trade cash leg references must already exist in the immutable genesis seed —
 the reserve set has been genesis-fixed since ADR-003. That is a real asymmetry
 nobody had named: **the log could birth a Position after t0 (`PositionOpened`)
 but not a Reserve.** It surfaced because the fund's operator needed to
-reclassify a fixed sum of Bitget cash from Tempo Pulse to Tempo Capital and was
+reclassify a fixed sum of <exchange> cash from Tempo Pulse to Tempo Capital and was
 being pushed toward editing the `"immutable t0 seed"` genesis file
 (`packages/event-store/src/event-store.ts:13`, `:79`) to do it — the only
 Reserve-creating path that existed.
@@ -196,7 +209,7 @@ verb's naive reading would have collided with).
   code over.
 
 **Validated, through the real ingest path, against a copy of the durable
-data** (never the durable data itself — `~/Dev/accumulus` was untouched). This
+data** (never the durable data itself — `~/Dev/<fund>` was untouched). This
 repository is public, so the properties are recorded here and the values are
 not — they live in the private notes vault artifact
 [[2026-07-28-reserve-opened-spec]]. **Tempo Capital rose by exactly the

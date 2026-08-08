@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE (mvi 2026-06-29-portfolio-persistence). Event-sourcing spine — types.
+ * Event-sourcing spine — types.
  *
  * The leaf of the event-sourcing spine: the durable event verbs, the parse-result
  * shape, and the small shared `eventError` constructor. Depends only on the

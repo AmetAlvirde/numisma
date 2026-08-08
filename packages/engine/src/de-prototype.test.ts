@@ -1,8 +1,11 @@
 // R1 regression lock (ADR-003 amendments): reliable-tier engine + TUI code must not
 // ship literally labelled with a prototype marker. Walks the source trees and asserts
-// the markers are gone — both the realized-P&L prototype (#90) and the
-// partial-close/profit-split prototype (#96). Each needle is built from fragments so
-// this guard file never matches itself (and the scan also skips this file by name).
+// no marker SHAPE survives — not an enumerated list of increments someone remembered
+// to add, but the forms a prototype marker takes: the `PROTOTYPE (mvi <slug>)` header
+// stamp for ANY increment slug or date, the bare `MVI PROTOTYPE` label, and the
+// `Dev/tmp/mvi-*` scratch-worktree handoff path. A new prototype dated years from now
+// is caught by the same three needles. Each needle is built from fragments so this
+// guard file never matches itself (and the scan also skips this file by name).
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -19,11 +22,12 @@ const PRICE_FEED_SRC_DIR = join(SRC_DIR, "..", "..", "..", "apps", "price-feed",
 const SCAN_DIRS = [SRC_DIR, TUI_SRC_DIR, PRICE_FEED_SRC_DIR];
 // Needles assembled from fragments so this guard file never matches itself.
 const MARKERS = [
-  "2026-07-01" + "-realized-pnl",
-  "PROTOTYPE (mvi " + "2026-07-02" + "-partial-close-profit-split)",
-  // The crypto price-fetch prototype marker + its tmp-path handoff (#106 / R7).
+  // The header stamp, for ANY increment: `PROTOTYPE (mvi 2026-06-29-portfolio-...)`.
+  "PROTOTYPE" + " (mvi ",
+  // The bare label used by the price-fetch prototype (#106 / R7)...
   "MVI " + "PROTOTYPE",
-  "Dev/tmp/mvi-numisma-" + "2026-07-03" + "-price-fetch-prototype",
+  // ...and any scratch-worktree handoff path left pointing at a prototype tree.
+  "Dev/tmp/" + "mvi-",
 ];
 const SELF = "de-prototype.test.ts";
 
@@ -45,7 +49,7 @@ describe("de-prototype: prototype markers are stripped from engine + TUI source"
   for (const marker of MARKERS) {
     it(`leaves no "${marker}" prototype marker anywhere under engine/src or tui/src`, () => {
       const offenders = files.filter((file) => readFileSync(file, "utf8").includes(marker));
-      expect(offenders).toEqual([]);
+      expect(offenders, `prototype marker "${marker}" still present in:\n${offenders.join("\n")}`).toEqual([]);
     });
   }
 });
