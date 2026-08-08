@@ -84,6 +84,37 @@ import {
   type SnapshotDerivation,
 } from "./push-core.ts";
 
+/** What the backfill shell's two flags decide, once argv has been read. */
+export interface BackfillArgs {
+  /** Rewrite the replay fixture. Set by `--fixture` AND by `--fixture-only`. */
+  writeFixture: boolean;
+  /**
+   * Fold and write the fixture with NO database and NO credential. This is the flag
+   * that decides whether `PROJECTION_WRITE_DATABASE_URL` is required at all.
+   */
+  fixtureOnly: boolean;
+}
+
+/**
+ * Parse the backfill shell's argv. Lives here, not in `backfill.ts`, for the reason
+ * `parsePushArgs` lives in `push-core.ts`: the shell is a self-executing script, so
+ * an importable parser is the only way a test reaches this half.
+ *
+ * EXACT-MATCH, so `--fixture-only` never also trips `--fixture` by substring, and
+ * `--fixture` never trips `fixtureOnly`. The second direction is the one with teeth:
+ * `--fixture-only` is what makes regenerating the fixture work with no write
+ * credential, so fusing the two would either demand production write access for a
+ * local file rewrite, or send a run the operator asked to keep local to the database.
+ *
+ * Permissive about unknown tokens on the same grounds as `parsePushArgs` — both
+ * flags are booleans whose absence is the safe default, and it lets the literal `--`
+ * pnpm forwards for `pnpm backfill -- --fixture` fall through unremarked.
+ */
+export function parseBackfillArgs(argv: readonly string[]): BackfillArgs {
+  const fixtureOnly = argv.includes("--fixture-only");
+  return { writeFixture: fixtureOnly || argv.includes("--fixture"), fixtureOnly };
+}
+
 /**
  * V3 — THE LOG'S OWN DISTINCT ANCHORED DATES, ASCENDING. NOT calendar days.
  *

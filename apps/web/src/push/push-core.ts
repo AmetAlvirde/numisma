@@ -21,6 +21,39 @@ import {
 } from "../projection/contract.ts";
 import { buildGlanceBlock } from "./glance.ts";
 
+/** What the push shell's two flags decide, once argv has been read. */
+export interface PushArgs {
+  /** Apply the DDL before anything else. Set by `--init` AND by `--init-only`. */
+  init: boolean;
+  /** Apply the DDL and STOP — no fold, no upsert, no durable log required. */
+  initOnly: boolean;
+}
+
+/**
+ * Parse the push shell's argv. Lives here, not in `push.ts`, because `push.ts` is a
+ * self-executing script: importing it to test it would run the push. The flag
+ * PAIRING is the part worth a test — `--init` and `--init-only` were once fused,
+ * which made `pnpm db:init` fold the durable log first and throw ENOENT on exactly
+ * the bootstrap and recovery paths it exists for (the shell's header tells the
+ * story). That regression was invisible to the suite until a Neon reset; it is not
+ * anymore.
+ *
+ * EXACT-MATCH, so `--init-only` never also trips `--init` by substring. It sets
+ * `init` DELIBERATELY and separately: `--init-only` still applies the DDL, it just
+ * stops there.
+ *
+ * DELIBERATELY PERMISSIVE, unlike `parseGapReportArgs`, which rejects an unknown
+ * token. That parser takes VALUES (`--since <date>`), where a typo silently rescopes
+ * the answer; these two flags are booleans whose absence is the safe default, and
+ * the push runs from launchd nightly. Refusing to run on an unrecognized token would
+ * turn a harmless typo into a missed day. Ignoring one also lets the literal `--`
+ * that pnpm forwards for `pnpm push -- --init` fall through with no special case.
+ */
+export function parsePushArgs(argv: readonly string[]): PushArgs {
+  const initOnly = argv.includes("--init-only");
+  return { init: initOnly || argv.includes("--init"), initOnly };
+}
+
 /** The folded read model AND the report built from it, for one anchor. */
 export interface FoldedAnchor {
   /**
@@ -153,7 +186,7 @@ export interface SnapshotDerivation {
   /**
    * The NARROWED payload written to the `report` JSONB column — built key-by-key
    * by `toProjectionReport`, never the wide `CompositionReport` (D8). Everything
-   * outside `{ totals, dashboard }` stops here and never leaves the machine.
+   * outside `{ totals, dashboard, glance }` stops here and never leaves the machine.
    */
   report: ProjectionReport;
 }

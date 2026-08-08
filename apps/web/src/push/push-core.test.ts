@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { CompositionReport } from "@numisma/engine";
 import { quarantineLogPath } from "@numisma/event-store";
 import { COMPOSITION_SNAPSHOT_SCHEMA_VERSION } from "../projection/contract.ts";
-import { deriveSnapshot, loadCurrentFold } from "./push-core.ts";
+import { deriveSnapshot, loadCurrentFold, parsePushArgs } from "./push-core.ts";
 import {
   loadFixture,
   makeTempStore,
@@ -46,6 +46,50 @@ describe("deriveSnapshot (pure fixture → derivation)", () => {
   it("takes asOf verbatim from the summary (the conflict key's date half)", () => {
     const report = reportWith("Fund X", "2026-12-31");
     expect(deriveSnapshot(report, TEST_GLANCE).asOf).toBe("2026-12-31");
+  });
+});
+
+/**
+ * The half `push.ts` used to keep unreachable. `--init` and `--init-only` were once
+ * ONE flag, which made `pnpm db:init` fold the durable log before applying the DDL
+ * and so throw ENOENT on exactly the bootstrap and recovery paths the command is
+ * for (see the shell's header). The fix was two `argv.includes` calls inside an
+ * unimportable `main()`, so a re-regression was invisible until a Neon reset. These
+ * cases are the guard: the pairing is asserted here, on every machine, with no DB.
+ */
+describe("parsePushArgs", () => {
+  it("defaults to fold-and-upsert: no DDL, no early return", () => {
+    expect(parsePushArgs([])).toEqual({ init: false, initOnly: false });
+  });
+
+  it("--init applies the DDL and STILL folds and upserts", () => {
+    expect(parsePushArgs(["--init"])).toEqual({ init: true, initOnly: false });
+  });
+
+  it("--init-only implies init, so `db:init` applies the DDL it exists to apply", () => {
+    expect(parsePushArgs(["--init-only"])).toEqual({ init: true, initOnly: true });
+  });
+
+  it("--init alone does not set initOnly", () => {
+    // The regression that mattered ran the other way too: an exact-match on
+    // `--init` must not be SATISFIED by `--init-only` alone deciding both, nor
+    // `--init` alone ever setting initOnly. Only the second half is a real risk
+    // (`"--init-only".includes("--init")` is true for a substring scan), so pin it.
+    expect(parsePushArgs(["--init"]).initOnly).toBe(false);
+  });
+
+  it("ignores the `--` pnpm forwards for `pnpm push -- --init-only`", () => {
+    expect(parsePushArgs(["--", "--init-only"])).toEqual({
+      init: true,
+      initOnly: true,
+    });
+  });
+
+  it("ignores tokens it does not know rather than failing the push", () => {
+    expect(parsePushArgs(["--verbose", "extra"])).toEqual({
+      init: false,
+      initOnly: false,
+    });
   });
 });
 

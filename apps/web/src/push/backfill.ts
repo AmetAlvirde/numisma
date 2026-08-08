@@ -24,12 +24,17 @@
  * DELETEd (the writer credential cannot).
  */
 import { Pool } from "pg";
-import { runBackfill, writeAnchorFixture } from "./backfill-core.ts";
+import {
+  parseBackfillArgs,
+  runBackfill,
+  writeAnchorFixture,
+} from "./backfill-core.ts";
 
 async function main(): Promise<void> {
-  // Exact-match argv, so `--fixture-only` never also trips `--fixture`.
-  const fixtureOnly = process.argv.includes("--fixture-only");
-  const writeFixture = fixtureOnly || process.argv.includes("--fixture");
+  // `argv.slice(2)` drops the node binary and this script's own path; the parser and
+  // the reasoning behind its exact-match flag pairing live in `backfill-core.ts`,
+  // where a test can reach them.
+  const { writeFixture, fixtureOnly } = parseBackfillArgs(process.argv.slice(2));
 
   // `--fixture-only` needs no credential at all: it folds local disk and writes a
   // local file. Requiring the write URL for it would make regenerating the fixture
