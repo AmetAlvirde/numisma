@@ -292,7 +292,9 @@ export function buildCanonicalState(data: FundReviewData): CanonicalState {
     // (`invalidLotFields`, audit finding 5) — this gate also sees data no parse
     // door touched: fold output and hand-edited images. It reports EVERY bad
     // field, not just the first, because one warning has to describe the whole
-    // record. `tier` is already `CapitalTier` here, so that issue cannot fire.
+    // record. `tier` is typed `CapitalTier` here, but typing is exactly what a
+    // hand-edited image can be lying about, so the predicate's `tier` issue is
+    // kept live rather than assumed unreachable.
     for (const lot of lots) {
       for (const issue of invalidLotFields(lot as unknown as Record<string, unknown>)) {
         invalidNumericFields.push(issue.field);

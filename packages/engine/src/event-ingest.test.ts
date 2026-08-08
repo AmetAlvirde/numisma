@@ -544,10 +544,11 @@ describe("Lot validity — one predicate across both ingest doors (audit finding
     );
   });
 
-  it("keeps admitting a signed cash (Reserve) Lot — tier attribution nets, it does not accumulate", () => {
-    // The cash-lot rule is deliberately NOT the position-lot rule: a Reserve's
-    // tier overlay is a signed decomposition of `amount`, so a negative leg is
-    // legitimate and `buildReserveTierContributions` — not the parser — judges it.
+  it("admits a negative cash (Reserve) Lot quantity through the genesis door, leaving the sign to the compose gate", () => {
+    // The cash-lot rule is deliberately NOT the position-lot rule, and not
+    // because a negative leg is fine: the compose gate is where a negative leg
+    // gets SURFACED (`invalid-reserve-lot-quantity`, the Reserve left untiered —
+    // `fund-composition-tiers.test.ts`). Rejecting it here would hide it.
     const seed = genesis() as unknown as Record<string, unknown>;
     const reserves = seed.reserves as Array<Record<string, unknown>>;
     const result = parseFundReview({
@@ -563,6 +564,37 @@ describe("Lot validity — one predicate across both ingest doors (audit finding
       ],
     });
     expect(result.kind).toBe("ok");
+  });
+
+  /** The genesis seed with its one reserve's lots replaced. */
+  function seedWithReserveLots(lots: unknown): Record<string, unknown> {
+    const seed = genesis() as unknown as Record<string, unknown>;
+    const reserves = seed.reserves as Array<Record<string, unknown>>;
+    return { ...seed, reserves: [{ ...reserves[0], lots }] };
+  }
+
+  it("rejects a NaN cash (Reserve) Lot quantity at the genesis door — malformed is not signed", () => {
+    // The half of the cash rule the door DOES own. A `NaN` leg is not a
+    // decomposition the gate can surface anything useful about; it poisons every
+    // sum it touches, so `typeof === "number"` was never the right test.
+    const result = parseFundReview(seedWithReserveLots([{ quantity: Number.NaN, tier: "c1" }]));
+    expect(result.kind).toBe("schema-error");
+    expect(result.kind === "schema-error" ? result.path : undefined).toBe(
+      "reserves[0].lots[0].quantity",
+    );
+  });
+
+  it("validates a cash (Reserve) Lot's entryFx when it carries one", () => {
+    // `entryFx` is not gated on `requireCost`: present means checked, whatever the
+    // Lot kind. Real reserve lots never carry one — this pins that the check did
+    // not quietly disappear for them.
+    const result = parseFundReview(
+      seedWithReserveLots([{ quantity: 1000, tier: "c1", entryFx: 0 }]),
+    );
+    expect(result.kind).toBe("schema-error");
+    expect(result.kind === "schema-error" ? result.path : undefined).toBe(
+      "reserves[0].lots[0].entryFx",
+    );
   });
 });
 
