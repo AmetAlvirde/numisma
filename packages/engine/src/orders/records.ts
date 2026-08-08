@@ -295,39 +295,90 @@ export function formatObservedAt(instant: Date): string {
 }
 
 /**
+ * THE WHITELIST IS THE WRITE (#205), SO THE TYPE HOLDS IT (audit finding 12).
+ *
+ * `serializeOrderRecord` copies ONLY the keys named below, and the failure that makes
+ * these four tables worth their shape is asymmetric and permanent: a field added to a
+ * record interface and forgotten here is DROPPED at write, `orders.jsonl` is append-only,
+ * and every line written before the omission is discovered is missing it with no
+ * migration path. #205 walked exactly that path once.
+ *
+ * So each table is a `Record<keyof …Record, true>` — the same union-derived idiom
+ * {@link KNOWN_KINDS} uses one screen up. A key missing from a table fails `pnpm
+ * typecheck`; so does a key that is not on the record. An OPTIONAL field is caught too:
+ * `keyof` erases optionality, so `orderType` is a REQUIRED entry here even though the
+ * field itself is optional — which is the case that actually bit, since a widening adds
+ * optional fields.
+ *
+ * ORDER IS SEMANTICS, AND THE TYPE DOES NOT CHECK IT. `Object.keys` returns these keys in
+ * the table's own INSERTION order (all of them are non-numeric strings, so no
+ * integer-index reshuffle applies), and that sequence is the byte layout of every line
+ * written from here on. Reordering a table rewrites the file's shape while typechecking
+ * clean, so the emitted sequence is pinned by test in `./records.test.ts`.
+ */
+const ORDER_PLACED_KEYS: Record<keyof OrderPlacedRecord, true> = {
+  id: true,
+  observedAt: true,
+  kind: true,
+  currency: true,
+  symbol: true,
+  side: true,
+  price: true,
+  quantity: true,
+  orderType: true,
+  timeInForce: true,
+  triggerPrice: true,
+  // Absent when nothing had filled: `JSON.stringify` drops an `undefined` value, so a
+  // rung with no partial serializes to exactly the bytes it always did — which is
+  // equally true of the three descriptors above.
+  observedFilledQuantity: true,
+  fundingReserveId: true,
+};
+
+const ORDER_CANCELLED_KEYS: Record<keyof OrderCancelledRecord, true> = {
+  id: true,
+  observedAt: true,
+  kind: true,
+  currency: true,
+};
+
+const ORDER_FILLED_KEYS: Record<keyof OrderFilledRecord, true> = {
+  id: true,
+  observedAt: true,
+  kind: true,
+  currency: true,
+  filledQuantity: true,
+};
+
+/**
+ * FIVE KEYS. No `quantity`, no `symbol`, no `price` — an observation restates ONE fact
+ * and joins to its placement line by id for the rest.
+ *
+ * The witness is EXCLUDED, not forgotten: {@link OBSERVED_THROUGH_CONSTRUCTOR} is a
+ * compile-time-only key that never exists on a real object, so listing it would put a
+ * key on disk that nothing can write and every reader would have to ignore.
+ */
+const ORDER_FILL_OBSERVED_KEYS: Record<
+  Exclude<keyof OrderFillObservedRecord, typeof OBSERVED_THROUGH_CONSTRUCTOR>,
+  true
+> = {
+  id: true,
+  observedAt: true,
+  kind: true,
+  currency: true,
+  observedFilledQuantity: true,
+};
+
+/**
  * CANONICAL key order, one per record kind. Serialization goes through this rather than
  * through the caller's object so a round-trip (write → load → re-serialize) is
  * BYTE-EQUAL by construction, not by the caller's luck in field ordering.
  */
 const KEY_ORDER: Record<OrderKind, readonly string[]> = {
-  orderPlaced: [
-    "id",
-    "observedAt",
-    "kind",
-    "currency",
-    "symbol",
-    "side",
-    "price",
-    "quantity",
-    // THE WHITELIST IS THE WRITE (#205). `serializeOrderRecord` copies ONLY the keys named
-    // here, so a field added to `OrderPlacedRecord` and forgotten in this list is DROPPED
-    // at write with a green typecheck and no failing test. The descriptors are pinned by a
-    // round trip through a real file rather than by a type — see the `#205` cases in
-    // `./bitget-ingest.test.ts`.
-    "orderType",
-    "timeInForce",
-    "triggerPrice",
-    // Absent when nothing had filled: `JSON.stringify` drops an `undefined` value, so a
-    // rung with no partial serializes to exactly the bytes it always did — which is
-    // equally true of the three descriptors above.
-    "observedFilledQuantity",
-    "fundingReserveId",
-  ],
-  orderCancelled: ["id", "observedAt", "kind", "currency"],
-  orderFilled: ["id", "observedAt", "kind", "currency", "filledQuantity"],
-  // FIVE KEYS. No `quantity`, no `symbol`, no `price` — an observation restates ONE fact
-  // and joins to its placement line by id for the rest.
-  orderFillObserved: ["id", "observedAt", "kind", "currency", "observedFilledQuantity"],
+  orderPlaced: Object.keys(ORDER_PLACED_KEYS),
+  orderCancelled: Object.keys(ORDER_CANCELLED_KEYS),
+  orderFilled: Object.keys(ORDER_FILLED_KEYS),
+  orderFillObserved: Object.keys(ORDER_FILL_OBSERVED_KEYS),
 };
 
 /** Serialize ONE record to its canonical JSON line (no trailing newline). */
