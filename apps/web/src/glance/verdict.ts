@@ -31,8 +31,11 @@ import type {
   DashboardFocus,
   DashboardSummary,
 } from "@numisma/engine";
-import type { GlanceBlock, SnapshotAnchor } from "../projection/contract.ts";
-import { SUPPRESSION_KEYS } from "../projection/contract.ts";
+import {
+  SUPPRESSION_KEYS,
+  type GlanceBlock,
+  type SnapshotAnchor,
+} from "../projection/contract.ts";
 import { addDays, asOfSortKey, calendarDateOf, daysBetween } from "../projection/as-of.ts";
 
 /* ────────────────────────────── the four triggers ─────────────────────────────── */
@@ -403,9 +406,7 @@ export function computeVerdict(
  * slot that vanished would destroy that.
  *
  * The suppression keys are read from {@link SUPPRESSION_KEYS} — their one declared
- * home on the wire contract — rather than re-derived or re-spelled: the reader cannot
- * see the mark dates that produced them, and a hand-typed literal would compile while
- * silently ceasing to match what the push emits (finding 7).
+ * home on the wire contract — never re-spelled here; that docstring says why.
  */
 function fundValueSlot(
   summary: DashboardSummary,
@@ -478,6 +479,9 @@ function reserveSlot(
   if (glance.reserveTargetPct === undefined) {
     return { rendered: false, suppressedBy: "no-policy" };
   }
+  // Defensive against STORED snapshots: today's push never emits `reserve` without
+  // also emitting `fundValue`, but a reserve-only key list is constructible data the
+  // reader may be handed, so this branch stays. Kept honest by `suppression-seam.test.ts`.
   if (suppressed.has(SUPPRESSION_KEYS.reserve)) {
     return { rendered: false, suppressedBy: "unexpected-absence" };
   }
