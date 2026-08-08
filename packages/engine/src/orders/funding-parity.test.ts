@@ -23,7 +23,7 @@ import { describe, expect, it } from "vitest";
 import { parseFixture } from "../fund-composition.fixtures.js";
 import type { FundReviewData } from "../contracts.js";
 import { composeAvailableCapital } from "./available.js";
-import { checkFundingCoverage } from "./ingest.js";
+import { checkFundingCoverage } from "./coverage.js";
 import type { OrderRecord } from "./records.js";
 import { pickRestingOrdersAsOf } from "./select.js";
 

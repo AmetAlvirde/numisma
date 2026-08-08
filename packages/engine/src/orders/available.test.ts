@@ -15,7 +15,7 @@ import type { FundReviewData } from "../contracts.js";
 import { formatAvailableCapital } from "../format.js";
 import { composeAvailableCapital } from "./available.js";
 import { committedByReserve, committedRungs, SLACK_EPSILON } from "./committed.js";
-import { checkFundingCoverage } from "./ingest.js";
+import { checkFundingCoverage } from "./coverage.js";
 import type { OrderRecord } from "./records.js";
 import { pickRestingOrdersAsOf } from "./select.js";
 
