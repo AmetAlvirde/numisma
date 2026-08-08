@@ -20,7 +20,6 @@ any command below.
 | --- | --- |
 | `ops/price-feed/run-daily-fetch.sh` | Wrapper the scheduler calls. Sets a PATH that can find `pnpm`, sources tokens, runs `pnpm prices:fetch`; on a clean fetch: (2) `pnpm spine` then (3) an auto-commit of any new data-repo changes scoped to `$NUMISMA_DATA_DIR` — idempotent if no new marks, never pushes — then (4) a post-check that **fails the job** if the durable event log is still uncommitted (lenient warn for the `head-digest.json` breadcrumb). Only once the log is verified does it touch anything derived, local before networked: (5) `pnpm gap-report -- --write` to rewrite `gap-report.json` beside the log and (6) `pnpm backfill` to refresh the hosted projection. Preserves the non-zero exit code so the scheduler notices a failure or rejection. |
 | `ops/price-feed/com.numisma.pricefeed.daily.plist` | launchd definition firing the wrapper **hourly from 18:00 to 23:00 local** (six intervals; 18:00 is the default mark time), **every day** — plus `RunAtLoad` true. The first fire on an awake machine marks the day; later fires add 0 new marks (though they still spend credits and time). See "Why the window is hourly, not a single 18:00 fire" and "Why the schedule fires 7 days/week" below. |
-
 | `ops/price-feed/launchagent-reinstall.md` | Runbook for pushing a plist change into the job launchd actually runs. Not executed by anything — it exists because the wrapper installs via `git pull` (launchd runs it in place) while the plist is a resolved copy, so merging a plist change does nothing on its own. |
 
 Both `.plist` / `.sh` files are templates: replace `__REPO_DIR__` / `__HOME__`
@@ -354,13 +353,22 @@ The `dow` field is `*` — **every day** — on purpose, and it is safe:
   mark (a fresh deterministic id the dedup can't catch, 0% move so the magnitude
   guard passes) — it would silently pile up every weekend.
 
-The fetch prevents that with **per-provider bar-date validation**: an equity mark is
-emitted only when the provider bar's date equals the run's trading-day `asOf`. When
-it doesn't (weekend/holiday), that instrument is **skipped as INFO** — you'll see
-`equity mark skipped — no fresh close for <asOf>` in the fetch output — **not** a
-failure. The run stays clean (exit 0), the crypto marks still ingest, and the
-`*-mxn` derived marks naturally skip too (their USD leg is stale). A weekday-only
-schedule was rejected: it would starve crypto AND still misfire on weekday holidays.
+The fetch prevents that with **bar-date validation applied uniformly to every
+instrument** — one rule, no per-source special case (`fetch-prices.ts`): a mark
+is emitted only when the provider bar's date equals the run's trading-day
+`asOf`. When it doesn't, that instrument is **skipped as INFO** — you'll see
+`mark skipped — no fresh close for <asOf>: <instrumentId> <symbol> (latest bar
+<observationDate>)` in the fetch output — **not** a failure. The run stays
+clean (exit 0). A weekday-only schedule was rejected: it would starve crypto
+AND still misfire on weekday holidays.
+
+The uniform rule means the same skip fires for any instrument whose bar is
+stale, but its **meaning differs by source**: for equities (and the `*-mxn`
+derived legs), a skip on a weekend or market holiday is expected and requires
+no action. For **crypto (Binance, 24/7)**, there is no closed day — a crypto
+skip on any date, including a weekend, is not "market closed, ignore"; it
+signals a late-firing provider or a stuck symbol and is worth investigating
+the same day it appears, not deferred to the next morning's gap report.
 
 ## Manual dry run (the schedule's main verification)
 
@@ -398,10 +406,13 @@ Confirm, in order:
 3. The wrapper exit code is `0` on a clean run, non-zero if any symbol failed or a
    mark was rejected.
 4. **On a weekend/holiday**, the equity lines read
-   `equity mark skipped — no fresh close for <asOf>` (one per equity, incl. the
+   `mark skipped — no fresh close for <asOf>: …` (one per equity, incl. the
    `*-mxn` legs), the crypto marks still emit, and the wrapper exit stays `0` — a
-   market-closed skip is expected INFO, not a failure. If you install on a weekday,
-   the equity marks emit normally; re-check this on the first weekend run.
+   market-closed skip on an equity is expected INFO, not a failure. If you install
+   on a weekday, the equity marks emit normally; re-check this on the first weekend
+   run. The same skip line on a **crypto** symbol is never expected (see "Why the
+   schedule fires 7 days/week" above) and should be treated as a live problem, not
+   waited out.
 5. **Auto-commit (step 3):** after a run that appended new marks, the log reads
    `committed durable-log changes (not pushed)` and `git -C "$NUMISMA_DATA_DIR" log
    -1` (or the `~/Dev/<fund>/data` default when the var is unset) shows a commit
@@ -531,14 +542,21 @@ bad day never appends a bad mark. The console/log distinguishes the two cases �
      blocks the whole batch (including hand-authored events) until it is removed,
      replaced, or admitted via `--magnitude-threshold`.
 
-### `equity mark skipped — no fresh close for <asOf>` — NOT a failure
+### `mark skipped — no fresh close for <asOf>: …` — usually NOT a failure, source-dependent
 
-- Info, not an error. It means the market was closed (weekend/holiday) so the Twelve
-  Data provider had no fresh close dated `asOf`; that equity (and, if it is a `*-mxn`
-  leg, its derived MXN mark) is skipped for the day rather than re-marked stale.
-- **Action: none.** The run still exits `0`, crypto still marks, and the equity marks
-  resume on the next trading day. Only investigate if you see it on a **trading day**
-  (would suggest provider bar-date drift or a stuck symbol).
+- The bar-date check is uniform — one rule for every instrument, no per-source
+  special case — so this line can appear for an equity, its `*-mxn` derived leg,
+  or crypto alike.
+- **Equity (incl. `*-mxn`): Action: none** on a weekend or market holiday. The
+  Twelve Data provider had no fresh close dated `asOf`; that instrument is
+  skipped for the day rather than re-marked stale, the run still exits `0`, and
+  the mark resumes on the next trading day. Only investigate an equity skip on a
+  **trading day** (would suggest provider bar-date drift or a stuck symbol).
+- **Crypto: Action: investigate the same day.** Binance trades 24/7, so there is
+  no "market closed" excuse — a crypto skip on any date (weekday or weekend)
+  means the provider fired late or a symbol is stuck. Do not wait for the gap
+  report: it only backstops the *next* morning, and only if every instrument for
+  that day was skipped, not one.
 
 ### Where to look
 
