@@ -1,8 +1,8 @@
 /**
  * THE ONE COMMITTED FORMULA. Everything that needs to know how much of a reserve is
- * encumbered by resting claims comes through this module — the `O1` import-boundary
- * guard (`./ingest.ts`) and the rendered available-capital report (`./available.ts`)
- * both call it, and neither computes it itself.
+ * encumbered by resting claims comes through this module — the `O1` funding-coverage
+ * guard (`checkFundingCoverage`, `./coverage.ts`) and the rendered available-capital
+ * report (`./available.ts`) both call it, and neither computes it itself.
  *
  * WHY THAT IS THE POINT OF THE FILE. Two independently-maintained committed formulas
  * that silently drift is precisely the class of defect this increment exists to remove.
@@ -42,7 +42,8 @@ import type { RestingOrder } from "./select.js";
  * rungs of `0.1 × 1` is coverage, not a shortfall.
  *
  * It lives HERE, beside the one committed formula, for the same reason that formula
- * does: the `O1` import guard (`./ingest.ts`) and the rendered report
+ * does: the `O1` funding-coverage guard (`checkFundingCoverage`, `./coverage.ts`) and
+ * the rendered report
  * (`../format.ts`) must not be able to drift about what counts as negative. They did:
  * the guard ACCEPTED float residue while the report shouted "available is NEGATIVE" over
  * every input the epsilon exists to admit. One constant, two callers, no second copy.

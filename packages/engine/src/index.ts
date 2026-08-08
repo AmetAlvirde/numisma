@@ -173,10 +173,6 @@ export {
   isDescriptorDifference,
   isFilledDifference,
 } from "./orders/ingest.js";
-// The `O1` funding-coverage guard, split from ingest because it changes with
-// reserve-admission policy rather than with the venue's row shape (#172, #179, #183).
-export type { FundingShortfall, FundingCoverage } from "./orders/coverage.js";
-export { checkFundingCoverage } from "./orders/coverage.js";
 export type {
   MergedOrderClaim,
   ChangedClaim,
@@ -186,6 +182,10 @@ export type {
   NumericClaimField,
   TextClaimField,
 } from "./orders/ingest.js";
+// The `O1` funding-coverage guard, split from ingest because it changes with
+// reserve-admission policy rather than with the venue's row shape (#172, #179, #183).
+export type { FundingShortfall, FundingCoverage } from "./orders/coverage.js";
+export { checkFundingCoverage } from "./orders/coverage.js";
 export type {
   BitgetOpenOrder,
   BitgetRowProblem,

@@ -3,8 +3,9 @@
  *
  * `./committed.ts` owns the one committed FORMULA. This module owns its ARGUMENTS: which
  * reserves may fund anything at all, and which rung belongs to which of them. Both
- * questions are answered here, once, for both surfaces — the `O1` import guard
- * (`./ingest.ts`) and the rendered available-capital report (`./available.ts`).
+ * questions are answered here, once, for both surfaces — the `O1` funding-coverage guard
+ * (`checkFundingCoverage`, `./coverage.ts`) and the rendered available-capital report
+ * (`./available.ts`).
  *
  * WHY IT IS A MODULE AND NOT A CONVENTION. The two surfaces already shared the formula
  * and still disagreed, because they were handed different arguments (#172): the guard
@@ -111,7 +112,7 @@ export function fundableReserves(data: FundReviewData): FundableReserve[] {
  * Rung order is preserved within a reserve, and the refusal order is the rungs' own — so
  * the guard and the report name THE SAME RUNGS WITH THE SAME REASONS, because they name
  * them off THIS list. The `unmatched` array returned here is the one `checkFundingCoverage`
- * hands back verbatim on its `unattributed` arm (`./ingest.js`) and the one
+ * hands back verbatim on its `unattributed` arm (`./coverage.js`) and the one
  * `composeAvailableCapital` renders (`./available.js`); neither filters it, dedups it or
  * re-derives it.
  *
