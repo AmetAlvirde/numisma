@@ -445,3 +445,203 @@ describe("a PositionClosed may not seal behind a verb already in the log", () =>
     });
   });
 });
+
+// THE OTHER HALF OF THE RULE: what it must NOT refuse. A gate that rejects everything
+// passes every test in the block above, so these are the cases that give those their
+// meaning. Each one folds the ACCEPTED batch and asserts what the fold produced — an
+// acceptance test that only checks `rejection === null` would pass even if the close
+// silently swallowed the trim, which is the very defect this increment closes.
+describe("the seal rule refuses nothing it should not", () => {
+  // CASE 1, AND THE ONLY TEST IN THE INCREMENT THAT EXERCISES STRICTNESS. Trim and
+  // close on the SAME DAY, trim first in the log — an ordinary trading sequence. The
+  // comparison is `asOf < latest` rejects, so equal is accepted; a non-strict `<=`
+  // would refuse this batch outright and the first assertion would go red.
+  //
+  // The fold sorts by (`asOf`, THEN LOG INDEX), so the trim still applies first even at
+  // equal dates and the close lands on the already-reduced lots. That is what the
+  // `costBasisUsd: 50` below proves, and it is the load-bearing assertion here: had the
+  // trim been dropped, the full-close row would read `costBasisUsd: 100` — exactly the
+  // fabricated figure case A produces. Same-day acceptance is worth nothing if the
+  // close still buries the trim.
+  it("case 1 — accepts a same-day trim-then-close, and folds BOTH legs", () => {
+    const result = ingestBatch([
+      openLate(),
+      trimPayload("evt-trim", "2026-06-10", 0.5, 50),
+      closePayload("evt-close", "2026-06-10", 50),
+    ]);
+
+    expect(result.rejection).toBeNull();
+    // Two rows: the trim's PARTIAL and the close's FULL. Cash nets to zero — out 100 at
+    // the open, back 50 + 50.
+    expect(ledgerDelta(result.committed)).toEqual({ cash: 0, closedRows: 2 });
+
+    const folded = foldEvents(genesis(), result.committed);
+    const rows = folded.closedPositions ?? [];
+    expect(rows.map((row) => Boolean(row.partial))).toEqual([true, false]);
+    // THE ASSERTION THAT MAKES THIS TEST NON-VACUOUS: the full-close row is sized 50,
+    // not 100, so the close demonstrably ran on lots the trim had already reduced.
+    expect(rows[1]).toMatchObject({
+      positionId: "btc-late",
+      costBasisUsd: 50,
+      proceedsUsd: 50,
+      realizedPnlUsd: 0,
+    });
+    expect(rows[0]).toMatchObject({ costBasisUsd: 50, proceedsUsd: 50, realizedPnlUsd: 0 });
+    expect(folded.positions.map((position) => position.id)).toEqual(["btc-core"]);
+  });
+
+  // CASE 2 — the ordinary sequence the rule must leave completely alone. If this ever
+  // reddens, the comparison direction has been inverted.
+  it("case 2 — accepts an ordinary trim-then-later-close, unchanged", () => {
+    const result = ingestBatch([
+      openLate(),
+      trimPayload("evt-trim", "2026-06-10", 0.5, 50),
+      closePayload("evt-close", "2026-06-18", 50),
+    ]);
+
+    expect(result.rejection).toBeNull();
+    expect(ledgerDelta(result.committed)).toEqual({ cash: 0, closedRows: 2 });
+
+    const rows = foldEvents(genesis(), result.committed).closedPositions ?? [];
+    expect(rows.map((row) => row.closedAsOf)).toEqual(["2026-06-10", "2026-06-18"]);
+    expect(rows[1]).toMatchObject({ costBasisUsd: 50, realizedPnlUsd: 0 });
+  });
+
+  // CASE 3 — THE SUBSET INVARIANT, READ FROM THE CONSUMING SIDE. `btc-core` is
+  // genesis-held and no log event has ever touched it, so `positionLastVerbAsOf` has no
+  // entry for it and the helper's missing-entry branch must return SUCCESS, not a
+  // dangling reference. Slice 1 pins the absence; this pins that the absence is read as
+  // "nothing to seal behind". A helper that treated a missing entry as an error would
+  // make every genesis-held position uncloseable — the loudest possible regression, and
+  // one no rejection test in this file would catch.
+  it("case 3 — accepts a close against a genesis-held position the log never touched", () => {
+    const seed = genesis();
+    const reference = buildEventReference(seed);
+    expect(reference.positionLastVerbAsOf.has("btc-core")).toBe(false);
+
+    const result = ingestBatch([
+      {
+        id: "evt-close-core",
+        asOf: "2026-06-10",
+        type: "PositionClosed",
+        positionId: "btc-core",
+        settlement: { reserveId: "pulse-cash", proceeds: 200 },
+      },
+    ]);
+
+    expect(result.rejection).toBeNull();
+    expect(ledgerDelta(result.committed)).toEqual({ cash: 200, closedRows: 1 });
+
+    const folded = foldEvents(genesis(), result.committed);
+    expect(folded.closedPositions?.[0]).toMatchObject({
+      positionId: "btc-core",
+      costBasisUsd: 200,
+      proceedsUsd: 200,
+      realizedPnlUsd: 0,
+    });
+    expect(folded.positions).toEqual([]);
+  });
+});
+
+// FOUR GATES, ONE PATH. `positionId` is the machine-readable half of all four
+// rejections a close can draw, so the MESSAGE is the only thing distinguishing them —
+// which makes "are they actually distinguishable" a real question rather than a
+// formality. Pairwise distinctness is the assertion; four regexes each matching its own
+// message would still pass if two gates emitted the same string.
+describe("the four position-id rejections a close can draw are distinguishable", () => {
+  const rejections = () => ({
+    unknown: ingestBatch([
+      {
+        id: "evt-close-ghost",
+        asOf: "2026-06-10",
+        type: "PositionClosed",
+        positionId: "ghost",
+        settlement: { reserveId: "pulse-cash", proceeds: 100 },
+      },
+    ]).rejection,
+    // Ordered ahead of the seal check, so a close that is BOTH backdated before birth
+    // and behind an accepted verb reports the birth fact. That ordering is what this
+    // entry silently pins.
+    notBorn: ingestBatch([openLate(), closePayload("evt-close", "2026-06-03")]).rejection,
+    alreadyClosed: ingestBatch([
+      openLate(),
+      closePayload("evt-close", "2026-06-18"),
+      closePayload("evt-close-again", "2026-06-20"),
+    ]).rejection,
+    sealsBehind: ingestBatch([
+      openLate(),
+      trimPayload("evt-trim", "2026-06-18", 0.5, 50),
+      closePayload("evt-close", "2026-06-10", 50),
+    ]).rejection,
+  });
+
+  it("all four land on path 'positionId'", () => {
+    for (const rejection of Object.values(rejections())) {
+      expect(rejection?.path).toBe("positionId");
+    }
+  });
+
+  it("each says its own thing", () => {
+    const { unknown, notBorn, alreadyClosed, sealsBehind } = rejections();
+
+    expect(unknown?.message).toContain("neither the genesis seed nor the log contains");
+    expect(notBorn?.message).toContain("not born until");
+    expect(alreadyClosed?.message).toContain("already closed");
+    expect(sealsBehind?.message).toContain("has already been accepted for it");
+  });
+
+  it("and no two of them are the same string", () => {
+    const messages = Object.values(rejections()).map((rejection) => rejection?.message);
+
+    expect(new Set(messages).size).toBe(4);
+  });
+});
+
+// CASE C — A DELIBERATE OVER-REJECTION, PINNED SO THAT CHANGING IT IS A DECISION.
+// `[Opened 06-05, Closed 06-10, Trimmed 06-08]`: the trim sorts BEFORE the close and
+// would fold perfectly correctly, so refusing it is stricter than the fold requires.
+// It stays refused on purpose — relaxing it means admitting retroactive edits to a
+// closed position's history, which is a policy question about the book, not a gate bug.
+// Filed as ledger item 21. This test exists so that a future relaxation is deliberate
+// rather than drift, and it is equally a pin on the SEAL rule's reach: the seal check
+// guards closes only, so the trim must still be refused by the already-closed guard and
+// must NOT report the seal message.
+describe("case C stays refused as already-closed, deliberately (ledger 21)", () => {
+  const caseC = () => [
+    openLate(),
+    closePayload("evt-close", "2026-06-10"),
+    trimPayload("evt-trim", "2026-06-08", 0.5, 50),
+  ];
+
+  it("rejects the backdated trim with the already-closed message, not the seal one", () => {
+    const result = ingestBatch(caseC());
+
+    expect(result.rejection?.path).toBe("positionId");
+    expect(result.rejection?.message).toContain("PositionTrimmed");
+    expect(result.rejection?.message).toContain("already closed");
+    expect(result.rejection?.message).not.toContain("has already been accepted for it");
+    expect(ledgerDelta(result.committed)).toEqual({ cash: 0, closedRows: 0 });
+  });
+
+  // What today's refusal costs, stated so the ledger-21 decision can be weighed on
+  // evidence rather than intuition: these events WOULD have folded correctly.
+  it("although that trim would have folded correctly — which is why 21 is open", () => {
+    const folded = foldEvents(genesis(), caseC().map(accepted));
+    const rows = folded.closedPositions ?? [];
+
+    expect(rows.map((row) => row.closedAsOf)).toEqual(["2026-06-08", "2026-06-10"]);
+    expect(rows[1]).toMatchObject({ costBasisUsd: 50, proceedsUsd: 100, realizedPnlUsd: 50 });
+  });
+});
+
+// CASE 6 — CANARY CONFIRMATION, recorded rather than re-run. These suites already run
+// on every `pnpm test`; duplicating them here would only add a second place to update.
+// Measured green and byte-untouched with the seal check in place:
+//
+//   position-born-by.test.ts   29 tests — the seal check sits BEHIND born-by's own call,
+//                                         so any moved message or path means the
+//                                         call-site ordering is wrong.
+//   reserve-opened.test.ts     45 tests — the standing canary from the born-by increment.
+//   event-ingest.test.ts       64 tests — including the post-close guard, whose two
+//                                         `/already closed/` assertions are positive
+//                                         evidence the seal check did not pre-empt it.
