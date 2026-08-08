@@ -21,12 +21,14 @@
  * that covers only part of the fund.
  */
 import { describe, expect, it } from "vitest";
-import type { CompositionRow } from "@numisma/engine";
+import type { CompositionReport, CompositionRow } from "@numisma/engine";
 import type { SnapshotAnchor } from "../projection/contract.ts";
+import { fundIdOf } from "../projection/contract.ts";
 import {
   NAV_JITTER_PP,
   NAV_MOVE_THRESHOLD_PCT,
   synthesizeAnchors,
+  SYNTHETIC_FUND_ID,
   SYNTHETIC_FUND_NAME,
   SYNTHETIC_START_NAV,
 } from "./fixture-synthesis.ts";
@@ -178,9 +180,8 @@ function shapeOf(anchor: SnapshotAnchor): string {
 describe("what survives — the projections slice 4 replays", () => {
   const out = synthesizeAnchors(REAL);
 
-  it("keeps every anchor date, in order, and the fund id", () => {
+  it("keeps every anchor date, in order", () => {
     expect(out.map((a) => a.asOf)).toEqual(REAL.map((a) => a.asOf));
-    expect(out.map((a) => a.fundId)).toEqual(REAL.map((a) => a.fundId));
   });
 
   it("copies the glance block VERBATIM — feedGap, missing[], suppressed, the floor", () => {
@@ -361,16 +362,42 @@ describe("the NAV jitter — closing the last recoverable series", () => {
     }
   });
 
-  it("emits the real 28-anchor fixture without the guard firing", () => {
-    // The end-to-end statement of sufficiency: the fund's own series regenerates
-    // clean. If a future day's move lands inside the band, THIS is where the next
-    // regeneration stops, with the date named.
+  it("leaves the guard silent on an ordinary series — regeneration is not blocked", () => {
+    // The statement of sufficiency, and it is a CONSTRUCTED series, not the fund's:
+    // nothing in this file can read the real 28 anchors (that is the whole point of
+    // the sanitizer). The real series' sufficiency is asserted where the generator
+    // actually holds it — `assertThresholdSideHolds` at regeneration time, which stops
+    // with the date named if a future day's move lands inside the band.
     expect(() => synthesizeAnchors(REAL)).not.toThrow();
   });
 });
 
-describe("what does NOT survive — every magnitude", () => {
+describe("what does NOT survive — every magnitude, and the fund's identity", () => {
   const out = synthesizeAnchors(REAL);
+
+  it("replaces the fund id — the real one never reaches the committed file", () => {
+    // The id was the last real string the sanitizer let through. `fundName` has been
+    // fictional since slice #149, but every anchor still carried the production
+    // `fund_id`, which named the fund in a PUBLIC repository just as plainly as the
+    // name would have — and it did so 28 times over, once per anchor.
+    for (const anchor of out) {
+      expect(anchor.fundId).toBe(SYNTHETIC_FUND_ID);
+    }
+    expect(SYNTHETIC_FUND_ID).not.toBe(REAL[0]!.fundId);
+  });
+
+  it("derives that id as the slug of the synthetic NAME, the way fundIdOf does", () => {
+    // `fundId` is a slug of `fundName` EVERYWHERE else in the system, so a second
+    // freely-invented string here would ship a fixture whose own id contradicts its
+    // own name — and `push-core`'s derivation would disagree with the file it is
+    // tested against. Pinned against the real `fundIdOf`, not against a copy of its
+    // regex, so the two cannot drift apart.
+    expect(SYNTHETIC_FUND_ID).toBe(
+      fundIdOf({
+        dashboard: { summary: { fundName: SYNTHETIC_FUND_NAME } },
+      } as unknown as CompositionReport),
+    );
+  });
 
   it("re-anchors the series at a round, obviously fictional NAV", () => {
     expect(out[0]!.report.totals.fundValueUsd).toBe(SYNTHETIC_START_NAV);

@@ -39,7 +39,10 @@
  *  - every row's `usdValue`, `costBasisUsd` and `unrealizedPnlUsd`;
  *  - every row's `percentOfFund` EXCEPT the Reserve row's;
  *  - the fund NAME, which becomes {@link SYNTHETIC_FUND_NAME} — the loudest possible
- *    signal, at a glance, that nothing in this file is a real position.
+ *    signal, at a glance, that nothing in this file is a real position;
+ *  - the fund ID, which becomes {@link SYNTHETIC_FUND_ID}, the slug of that name. It
+ *    is not a magnitude, but it IS the real fund's identifier, and it appeared on
+ *    every anchor of a file this public repository checks in.
  *
  * ── THE NAV SERIES, AND WHY IT IS JITTERED ──────────────────────────────────────
  * Preserving every day-over-day NAV change EXACTLY would be mathematically the same
@@ -141,6 +144,23 @@ export { NAV_MOVE_THRESHOLD_PCT };
  * who opens the file must not have to reason about whether it is real.
  */
 export const SYNTHETIC_FUND_NAME = "Sanitized Exploratory Fund";
+
+/**
+ * The fund id every synthetic anchor carries — the SLUG of {@link SYNTHETIC_FUND_NAME},
+ * exactly as `fundIdOf` would derive it from that name.
+ *
+ * The id used to pass through untouched, which meant the committed fixture named the
+ * real fund on every one of its anchors while its `fundName` said otherwise. `fundName`
+ * is the loud signal; `fund_id` is the quiet one, and a public repository publishes
+ * both equally.
+ *
+ * WHY A LITERAL AND NOT `fundIdOf(...)`. `fundIdOf` takes a whole `CompositionReport`,
+ * and synthesis has no report to hand at module scope — only the name. Re-implementing
+ * the slug regex here would be the drift `NAV_MOVE_THRESHOLD_PCT` is re-exported to
+ * avoid, so the agreement is PINNED IN THE TEST against the real `fundIdOf` instead:
+ * this constant cannot silently stop being the slug of the name above.
+ */
+export const SYNTHETIC_FUND_ID = "sanitized-exploratory-fund";
 
 /** Each rank holds this fraction of the one above it, before the wobble. */
 const RANK_DECAY = 0.72;
@@ -529,7 +549,10 @@ function synthesizeAnchor(anchor: SnapshotAnchor, nav: number): SnapshotAnchor {
   }
 
   return {
-    fundId: anchor.fundId,
+    // NOT `anchor.fundId`: the id is a slug of the fund name, and the name above is
+    // fictional, so carrying the real id through would have the fixture contradict
+    // itself while publishing the one string the rename was meant to withhold.
+    fundId: SYNTHETIC_FUND_ID,
     asOf,
     report: {
       totals: { ...totals, fundValueUsd: nav },
