@@ -434,6 +434,42 @@ describe("crossReferenceEvent — InvalidationMarked reference + post-close gate
   });
 });
 
+// Audit 2026-08-07 MUST FIX 1. `PositionClosed` was the one position-targeting verb
+// whose gate never consulted the retired-id set — trim and add-to both reject a
+// post-close event, close did not. Ingest dedup keys on event id alone, so a
+// re-authored close carrying a FRESH id passed the gate a second time: the cross-ref
+// shadow credited the proceeds again while the fold silently dropped the event, and
+// NAV drifted with `warnings: []` — the silent-cash-leg class ADR-003's fail-loud
+// posture exists to eliminate.
+//
+// The closed world-state below is built by running a real close through
+// `applyEventToReference` and never by reaching into the reference's internals, so
+// these locks hold whatever encoding the gate later uses to remember a retired id.
+describe("crossReferenceEvent — PositionClosed post-close gate (audit MUST FIX 1)", () => {
+  it("accepts the first close of a known open position", () => {
+    expect(crossReferenceEvent(asEvent(closedInput()), buildEventReference(genesis())).kind).toBe(
+      "ok",
+    );
+  });
+
+  it("rejects a re-authored second close of an already-closed position", () => {
+    const reference = buildEventReference(genesis());
+    const first = asEvent(closedInput());
+    expect(crossReferenceEvent(first, reference).kind).toBe("ok");
+    applyEventToReference(reference, first); // retires aapl-core
+
+    // A fresh event id: the durable log's id-keyed dedup cannot see this as a
+    // duplicate, so the gate is the only thing standing between it and the fold.
+    const second = asEvent(closedInput({ id: "e-close-reauthored", asOf: "2026-06-11" }));
+    const error = expectRejected(crossReferenceEvent(second, reference));
+    expect(error.path).toBe("positionId");
+    expect(error.message).toMatch(/already closed/);
+  });
+
+  // A dangling close (unknown id) staying distinct from a post-close rejection is
+  // already locked by the MF1 case above — not re-asserted here.
+});
+
 /** Parse a fixture input and unwrap to a typed event (fixtures are valid). */
 function asEvent(input: Record<string, unknown>): PortfolioEvent {
   const result = parseEvent(input);
