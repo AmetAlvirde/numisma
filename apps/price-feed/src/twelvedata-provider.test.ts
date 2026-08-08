@@ -1,13 +1,16 @@
 // Twelve Data provider suite. No live network (every fetch is mocked): the
 // happy-path daily-close parse, the missing-key guard, HTTP failure, Twelve Data's
 // 200+status:"error" body, malformed payloads, a non-positive close, and the
-// request timeout — each thrown loud and symbol-attributable.
+// request timeout — each attributed to its symbol rather than aborting the run.
+//
+// There is ONE fetch under test. The single-symbol wrapper this file used to
+// exercise separately was deleted (audit finding 18: zero non-test callers, and it
+// invited the per-symbol looping the 8-credit/minute cap punishes), so its cases
+// live below as one-element batches — the same code path, since a single-symbol
+// request is what Twelve Data answers with the un-keyed body shape.
 import { describe, expect, it } from "vitest";
 import type { InstrumentRegistryEntry } from "@numisma/engine";
-import {
-  fetchTwelveDataDailyClose,
-  fetchTwelveDataDailyCloses,
-} from "./twelvedata-provider.js";
+import { fetchTwelveDataDailyCloses } from "./twelvedata-provider.js";
 
 const AAPL: InstrumentRegistryEntry = {
   instrumentId: "aapl",
@@ -42,13 +45,20 @@ function fetchWith(res: () => Response | Promise<Response>): typeof fetch {
 
 const OPTS = { timeoutMs: 5_000, apiKey: "test-key", now: () => NOW };
 
-describe("fetchTwelveDataDailyClose — happy path", () => {
+/** The one-element batch: the un-keyed single-symbol body shape. */
+async function fetchOne(entry: InstrumentRegistryEntry, options: typeof OPTS & { fetchImpl: typeof fetch }) {
+  const [result] = await fetchTwelveDataDailyCloses([entry], options);
+  return result;
+}
+
+describe("fetchTwelveDataDailyCloses — single-symbol happy path", () => {
   it("parses the latest daily close into a ProviderObservation", async () => {
-    const obs = await fetchTwelveDataDailyClose(AAPL, {
+    const result = await fetchOne(AAPL, {
       ...OPTS,
       fetchImpl: fetchWith(() => timeSeriesResponse("212.44")),
     });
-    expect(obs).toEqual({
+    expect(result?.error).toBeUndefined();
+    expect(result?.observation).toEqual({
       instrumentId: "aapl",
       symbol: "AAPL",
       close: 212.44,
@@ -63,55 +73,60 @@ describe("fetchTwelveDataDailyClose — happy path", () => {
       seen = typeof url === "string" ? url : url.toString();
       return Promise.resolve(timeSeriesResponse("100"));
     }) as typeof fetch;
-    await fetchTwelveDataDailyClose(AAPL, { ...OPTS, fetchImpl: spy });
+    await fetchOne(AAPL, { ...OPTS, fetchImpl: spy });
     expect(seen).toContain("symbol=AAPL");
     expect(seen).toContain("apikey=test-key");
   });
 });
 
-describe("fetchTwelveDataDailyClose — loud, attributable failures", () => {
-  it("fails loud when the API key is missing", async () => {
-    await expect(
-      fetchTwelveDataDailyClose(AAPL, { ...OPTS, apiKey: "", fetchImpl: fetchWith(() => timeSeriesResponse("1")) }),
-    ).rejects.toThrow(/TWELVEDATA_API_KEY is not set/);
+describe("fetchTwelveDataDailyCloses — single-symbol attributable failures", () => {
+  // Each case is an attributed RESULT, never a throw: the whole point of the batched
+  // shape is that no single symbol's problem can abort the run.
+  it("fails attributably when the API key is missing", async () => {
+    const result = await fetchOne(AAPL, {
+      ...OPTS,
+      apiKey: "",
+      fetchImpl: fetchWith(() => timeSeriesResponse("1")),
+    });
+    expect(result?.observation).toBeUndefined();
+    expect(result?.error).toMatch(/TWELVEDATA_API_KEY is not set/);
   });
 
   it("attributes an HTTP error to the symbol", async () => {
-    await expect(
-      fetchTwelveDataDailyClose(AAPL, {
-        ...OPTS,
-        fetchImpl: fetchWith(() => new Response("nope", { status: 500, statusText: "Server Error" })),
-      }),
-    ).rejects.toThrow(/Twelve Data AAPL -> HTTP 500/);
+    const result = await fetchOne(AAPL, {
+      ...OPTS,
+      fetchImpl: fetchWith(() => new Response("nope", { status: 500, statusText: "Server Error" })),
+    });
+    expect(result?.error).toMatch(/Twelve Data AAPL -> HTTP 500/);
   });
 
   it("surfaces Twelve Data's status:error body (200 with an error message)", async () => {
-    await expect(
-      fetchTwelveDataDailyClose(AAPL, {
-        ...OPTS,
-        fetchImpl: fetchWith(
-          () =>
-            new Response(JSON.stringify({ code: 400, message: "symbol not found", status: "error" }), {
-              status: 200,
-            }),
-        ),
-      }),
-    ).rejects.toThrow(/Twelve Data AAPL -> symbol not found/);
+    const result = await fetchOne(AAPL, {
+      ...OPTS,
+      fetchImpl: fetchWith(
+        () =>
+          new Response(JSON.stringify({ code: 400, message: "symbol not found", status: "error" }), {
+            status: 200,
+          }),
+      ),
+    });
+    expect(result?.error).toMatch(/Twelve Data AAPL -> symbol not found/);
   });
 
   it("rejects a payload with no values row", async () => {
-    await expect(
-      fetchTwelveDataDailyClose(AAPL, {
-        ...OPTS,
-        fetchImpl: fetchWith(() => new Response(JSON.stringify({ status: "ok", values: [] }), { status: 200 })),
-      }),
-    ).rejects.toThrow(/unexpected payload shape/);
+    const result = await fetchOne(AAPL, {
+      ...OPTS,
+      fetchImpl: fetchWith(() => new Response(JSON.stringify({ status: "ok", values: [] }), { status: 200 })),
+    });
+    expect(result?.error).toMatch(/unexpected payload shape/);
   });
 
   it("rejects a non-positive / NaN close", async () => {
-    await expect(
-      fetchTwelveDataDailyClose(AAPL, { ...OPTS, fetchImpl: fetchWith(() => timeSeriesResponse("nope")) }),
-    ).rejects.toThrow(/non-positive close/);
+    const result = await fetchOne(AAPL, {
+      ...OPTS,
+      fetchImpl: fetchWith(() => timeSeriesResponse("nope")),
+    });
+    expect(result?.error).toMatch(/non-positive close/);
   });
 
   it("attributes a request timeout to the symbol", async () => {
@@ -123,9 +138,8 @@ describe("fetchTwelveDataDailyClose — loud, attributable failures", () => {
           reject(error);
         });
       })) as typeof fetch;
-    await expect(
-      fetchTwelveDataDailyClose(AAPL, { ...OPTS, timeoutMs: 20, fetchImpl: stall }),
-    ).rejects.toThrow(/timed out after 20ms/);
+    const result = await fetchOne(AAPL, { ...OPTS, timeoutMs: 20, fetchImpl: stall });
+    expect(result?.error).toMatch(/timed out after 20ms/);
   });
 });
 
