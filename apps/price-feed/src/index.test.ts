@@ -14,6 +14,20 @@
  * until the first future consumer (web, scheduler — the reuse the module header
  * promises) tries to wire it up. This is the only thing that would catch it.
  *
+ * WHAT THE SURFACE IS SHAPED FOR (audit finding 18, decision C). With no consumer
+ * to take evidence from, the barrel is shaped for the consumer the package header
+ * promises, and the list below is that decision's record. Two kinds of export were
+ * removed rather than left pinned:
+ *   - `atomicWrite` / `AtomicWriteIo` and `upsertQuote` — internal plumbing (a
+ *     generic fs primitive and disposable price-store IO) that three modules reach
+ *     by RELATIVE import and no front-door consumer needs. The modules stay; only
+ *     the re-exports went.
+ *   - `fetchTwelveDataDailyClose` (singular) — deleted outright. It had zero
+ *     non-test callers, and publishing it invited a consumer to issue one request
+ *     per symbol against Twelve Data's 8-credit/minute cap. The BATCHED
+ *     `fetchTwelveDataDailyCloses` — what `runPriceFetch` actually drives — is
+ *     exported in its place, with `ProviderFetchResult`, its per-entry outcome.
+ *
  * The surface splits in two, and so does the guard:
  *   - RUNTIME exports are asserted here, by exact set equality against
  *     `EXPECTED_VALUE_EXPORTS` — so a DROP fails, and so does an unannounced
@@ -31,7 +45,6 @@ import { describe, expect, it } from "vitest";
 // coverage instrumentation attributes the crossing to the barrel itself.
 import * as priceFeed from "./index.js";
 import type {
-  AtomicWriteIo,
   EquitiesFetchOptions,
   FetchFailure,
   FetchOptions,
@@ -41,6 +54,7 @@ import type {
   PriceFeedConfig,
   PriceFeedPaths,
   ProviderCredentials,
+  ProviderFetchResult,
   ProviderObservation,
   RejectionScan,
   RunOptions,
@@ -56,14 +70,12 @@ const EXPECTED_VALUE_EXPORTS = {
   // config.ts — the shipped defaults and the env credential reader.
   DEFAULT_CONFIG: "object",
   readCredentialsFromEnv: "function",
-  // atomic-write.ts — the durable write primitive the store and inbox share.
-  atomicWrite: "function",
-  // The three provider fetches (ADR-005 two-plane model).
+  // The three provider fetches (ADR-005 two-plane model). Twelve Data's is the
+  // BATCHED one — the singular fetch is gone, see the header.
   fetchBinanceDailyClose: "function",
-  fetchTwelveDataDailyClose: "function",
+  fetchTwelveDataDailyCloses: "function",
   fetchBanxicoFix: "function",
-  // price-store.ts / inbox.ts — the disposable store and the atomic inbox emit.
-  upsertQuote: "function",
+  // inbox.ts — the atomic inbox emit.
   emitMarksToInbox: "function",
   // paths.ts — path resolution for both.
   resolvePriceFeedPaths: "function",
@@ -84,10 +96,10 @@ const EXPECTED_VALUE_EXPORTS = {
 type TypeSurface = {
   config: PriceFeedConfig;
   credentials: ProviderCredentials;
-  atomicWriteIo: AtomicWriteIo;
   observation: ProviderObservation;
   fetchOptions: FetchOptions;
   equitiesFetchOptions: EquitiesFetchOptions;
+  providerFetchResult: ProviderFetchResult;
   fixFetchOptions: FixFetchOptions;
   paths: PriceFeedPaths;
   runResult: FetchRunResult;
