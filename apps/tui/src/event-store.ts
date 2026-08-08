@@ -1,7 +1,9 @@
 /**
  * WRITE half of the event-sourcing spine — the inbox ingest, dedup persistence,
  * atomic append, archival, and the one-shot legacy migration. The pure fold +
- * event validation live in the engine (`foldEvents` / `parseEvent`); the durable
+ * event validation live in the engine (`foldEvents` / `parseEvent`), as does the
+ * pending-inbox walk this ingest folds with (`walkPendingInbox`, shared verbatim
+ * with the price-feed's fetch-time rejection pre-check); the durable
  * log's READ path — path resolution, genesis load, log load, quarantine, the
  * folded review — has moved to `@numisma/event-store`, shared with the web push,
  * and is imported back here (`loadGenesis`, `loadEventLog`, `readOptional`,
@@ -37,6 +39,7 @@ import {
   foldEvents,
   migrateLegacyEvent,
   parseEvent,
+  walkPendingInbox,
   type PortfolioEvent,
   type SuppliedCashLeg,
 } from "@numisma/engine";
@@ -104,42 +107,36 @@ export async function ingestInbox(
   const existingLoad = await loadEventLog(paths.log);
   assertLogFullyLoaded(existingLoad, paths.log);
   const existing = existingLoad.events;
-  const seen = new Set(existing.map((event) => event.id));
   // The known world is genesis + the durable log; accepted batch events extend it
   // in order, so a position opened earlier in this inbox can be referenced later.
   const reference = buildEventReference(genesis, existing);
 
-  // Only pass the magnitude dial when the operator set it, so the engine keeps its
-  // own ±50% default (exactOptionalPropertyTypes forbids handing an explicit
-  // `undefined`). Mirrors the guard pattern in price-feed's findMarkRejections.
-  const guardOptions =
-    options.magnitudeThreshold === undefined
-      ? undefined
-      : { magnitudeThreshold: options.magnitudeThreshold };
-
-  const toAppend: PortfolioEvent[] = [];
-  let duplicateCount = 0;
-  for (const [index, candidate] of parsed.entries()) {
-    const result = parseEvent(candidate);
-    if (result.kind !== "ok") {
-      throw new Error(
-        `Inbox transaction [${index}] is invalid (${result.path}: ${result.message}).`,
-      );
-    }
-    if (seen.has(result.value.id)) {
-      duplicateCount += 1;
-      continue;
-    }
-    const crossRef = crossReferenceEvent(result.value, reference, guardOptions);
-    if (crossRef.kind !== "ok") {
-      throw new Error(
-        `Inbox transaction [${index}] failed cross-reference (${crossRef.path}: ${crossRef.message}).`,
-      );
-    }
-    seen.add(result.value.id);
-    applyEventToReference(reference, result.value);
-    toAppend.push(result.value);
+  // The walk itself — parse, dedup by id before the guard, cross-reference, advance
+  // the reference on accept — is the engine's `walkPendingInbox`, shared verbatim
+  // with the price-feed's fetch-time rejection pre-check (audit finding 9). Only the
+  // magnitude dial is passed when the operator set it (`undefined` keeps the engine's
+  // own ±50% default). `haltOnRejection` is THIS caller's all-or-nothing policy: the
+  // walk stops at the first refusal and we throw below, so nothing is appended.
+  const walk = walkPendingInbox(parsed, reference, {
+    seenIds: new Set(existing.map((event) => event.id)),
+    haltOnRejection: true,
+    ...(options.magnitudeThreshold === undefined
+      ? {}
+      : { magnitudeThreshold: options.magnitudeThreshold }),
+  });
+  if (walk.invalid) {
+    throw new Error(
+      `Inbox transaction [${walk.invalid.index}] is invalid (${walk.invalid.path}: ${walk.invalid.message}).`,
+    );
   }
+  const [rejection] = walk.rejected;
+  if (rejection) {
+    throw new Error(
+      `Inbox transaction [${rejection.index}] failed cross-reference (${rejection.path}: ${rejection.message}).`,
+    );
+  }
+  const toAppend = walk.accepted;
+  const duplicateCount = walk.duplicateCount;
 
   // No-op archive on a zero-new re-drop: archive nothing and leave the inbox (and
   // any prior archive) untouched, honoring the "never overwritten" promise. Only a
