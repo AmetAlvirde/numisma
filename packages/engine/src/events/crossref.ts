@@ -6,9 +6,16 @@
  * genesis seed plus everything the durable log has already introduced. Rejects an
  * open colliding with or citing unknown ids, a close/mark for an unknown id, a
  * cross-currency Transfer, an insufficient debit, and a mark/settlement deviating
- * beyond its magnitude threshold. Pure validation LOGIC (ADR-001); it shadows the
- * fold's reserve math (`./fold.ts`) so the sufficiency gate sees the running
- * balances the fold will produce. See ADR-003.
+ * beyond its magnitude threshold. Pure validation LOGIC (ADR-001).
+ *
+ * ONE WORLD-STATE (ADR-015). The gate does not maintain its own model of the world:
+ * {@link buildEventReference} PROJECTS `foldEvents(genesis, acceptedSoFar)` into the
+ * narrow view the guards read. Until 2026-08-08 this file carried a second
+ * implementation of the fold's transitions — an incrementally-advanced shadow — and
+ * the two encodings drifted (audit MUST FIX 1: the fold consumed a position on close,
+ * the shadow did not, so a re-authored second close passed the gate and then vanished
+ * at fold, corrupting NAV under `warnings: []`). Deriving from the fold makes that
+ * whole divergence class UNREPRESENTABLE rather than guarded. See ADR-015 and ADR-003.
  */
 import type { CapitalTier, Currency, FundReviewData, PositionLot } from "../contracts.js";
 import type {
@@ -23,17 +30,11 @@ import type {
   PositionTrimmedEvent,
   PriceMarkedEvent,
   ReserveOpenedEvent,
-  TierDelta,
   TransferEvent,
   WithdrawEvent,
 } from "./types.js";
 import { eventError } from "./types.js";
-import {
-  reserveDeltasForClose,
-  reserveDeltasForOpen,
-  splitTierRemoval,
-  weightedAverageCost,
-} from "./fold.js";
+import { foldEvents, reserveDeltasForOpen } from "./fold.js";
 
 /**
  * The deviation past which a `PriceMarked` is treated as an implausible fat-finger
@@ -58,11 +59,15 @@ export const PRICE_MARK_MAGNITUDE_THRESHOLD = 0.5;
 export const SETTLEMENT_MAGNITUDE_THRESHOLD = 0.5;
 
 /**
- * One Reserve as the cross-reference gate sees it: the running balance shadow the
- * sufficiency gate checks debits against, plus the two facts that make the Reserve
- * itself checkable — the currency it is denominated in, and the date it was born.
+ * One Reserve as the cross-reference gate sees it: the FOLDED balance the sufficiency
+ * gate checks debits against, plus the two facts that make the Reserve itself
+ * checkable — the currency it is denominated in, and the date it was born.
+ *
+ * `amount`/`tiers` are read straight off `foldEvents(...).reserves`, so "what the gate
+ * thinks this Reserve holds" and "what the fold will produce" are the same number by
+ * construction (ADR-015), not by two encodings agreeing.
  */
-export interface ReserveShadow {
+export interface ReserveView {
   amount: number;
   tiers: Map<CapitalTier, number> | null;
   currency: Currency;
@@ -73,11 +78,13 @@ export interface ReserveShadow {
 /**
  * The known world an event is cross-referenced against: every id the genesis seed
  * and the durable log have introduced, plus the last known close per instrument
- * for the magnitude guard. Built from genesis (and optionally the existing log) by
- * {@link buildEventReference}; extended in-place by {@link applyEventToReference}
- * as a batch is accepted, so an event opened earlier in the same inbox can be
- * referenced by a later one. Per ADR-001 the TUI owns loading these ids off disk;
- * this engine code owns the validation logic that consumes them.
+ * for the magnitude guard. A READ-ONLY PROJECTION of `foldEvents(genesis,
+ * acceptedSoFar)`, built by {@link buildEventReference} — never advanced in place.
+ * To judge an event against a batch that has already accepted others, rebuild it
+ * from genesis plus the accepted prefix; that is what makes "an event opened earlier
+ * in the same inbox can be cited by a later one" true without a second encoding of
+ * the fold's transitions (ADR-015). Per ADR-001 the TUI owns loading genesis and the
+ * log off disk; this engine code owns the validation logic that consumes them.
  */
 export interface EventReference {
   positionIds: Set<string>;
@@ -115,274 +122,144 @@ export interface EventReference {
    * be silently dropped at fold, which is exactly the drift this ledger eliminates.
    * See {@link crossReferenceInvalidation} / {@link crossReferenceClose} and ADR-003
    * (fail-loud-at-ingest).
+   *
+   * Derived from the fold's own CLOSED BOOK — the full-close rows of
+   * `foldEvents(...).closedPositions` — so "retired" means exactly what the fold
+   * means by it. A partial (trim) row is excluded: a trim always leaves the position
+   * open, and the fold keeps it in `positions`.
    */
   closedPositionIds: Set<string>;
   /** Latest known close per instrument: the magnitude guard's comparison point. */
   lastClose: Map<string, { price: number; asOf: string }>;
   /**
-   * Running Reserve balances the cross-ref sufficiency gate checks a debit
+   * Folded Reserve balances the cross-ref sufficiency gate checks a debit
    * against (a withdraw/transfer/open-funding can't exceed available, per Tier).
-   * `tiers` is null for an untiered Reserve — only its `amount` is checked. Updated
-   * in-place by {@link applyEventToReference} as a batch is accepted, mirroring the
-   * fold's {@link applyReserveDelta}, so a deposit earlier in the inbox funds a
-   * later withdraw. `currency` is the Reserve's own denomination, read by the
-   * same-currency Transfer guard (a cross-currency move is FX, not a Transfer).
+   * `tiers` is null for an untiered Reserve — only its `amount` is checked. Read off
+   * `foldEvents(...).reserves`, so a deposit earlier in the inbox funds a later
+   * withdraw because the FOLD says it does. `currency` is the Reserve's own
+   * denomination, read by the same-currency Transfer guard (a cross-currency move is
+   * FX, not a Transfer).
    *
    * `bornAsOf` is the date the Reserve came into existence — `genesis.review.asOf`
    * for a seeded Reserve, the `ReserveOpened`'s own `asOf` for a log-born one. It is
    * what makes "does this Reserve exist" answerable AS OF A DATE; see
    * {@link requireReserveBornBy}.
    */
-  reserveBalances: Map<string, ReserveShadow>;
+  reserveBalances: Map<string, ReserveView>;
   /**
-   * Closed/open position lots the settlement-magnitude gate reads to compute a
-   * close's expected proceeds (quantity × last close) and the Tier mix proceeds
-   * inherit. Mirrors `lastClose` existing solely to feed the PriceMarked guard.
+   * OPEN position lots the settlement-magnitude gate reads to compute a close's
+   * expected proceeds (quantity × last close) and the Tier mix proceeds inherit.
+   * Mirrors `lastClose` existing solely to feed the PriceMarked guard.
+   *
+   * The fold's surviving `positions`, and only those: a retired id is caught by
+   * {@link closedPositionIds} before either magnitude gate reaches this map, so the
+   * lots of a closed position are never needed and are not carried.
    */
   positionLots: Map<string, { instrumentId: string; lots: PositionLot[] }>;
 }
 
 /**
- * Build the cross-reference world from the immutable genesis seed and, optionally,
- * the events already in the durable log. The last-close seed mirrors the fold: a
- * genesis-held instrument's `markPrice` at the genesis date is its t0 close, any
- * genesis-provided closes win, and prior log events advance it. Pure.
+ * Build the cross-reference world: fold the immutable genesis seed plus the events
+ * already accepted, then PROJECT that folded book into the narrow view the guards
+ * read. Pure.
+ *
+ * THE ONE WORLD-STATE (ADR-015). Everything below is a read of
+ * `foldEvents(genesis, priorEvents)` — reserve balances and their Tier mixes, which
+ * positions are open, which are retired, each open position's running lots, and the
+ * last known close per instrument. The gate therefore cannot be wrong about the world
+ * the fold will produce; it is looking at that world. The only facts NOT on the folded
+ * output are `genesisAsOf` (the fold restamps `review.asOf` to the latest event) and
+ * each Reserve's `bornAsOf`, both of which are read off the inputs directly.
+ *
+ * COST, and the standing budget. This is O(log length) per call, ≈0.1 ms per 1k events
+ * (measured 2026-08-07, Node 24; ADR-015 records the envelope). A batch walk rebuilds
+ * once per accepted event, so an n-event batch against an L-event log costs n+1 folds —
+ * ≈6 ms at today's L, and a 50-event batch does not cross one second until L ≈ 200k.
+ * Re-measure before assuming this still holds if a future gate rule needs the
+ * `compose/*` pipeline per event rather than the bare fold.
  */
 export function buildEventReference(
   genesis: FundReviewData,
-  priorEvents: PortfolioEvent[] = [],
+  priorEvents: readonly PortfolioEvent[] = [],
 ): EventReference {
-  const reference: EventReference = {
-    positionIds: new Set(genesis.positions.map((position) => position.id)),
-    reserveIds: new Set(genesis.reserves.map((reserve) => reserve.id)),
-    portfolioIds: new Set(genesis.portfolios.map((portfolio) => portfolio.id)),
-    accountCurrencies: new Map(genesis.accounts.map((account) => [account.id, account.currency])),
-    instrumentIds: new Set(genesis.instruments.map((instrument) => instrument.id)),
-    // Genesis positions are all open; the log fills this via `PositionClosed` below.
-    closedPositionIds: new Set(),
-    lastClose: new Map(),
-    genesisAsOf: genesis.review.asOf,
-    reserveBalances: new Map(
-      genesis.reserves.map((reserve) => [
-        reserve.id,
-        {
-          amount: reserve.amount,
-          tiers: reserve.lots
-            ? new Map(reserve.lots.map((lot) => [lot.tier, lot.quantity]))
-            : null,
-          currency: reserve.currency,
-          // A seeded Reserve exists from the instant the world does.
-          bornAsOf: genesis.review.asOf,
-        },
-      ]),
-    ),
+  const folded = foldEvents(genesis, [...priorEvents]);
+  const genesisAsOf = genesis.review.asOf;
+
+  // A Reserve's birth date is the one fact the folded record does not carry: a seeded
+  // Reserve exists from the instant the world does, a log-born one from its
+  // `ReserveOpened`'s own `asOf`. Read off the inputs, not re-derived by a transition.
+  const bornAsOf = new Map<string, string>(
+    genesis.reserves.map((reserve) => [reserve.id, genesisAsOf]),
+  );
+  for (const event of priorEvents) {
+    if (event.type === "ReserveOpened") {
+      bornAsOf.set(event.reserve.id, event.asOf);
+    }
+  }
+
+  // Known position ids are the fold's SURVIVORS plus everything in its closed book —
+  // a retired id stays known (it existed; close-and-reopen mints a fresh id), and the
+  // full-close rows are precisely the retired set. A partial row is a trim, whose
+  // position is still open above.
+  const positionIds = new Set(folded.positions.map((position) => position.id));
+  const closedPositionIds = new Set<string>();
+  for (const row of folded.closedPositions ?? []) {
+    positionIds.add(row.positionId);
+    if (!row.partial) {
+      closedPositionIds.add(row.positionId);
+    }
+  }
+
+  // Latest close per instrument, from the fold's own `closes[]`: the genesis-provided
+  // closes, the t0 `markPrice` anchors the fold seeds, every `PriceMarked`, and any
+  // entry/blend cost baseline the fold minted. Later-or-equal `asOf` wins, so a mark
+  // that lands on the day of an existing anchor supersedes it — the same tie-break the
+  // fold itself applies when it overwrites a same-day close.
+  const lastClose = new Map<string, { price: number; asOf: string }>();
+  for (const close of folded.closes ?? []) {
+    const current = lastClose.get(close.instrumentId);
+    if (!current || close.asOf >= current.asOf) {
+      lastClose.set(close.instrumentId, { price: close.price, asOf: close.asOf });
+    }
+  }
+
+  const reserveBalances = new Map<string, ReserveView>();
+  for (const reserve of folded.reserves) {
+    // `lots: undefined` is an untiered Reserve (amount is the whole truth); `lots: []`
+    // is a tiered-but-empty one, born by `ReserveOpened` — an empty Map, NOT null, so
+    // the first credit gives it real Tiers. `applyReserveDelta` draws the same line.
+    let tiers: Map<CapitalTier, number> | null = null;
+    if (reserve.lots) {
+      tiers = new Map();
+      for (const lot of reserve.lots) {
+        tiers.set(lot.tier, (tiers.get(lot.tier) ?? 0) + lot.quantity);
+      }
+    }
+    reserveBalances.set(reserve.id, {
+      amount: reserve.amount,
+      tiers,
+      currency: reserve.currency,
+      bornAsOf: bornAsOf.get(reserve.id) ?? genesisAsOf,
+    });
+  }
+
+  return {
+    positionIds,
+    reserveIds: new Set(folded.reserves.map((reserve) => reserve.id)),
+    portfolioIds: new Set(folded.portfolios.map((portfolio) => portfolio.id)),
+    accountCurrencies: new Map(folded.accounts.map((account) => [account.id, account.currency])),
+    instrumentIds: new Set(folded.instruments.map((instrument) => instrument.id)),
+    genesisAsOf,
+    closedPositionIds,
+    lastClose,
+    reserveBalances,
     positionLots: new Map(
-      genesis.positions.map((position) => [
+      folded.positions.map((position) => [
         position.id,
         { instrumentId: position.instrumentId, lots: position.lots },
       ]),
     ),
   };
-
-  // Seed last-close at the genesis date from each held instrument's markPrice, then
-  // let any genesis-provided Close (its own asOf) override when at least as recent.
-  for (const position of genesis.positions) {
-    noteClose(reference, position.instrumentId, position.markPrice, genesis.review.asOf);
-  }
-  for (const close of genesis.closes ?? []) {
-    noteClose(reference, close.instrumentId, close.price, close.asOf);
-  }
-
-  for (const event of priorEvents) {
-    applyEventToReference(reference, event);
-  }
-  return reference;
-}
-
-/**
- * Fold one already-accepted event into the reference so subsequent events in the
- * same batch see its effects: an open introduces its position id (and an entry
- * close for a mid-stream instrument), a mark advances the last close. Mutates in
- * place. A close leaves the id known — it existed, and the domain's close-and-
- * reopen rule mints a fresh id rather than reusing the retired one — but records
- * it in {@link EventReference.closedPositionIds} so the ingest gate can reject
- * EVERY later verb targeting it: a second close, a trim, an add-to, or a
- * post-close `InvalidationMarked`.
- */
-export function applyEventToReference(reference: EventReference, event: PortfolioEvent): void {
-  switch (event.type) {
-    case "PositionOpened":
-      reference.positionIds.add(event.position.id);
-      reference.positionLots.set(event.position.id, {
-        instrumentId: event.position.instrumentId,
-        lots: event.position.lots,
-      });
-      noteClose(
-        reference,
-        event.position.instrumentId,
-        weightedAverageCost(event.position.lots),
-        event.asOf,
-      );
-      applyDeltasToBalance(
-        reference,
-        event.funding.reserveId,
-        reserveDeltasForOpen(event.position.lots, event.funding.amount),
-      );
-      break;
-    case "PriceMarked":
-      noteClose(reference, event.instrumentId, event.price, event.asOf);
-      break;
-    case "PositionClosed": {
-      const closed = reference.positionLots.get(event.positionId);
-      if (closed) {
-        applyDeltasToBalance(
-          reference,
-          event.settlement.reserveId,
-          reserveDeltasForClose(closed.lots, event.settlement.proceeds),
-        );
-      }
-      // Flag the id retired so every later verb targeting it fails loud — a second
-      // close, a trim, an add-to, or a post-close InvalidationMarked.
-      reference.closedPositionIds.add(event.positionId);
-      break;
-    }
-    case "PositionTrimmed": {
-      // Credit the settlement reserve (tiered by the removed mix) and REDUCE the
-      // running per-tier position lots so a later trim in the same batch sees the
-      // shrunk balance — the shadow the position-lot-sufficiency gate reads.
-      const trimmed = reference.positionLots.get(event.positionId);
-      if (trimmed) {
-        let working = trimmed.lots;
-        const removed: PositionLot[] = [];
-        for (const removal of event.removals) {
-          const split = splitTierRemoval(working, removal.tier, removal.quantity);
-          removed.push(...split.removed);
-          working = split.remaining;
-        }
-        reference.positionLots.set(event.positionId, {
-          instrumentId: trimmed.instrumentId,
-          lots: working,
-        });
-        applyDeltasToBalance(
-          reference,
-          event.settlement.reserveId,
-          reserveDeltasForClose(removed, event.settlement.proceeds),
-        );
-        // A trim ALWAYS leaves the position open: a full-retirement trim is rejected
-        // at the gate (`crossReferenceTrim`), so `working` is never empty here and the
-        // id is never retired — the position survives with reduced lots.
-      }
-      break;
-    }
-    case "PositionAddedTo": {
-      // Append the new lot to the running position lots and debit the funding reserve.
-      const added = reference.positionLots.get(event.positionId);
-      if (added) {
-        reference.positionLots.set(event.positionId, {
-          instrumentId: added.instrumentId,
-          lots: [...added.lots, event.lot],
-        });
-      }
-      applyDeltasToBalance(
-        reference,
-        event.funding.reserveId,
-        reserveDeltasForOpen([event.lot], event.funding.amount),
-      );
-      break;
-    }
-    case "Deposit":
-      applyDeltasToBalance(reference, event.reserveId, [
-        { tier: event.tier, amount: event.amount },
-      ]);
-      break;
-    case "Withdraw":
-      applyDeltasToBalance(reference, event.reserveId, [
-        { tier: event.tier, amount: -event.amount },
-      ]);
-      break;
-    case "Transfer":
-      applyDeltasToBalance(reference, event.fromReserveId, [
-        { tier: event.tier, amount: -event.amount },
-      ]);
-      applyDeltasToBalance(reference, event.toReserveId, [
-        { tier: event.tier, amount: event.amount },
-      ]);
-      break;
-    case "InvalidationMarked":
-      // No id or balance effect: the position id already exists and no cash moves.
-      // The level is a compose-time concern (breach derivation), not a reference one.
-      break;
-    case "ReserveOpened":
-      // LOAD-BEARING, and the one arm whose omission compiles clean: this switch has
-      // no return obligation, so forgetting `ReserveOpened` here would silently no-op
-      // and a same-batch `[ReserveOpened, Transfer→it]` — the whole point of the verb —
-      // would fail cross-reference with a bogus "reserve does not exist".
-      //
-      // Register in BOTH id sets the gates read: `reserveIds` (collision checks) and
-      // `reserveBalances` (existence + sufficiency). Born at zero with an EMPTY tier
-      // map — not `null` — so the shadow matches the fold's empty `lots: []`: the
-      // Reserve is untiered-because-empty, and the first credit gives it real tiers.
-      //
-      // `bornAsOf` is the event's OWN date, and it is the third thing this arm
-      // registers: cross-ref validates in LOG order while the fold applies in
-      // (asOf, then log) order, so without a birth date a movement dated EARLIER
-      // than the birth passes the gate and then sorts ahead of it at fold, where
-      // `applyToReserve` silently skips the not-yet-born destination and the cash
-      // leaves the fund. See {@link requireReserveBornBy}.
-      reference.reserveIds.add(event.reserve.id);
-      reference.reserveBalances.set(event.reserve.id, {
-        amount: 0,
-        tiers: new Map(),
-        currency: event.reserve.currency,
-        bornAsOf: event.asOf,
-      });
-      break;
-    default: {
-      // EXHAUSTIVENESS LATCH (no runtime surface, by design). This switch has no
-      // return obligation, so before this arm existed a forgotten verb compiled
-      // clean and silently no-opped — the event would never register its ids and a
-      // same-batch reference to it would fail with a bogus "does not exist". The
-      // `never` assignment makes verb eleven a COMPILE ERROR here instead. Nothing
-      // reaches this arm at runtime; no test can observe it. `pnpm typecheck` is
-      // its only proof.
-      const _never: never = event;
-      return _never;
-    }
-  }
-}
-
-/**
- * Mirror {@link applyReserveDelta} on the cross-ref reserve-balance shadow, so the
- * sufficiency gate sees the same running balances the fold will produce. Untiered
- * reserves track only `amount`.
- */
-function applyDeltasToBalance(
-  reference: EventReference,
-  reserveId: string,
-  deltas: TierDelta[],
-): void {
-  const balance = reference.reserveBalances.get(reserveId);
-  if (!balance) {
-    return; // Unknown reserve — the existence gate rejects before this runs.
-  }
-  for (const delta of deltas) {
-    balance.amount += delta.amount;
-    if (balance.tiers) {
-      balance.tiers.set(delta.tier, (balance.tiers.get(delta.tier) ?? 0) + delta.amount);
-    }
-  }
-}
-
-function noteClose(
-  reference: EventReference,
-  instrumentId: string,
-  price: number,
-  asOf: string,
-): void {
-  const current = reference.lastClose.get(instrumentId);
-  if (!current || asOf >= current.asOf) {
-    reference.lastClose.set(instrumentId, { price, asOf });
-  }
 }
 
 /**
@@ -562,7 +439,7 @@ function crossReferenceInvalidation(
 
 /** {@link requireReserveBornBy}'s answer: the Reserve, or the reason there isn't one. */
 type ReserveLookup =
-  | { kind: "ok"; balance: ReserveShadow }
+  | { kind: "ok"; balance: ReserveView }
   | { kind: "event-error"; error: EventError };
 
 /**
@@ -633,7 +510,7 @@ function requireReserveBornBy(
  * total balance, a tiered one against the named Tier's available quantity. Fails
  * loud rather than letting a debit drive a balance silently negative.
  *
- * Takes an ALREADY-RESOLVED {@link ReserveShadow}, not a reserve id: existence —
+ * Takes an ALREADY-RESOLVED {@link ReserveView}, not a reserve id: existence —
  * including the as-of-this-date half — is {@link requireReserveBornBy}'s job and
  * only its job, and every caller has already asked it. Re-resolving here duplicated
  * that lookup once per tier delta inside the open/add funding loops, and split one
@@ -641,7 +518,7 @@ function requireReserveBornBy(
  * the message.
  */
 function checkDebit(
-  balance: ReserveShadow,
+  balance: ReserveView,
   reserveId: string,
   tier: CapitalTier,
   amount: number,
@@ -682,11 +559,15 @@ function crossReferenceClose(
         `the genesis seed nor the log contains.`,
     );
   }
-  // A close retires the id, so a SECOND close of it can never fold to anything: the
-  // fold drops it silently while this shadow re-credits the proceeds, drifting NAV
-  // with no warning. Log dedup keys on event id alone and cannot catch a re-authored
-  // close carrying a fresh id — the retired-id set is the only guard, the same one
-  // trim, add-to and the post-close mark consult.
+  // A close retires the id, so a SECOND close of it can never fold to anything — the
+  // fold drops it silently, with no warning. Log dedup keys on event id alone and
+  // cannot catch a re-authored close carrying a fresh id, so this check is what stands
+  // between it and the log; trim, add-to and the post-close mark consult the same set.
+  //
+  // Under ADR-015 that set IS the fold's closed book, so this guard now says out loud
+  // what the fold would do anyway rather than asserting it independently. It stays
+  // explicit for its MESSAGE: falling through to a "position does not exist" reject
+  // would tell the operator the wrong thing about a position that plainly did.
   if (reference.closedPositionIds.has(event.positionId)) {
     return eventError(
       "positionId",

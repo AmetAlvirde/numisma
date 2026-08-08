@@ -4,7 +4,6 @@
 // deliberate un-marked-instrument gate-skip, and the cross-ref shadow equivalence
 // guard. The core per-verb legs + seam + ingest gates live in cash-settlement.test.ts.
 import {
-  applyEventToReference,
   buildEventReference,
   crossReferenceEvent,
   EVENT_SCHEMA_VERSION,
@@ -326,32 +325,39 @@ describe("cash leg — the cross-ref shadow tracks the fold exactly (slice #87)"
   }
 
   /**
-   * Drive a batch through the REAL ingest path — the cross-ref gate first, then both
-   * encodings over the ACCEPTED subset — and assert the shadow's running balances
-   * equal the folded reserves, per amount and per Tier. Returns the ids the gate
-   * rejected, so a caller can lock which events never reached either encoding.
+   * Drive a batch through the REAL ingest path — the cross-ref gate, event by event,
+   * re-deriving the gate's world from the ACCEPTED subset as the walk does — and
+   * assert the balances the sufficiency gate reads equal the folded reserves, per
+   * amount and per Tier. Returns the ids the gate rejected, so a caller can lock which
+   * events never reached the book at all.
    *
    * Routing through `crossReferenceEvent` is the load-bearing part (audit finding
-   * 32). Hand-feeding both encodings the same known-good batch could only ever catch
-   * arithmetic drift, never the sharper class: an event THE GATE LETS THROUGH that
-   * only one of the two encodings applies. The fold silently ignores a second close
-   * of a retired position while the shadow re-credits its proceeds, so an unguarded
-   * gate shows up here as a balance mismatch — no error text, no reference internals,
-   * nothing that a rewrite of how the gate remembers a closed id could invalidate.
+   * 32). Hand-feeding a known-good batch straight to the fold could only ever catch
+   * arithmetic drift, never the sharper class: an event THE GATE LETS THROUGH that the
+   * fold then silently ignores — a second close of a retired position being the one
+   * that actually shipped (MUST FIX 1). That shows up here as a balance mismatch, with
+   * no error text and no reference internals involved.
+   *
+   * The assertions are deliberately unchanged across ADR-015, which made the gate READ
+   * the fold instead of shadowing it. They now check the PROJECTION — that
+   * `reserveBalances` reproduces `foldEvents(...).reserves` faithfully, Tier map for
+   * lots array — rather than two encodings agreeing. The gate-level claim they defend
+   * is the same one either way: what the gate believes a Reserve holds is what the
+   * fold will produce.
    */
   function expectShadowAgreesWithFold(events: PortfolioEvent[]): string[] {
     const rejected: string[] = [];
     const accepted: PortfolioEvent[] = [];
-    const reference = buildEventReference(genesis());
+    let reference = buildEventReference(genesis());
     for (const event of events) {
       if (crossReferenceEvent(event, reference).kind !== "ok") {
         rejected.push(event.id);
         continue;
       }
       accepted.push(event);
-      // The shadow's encoding: advance the cross-ref balances exactly as the
-      // sufficiency gate does across a batch (amount + Tier Map).
-      applyEventToReference(reference, event);
+      // The accept IS the advance (ADR-015): re-derive the gate's world from genesis
+      // plus everything accepted so far, exactly as `walkPendingInbox` does.
+      reference = buildEventReference(genesis(), accepted);
     }
 
     // The fold's encoding: mutate a `ReserveRecord` (amount + lots array).

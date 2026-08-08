@@ -3,11 +3,15 @@
 // the pre-check's entire value is byte-fidelity to the spine, and nothing held the
 // two copies together (the price-feed package cannot import `apps/tui`). These tests
 // lock the ONE walk's contract at the seam both callers consume: order, dedup
-// (before the guard), the reference advancing only on accept, and the two error
+// (before the guard), the world advancing only on accept, and the two error
 // policies the callers deliberately differ on — halt-on-rejection (the spine's
 // all-or-nothing ingest) vs collect-and-continue (the advisory pre-check).
+//
+// ADR-015 changed HOW the walk advances, not WHETHER: the world is re-folded from
+// genesis plus the accepted prefix on each accept, and handed back as
+// `result.reference`, rather than an incremental shadow being mutated in place.
 import { describe, expect, it } from "vitest";
-import { buildEventReference, walkPendingInbox, type FundReviewData } from "../index.js";
+import { walkPendingInbox, type FundReviewData } from "../index.js";
 
 const GENESIS_AS_OF = "2026-06-01";
 
@@ -89,47 +93,46 @@ function markedInput(overrides: Record<string, unknown> = {}) {
 }
 
 describe("walkPendingInbox — the one pending-inbox walk", () => {
-  it("accepts in order and ADVANCES the reference, so a later event can cite an earlier one", () => {
-    const reference = buildEventReference(genesis());
-    // Genesis puts `aapl-usd`'s last close at 150. The open folds a second aapl
-    // position whose weighted-average cost is 100, ADVANCING that close; the mark at
-    // 60 then deviates 40% from 100 (inside the ±50% guard) but 60% from the genesis
-    // 150 (outside it). On an un-advanced reference the mark is REJECTED.
+  it("accepts in order and ADVANCES the world, so a later event can cite an earlier one", () => {
+    // Two directions of the same claim, in one batch. Genesis holds no `btc-usd`
+    // position, so before this batch btc-core does not exist and btc-usd has no
+    // recorded close at all.
+    //
+    //  - The invalidation cites `btc-core`, a position the OPEN introduces earlier in
+    //    the same batch. Un-advanced, it is a dangling reference and is rejected.
+    //  - The open mints btc-usd's first close at its entry VWAC of 100, so the 400 mark
+    //    deviates 300% and trips the ±50% magnitude guard. Un-advanced, btc-usd has no
+    //    comparison point and the fat-finger sails through.
     const walk = walkPendingInbox(
       [
-        openedInput({
-          id: "e-open-aapl",
-          position: {
-            id: "aapl-core-2",
-            portfolioId: "core",
-            tempo: "Liquid",
-            executionMode: "live",
-            accountId: "xtb-usd",
-            instrumentId: "aapl-usd",
-            direction: "long",
-            currency: "USD",
-            lots: [{ quantity: 1, cost: 100, tier: "c1" }],
-          },
-        }),
-        markedInput({ id: "e-mark-aapl", price: 60 }),
+        openedInput(),
+        {
+          id: "e-inval",
+          asOf: "2026-06-06",
+          type: "InvalidationMarked",
+          positionId: "btc-core",
+          price: 80,
+          direction: "below",
+        },
+        markedInput({ id: "e-mark-btc", instrumentId: "btc-usd", price: 400 }),
       ],
-      reference,
+      { genesis: genesis() },
     );
 
     expect(walk.invalid).toBeUndefined();
-    expect(walk.rejected).toEqual([]);
-    expect(walk.accepted.map((event) => event.id)).toEqual(["e-open-aapl", "e-mark-aapl"]);
+    expect(walk.accepted.map((event) => event.id)).toEqual(["e-open", "e-inval"]);
+    expect(walk.rejected.map((rejection) => rejection.event.id)).toEqual(["e-mark-btc"]);
     expect(walk.duplicateCount).toBe(0);
-    expect([...walk.seenIds]).toEqual(["e-open-aapl", "e-mark-aapl"]);
-    // And the reference the caller holds afterwards is the world the NEXT event would
-    // be judged against: both accepted events folded in, latest close wins.
-    expect(reference.lastClose.get("aapl-usd")).toEqual({ price: 60, asOf: "2026-06-06" });
-    expect(reference.positionIds.has("aapl-core-2")).toBe(true);
+    // And the world the walk hands back is what the NEXT event would be judged
+    // against: the accepted events folded in, the rejected mark absent.
+    expect(walk.reference.positionIds.has("btc-core")).toBe(true);
+    expect(walk.reference.lastClose.get("btc-usd")).toEqual({ price: 100, asOf: "2026-06-05" });
   });
 
   it("dedup-skips an id already seen BEFORE the guard, counting it as a duplicate", () => {
-    const reference = buildEventReference(genesis());
-    const walk = walkPendingInbox([openedInput()], reference, { seenIds: new Set(["e-open"]) });
+    const walk = walkPendingInbox([openedInput()], { genesis: genesis() }, {
+      seenIds: new Set(["e-open"]),
+    });
 
     expect(walk.duplicateCount).toBe(1);
     expect(walk.accepted).toEqual([]);
@@ -137,16 +140,14 @@ describe("walkPendingInbox — the one pending-inbox walk", () => {
   });
 
   it("dedup-skips a repeat of an id accepted earlier in the SAME batch", () => {
-    const reference = buildEventReference(genesis());
-    const walk = walkPendingInbox([openedInput(), openedInput()], reference);
+    const walk = walkPendingInbox([openedInput(), openedInput()], { genesis: genesis() });
 
     expect(walk.accepted.map((event) => event.id)).toEqual(["e-open"]);
     expect(walk.duplicateCount).toBe(1);
   });
 
   it("HALTS at the first structurally invalid candidate, walking nothing after it", () => {
-    const reference = buildEventReference(genesis());
-    const walk = walkPendingInbox([{ type: "NotAVerb" }, openedInput()], reference);
+    const walk = walkPendingInbox([{ type: "NotAVerb" }, openedInput()], { genesis: genesis() });
 
     expect(walk.invalid).toEqual({
       index: 0,
@@ -157,11 +158,10 @@ describe("walkPendingInbox — the one pending-inbox walk", () => {
   });
 
   it("haltOnRejection stops at the first cross-reference rejection (the spine's all-or-nothing ingest)", () => {
-    const reference = buildEventReference(genesis());
     const walk = walkPendingInbox(
       // A 10× mark trips the magnitude guard; the open after it must never be walked.
       [markedInput({ id: "e-fat-finger", price: 3000 }), openedInput()],
-      reference,
+      { genesis: genesis() },
       { haltOnRejection: true },
     );
 
@@ -172,10 +172,9 @@ describe("walkPendingInbox — the one pending-inbox walk", () => {
   });
 
   it("by default COLLECTS rejections, keeps walking, and never advances on a rejected event", () => {
-    const reference = buildEventReference(genesis());
     const walk = walkPendingInbox(
       [markedInput({ id: "e-fat-finger", price: 3000 }), openedInput()],
-      reference,
+      { genesis: genesis() },
     );
 
     expect(walk.rejected.map((rejection) => rejection.event.id)).toEqual(["e-fat-finger"]);
@@ -186,8 +185,7 @@ describe("walkPendingInbox — the one pending-inbox walk", () => {
   });
 
   it("passes the magnitude dial straight through to the guard", () => {
-    const wide = buildEventReference(genesis());
-    const walk = walkPendingInbox([markedInput({ price: 3000 })], wide, {
+    const walk = walkPendingInbox([markedInput({ price: 3000 })], { genesis: genesis() }, {
       magnitudeThreshold: 100,
     });
 

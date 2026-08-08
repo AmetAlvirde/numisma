@@ -3,9 +3,16 @@
  *
  * The shape both ingest paths need: fold an ordered batch of untrusted candidates
  * onto a known world — `parseEvent` each, dedup-skip by stable `id` BEFORE the
- * guard, `crossReferenceEvent` the rest, and `applyEventToReference` the accepted
- * ones so the reference ADVANCES (a Position opened earlier in the batch can be
- * cited by a later event).
+ * guard, `crossReferenceEvent` the rest, and REBUILD the reference from genesis plus
+ * the accepted prefix so the world ADVANCES (a Position opened earlier in the batch
+ * can be cited by a later event).
+ *
+ * ADR-015 put that rebuild here. The walk used to advance an incrementally-maintained
+ * shadow in place; now each accept re-derives the gate's view from
+ * `foldEvents(genesis, [...priorEvents, ...accepted])`, so what the next candidate is
+ * judged against is the book the fold will actually produce. That is n+1 folds for an
+ * n-event batch — ≈6 ms per ingest at today's log length; see
+ * {@link buildEventReference} for the standing budget.
  *
  * Two callers walk it, and the second one's ENTIRE value is byte-fidelity to the
  * first:
@@ -27,7 +34,8 @@
  * job; this takes the already-read candidates as data and returns the verdicts as
  * data. Nothing here touches the filesystem.
  */
-import { applyEventToReference, crossReferenceEvent, type EventReference } from "./crossref.js";
+import type { FundReviewData } from "../contracts.js";
+import { buildEventReference, crossReferenceEvent, type EventReference } from "./crossref.js";
 import { parseEvent } from "./parse.js";
 import type { PortfolioEvent } from "./types.js";
 
@@ -57,7 +65,19 @@ export interface IngestWalkRejection {
   message: string;
 }
 
-/** What the walk found, as data. The reference itself was advanced in place. */
+/**
+ * The world a walk starts from: the immutable genesis seed plus the events already
+ * accepted before this batch (typically the durable log's). Handed in as INPUTS rather
+ * than as a pre-built reference, because under ADR-015 the walk must be able to
+ * re-fold — the gate's view is derived per accept, never advanced.
+ */
+export interface IngestWalkWorld {
+  genesis: FundReviewData;
+  /** Events already committed. Copied, never mutated. */
+  priorEvents?: readonly PortfolioEvent[];
+}
+
+/** What the walk found, as data — including the world it ended in. */
 export interface IngestWalkResult {
   /** The events the batch actually introduces, in order — what a caller appends. */
   accepted: PortfolioEvent[];
@@ -77,6 +97,14 @@ export interface IngestWalkResult {
    * the spine silently skips, never guards, so it must not be judged twice.
    */
   seenIds: Set<string>;
+  /**
+   * The known world AFTER the walk — `genesis + priorEvents + accepted`, projected off
+   * the fold. RETURNED rather than mutated into a caller's reference: under ADR-015 the
+   * reference is a projection, so there is nothing to advance in place. It is what the
+   * next candidate would be judged against, which is exactly what the price-feed
+   * pre-check needs in order to judge this run's fresh marks.
+   */
+  reference: EventReference;
 }
 
 export interface IngestWalkOptions {
@@ -97,22 +125,28 @@ export interface IngestWalkOptions {
 }
 
 /**
- * Walk a pending batch onto `reference`, in order.
+ * Walk a pending batch onto `world`, in order.
  *
- * `reference` is ADVANCED IN PLACE by each accepted event (the
- * {@link applyEventToReference} contract) and left untouched by a duplicate, a
- * rejection, or an invalid candidate — so what the caller holds afterwards is
- * exactly the known world the next event would be judged against.
+ * Each ACCEPTED event re-derives the gate's view from genesis plus the accepted prefix
+ * (ADR-015), so the next candidate is judged against the book the fold will produce. A
+ * duplicate, a rejection, or an invalid candidate leaves the world untouched — a
+ * rejected event is one the spine would refuse to apply, so it must not be allowed to
+ * inform the judgment of the next one. `result.reference` is the world the walk ended
+ * in.
  */
 export function walkPendingInbox(
   candidates: readonly unknown[],
-  reference: EventReference,
+  world: IngestWalkWorld,
   options: IngestWalkOptions = {},
 ): IngestWalkResult {
   const seenIds = new Set(options.seenIds ?? []);
+  const priorEvents = world.priorEvents ?? [];
   const accepted: PortfolioEvent[] = [];
   const rejected: IngestWalkRejection[] = [];
   let duplicateCount = 0;
+  // Re-derived on every accept below; built once here so a batch that accepts nothing
+  // (all duplicates, or empty) still costs exactly one fold.
+  let reference = buildEventReference(world.genesis, priorEvents);
 
   // Only pass the magnitude dial when the caller set it, so the engine keeps its own
   // ±50% default (exactOptionalPropertyTypes forbids an explicit `undefined`).
@@ -130,6 +164,7 @@ export function walkPendingInbox(
         rejected,
         invalid: { index, path: parsed.path, message: parsed.message },
         seenIds,
+        reference,
       };
     }
     const event = parsed.value;
@@ -144,14 +179,16 @@ export function walkPendingInbox(
     if (crossRef.kind !== "ok") {
       rejected.push({ index, event, path: crossRef.path, message: crossRef.message });
       if (options.haltOnRejection) {
-        return { accepted, duplicateCount, rejected, seenIds };
+        return { accepted, duplicateCount, rejected, seenIds, reference };
       }
-      // Do NOT advance the reference with an event the spine would refuse to apply.
+      // Do NOT advance the world with an event the spine would refuse to apply.
       continue;
     }
-    applyEventToReference(reference, event);
     accepted.push(event);
+    // The accept IS the advance: re-fold genesis + everything committed + everything
+    // this batch has taken so far. One fold per accepted event, deliberately (ADR-015).
+    reference = buildEventReference(world.genesis, [...priorEvents, ...accepted]);
   }
 
-  return { accepted, duplicateCount, rejected, seenIds };
+  return { accepted, duplicateCount, rejected, seenIds, reference };
 }
