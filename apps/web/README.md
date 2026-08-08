@@ -148,6 +148,7 @@ See `apps/web/.env.example` for the authoritative, commented list. Summary:
 | `PROJECTION_ADMIN_DATABASE_URL` | `db:provision` | One-shot, local/operator only |
 | `PROJECTION_WRITER_ROLE` / `PROJECTION_READER_ROLE` | `db:provision` | Optional, default `numisma_push` / `numisma_web` |
 | `NUMISMA_SEED_EMAIL` / `NUMISMA_SEED_PASSWORD` / `NUMISMA_SEED_NAME` | `auth:seed` | Local/operator only |
+| `AUTH_VERIFY_BASE_URL` | `auth:verify-limit` | Local/operator only — **set it, or the run proves nothing** (defaults to `http://localhost:3000`) |
 | `NUMISMA_DATA_DIR` | `push`, `backfill` (via `@numisma/engine`) | Should stay **unset** in production use — defaults to `~/Dev/<fund>/data` |
 
 ## Tests
