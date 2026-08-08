@@ -19,11 +19,14 @@
  * changes no engine or tui code (C1); `pnpm spine` stays the one authoritative
  * guard and the permanent manual fallback stays the operator's path (C5).
  *
- * FAITHFUL TO `ingestInbox` (tui/src/event-store.ts): the real spine ingest folds
- * genesis + log, then walks the inbox IN ORDER — dedup-skipping any id already
- * committed in the log BEFORE the guard, `crossReferenceEvent`-ing each remaining
- * event against a reference that ADVANCES with every accepted one, all-or-nothing.
- * The pre-check mirrors that exactly, so it (a) does NOT false-positive on a
+ * FAITHFUL TO `ingestInbox` (tui/src/event-store.ts) BY CONSTRUCTION: the real spine
+ * ingest folds genesis + log, then walks the inbox IN ORDER — dedup-skipping any id
+ * already committed in the log BEFORE the guard, `crossReferenceEvent`-ing each
+ * remaining event against a reference that ADVANCES with every accepted one,
+ * all-or-nothing. That walk is no longer mirrored here: both paths call the engine's
+ * ONE `walkPendingInbox` (audit finding 9), so it cannot drift. Only the ERROR POLICY
+ * differs — the spine halts and throws, this advisory collects. Hence it (a) does NOT
+ * false-positive on a
  * hand-authored corrective mark that the spine would fold in first (that mark
  * advances the reference before this run's fresh mark is judged), (b) DOES surface
  * a doomed mark left queued by a PRIOR run (spine rejects the whole batch on it,
@@ -35,10 +38,9 @@
  * functions, consumed unchanged.
  */
 import {
-  applyEventToReference,
   buildEventReference,
   crossReferenceEvent,
-  parseEvent,
+  walkPendingInbox,
   type EventReference,
   type PortfolioEvent,
   type PriceMarkedEvent,
@@ -87,7 +89,8 @@ export interface SpineWorld {
   /** genesis + durable log, ADVANCED by every accepted pending inbox event in order. */
   reference: EventReference;
   /**
-   * The ids spine dedup-skips BEFORE the magnitude guard (event-store.ts:259):
+   * The ids spine dedup-skips BEFORE the magnitude guard (the dedup step inside the
+   * engine's `walkPendingInbox`, which `ingestInbox` and this module both call):
    * every durable-log event id plus every currently-pending inbox event id. A
    * fetched mark whose id is in here is one spine would silently skip, never guard.
    */
@@ -132,7 +135,7 @@ export interface SpineWorld {
  */
 export async function loadSpineReference(
   paths: SpineReferencePaths,
-  options?: { freshlyQueuedCount?: number },
+  options?: { freshlyQueuedCount?: number; magnitudeThreshold?: number },
 ): Promise<SpineWorld> {
   const genesis = await loadGenesis(paths.genesis);
 
@@ -141,10 +144,10 @@ export async function loadSpineReference(
   const priorEvents: PortfolioEvent[] = load.events;
 
   // The known world is genesis + the durable log; accepted pending inbox events
-  // extend it in order, exactly as `ingestInbox`. `seen` starts as the log ids —
-  // the ids the spine dedup-skips before the guard even runs (event-store.ts:245).
+  // extend it in order, exactly as `ingestInbox` — because it is the same walk.
+  // The seed set is the log ids: the ids `walkPendingInbox` dedup-skips before the
+  // guard even runs.
   const reference = buildEventReference(genesis, priorEvents);
-  const seenIds = new Set(priorEvents.map((event) => event.id));
 
   // Fold in the PRE-EXISTING inbox: everything on disk except the tail this run just
   // appended (which are the marks being JUDGED, not batch context — folding them
@@ -154,37 +157,36 @@ export async function loadSpineReference(
   const pendingCount = Math.max(0, inboxRecords.length - freshlyQueuedCount);
   const pending = inboxRecords.slice(0, pendingCount);
 
-  const pendingRejections: MarkRejection[] = [];
-  for (const [index, candidate] of pending.entries()) {
-    const parsed = parseEvent(candidate);
-    if (parsed.kind !== "ok") {
-      // A structurally invalid pending event dooms the whole spine ingest too; the
-      // caller swallows this throw into "pre-check unavailable" (non-fatal).
-      throw new Error(
-        `Inbox ${paths.inbox} pending event [${index}] failed to parse (${parsed.path}: ${parsed.message}).`,
-      );
-    }
-    const event = parsed.value;
-    if (seenIds.has(event.id)) {
-      // Already committed in the log: spine dedup-skips it (event-store.ts:259)
-      // BEFORE the guard, so it neither guards nor advances the reference. Skip it.
-      continue;
-    }
-    // Record the id as pending-seen so a fresh mark that duplicates it is excluded
-    // from the judged set — spine would dedup-skip that fresh mark the same way.
-    seenIds.add(event.id);
-    const crossRef = crossReferenceEvent(event, reference);
-    if (crossRef.kind !== "ok") {
-      // Finding 4b: a doomed-but-queued mark from a PRIOR run. Spine rejects the
-      // whole all-or-nothing batch on it, so surface it now. Do NOT advance the
-      // reference with an event the spine itself would refuse to apply.
-      pendingRejections.push(toMarkRejection(event, crossRef.path, crossRef.message));
-      continue;
-    }
-    applyEventToReference(reference, event);
+  // THE SAME WALK THE SPINE RUNS (`walkPendingInbox`), differing only in error
+  // policy: `ingestInbox` halts on the first refusal and throws; this advisory
+  // collects every refusal, because a doomed mark queued by a prior run must not
+  // hide a second one. The walk advances `reference` in place on each accepted
+  // event and never on a rejected one — the spine's behavior, not a copy of it.
+  // The dial rides along: the pending fold is judged by the SAME threshold the fresh
+  // marks are (`findMarkRejections`), or the walk would fold the inbox at the engine
+  // default while this run's marks were judged at the caller's dial. Only set it when
+  // the caller did (exactOptionalPropertyTypes forbids an explicit `undefined`).
+  const walk = walkPendingInbox(pending, reference, {
+    seenIds: new Set(priorEvents.map((event) => event.id)),
+    ...(options?.magnitudeThreshold === undefined
+      ? {}
+      : { magnitudeThreshold: options.magnitudeThreshold }),
+  });
+  if (walk.invalid) {
+    // A structurally invalid pending event dooms the whole spine ingest too; the
+    // caller swallows this throw into "pre-check unavailable" (non-fatal).
+    throw new Error(
+      `Inbox ${paths.inbox} pending event [${walk.invalid.index}] failed to parse ` +
+        `(${walk.invalid.path}: ${walk.invalid.message}).`,
+    );
   }
+  // Finding 4b: doomed-but-queued marks from a PRIOR run. Spine rejects the whole
+  // all-or-nothing batch on them, so surface them now.
+  const pendingRejections: MarkRejection[] = walk.rejected.map((rejection) =>
+    toMarkRejection(rejection.event, rejection.path, rejection.message),
+  );
 
-  return { reference, seenIds, pendingRejections };
+  return { reference, seenIds: walk.seenIds, pendingRejections };
 }
 
 /**
@@ -223,8 +225,9 @@ export function findMarkRejections(
  *
  * `seenIds` are the ids spine dedup-skips BEFORE the guard (log + pending inbox).
  * Marks whose id is in that set are dropped: `mergeInbox` dedup-skipped a mark
- * already pending, and the spine skips one already in the log (event-store.ts:259),
- * so guarding either would falsely halt the wrapper on a mark spine never guards
+ * already pending, and the spine skips one already in the log (the dedup step in
+ * `walkPendingInbox`, which `ingestInbox` runs), so guarding either would falsely
+ * halt the wrapper on a mark spine never guards
  * (Finding 5). Only marks genuinely NEW to the batch are returned. Nothing before
  * the mark time (no marks emitted this run).
  */
@@ -273,7 +276,12 @@ export async function scanFetchedMarks(
   }
   let world: SpineWorld;
   try {
-    world = await loadSpineReference(paths, { freshlyQueuedCount: result.emittedCount });
+    world = await loadSpineReference(paths, {
+      freshlyQueuedCount: result.emittedCount,
+      ...(options?.magnitudeThreshold === undefined
+        ? {}
+        : { magnitudeThreshold: options.magnitudeThreshold }),
+    });
   } catch (error) {
     // Includes a MISSING genesis (ENOENT from `loadGenesis`): unseeded or damaged,
     // it is surfaced as one Note rather than an unexplained silent skip.
