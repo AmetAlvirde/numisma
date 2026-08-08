@@ -60,8 +60,10 @@ under Node while the terminal glue stays isolated in a Bun-only layer.
   the `pnpm dev` / `pnpm report` path, which read the event store.
 - `event-store.ts` — the write/ingest half of the durable event-store IO: the
   validated ingest boundary (dedup / atomic append / archive), legacy-log
-  migration, inbox archival, magnitude-threshold env plumbing, and
-  `parseAsOfArg`. The read path — path resolution, genesis load, log load with
+  migration, and inbox archival. Argv/env parsing (`parseAsOfArg`,
+  `parseMagnitudeThresholdArg`) was extracted to `spine-args.ts` (finding 35),
+  so this module keeps durable-log responsibilities only. The read path — path
+  resolution, genesis load, log load with
   quarantine, and `loadFoldedReview` — was lifted out into
   [`@numisma/event-store`](../../packages/event-store) so `apps/web`'s push can
   fold the durable log without depending on the TUI. The reliability core
@@ -70,14 +72,24 @@ under Node while the terminal glue stays isolated in a Bun-only layer.
 - `startup.ts` — `prepareStartup`, the data path that runs before the renderer
   (`--as-of` → ingest → surface report → fold), shared by `app.ts` and the
   openTUI verification harness (`startup.test.ts`).
+
+**Excluded from the coverage number (orders/migration CLI shells):**
+
 - `import-orders-cli.ts`, `record-fill-cli.ts`, `cancel-order-cli.ts`,
   `migrate-legacy-log.ts` — the four orders/migration CLI entries. These run
-  under Node (`tsx`), so unlike the Bun-only wiring below they are **not**
-  excluded from `vitest.config.ts`'s coverage `include` — they count toward the
-  measured number even though each is thin argv/readline wiring with no direct
-  unit test of its own (the flows they bind — `import-orders.ts`,
-  `record-fill.ts`, `cancel-order.ts`, and `event-store.ts`'s
-  `migrateLegacyLog` — are the tested units).
+  under Node (`tsx`), but `vitest.config.ts` excludes all four from coverage
+  `include` — not for thinness alone but because **importing the shell runs the
+  act**: each is a self-executing entry (top-level await / a `main()` that
+  calls itself) binding the real fs and the real data dir to a flow module —
+  plus a real readline prompt in the two importers that have one
+  (`import-orders-cli.ts`, `record-fill-cli.ts`; `cancel-order-cli.ts` is
+  deliberately promptless so it stays scriptable, and the migration takes only
+  argv) — so a test cannot load one to assert it without performing a
+  real import, a real fill, a real cancel, or a real in-place rewrite of the
+  durable log (`record-fill-cli.ts` says so in its own header). The flows they
+  bind — `import-orders.ts`, `record-fill.ts`, `cancel-order.ts`, and
+  `event-store.ts`'s `migrateLegacyLog` — are the tested units and DO count
+  toward the measured number. See `docs/coverage-rationale.md` §1.
 
 **Excluded from the coverage number (scripts + Bun-only wiring):**
 
