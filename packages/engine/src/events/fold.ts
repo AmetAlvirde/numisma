@@ -167,22 +167,36 @@ export function foldEvents(
   // already yields a 2-point journey (the journey builder skips single anchors).
   // The anchor is the genesis `markPrice`, NOT cost: that keeps it coherent with
   // the authoritative valuation, so no synthetic `markprice-close-mismatch` fires.
-  // Genesis-provided closes win — we only fill instruments that have none.
+  // Genesis-provided closes win — we only fill instruments that have none, and
+  // `costAnchors` below records ONLY the anchors the fold itself minted, so a
+  // scale-in can re-price its own baseline and never recorded history.
   //
   // First-position-wins here: if two genesis positions ever shared an instrument
   // with different `markPrice`, this seeds the t0 anchor from the FIRST while the
   // magnitude guard's `buildEventReference`/`noteClose` keeps the LAST (equal-asOf
   // overwrite), so the fold anchor and the guard seed could diverge. Unreachable
   // today (one position per instrument); revisit this tie-break if that changes.
+  //
+  // The two anchors also diverge, legitimately, after any scale-in: the ingest
+  // magnitude gate reads `buildEventReference(genesis)` — the SEED's closes — and
+  // never the fold's output, so the fold re-pricing its own cost anchor below is
+  // invisible to that gate by construction. Nothing reconciles the two, and
+  // nothing needs to: the gate compares an incoming event against recorded
+  // history, while the fold anchor is a display baseline for the journey.
   const seededInstruments = new Set(closes.map((close) => close.instrumentId));
+  // The fold-minted cost baseline per instrument (a genesis `markPrice` seed or an
+  // entry VWAC), held by reference so a later scale-in can re-price it in place.
+  const costAnchors = new Map<string, Close>();
   for (const position of genesis.positions) {
     if (!seededInstruments.has(position.instrumentId)) {
       seededInstruments.add(position.instrumentId);
-      closes.push({
+      const anchor: Close = {
         instrumentId: position.instrumentId,
         asOf: genesis.review.asOf,
         price: position.markPrice,
-      });
+      };
+      closes.push(anchor);
+      costAnchors.set(position.instrumentId, anchor);
     }
   }
 
@@ -221,7 +235,13 @@ export function foldEvents(
         // instrument first held mid-stream also has a baseline for its journey.
         if (!seededInstruments.has(position.instrumentId)) {
           seededInstruments.add(position.instrumentId);
-          closes.push({ instrumentId: position.instrumentId, asOf: event.asOf, price: entryPrice });
+          const anchor: Close = {
+            instrumentId: position.instrumentId,
+            asOf: event.asOf,
+            price: entryPrice,
+          };
+          closes.push(anchor);
+          costAnchors.set(position.instrumentId, anchor);
         }
         // Cash leg: debit the funding reserve. Sufficiency was proven at ingest.
         applyToReserve(reserves, event.funding.reserveId, reserveDeltasForOpen(position.lots, event.funding.amount));
@@ -314,7 +334,32 @@ export function foldEvents(
           // print a fabricated unrealized P&L. A real mark — a genesis seed mark (never
           // in the fallback set) or any PriceMarked — is left untouched.
           if (entryWacFallback.has(adding.id) && !latestMark.has(adding.instrumentId)) {
-            adding.markPrice = weightedAverageCost(adding.lots);
+            const blended = weightedAverageCost(adding.lots);
+            adding.markPrice = blended;
+            // Move the display-only Close WITH the fallback mark. The open arm seeds
+            // the two together; omitting the refresh here left the stale pre-add
+            // anchor as the instrument's latest Close and fired a synthetic
+            // `markprice-close-mismatch` on a legitimate scale-in (ADR-003 claims that
+            // warning cannot fire on the event path).
+            //
+            // RE-PRICE, never append. The blend is a COST, not a price observed on the
+            // add's date: appending it as a fresh dated point drew a spike the market
+            // never printed (open 100 → add 150 → mark 105 rendered a 100/150/105
+            // journey with a nonsense changeAbs). So the fold edits its OWN cost
+            // baseline in place, keeping that anchor's original date — the journey
+            // then carries one restated baseline plus the real marks.
+            //
+            // The anchor is looked up by identity, not by (instrument, date): only
+            // anchors this fold minted are in `costAnchors`, so a genesis-provided
+            // Close — which wins by rule, see the seeding block above — is never
+            // clobbered. No fold anchor (the instrument's baseline came from genesis)
+            // means there is nothing this arm may honestly rewrite, so it leaves the
+            // display alone; the mark stays authoritative and any resulting divergence
+            // is a real one worth warning about.
+            const anchor = costAnchors.get(adding.instrumentId);
+            if (anchor) {
+              anchor.price = blended;
+            }
           }
           applyToReserve(
             reserves,
@@ -332,13 +377,31 @@ export function foldEvents(
           direction: event.direction,
         });
         break;
-      case "PriceMarked":
+      case "PriceMarked": {
         latestMark.set(event.instrumentId, event.price);
-        closes.push({ instrumentId: event.instrumentId, asOf: event.asOf, price: event.price });
+        // A MARK OWNS ITS DAY. `latestCloseByInstrument` breaks an equal-`asOf` tie by
+        // keeping the FIRST close it sees, so blind-pushing a twin let a stale same-day
+        // anchor — an entry/blend cost baseline, or a superseded earlier mark — outrank
+        // the mark that actually sets `markPrice`, firing a synthetic
+        // `markprice-close-mismatch`. Overwriting instead makes the display agree with
+        // valuation by construction, and makes two marks on one day keep the LAST
+        // (matching the latest-wins `markPrice`) rather than the first.
+        const sameDay = closes.find(
+          (close) => close.instrumentId === event.instrumentId && close.asOf === event.asOf,
+        );
+        if (sameDay) {
+          // The overwritten close may BE the fold's cost anchor for this instrument;
+          // it stays registered but is unreachable to a later scale-in, which refuses
+          // to blend once `latestMark` holds a real mark for the instrument.
+          sameDay.price = event.price;
+        } else {
+          closes.push({ instrumentId: event.instrumentId, asOf: event.asOf, price: event.price });
+        }
         if (event.usdMxn !== undefined) {
           usdMxn = event.usdMxn;
         }
         break;
+      }
       case "Deposit":
         applyToReserve(reserves, event.reserveId, [{ tier: event.tier, amount: event.amount }]);
         break;
