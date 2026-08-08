@@ -62,6 +62,14 @@ export const BITGET_OPEN_ORDERS_HEADER = [
  * while a row printed as partially filled was skipped whole — the rung vanished from the
  * book and the capital it encumbers was reported FREE, which is the direction that costs
  * money. The REMAINDER decides now; the word only has to be one this reader knows.
+ *
+ * AND THE REMAINDER IS COMPUTED FIRST. The vocabulary check sits BELOW the remainder gate
+ * in `parseBitgetOpenOrdersCsv`, so a row with nothing left is `not-resting` whatever the
+ * venue printed. Asking the word first left the rule true only on paper: a rung that
+ * filled between export and import prints a terminal word (`Filled`, `Cancelled`, …) that
+ * is not in this vocabulary, so it landed in `unknown-status` and fired the #184
+ * money-direction alarm about a row we can weigh, and weigh at zero. The word is still
+ * only consulted for rows the quantities CANNOT answer — one with a remainder open.
  */
 export const BITGET_RESTING_STATUS = "unfilled";
 
@@ -297,8 +305,49 @@ export function parseBitgetOpenOrdersCsv(csv: string): BitgetOpenOrdersParse {
       continue;
     }
 
-    // VOCABULARY CHECK, NOT AN ADMISSION GATE. A word this reader does not know is still
-    // refused; a word it knows only gets the row as far as the remainder test below.
+    // THE ADMISSION GATE (#173), AND IT RUNS FIRST. A row still claims capital exactly
+    // when something is left unfilled, and the two quantity columns say so without help
+    // from the status word — so they are read BEFORE the vocabulary is consulted. Asking
+    // the word first made the rule a lie for the one ordinary event #184 exists for: a
+    // rung that fills between the operator's export and their import prints a terminal
+    // word this reader does not know, and refusing it there raised a money-direction
+    // alarm about a row we can in fact weigh, and weigh at zero.
+    //
+    // AUTHORITATIVE. `order_value` is read past and dropped: it drifts by cents against
+    // this column and must never be the thing anything reconciles on.
+    const quantity = canonicalDecimal(column(fields, "quantity"));
+    if (quantity === undefined || Number(quantity) <= 0) {
+      skips.push(skip(lineNumber, "malformed", "quantity must be a positive decimal"));
+      continue;
+    }
+
+    const filledQuantity = canonicalDecimal(column(fields, "filled_quantity"));
+    if (filledQuantity === undefined || Number(filledQuantity) < 0) {
+      skips.push(skip(lineNumber, "malformed", "filled_quantity must be a non-negative decimal"));
+      continue;
+    }
+
+    // Nothing left is not a claim: it is correctly out of the resting book, whatever the
+    // venue printed, and reported so it is not silent.
+    const remainder = Number(quantity) - Number(filledQuantity);
+    if (remainder <= 0) {
+      skips.push(
+        skip(
+          lineNumber,
+          "not-resting",
+          `the venue shows ${filledQuantity} of ${quantity} filled, so nothing is still ` +
+            `claimed; this row is not a resting order`,
+        ),
+      );
+      continue;
+    }
+
+    // VOCABULARY CHECK, NOT AN ADMISSION GATE. Reached only by a row that still has a
+    // remainder open — which is exactly the row whose status we cannot infer from the
+    // quantities. A word this reader does not know is refused HERE, because a remainder
+    // under an unrecognized word could be resting or could be dead, and guessing means a
+    // claim on capital the venue never confirmed. The vocabulary is deliberately NOT
+    // widened to absorb terminal words: the remainder above already answers those.
     const status = normalizeStatus(column(fields, "status"));
     const known =
       status === BITGET_RESTING_STATUS ||
@@ -345,36 +394,6 @@ export function parseBitgetOpenOrdersCsv(csv: string): BitgetOpenOrdersParse {
     const price = canonicalDecimal(column(fields, "price"));
     if (price === undefined || Number(price) <= 0) {
       skips.push(skip(lineNumber, "malformed", "price must be a positive decimal"));
-      continue;
-    }
-
-    // AUTHORITATIVE. `order_value` is read past and dropped: it drifts by cents against
-    // this column and must never be the thing anything reconciles on.
-    const quantity = canonicalDecimal(column(fields, "quantity"));
-    if (quantity === undefined || Number(quantity) <= 0) {
-      skips.push(skip(lineNumber, "malformed", "quantity must be a positive decimal"));
-      continue;
-    }
-
-    const filledQuantity = canonicalDecimal(column(fields, "filled_quantity"));
-    if (filledQuantity === undefined || Number(filledQuantity) < 0) {
-      skips.push(skip(lineNumber, "malformed", "filled_quantity must be a non-negative decimal"));
-      continue;
-    }
-
-    // THE ADMISSION GATE (#173). A row still claims capital exactly when something is left
-    // unfilled, whichever of the known words the venue printed. Nothing left is not a
-    // claim: it is correctly out of the resting book, and reported so it is not silent.
-    const remainder = Number(quantity) - Number(filledQuantity);
-    if (remainder <= 0) {
-      skips.push(
-        skip(
-          lineNumber,
-          "not-resting",
-          `the venue shows ${filledQuantity} of ${quantity} filled, so nothing is still ` +
-            `claimed; this row is not a resting order`,
-        ),
-      );
       continue;
     }
 
