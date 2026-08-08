@@ -109,10 +109,12 @@ export interface EventReference {
    * Position ids the log has retired via a `PositionClosed`. A closed id stays in
    * {@link positionIds} (it existed, and close-and-reopen mints a fresh id rather
    * than reusing the retired one), but is additionally flagged here so the ingest
-   * gate can reject a post-close `InvalidationMarked` — a level on a retired
-   * position can never fold (breach is derived per OPEN position), so accepting it
-   * would silently drop the mark at fold. See {@link crossReferenceInvalidation}
-   * and ADR-003 (fail-loud-at-ingest).
+   * gate can reject every verb that targets a retired position — a post-close
+   * `InvalidationMarked` (a level on a retired position can never fold, since breach
+   * is derived per OPEN position), a trim, an add-to, and a SECOND close. Each would
+   * be silently dropped at fold, which is exactly the drift this ledger eliminates.
+   * See {@link crossReferenceInvalidation} / {@link crossReferenceClose} and ADR-003
+   * (fail-loud-at-ingest).
    */
   closedPositionIds: Set<string>;
   /** Latest known close per instrument: the magnitude guard's comparison point. */
@@ -203,8 +205,9 @@ export function buildEventReference(
  * close for a mid-stream instrument), a mark advances the last close. Mutates in
  * place. A close leaves the id known — it existed, and the domain's close-and-
  * reopen rule mints a fresh id rather than reusing the retired one — but records
- * it in {@link EventReference.closedPositionIds} so the ingest gate can reject a
- * post-close `InvalidationMarked` on it.
+ * it in {@link EventReference.closedPositionIds} so the ingest gate can reject
+ * EVERY later verb targeting it: a second close, a trim, an add-to, or a
+ * post-close `InvalidationMarked`.
  */
 export function applyEventToReference(reference: EventReference, event: PortfolioEvent): void {
   switch (event.type) {
@@ -238,7 +241,8 @@ export function applyEventToReference(reference: EventReference, event: Portfoli
           reserveDeltasForClose(closed.lots, event.settlement.proceeds),
         );
       }
-      // Flag the id retired so a later post-close InvalidationMarked fails loud.
+      // Flag the id retired so every later verb targeting it fails loud — a second
+      // close, a trim, an add-to, or a post-close InvalidationMarked.
       reference.closedPositionIds.add(event.positionId);
       break;
     }
@@ -657,6 +661,15 @@ function checkDebit(
   return null;
 }
 
+/**
+ * Cross-reference a `PositionClosed`. The position id must be KNOWN (genesis seed
+ * or log) and not already RETIRED — a close retires the id, the fold silently
+ * drops any later close of it, and log dedup keys on event id alone, so this gate
+ * is the only thing standing between a re-authored second close and silent NAV
+ * drift. The settlement leg is then checked for a live reserve and by the
+ * settlement-magnitude gate (Σ quantity × last close). Pure: reads `reference`,
+ * never mutates it.
+ */
 function crossReferenceClose(
   event: PositionClosedEvent,
   reference: EventReference,
@@ -667,6 +680,17 @@ function crossReferenceClose(
       "positionId",
       `PositionClosed references position id '${event.positionId}', which neither ` +
         `the genesis seed nor the log contains.`,
+    );
+  }
+  // A close retires the id, so a SECOND close of it can never fold to anything: the
+  // fold drops it silently while this shadow re-credits the proceeds, drifting NAV
+  // with no warning. Log dedup keys on event id alone and cannot catch a re-authored
+  // close carrying a fresh id — the retired-id set is the only guard, the same one
+  // trim, add-to and the post-close mark consult.
+  if (reference.closedPositionIds.has(event.positionId)) {
+    return eventError(
+      "positionId",
+      `PositionClosed targets position id '${event.positionId}', which is already closed.`,
     );
   }
   const settlesInto = requireReserveBornBy(
