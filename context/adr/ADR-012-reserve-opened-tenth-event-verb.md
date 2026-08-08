@@ -17,11 +17,15 @@ code._
 > stale — `ReserveOpened` merged to `main` in PR #162 (`54a1c0b`, 2026-07-28)
 > with follow-up fixes in `71c6e56` the same day, and the verb is live in
 > `packages/engine/src/events/{types,parse,fold,crossref}.ts`. One artifact
-> still carries the prototype framing verbatim:
-> `packages/engine/src/reserve-opened.test.ts` opens with a `// PROTOTYPE.`
-> comment header describing itself as pinning only two silent holes — that
-> comment is now inaccurate to the file's role as the shipped verb's test
-> suite and is out of this ADR's edit scope (code, not `context/`).
+> still carried the prototype framing verbatim:
+> `packages/engine/src/reserve-opened.test.ts` opened with a `// PROTOTYPE.`
+> comment header describing itself as pinning only two silent holes.
+>
+> **Update (2026-08-08, ADR-015 fold-in):** that comment is now fixed — the
+> file's header reads "Shipped to `main` in PR #162 (ADR-012); the narrow scope
+> below is a deliberate choice, not prototype-era coverage" and its own inline
+> note records the second silent hole's closure (see the next update). No open
+> item remains against this ADR.
 
 No verb creates a Reserve. Every `reserveId` a `Deposit` / `Withdraw` / `Transfer`
 / trade cash leg references must already exist in the immutable genesis seed —
@@ -169,6 +173,16 @@ verb's naive reading would have collided with).
   removing the `Withdraw` arm from `foldEvents` fails with
   `TS2322: Type 'WithdrawEvent' is not assignable to type 'never'`. Both verified
   by deliberate removal and restored.
+
+  **Superseded in part (2026-08-08, ADR-015):** the paragraph above records what
+  was true when this ADR was written. ADR-015 subsequently deleted
+  `applyEventToReference` and the cross-ref shadow it advanced entirely — the
+  ingest gate now reads world-state from `foldEvents` directly, so there is no
+  second switch left to latch. The `foldEvents` half of the finding stands
+  unchanged; the `applyEventToReference` half is moot because the function it
+  describes no longer exists. This paragraph is left as-written rather than
+  edited, since it accurately narrates a decision made at the time; see ADR-015
+  for the current shape.
 
   The finer-grained half of the finding is closed too. The prototype's mutation
   pass showed the `ReserveOpened` cross-ref arm writes **two** id structures
