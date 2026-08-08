@@ -204,9 +204,9 @@ holds only the write/ingest half (`ingestInbox`, `migrateLegacyLog`, inbox
 archival, magnitude-threshold env plumbing, `parseAsOfArg`); its read-path unit
 tests moved with the code into `packages/event-store/src/event-store.test.ts`.
 
-- **`packages/engine/src/events/*.ts`** (91.6% lines, measured) — the covered
+- **`packages/engine/src/events/*.ts`** (92.56% lines, measured) — the covered
   core is the fold itself (`events/fold.ts`, 96.91% lines) and the ingest
-  cross-reference (`events/crossref.ts`, 94.3% lines), exercised by
+  cross-reference (`events/crossref.ts`, 96.23% lines), exercised by
   `event-ingest.test.ts` and `fold.test.ts` — and, since the date-ordering
   gates landed, by `position-born-by.test.ts` (29 tests) and
   `position-seal.test.ts` (PR #261). Uncovered in both: **per-field
@@ -217,32 +217,23 @@ tests moved with the code into `packages/event-store/src/event-store.test.ts`.
   `parsePositionAddedTo`, and siblings), the "not every malformed-field
   fixture exists yet" gap the rest of the file already documents. This is a
   summary, not the full list (that would misrepresent a partial excerpt as
-  complete) — the two largest blocks are `:554-583` (`parsePositionTrimmed`'s
-  `positionId`/`removals`/`settlement.reserveId`/`settlement.proceeds` fields)
-  and `:600-623` (`parsePositionAddedTo`'s `positionId`/`funding.reserveId`/
-  `funding.amount` fields). `events/crossref.ts` adds `:361-365` (`ReserveOpened`
-  colliding with an existing position id), `:636-638,640-641,643-647`
-  (`PositionTrimmed`'s unknown-position-id and already-closed rejections),
-  `:707-714` (`PositionTrimmed`'s settlement-proceeds deviation-threshold
-  rejection), `:761-762` (`PositionAddedTo`'s funding-leg debit-check
-  error-message wrapping), and `:824-825,887-888` (the `Transfer`/
-  `PositionOpened` cross-reference error-message wrapping) — the
-  validator/cross-reference logic runs, but not every individual
-  malformed-field or error-wrapping fixture exists yet.
-
-  > **STALE, flagged 2026-08-08 — do not trust the `events/crossref.ts` figures
-  > or citations in this bullet until re-measured.** PR #261 (`e6ef2a5`) inserted
-  > ~237 lines into the middle of `events/crossref.ts` and added a 791-line
-  > `position-seal.test.ts`, so **every `crossref.ts` line citation above now
-  > points at unrelated code** (spot-checked: `:361` is prose in a doc comment,
-  > `:636` is `requireReserveBornBy`'s docblock, `:707` is a `};`, `:761` is a
-  > signature line, `:824-825` sits inside `requirePositionUntouchedAfter`'s
-  > docblock) and the 94.3% lines figure predates both the new code and the new
-  > tests. Re-anchoring them by hand would be guesswork: the uncovered RANGES
-  > themselves have moved, not just their numbers. Closing this needs a fresh
-  > `pnpm coverage` run read off the istanbul HTML / `coverage-final.json` — never
-  > the v8 text column. This is ledger item 14's class (citing coverage by line
-  > number) firing exactly as predicted.
+  complete) — the two largest blocks sit inside `:554-583`
+  (`parsePositionTrimmed`'s `positionId`/`removals`/`settlement.reserveId`/
+  `settlement.proceeds` fields) and `:607-623` (`parsePositionAddedTo`'s
+  `positionId`/`funding.reserveId`/`funding.amount` fields).
+  `events/crossref.ts` (re-measured 2026-08-08, after PR #261) adds `:330-333`
+  (the `_never` exhaustiveness latch on the event-type switch — unreachable at
+  runtime by construction, same category as `events/fold.ts`'s `:492-498` and
+  the other `_never` rows in §7), `:558-562` (`ReserveOpened` colliding with an
+  existing position id), `:1090-1097` (`PositionTrimmed`'s settlement-proceeds
+  deviation-threshold rejection), `:1141-1142` (`PositionAddedTo`'s
+  funding-leg debit-check error-message wrapping), and `:1204-1205,1267-1268`
+  (the `Transfer`/`PositionOpened` cross-reference error-message wrapping) —
+  the validator/cross-reference logic runs, but not every individual
+  malformed-field or error-wrapping fixture exists yet. (PR #261's
+  `position-seal.test.ts` closed the `PositionTrimmed` unknown-position-id and
+  already-closed rejection branches this bullet used to cite as open — they
+  measure covered in the fresh run.)
 
   `events/fold.ts` has four branches open, not the two this bullet
   used to claim: `:649-650` (the lot-selection helper's zero-`tierTotal` early
