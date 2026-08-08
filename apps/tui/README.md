@@ -7,7 +7,40 @@ It is also the access-surface half of the event-sourcing spine
 ([ADR-003](../../context/adr/ADR-003-event-log-genesis-fold-persistence.md)): the
 durable file IO — inbox detection, validated ingest, dedup, atomic append,
 archive, and quarantine — lives here, while the pure fold and event validation
-stay in `@numisma/engine`.
+stay in `@numisma/engine`. The write/ingest half of the event log stays here
+(`event-store.ts`); the read path (path resolution, genesis load, log load with
+quarantine, `loadFoldedReview`) lives in [`@numisma/event-store`](../../packages/event-store).
+
+It also hosts the `Order` CLIs — the access surface for
+[ADR-013](../../context/adr/ADR-013-order-a-claim-on-capital-recorded-beside-the-log.md)'s
+`Order`, "a claim on capital that has not yet become a transaction," recorded in
+a third durable artifact, `data/orders.jsonl`, **beside** the event log, never
+in it, and joined to the fold at read time. The sidecar's own read/write IO
+(`resolveOrdersPath`, `loadOrders`, `appendOrders`) lives in
+[`@numisma/preferences`](../../packages/preferences), alongside the general
+preferences sidecar — this package only wires that IO to its three interactive
+flows (`import-orders.ts`, `record-fill.ts`, `cancel-order.ts`) through the CLI
+entries below.
+
+## Entry points
+
+Every entry point below is a source file under `src/`; the `pnpm` name is the
+root-level script from the repo's `package.json` (all of them delegate to
+`apps/tui/src/*` via `tsx` or `bun`, not to a script inside this package's own
+`package.json`, which only defines `dev`, `report`, `smoke:tui`, `typecheck`).
+
+| `pnpm` script | Entry file | Read-only? | What it does |
+| --- | --- | --- | --- |
+| `dev` | `app.ts` | no (ingests inbox) | Bun openTUI dashboard: `prepareStartup` (ingest → fold) then `mountApp`. |
+| `report` | `report.ts` | yes | Folds genesis + log and prints the composition report. Never ingests. |
+| `spine` | `spine.ts` | no (ingests inbox) | Node tracer: ingest → fold (`--as-of <date>`, optional) → render. `--magnitude-threshold=<n>` / `SPINE_MAGNITUDE_THRESHOLD` opts into a wider fat-finger guard for one run. |
+| `spine:reset` | `spine-reset.ts` | no (destructive, guarded) | Deletes `events.jsonl` and restores the latest archived inbox. Refuses on the default `accumulus` `dataDir`; needs an explicit `NUMISMA_DATA_DIR`. |
+| `migrate:log` | `migrate-legacy-log.ts` | no (rewrites the log) | One-shot ADR-003 v2 cash-leg migration from an operator-authored `data/migration-cash-legs.json`. Fails loud, writes nothing on any invalid/missing leg. |
+| `orders:import <csv>` | `import-orders-cli.ts` | no (appends orders) | Interactive Bitget open-orders import into `orders.jsonl`. Never touches the event log. Exit 0 on `imported-partial` (ADR-014). |
+| `orders:fill` | `record-fill-cli.ts` | no (appends orders + log) | Interactive fill recording: retires the claim in `orders.jsonl` and appends the resulting transaction to `events.jsonl`. |
+| `orders:cancel <orderId> [observedAt]` | `cancel-order-cli.ts` | no (appends orders) | Scriptable (argv-only, no prompt) retirement of one resting rung in `orders.jsonl`. Never touches the event log. |
+| `smoke:tui` | `smoke-openTui.ts` | yes (in-memory) | Bun keypress smoke against a synthetic fund review; no disk IO. |
+| `smoke:startup` | `smoke-startup-openTui.ts` | no (builds a temp on-disk store) | Bun startup smoke: drives `prepareStartup` + `mountApp` through the real renderer against a temp-dir event store. |
 
 ## Node / Bun split
 
@@ -37,6 +70,14 @@ under Node while the terminal glue stays isolated in a Bun-only layer.
 - `startup.ts` — `prepareStartup`, the data path that runs before the renderer
   (`--as-of` → ingest → surface report → fold), shared by `app.ts` and the
   openTUI verification harness (`startup.test.ts`).
+- `import-orders-cli.ts`, `record-fill-cli.ts`, `cancel-order-cli.ts`,
+  `migrate-legacy-log.ts` — the four orders/migration CLI entries. These run
+  under Node (`tsx`), so unlike the Bun-only wiring below they are **not**
+  excluded from `vitest.config.ts`'s coverage `include` — they count toward the
+  measured number even though each is thin argv/readline wiring with no direct
+  unit test of its own (the flows they bind — `import-orders.ts`,
+  `record-fill.ts`, `cancel-order.ts`, and `event-store.ts`'s
+  `migrateLegacyLog` — are the tested units).
 
 **Excluded from the coverage number (scripts + Bun-only wiring):**
 
@@ -45,19 +86,33 @@ under Node while the terminal glue stays isolated in a Bun-only layer.
   the already-tested composition report — no unit to assert. Read-only; it never
   ingests.
 - `spine.ts` — the `tsx` Node tracer (`pnpm spine`): ingest → fold → render,
-  orchestrating already-tested `event-store`/engine functions.
-- `spine-reset.ts` — the `tsx` iteration helper (`pnpm spine:reset`): clear the
-  log and restore the most recent archived inbox. A dev utility, no unit to assert.
+  orchestrating already-tested `event-store`/engine functions. Prints ingest
+  counts, then the composition report as of `--as-of <date>` (or current state).
+  Accepts an opt-in `--magnitude-threshold=<n>` (or `SPINE_MAGNITUDE_THRESHOLD`)
+  to raise the ±50% fat-finger guard for one run; every override announces
+  itself on stderr. Ingests the inbox — not read-only.
+- `spine-reset.ts` — the `tsx` iteration helper (`pnpm spine:reset`): deletes the
+  append-only log and, if the inbox is already gone, restores the most recent
+  archived inbox so it can be re-folded. Genesis is untouched; idempotent. Refuses
+  to run when the resolved `dataDir` is the default `accumulus` sibling repo — it
+  requires an explicit, non-default `NUMISMA_DATA_DIR` — so it cannot delete the
+  real durable log. Destructive within its guarded scope, not read-only.
 - `app.ts` — the self-executing `pnpm dev` entry: path resolution, `prepareStartup`,
-  openTUI renderer construction, fail-fast/exit codes, then `mountApp`.
+  openTUI renderer construction, fail-fast/exit codes, then `mountApp`. Also
+  resolves the orders sidecar path and wires `loadAvailableCapital` so the
+  dashboard joins `orders.jsonl` to the fold at read time (never merged).
 - `mount-app.ts` — the openTUI-coupled wiring: renderable construction, keypress
   subscription, `dashboard.content` writes, and `requestRender`. Holds the
   `@opentui/core` import and the engine calls (`buildDashboardDetail`,
   `buildDashboardLines`) whose results are passed into the pure core.
-- `smoke-openTui.ts` — the keypress Bun smoke (`pnpm smoke:tui`).
+- `smoke-openTui.ts` — the keypress Bun smoke (`pnpm smoke:tui`): drives real
+  `j`/`k`/`enter` through `mountApp` against a synthetic in-memory fund review
+  and asserts the cursor moved and a detail row rendered. Does not touch disk.
 - `smoke-startup-openTui.ts` — the startup Bun smoke (`pnpm smoke:startup`):
   drives `prepareStartup` + `mountApp` through the real openTUI renderer against
-  an on-disk store.
+  an on-disk event store built in a temp dir, and asserts the five `pnpm spine`
+  targets on the rendered surface (ingest counts, mutated current state, two
+  as-of snapshots, tracer-parity fund value, byte-identical restart survival).
 
 The openTUI files run under Bun against the real renderer and never execute under
 Node's `vitest run`, so instrumenting them would only report dead 0% and make the
