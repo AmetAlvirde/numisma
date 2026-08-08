@@ -88,6 +88,14 @@ describe("the committed anchor fixture", () => {
       expect(dates, `the fixture no longer holds ${named}`).toContain(named);
     }
     expect(dates.length).toBeGreaterThan(NAMED_ANCHORS.length);
+    // AND IT NEVER SHRINKS. The count is not pinned, but a floor is: the old
+    // equality pin at least caught a fixture that lost anchors, and dropping it
+    // outright would let a regeneration that silently emitted ten fewer interior
+    // days pass every assertion in this suite. A `>=` floor keeps that guard while
+    // costing nothing as the file grows — it needs no edit on the ordinary day the
+    // fixture gains an anchor, and moves only on a DELIBERATE truncation, which is
+    // exactly the change that should have to be typed out here.
+    expect(dates.length).toBeGreaterThanOrEqual(28);
   });
 
   it("holds distinct anchored dates in ascending order", async () => {

@@ -5,10 +5,12 @@
  * ANY module may import it: that is the entire reason it is a separate file from
  * `backfill-core.ts`.
  *
- * WHY IT EXISTS. Slice 4's load-bearing test replays all 28 anchors through
- * `verdict.ts` and asserts the measured history (6 *yes* / 22 *no*, `feedGap` on 5
- * of the 6, `navMove` on 07-14 only, 06-28 declining to compare, 07-26 rendering in
- * full). Without a committed fixture that test can only read backfilled rows out of
+ * WHY IT EXISTS. Slice 4's load-bearing test replays EVERY anchor in this file
+ * through `verdict.ts` and asserts the measured history against the anchors it names
+ * — a handful of *yes* days among mostly *no* ones, `feedGap` behind most of the
+ * *yes* verdicts, `navMove` behind one, 06-28 declining to compare, 07-26 rendering
+ * in full (as measured on 2026-08-05; the fixture grows by one on every push, so
+ * these are a dated observation, not a contract). Without a committed fixture that test can only read backfilled rows out of
  * Postgres, which means it sits behind the same `NUMISMA_TEST_DATABASE_URL` gate as
  * the write test and **passes by skipping** on every machine and CI run without a
  * database — the exact shape this repo has been burned by before. The Postgres
