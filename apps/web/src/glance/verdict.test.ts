@@ -310,7 +310,8 @@ describe("same-day precedence — chosen, not measured", () => {
 
     expect(verdict.fired.map((t) => t.name)).toEqual(["reserveFloor", "navMove"]);
     expect(verdict.sentence).toBe("Reserve is 8.2%, below its 10% floor");
-    // Everything that fired is still carried, for /big-picture to list.
+    // Everything that fired is still carried on `fired`, even though only the winner
+    // becomes the sentence — no component renders the rest today.
     expect(verdict.fired[1]?.sentence).toBe("Fund moved more than 1.5% since Mon 13 Jul");
   });
 });

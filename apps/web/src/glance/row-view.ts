@@ -43,10 +43,12 @@
  * them rather than the push shipping a key it would have to version.
  */
 import type { CompositionRow } from "@numisma/engine";
-import type { SnapshotAnchor } from "../projection/contract.ts";
-// The header keys are read from their one declared home, never re-spelled here — a
-// hand-typed literal compiles while the reader silently stops suppressing (finding 7).
-import { SUPPRESSION_KEYS } from "../projection/contract.ts";
+// The header keys are read from their one declared home, never re-spelled here — see
+// the {@link SUPPRESSION_KEYS} docstring in `../projection/contract.ts` for why.
+import {
+  SUPPRESSION_KEYS,
+  type SnapshotAnchor,
+} from "../projection/contract.ts";
 import { referenceLabel, resolveReferenceAnchor } from "./verdict.ts";
 
 /**
