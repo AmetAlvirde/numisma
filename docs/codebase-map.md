@@ -51,10 +51,17 @@ These are the seams most likely to be misread from the tree alone:
 
 2. **Orders are not events.** An Order is a claim on capital that has not become
    a transaction. It lives in `orders.jsonl` and is joined to the fold at *read*
-   time — never folded into `FundReviewData` or NAV
+   time. The invariant ADR-013 actually guards is narrower than "orders/ cannot
+   reach the fold": a line in `orders.jsonl` is never a `PortfolioEvent` —
+   `parseEvent` rejects it, pinned by `orders-not-events.test.ts`
    ([ADR-013](../context/adr/ADR-013-order-a-claim-on-capital-recorded-beside-the-log.md)).
-   `packages/engine/src/orders/` depends on `contracts.ts` but deliberately never
-   on `events/types.ts`, so it structurally cannot reach the fold.
+   The ADR declines to decide module structure, and one deliberate crossing
+   exists: `packages/engine/src/orders/fill.ts` imports `PortfolioEvent` /
+   `PositionOpenedEvent` / `PositionAddedToEvent` directly — still the only
+   direct `events/types.ts` import in `orders/` — because the fill act
+   constructs the fold events it writes. `orders/attribution.ts` and
+   `orders/coverage.ts` reach folded state too, but only transitively, through
+   `compose/canonical.js`.
 
 ## Runbooks and operational docs
 
