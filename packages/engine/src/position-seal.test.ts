@@ -198,7 +198,39 @@ function ledgerDelta(committed: PortfolioEvent[]): { cash: number; closedRows: n
   };
 }
 
-/** Every seal rejection must name BOTH dates and the verb it would have buried. */
+/**
+ * WHAT THE GATE ACTUALLY PREVENTED, as a number: fold the events the gate LET THROUGH,
+ * fold the same batch with the gate bypassed entirely, and return the difference.
+ *
+ * This is the assertion with teeth, and the reason the obvious one has none. Asserting
+ * `ledgerDelta(result.committed)` is `{0, 0}` on a rejection proves nothing: the harness
+ * returns `committed: []` on any rejection, so that is `ledgerDelta([])` — zero for every
+ * possible implementation of `foldEvents`, already implied by asserting `committed` is
+ * empty, and unreachable anyway because the rejection assertion throws first. The
+ * counterfactual is what carries the meaning, and it must be JOINED to the gated result
+ * rather than measured beside it: if the rule regresses, the gate lets everything
+ * through, gated equals ungated, and this difference collapses to zero — red, against
+ * the exact figures the damage is worth.
+ */
+function damagePrevented(
+  inputs: Record<string, unknown>[],
+  committed: PortfolioEvent[],
+): { cash: number; closedRows: number } {
+  const gated = ledgerDelta(committed);
+  const ungated = ledgerDelta(inputs.map(accepted));
+  return {
+    cash: ungated.cash - gated.cash,
+    closedRows: ungated.closedRows - gated.closedRows,
+  };
+}
+
+/**
+ * Every seal rejection must name both dates AND BIND EACH TO ITS ROLE. Bare `toContain`
+ * on each date is order-blind: a message that swapped them — "your close as of 06-18 is
+ * blocked by a trim dated 06-10, date the close 06-10 or later" — would pass while
+ * instructing the operator to use the very date being rejected. The composed substrings
+ * below are what make the two dates non-interchangeable.
+ */
 function expectSealRejection(
   rejection: { path: string; message: string } | null,
   blockedAsOf: string,
@@ -207,10 +239,9 @@ function expectSealRejection(
 ): void {
   expect(rejection).not.toBeNull();
   expect(rejection?.path).toBe("positionId");
-  expect(rejection?.message).toContain("PositionClosed");
-  expect(rejection?.message).toContain(blockedAsOf);
-  expect(rejection?.message).toContain(latestAsOf);
-  expect(rejection?.message).toContain(verb);
+  expect(rejection?.message).toContain("PositionClosed closes position");
+  expect(rejection?.message).toContain(`as of ${blockedAsOf}`);
+  expect(rejection?.message).toContain(`${verb} dated ${latestAsOf}`);
 }
 
 const keysOf = (reference: ReturnType<typeof buildEventReference>): string[] =>
@@ -355,15 +386,20 @@ describe("a PositionClosed may not seal behind a verb already in the log", () =>
 
       expectSealRejection(result.rejection, "2026-06-10", "2026-06-18", "PositionTrimmed");
       expect(result.committed).toEqual([]);
-      expect(ledgerDelta(result.committed)).toEqual({ cash: 0, closedRows: 0 });
+      // What the gate PREVENTED, joined to what it did: $50 of cash and one fabricated
+      // closed row. Collapses to `{0, 0}` — red — if the rule ever stops rejecting.
+      expect(damagePrevented(batch(), result.committed)).toEqual({ cash: -50, closedRows: 1 });
     });
 
-    // THE PRE-FIX DAMAGE, PINNED. Folded WITHOUT the gate — which is exactly what the
-    // durable log held before this rule — the same three events report a fabricated $50
-    // realized LOSS at full size on a position that broke even, and take $50 of cash
-    // with them. Measured at 80827b6. This is the number the gate exists to make
-    // unreachable; if the rule regresses, the assertion above goes green-to-red against
-    // these very figures.
+    // THE SHAPE OF THAT DAMAGE, spelled out. Folded WITHOUT the gate — which is exactly
+    // what the durable log held before this rule — the same three events report a
+    // fabricated $50 realized LOSS at full size on a position that broke even. Measured
+    // at 80827b6.
+    //
+    // THIS TEST DOES NOT GUARD THE RULE, and an earlier comment here claimed it did.
+    // `crossReferenceEvent` is nowhere in its path, so every mutation that destroys the
+    // seal check leaves it green. It documents the figures; the `damagePrevented`
+    // assertion above is what reddens.
     it("would fabricate a realized loss if those events ever reached the fold", () => {
       const folded = foldEvents(genesis(), batch().map(accepted));
 
@@ -398,15 +434,19 @@ describe("a PositionClosed may not seal behind a verb already in the log", () =>
   // CASE D — the verb the FOLD can never date. `InvalidationLevel` carries no `asOf`,
   // so no fold-only projection could have caught this one; the level simply vanished.
   it("case D — rejects a close dated before an accepted InvalidationMarked", () => {
-    const result = ingestBatch([
+    const batch = [
       openLate(),
       invalidatePayload("evt-invalidate", "2026-06-20"),
       closePayload("evt-close", "2026-06-10"),
-    ]);
+    ];
+    const result = ingestBatch(batch);
 
     expectSealRejection(result.rejection, "2026-06-10", "2026-06-20", "InvalidationMarked");
     expect(result.committed).toEqual([]);
-    expect(ledgerDelta(result.committed)).toEqual({ cash: 0, closedRows: 0 });
+    // The prevented damage is a closed row, and NO cash — an invalidation has no reserve
+    // leg, which is exactly why the message must not claim a vanished cash leg here.
+    expect(damagePrevented(batch, result.committed)).toEqual({ cash: 0, closedRows: 1 });
+    expect(result.rejection?.message).not.toContain("taking its cash leg");
   });
 
   // CASE E, THE WIDEST — the case where MONEY moves against the operator's belief. The
@@ -426,7 +466,10 @@ describe("a PositionClosed may not seal behind a verb already in the log", () =>
 
       expectSealRejection(result.rejection, "2026-06-10", "2026-06-18", "PositionAddedTo");
       expect(result.committed).toEqual([]);
-      expect(ledgerDelta(result.committed)).toEqual({ cash: 0, closedRows: 0 });
+      // Cash nets to zero even UNGATED, because the debit that should have fired never
+      // did — so the prevented damage shows up only as the bogus closed row. This is the
+      // case that proves a cash-only assertion is not enough.
+      expect(damagePrevented(batch(), result.committed)).toEqual({ cash: 0, closedRows: 1 });
     });
 
     // The pre-fix damage, and why a cash-delta assertion ALONE cannot see it: the
@@ -563,10 +606,14 @@ describe("the four position-id rejections a close can draw are distinguishable",
     // and behind an accepted verb reports the birth fact. That ordering is what this
     // entry silently pins.
     notBorn: ingestBatch([openLate(), closePayload("evt-close", "2026-06-03")]).rejection,
+    // DATED BEFORE THE FIRST CLOSE, DELIBERATELY. A second close dated LATER is the one
+    // date where already-closed and the seal check AGREE on rejecting, so it pins
+    // nothing about their order; backdating it makes the two gates disagree, and the
+    // already-closed message is the one that must win. See the ordering test below.
     alreadyClosed: ingestBatch([
       openLate(),
       closePayload("evt-close", "2026-06-18"),
-      closePayload("evt-close-again", "2026-06-20"),
+      closePayload("evt-close-again", "2026-06-08"),
     ]).rejection,
     sealsBehind: ingestBatch([
       openLate(),
@@ -595,6 +642,103 @@ describe("the four position-id rejections a close can draw are distinguishable",
 
     expect(new Set(messages).size).toBe(4);
   });
+
+  // THE ONE GATE BOUNDARY NOTHING ELSE PINS. Its siblings are already guarded — moving
+  // the seal check ahead of `requirePositionBornBy` reddens five tests, moving it behind
+  // the magnitude gate reddens one — but seal-vs-already-closed was free to swap, because
+  // the only fixture exercising it used a second close dated LATER, where both orderings
+  // reject alike. Backdated, they disagree: already-closed must still win, because "this
+  // position is retired" is the more fundamental fact and the one the operator can act
+  // on. Under a reorder this test reports the seal message instead.
+  it("a second close dated BEFORE the first reports already-closed, not the seal", () => {
+    const result = ingestBatch([
+      openLate(),
+      closePayload("evt-close", "2026-06-18"),
+      closePayload("evt-close-again", "2026-06-08"),
+    ]);
+
+    expect(result.rejection?.path).toBe("positionId");
+    expect(result.rejection?.message).toContain("already closed");
+    expect(result.rejection?.message).not.toContain("has already been accepted for it");
+  });
+});
+
+// WHICH POSITION THE RULE IS ABOUT. The map is keyed by position id and the helper looks
+// up ONE key; a helper that ignored its `positionId` argument and took a global maximum
+// over every value would have passed the entire suite before this test existed. The
+// consequence is not subtle — every position becomes uncloseable the moment ANY other
+// position has a later verb, and the rejection cites a trim on an unrelated instrument.
+//
+// The suite had both halves and never joined them: one test reads the map without
+// running the rule, another runs the rule against a map with no entry for the target.
+// This is the join — two positions, BOTH with entries, and only one of them relevant.
+describe("the rule reads the CLOSING position's history, not the log's", () => {
+  const twoPositions = () => [
+    openLate(),
+    invalidatePayload("evt-invalidate-core", "2026-06-08"),
+    trimPayload("evt-trim-late", "2026-06-18", 0.5, 50),
+  ];
+
+  it("accepts a close whose own position is untouched after it, though another is not", () => {
+    // `btc-core` was last touched 06-08 and closes 06-10 — fine on its own history.
+    // `btc-late` was trimmed 06-18, LATER than that close, and is nobody's business here.
+    const batch = [
+      ...twoPositions(),
+      {
+        id: "evt-close-core",
+        asOf: "2026-06-10",
+        type: "PositionClosed",
+        positionId: "btc-core",
+        settlement: { reserveId: "pulse-cash", proceeds: 200 },
+      },
+    ];
+    const result = ingestBatch(batch);
+
+    // Both positions really do have entries — otherwise this proves nothing.
+    const reference = buildEventReference(genesis(), result.committed);
+    expect(reference.positionLastVerbAsOf.get("btc-late")?.asOf).toBe("2026-06-18");
+    expect(reference.positionLastVerbAsOf.get("btc-core")?.asOf).toBe("2026-06-10");
+
+    expect(result.rejection).toBeNull();
+    expect(result.committed).toHaveLength(4);
+  });
+
+  it("still rejects when the closing position's OWN history is the later one", () => {
+    // Same two-position world, but now the seal-breaking close targets `btc-late`, whose
+    // own trim is the blocker. Proves the acceptance above is about WHOSE history it
+    // read, not about the rule having gone quiet in a crowded log.
+    const result = ingestBatch([...twoPositions(), closePayload("evt-close", "2026-06-10", 50)]);
+
+    expectSealRejection(result.rejection, "2026-06-10", "2026-06-18", "PositionTrimmed");
+  });
+});
+
+// THE TIE-BREAK, WHICH ONLY THE MESSAGE CAN SEE. Two verbs share the max date, so the
+// date — and therefore every accept/reject verdict — is identical whichever wins the
+// type slot. What changes is which verb the operator is sent to look at, and `foldEvents`
+// sorts by (`asOf`, THEN LOG INDEX), so the LAST-logged of a same-dated group is the one
+// applied last: the event actually sitting on top, and the first thing a close buries.
+// Under `>` instead of `>=` the FIRST-logged kept the slot and this batch blamed the
+// trim while the add-to — the one carrying the unfired funding debit — was the casualty.
+it("names the LAST-logged verb when two share the latest date", () => {
+  const batch = [
+    openLate(),
+    trimPayload("evt-trim", "2026-06-18", 0.5, 50),
+    addToPayload("evt-add", "2026-06-18"),
+    closePayload("evt-close", "2026-06-10", 100),
+  ];
+  const reference = buildEventReference(genesis(), batch.slice(0, 3).map(accepted));
+
+  expect(reference.positionLastVerbAsOf.get("btc-late")).toEqual({
+    asOf: "2026-06-18",
+    type: "PositionAddedTo",
+  });
+  expectSealRejection(
+    ingestBatch(batch).rejection,
+    "2026-06-10",
+    "2026-06-18",
+    "PositionAddedTo",
+  );
 });
 
 // CASE C — A DELIBERATE OVER-REJECTION, PINNED SO THAT CHANGING IT IS A DECISION.
@@ -620,7 +764,7 @@ describe("case C stays refused as already-closed, deliberately (ledger 21)", () 
     expect(result.rejection?.message).toContain("PositionTrimmed");
     expect(result.rejection?.message).toContain("already closed");
     expect(result.rejection?.message).not.toContain("has already been accepted for it");
-    expect(ledgerDelta(result.committed)).toEqual({ cash: 0, closedRows: 0 });
+    expect(result.committed).toEqual([]);
   });
 
   // What today's refusal costs, stated so the ledger-21 decision can be weighed on
