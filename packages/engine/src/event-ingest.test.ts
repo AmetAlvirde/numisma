@@ -466,16 +466,8 @@ describe("crossReferenceEvent — PositionClosed post-close gate (audit MUST FIX
     expect(error.message).toMatch(/already closed/);
   });
 
-  it("names a dangling close distinctly from a post-close one", () => {
-    const error = expectRejected(
-      crossReferenceEvent(
-        asEvent(closedInput({ positionId: "ghost" })),
-        buildEventReference(genesis()),
-      ),
-    );
-    expect(error.path).toBe("positionId");
-    expect(error.message).toMatch(/neither the genesis seed nor the log contains/);
-  });
+  // A dangling close (unknown id) staying distinct from a post-close rejection is
+  // already locked by the MF1 case above — not re-asserted here.
 });
 
 /** Parse a fixture input and unwrap to a typed event (fixtures are valid). */

@@ -205,8 +205,9 @@ export function buildEventReference(
  * close for a mid-stream instrument), a mark advances the last close. Mutates in
  * place. A close leaves the id known — it existed, and the domain's close-and-
  * reopen rule mints a fresh id rather than reusing the retired one — but records
- * it in {@link EventReference.closedPositionIds} so the ingest gate can reject a
- * post-close `InvalidationMarked` on it.
+ * it in {@link EventReference.closedPositionIds} so the ingest gate can reject
+ * EVERY later verb targeting it: a second close, a trim, an add-to, or a
+ * post-close `InvalidationMarked`.
  */
 export function applyEventToReference(reference: EventReference, event: PortfolioEvent): void {
   switch (event.type) {
@@ -240,7 +241,8 @@ export function applyEventToReference(reference: EventReference, event: Portfoli
           reserveDeltasForClose(closed.lots, event.settlement.proceeds),
         );
       }
-      // Flag the id retired so a later post-close InvalidationMarked fails loud.
+      // Flag the id retired so every later verb targeting it fails loud — a second
+      // close, a trim, an add-to, or a post-close InvalidationMarked.
       reference.closedPositionIds.add(event.positionId);
       break;
     }
@@ -659,6 +661,15 @@ function checkDebit(
   return null;
 }
 
+/**
+ * Cross-reference a `PositionClosed`. The position id must be KNOWN (genesis seed
+ * or log) and not already RETIRED — a close retires the id, the fold silently
+ * drops any later close of it, and log dedup keys on event id alone, so this gate
+ * is the only thing standing between a re-authored second close and silent NAV
+ * drift. The settlement leg is then checked for a live reserve and by the
+ * settlement-magnitude gate (Σ quantity × last close). Pure: reads `reference`,
+ * never mutates it.
+ */
 function crossReferenceClose(
   event: PositionClosedEvent,
   reference: EventReference,
