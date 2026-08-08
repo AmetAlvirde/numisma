@@ -16,12 +16,7 @@ import {
   resolveEventStorePaths,
   type EventStorePaths,
 } from "@numisma/event-store";
-import {
-  ingestInbox,
-  migrateLegacyLog,
-  parseMagnitudeThresholdArg,
-  SPINE_MAGNITUDE_THRESHOLD_ENV,
-} from "./event-store.js";
+import { ingestInbox, migrateLegacyLog } from "./event-store.js";
 import type { SuppliedCashLeg } from "@numisma/engine";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -344,52 +339,6 @@ describe("ingestInbox — magnitude override lands a genuine big move (Finding 6
     // A +33% mark is inside ±50%; a >50% mark stays rejected without an override.
     const rejects = await makeStore({ inbox: [markAapl(300, "big")] });
     await expect(ingestInbox(rejects)).rejects.toThrowError(/cross-reference.*price/);
-  });
-});
-
-describe("parseMagnitudeThresholdArg — opt-in operator override, fail-loud on garbage", () => {
-  it("returns undefined when neither flag nor env is set (the default run)", () => {
-    expect(parseMagnitudeThresholdArg(["node", "spine"], {})).toBeUndefined();
-  });
-
-  it("reads --magnitude-threshold=<n>", () => {
-    expect(parseMagnitudeThresholdArg(["node", "spine", "--magnitude-threshold=1.5"], {})).toBe(1.5);
-  });
-
-  it("reads the space-separated --magnitude-threshold <n>", () => {
-    expect(parseMagnitudeThresholdArg(["node", "spine", "--magnitude-threshold", "0.75"], {})).toBe(0.75);
-  });
-
-  it("reads the env var when no flag is present", () => {
-    expect(
-      parseMagnitudeThresholdArg(["node", "spine"], { [SPINE_MAGNITUDE_THRESHOLD_ENV]: "2" }),
-    ).toBe(2);
-  });
-
-  it("lets the flag win over the env var", () => {
-    expect(
-      parseMagnitudeThresholdArg(["node", "spine", "--magnitude-threshold=1.5"], {
-        [SPINE_MAGNITUDE_THRESHOLD_ENV]: "9",
-      }),
-    ).toBe(1.5);
-  });
-
-  it("fails loud on a non-numeric value", () => {
-    expect(() => parseMagnitudeThresholdArg(["node", "spine", "--magnitude-threshold=huge"], {})).toThrow(
-      /Invalid magnitude-threshold/,
-    );
-  });
-
-  it("fails loud on a non-positive value", () => {
-    expect(() => parseMagnitudeThresholdArg(["node", "spine"], { [SPINE_MAGNITUDE_THRESHOLD_ENV]: "0" })).toThrow(
-      /Invalid magnitude-threshold/,
-    );
-  });
-
-  it("fails loud on a missing flag value", () => {
-    expect(() => parseMagnitudeThresholdArg(["node", "spine", "--magnitude-threshold"], {})).toThrow(
-      /Missing value for --magnitude-threshold/,
-    );
   });
 });
 

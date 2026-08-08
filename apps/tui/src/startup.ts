@@ -13,7 +13,8 @@
  */
 import type { FundReviewData } from "@numisma/engine";
 import { loadFoldedReview, type EventStorePaths } from "@numisma/event-store";
-import { ingestInbox, parseAsOfArg, type IngestReport } from "./event-store.js";
+import { ingestInbox, type IngestReport } from "./event-store.js";
+import { parseAsOfArg } from "./spine-args.js";
 import { formatGapCheckFailure } from "./gap-lines.js";
 
 /** What the renderer needs after the startup data path runs. */
