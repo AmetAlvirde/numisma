@@ -34,8 +34,10 @@ try {
     restoreLogImage: (prior) => restoreLogImage(paths.log, prior),
     loadGenesis: () => loadGenesis(paths.genesis),
     // `loadEventLog` + `assertLogFullyLoaded` is ONE pair, never a lone read — the
-    // convention every durable-log reader in the repo follows (`event-store.ts`,
-    // price-feed's `rejection-check.ts`, the package's own fold and gap-report IO).
+    // convention the repo's durable-log readers follow (`event-store.ts`, price-feed's
+    // `rejection-check.ts`, the package's own fold and gap-report IO; web's
+    // `backfill-core.ts` `enumerateAnchors` reads bare, tolerable only because every
+    // anchor it yields is immediately re-read through the asserting fold path).
     // Dropping the assertion here would let `recordFill` reason over a HALF-READ log:
     // `reconcileFillActs` would see a sidecar `orderFilled` whose log half is the
     // quarantined line and refuse with `torn-fill-act`, whose message instructs the

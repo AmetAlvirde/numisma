@@ -1,10 +1,12 @@
 /**
  * THE FILL SHELL REFUSES A PARTIAL DURABLE LOG (audit finding 2).
  *
- * `record-fill-cli.ts` was the one non-test `loadEventLog` call site in the repo that
- * did not pair with `assertLogFullyLoaded` — the convention every other reader states
- * and follows (`apps/tui/src/event-store.ts`, `apps/price-feed/src/rejection-check.ts`,
- * `packages/event-store/src/{event-store,gap-report-io}.ts`). A single quarantined line
+ * `record-fill-cli.ts` was a non-test `loadEventLog` call site that did not pair with
+ * `assertLogFullyLoaded` — the convention its sibling readers state and follow
+ * (`apps/tui/src/event-store.ts`, `apps/price-feed/src/rejection-check.ts`,
+ * `packages/event-store/src/{event-store,gap-report-io}.ts`). The one other bare read,
+ * `apps/web/src/push/backfill-core.ts`'s `enumerateAnchors`, is tolerable only because
+ * each anchor it yields is immediately re-read through the asserting fold path. A single quarantined line
  * therefore made `recordFill` reason over a HALF-READ log: `reconcileFillActs` could
  * read a sidecar `orderFilled` whose log half was the quarantined line and refuse with
  * `torn-fill-act` — whose message tells the operator to HAND-AUTHOR the missing half,
