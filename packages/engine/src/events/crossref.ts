@@ -109,10 +109,12 @@ export interface EventReference {
    * Position ids the log has retired via a `PositionClosed`. A closed id stays in
    * {@link positionIds} (it existed, and close-and-reopen mints a fresh id rather
    * than reusing the retired one), but is additionally flagged here so the ingest
-   * gate can reject a post-close `InvalidationMarked` — a level on a retired
-   * position can never fold (breach is derived per OPEN position), so accepting it
-   * would silently drop the mark at fold. See {@link crossReferenceInvalidation}
-   * and ADR-003 (fail-loud-at-ingest).
+   * gate can reject every verb that targets a retired position — a post-close
+   * `InvalidationMarked` (a level on a retired position can never fold, since breach
+   * is derived per OPEN position), a trim, an add-to, and a SECOND close. Each would
+   * be silently dropped at fold, which is exactly the drift this ledger eliminates.
+   * See {@link crossReferenceInvalidation} / {@link crossReferenceClose} and ADR-003
+   * (fail-loud-at-ingest).
    */
   closedPositionIds: Set<string>;
   /** Latest known close per instrument: the magnitude guard's comparison point. */
@@ -667,6 +669,17 @@ function crossReferenceClose(
       "positionId",
       `PositionClosed references position id '${event.positionId}', which neither ` +
         `the genesis seed nor the log contains.`,
+    );
+  }
+  // A close retires the id, so a SECOND close of it can never fold to anything: the
+  // fold drops it silently while this shadow re-credits the proceeds, drifting NAV
+  // with no warning. Log dedup keys on event id alone and cannot catch a re-authored
+  // close carrying a fresh id — the retired-id set is the only guard, the same one
+  // trim, add-to and the post-close mark consult.
+  if (reference.closedPositionIds.has(event.positionId)) {
+    return eventError(
+      "positionId",
+      `PositionClosed targets position id '${event.positionId}', which is already closed.`,
     );
   }
   const settlesInto = requireReserveBornBy(
