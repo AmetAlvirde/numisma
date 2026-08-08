@@ -19,7 +19,7 @@ root (`0.7.4`). Deployed to Vercel as project `numisma-web`; see
   projection DB (no `psql`).
 
 This app does **not** run `@numisma/engine`'s fold in the cloud — folding
-happens locally against `NUMISMA_DATA_DIR` (default `~/Dev/accumulus/data`);
+happens locally against `NUMISMA_DATA_DIR` (default `~/Dev/<fund>/data`);
 only the derived report is pushed. It does not read or write the raw event
 log at request time, and it never holds a write credential to the projection
 DB at runtime.
@@ -148,7 +148,7 @@ See `apps/web/.env.example` for the authoritative, commented list. Summary:
 | `PROJECTION_ADMIN_DATABASE_URL` | `db:provision` | One-shot, local/operator only |
 | `PROJECTION_WRITER_ROLE` / `PROJECTION_READER_ROLE` | `db:provision` | Optional, default `numisma_push` / `numisma_web` |
 | `NUMISMA_SEED_EMAIL` / `NUMISMA_SEED_PASSWORD` / `NUMISMA_SEED_NAME` | `auth:seed` | Local/operator only |
-| `NUMISMA_DATA_DIR` | `push`, `backfill` (via `@numisma/engine`) | Should stay **unset** in production use — defaults to `~/Dev/accumulus/data` |
+| `NUMISMA_DATA_DIR` | `push`, `backfill` (via `@numisma/engine`) | Should stay **unset** in production use — defaults to `~/Dev/<fund>/data` |
 
 ## Tests
 

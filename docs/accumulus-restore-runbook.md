@@ -1,11 +1,15 @@
-# Accumulus restore runbook: locate and reverse a bad NAV
+# Restoring the durable data repository: locate and reverse a bad NAV
 
-The durable ledger lives in the private sibling repo **`accumulus`** (`~/Dev/accumulus`
+The durable ledger lives in the private sibling repo **`<fund>`** (`~/Dev/<fund>`
 by default, or wherever `NUMISMA_DATA_DIR` points — see
 [`price-feed-ops.md`](./price-feed-ops.md) and the README "Local data" section). Every
 successful ingest commits `events.jsonl` + `head-digest.json` under **your own git
 identity**, so a bad value is both **locatable** and **reversible** with plain git — no
 bisect, no restore wrapper.
+
+Throughout this page, `<fund>` stands for your own private data repository — the same
+convention as `<dataDir>` — so substitute your actual repo name/path before running
+any command below.
 
 This is the **shipped restore mechanism** (a deliberate runbook-first decision, PRD
 #114). There is intentionally **no `pnpm data:restore` command**: the git primitives
@@ -29,13 +33,13 @@ the surviving events; you never edit the Head Digest by hand.
 ## 0. Confirm the store you are operating on
 
 ```sh
-# The accumulus checkout (adjust if NUMISMA_DATA_DIR is set to something else).
-cd ~/Dev/accumulus
-echo "NUMISMA_DATA_DIR=${NUMISMA_DATA_DIR:-<unset → ~/Dev/accumulus/data default>}"
+# The <fund> checkout (adjust if NUMISMA_DATA_DIR is set to something else).
+cd ~/Dev/<fund>
+echo "NUMISMA_DATA_DIR=${NUMISMA_DATA_DIR:-<unset → ~/Dev/<fund>/data default>}"
 git status          # expect a clean tree before you start
 ```
 
-Everything below runs **inside the accumulus checkout**, not the numisma repo.
+Everything below runs **inside the `<fund>` checkout**, not the numisma repo.
 
 ## 1. Locate — pin the NAV jump to one commit
 
@@ -98,9 +102,9 @@ The revert already restored the Head Digest, but **trust the fold, not the file*
 Re-derive the read model from the surviving events and confirm the NAV is correct again:
 
 ```sh
-# From the numisma checkout, pointed at this accumulus store:
+# From the numisma checkout, pointed at this <fund> store:
 cd ~/Dev/numisma
-NUMISMA_DATA_DIR=~/Dev/accumulus/data pnpm report
+NUMISMA_DATA_DIR=~/Dev/<fund>/data pnpm report
 ```
 
 Confirm `fundValueUsd` matches the known-good value from step 1 (the value *before* the
@@ -112,7 +116,7 @@ re-derived Head Digest equals the pre-bad Head Digest.
 ## 5. Push — publish the reversal
 
 ```sh
-cd ~/Dev/accumulus
+cd ~/Dev/<fund>
 git push
 ```
 
@@ -131,7 +135,7 @@ launchctl kickstart -k gui/$(id -u)/com.numisma.pricefeed.daily
 tail -n 40 ~/Library/Logs/numisma/price-feed-*.log
 ```
 
-Confirm the run fetches, ingests through the unchanged spine guard, and (in the accumulus
+Confirm the run fetches, ingests through the unchanged spine guard, and (in the `<fund>`
 checkout) lands a fresh ingest commit whose Head Digest shows the **corrected** NAV. A
 clean run here proves the store is healthy and the hands-off path is unblocked again.
 

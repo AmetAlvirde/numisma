@@ -28,7 +28,7 @@ No verb creates a Reserve. Every `reserveId` a `Deposit` / `Withdraw` / `Transfe
 the reserve set has been genesis-fixed since ADR-003. That is a real asymmetry
 nobody had named: **the log could birth a Position after t0 (`PositionOpened`)
 but not a Reserve.** It surfaced because the fund's operator needed to
-reclassify a fixed sum of Bitget cash from Tempo Pulse to Tempo Capital and was
+reclassify a fixed sum of <exchange> cash from Tempo Pulse to Tempo Capital and was
 being pushed toward editing the `"immutable t0 seed"` genesis file
 (`packages/event-store/src/event-store.ts:13`, `:79`) to do it — the only
 Reserve-creating path that existed.
@@ -209,7 +209,7 @@ verb's naive reading would have collided with).
   code over.
 
 **Validated, through the real ingest path, against a copy of the durable
-data** (never the durable data itself — `~/Dev/accumulus` was untouched). This
+data** (never the durable data itself — `~/Dev/<fund>` was untouched). This
 repository is public, so the properties are recorded here and the values are
 not — they live in the private notes vault artifact
 [[2026-07-28-reserve-opened-spec]]. **Tempo Capital rose by exactly the

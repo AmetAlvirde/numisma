@@ -2,7 +2,7 @@
 
 _Made during: MVI — BTC DCA tracker increment / 2026-07-28 orders grill
 ([[2026-07-28-btc-dca-tracker-orders-grill]], decisions `D3`, `D4`, `D12`) →
-spec "Increment one — `Order`, Bitget ingest, and available capital" (#163,
+spec "Increment one — `Order`, <exchange> ingest, and available capital" (#163,
 seams `S1`, `S3`, `S5`, `S9`) / slice #165. Language and record only — no
 behavior lands with this ADR._
 _Scope: product_

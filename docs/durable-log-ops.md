@@ -2,11 +2,15 @@
 
 The durable ledger — `events.jsonl`, `genesis.json`, `preferences.jsonl`, and the
 derived `head-digest.json` breadcrumb — lives in the private sibling repo
-**`accumulus`** (`~/Dev/accumulus/data` by default, or wherever `NUMISMA_DATA_DIR`
+**`<fund>`** (`~/Dev/<fund>/data` by default, or wherever `NUMISMA_DATA_DIR`
 points). Every successful ingest commits the log + Head Digest under **your own git
 identity**, so a bad-but-honest NAV is **locatable** (`git log -p head-digest.json`)
 and **reversible** (`git revert` + re-fold). This is the reliable conversion of PRD
 #114 (ADR-006 sibling-repo substrate; ADR-003 amendment for the derived Head Digest).
+
+Throughout this page, `<fund>` stands for your own private data repository — the same
+convention as `<dataDir>` — so substitute your actual repo name/path before running
+any command below.
 
 This page is the **verification guide**: how to get the branch, confirm it is green,
 and exercise each reliability behavior by hand. It is the companion to two neighbours:
@@ -17,9 +21,9 @@ and exercise each reliability behavior by hand. It is the companion to two neigh
   triage that produce the ingests this ledger versions.
 
 Everything here is machine-local. Nothing secret or trade-derived enters the numisma
-checkout (transaction-data-is-private); the durable store is the `accumulus` repo, and
+checkout (transaction-data-is-private); the durable store is the `<fund>` repo, and
 the disposable cache (`prices/`, `inbox/`, `ingested/`) is kept out of history by
-`accumulus`'s allowlist `.gitignore`.
+`<fund>`'s allowlist `.gitignore`.
 
 ## What the reliable cut delivered
 
@@ -27,9 +31,9 @@ the disposable cache (`prices/`, `inbox/`, `ingested/`) is kept out of history b
 | --- | --- | --- |
 | R-M1 | The ingest commit **never blocks**: `git()` forces `GIT_TERMINAL_PROMPT=0` and bounded push/commit timeouts; a hang, timeout, or any git failure degrades to one loud stderr warning and returns. | `apps/tui/src/ingest-commit.ts` |
 | R-M2 | The orphaned in-repo `data/` ledger is retired; a tree guard asserts no `data/events.jsonl`. | `apps/tui/src/durable-log-guards.test.ts` |
-| R-M3 | `resolvePreferencesPath()` resolves under the accumulus default — never a CWD-relative `"data"`. | `packages/preferences/src/preferences.ts` |
+| R-M3 | `resolvePreferencesPath()` resolves under the `<fund>` default — never a CWD-relative `"data"`. | `packages/preferences/src/preferences.ts` |
 | R-M4 | A fresh install's launchd job finds `pnpm` **and** `node`: `~/.asdf/shims` leads PATH, with a loud named error (not a bare exit-127) if either is unresolvable. | `ops/price-feed/run-daily-fetch.sh` |
-| R-M5 | `spine:reset` refuses whenever `dataDir` resolves to the accumulus default. | `apps/tui/src/spine-reset.ts` |
+| R-M5 | `spine:reset` refuses whenever `dataDir` resolves to the `<fund>` default. | `apps/tui/src/spine-reset.ts` |
 | R-M6 | PROTOTYPE banners stripped from shipping engine/runtime durable-log code. | engine + tui |
 | R-M7 | `Checkpoint` → `HeadDigest`, `deriveCheckpoint` → `deriveHeadDigest`, `checkpoint.json` → `head-digest.json` (before the filename froze). | engine + tui |
 | R-M8 | The restore runbook + repointed `README` / `price-feed-ops` docs. | `docs/` |
@@ -61,8 +65,8 @@ below.
 
 ## 2. The `spine:reset` footgun is structurally safe (R-M5)
 
-With the default `dataDir` resolving to the private `accumulus` repo, an unguarded
-`spine:reset` would `rm ~/Dev/accumulus/data/events.jsonl` — the very ledger this
+With the default `dataDir` resolving to the private `<fund>` repo, an unguarded
+`spine:reset` would `rm ~/Dev/<fund>/data/events.jsonl` — the very ledger this
 increment protects. The command now **refuses at the default** and only proceeds
 against an explicit throwaway dir:
 
@@ -75,9 +79,9 @@ pnpm spine:reset
 NUMISMA_DATA_DIR=/tmp/throwaway pnpm spine:reset   # only an explicit non-default dir proceeds
 ```
 
-The guard compares the resolved `dataDir` against `resolveDataDir({})` (the accumulus
+The guard compares the resolved `dataDir` against `resolveDataDir({})` (the `<fund>`
 default computed with an empty env), so it refuses whether the default was reached
-implicitly (env unset) **or** by an explicit `NUMISMA_DATA_DIR` pointed at accumulus.
+implicitly (env unset) **or** by an explicit `NUMISMA_DATA_DIR` pointed at `<fund>`.
 
 ## 3. One resolver, one knob (R-M3, the unified `resolveDataDir`)
 
@@ -85,7 +89,7 @@ The `NUMISMA_DATA_DIR` env var is the **single** knob that moves every plane (th
 event-store, the price-feed config, and the preferences sidecar). The resolution rule
 lives once, pure and IO-free, in `@numisma/engine` (`packages/engine/src/data-dir.ts`):
 
-- unset / empty / whitespace → the accumulus default (`~/Dev/accumulus/data`);
+- unset / empty / whitespace → the `<fund>` default (`~/Dev/<fund>/data`);
 - `~` or `~/…` → `~`-expanded against `homedir()`, then made absolute;
 - an absolute path → normalized;
 - a **relative** path → **rejected loudly** (a relative value would resolve
@@ -95,7 +99,7 @@ lives once, pure and IO-free, in `@numisma/engine` (`packages/engine/src/data-di
 NUMISMA_DATA_DIR=data pnpm report
 # → throws: NUMISMA_DATA_DIR must be an absolute path or start with "~/" (got "data"). …
 
-NUMISMA_DATA_DIR=~/Dev/accumulus/data pnpm report   # ~ expands; every plane resolves the same store
+NUMISMA_DATA_DIR=~/Dev/<fund>/data pnpm report   # ~ expands; every plane resolves the same store
 ```
 
 The default is **absolute and homedir-derived** — never CWD-relative, never a hardcoded
@@ -106,15 +110,15 @@ because launchd cannot expand `~` (see `price-feed-ops.md` step 3).
 ## 4. Locate-when and go-back (the reason the increment exists)
 
 Every ingest commit pins the NAV and the writing app version, so the Head Digest's git
-history *is* the NAV-over-time timeline. In the accumulus checkout:
+history *is* the NAV-over-time timeline. In the `<fund>` checkout:
 
 ```sh
-cd ~/Dev/accumulus
+cd ~/Dev/<fund>
 git log -p -- data/head-digest.json      # find the commit where fundValueUsd jumps wrong
 # read headEventId, the numisma-version: trailer, and asOf from the same diff
 git revert --no-edit <bad-sha>           # invert the bad append (history stays honest)
 cd ~/Dev/numisma
-NUMISMA_DATA_DIR=~/Dev/accumulus/data pnpm report   # re-fold re-derives the correct NAV
+NUMISMA_DATA_DIR=~/Dev/<fund>/data pnpm report   # re-fold re-derives the correct NAV
 ```
 
 The full decision tree — `revert` vs. surgical `checkout`, conflict handling, push, and
@@ -183,5 +187,5 @@ See `price-feed-ops.md` ("PATH: the scheduler must be able to find `pnpm` **and*
 - Restore ships **runbook-first** — there is intentionally no `pnpm data:restore`
   wrapper (deferred until a second failure shape demands it).
 - Privacy is **private-repo access control, not encryption**: plaintext blobs live in
-  `accumulus` history by design (ADR-006). Encrypting forward cannot scrub the plaintext
+  `<fund>` history by design (ADR-006). Encrypting forward cannot scrub the plaintext
   already in history.

@@ -3,13 +3,13 @@
 _Made during: MVI — portable-durable-log increment / 2026-07-03 prototype (branch
 `feature/portable-durable-log` @ `6b30547`) → AAR → audit → reliable conversion (no
 PRD issue yet; ratified at the reliable-conversion gate so the substrate and the
-commit-per-ingest contract freeze before a hosted app reads accumulus by path and by
+commit-per-ingest contract freeze before a hosted app reads the <fund> repo by path and by
 the `head-digest.json` filename)._
 _Scope: product_
 _Status: accepted (amended 2026-07-30 — see "Amendment: the tracked-file list, and the
 membership test that governs it" below)_
 
-The durable log lives in a **dedicated private sibling git repository** — `~/Dev/accumulus`,
+The durable log lives in a **dedicated private sibling git repository** — `~/Dev/<fund>`,
 the **Log History** — discovered at runtime through a configurable **`NUMISMA_DATA_DIR`**,
 and every successful ingest that appends ≥1 event **best-effort auto-commits the durable
 text files to that repo** under the operator's own git identity, then best-effort pushes.
@@ -38,7 +38,7 @@ the `captureIngestCommit` seam wired into `ingestInbox` — is the `@numisma/tui
   leak the git-ignore exists to prevent. A `.gitignore`'d repo *nested* in the numisma
   tree (the original design) creates the repo-in-repo problem: two overlapping working
   trees, submodule-or-ignore ambiguity, `git add -A` footguns. A **sibling** repo removes
-  both — numisma stays code-only, accumulus is standalone and independently clonable by a
+  both — numisma stays code-only, the <fund> repo is standalone and independently clonable by a
   future hosted surface, and the `NUMISMA_DATA_DIR` config variable (not a folder taxonomy)
   absorbs any future layout change. Validated by the prototype: moving data *out* of the
   tree "removed the repo-in-repo problem entirely."
@@ -52,7 +52,7 @@ the `captureIngestCommit` seam wired into `ingestInbox` — is the `@numisma/tui
   port if push volume ever justifies it.
 - **Plaintext blobs in the private repo vs. encrypt-before-commit.** Chosen: **plaintext**,
   with privacy provided by **private-repo access control, not encryption**. The trade-off
-  is explicit and sticky — plaintext trade data lives in accumulus history *permanently*,
+  is explicit and sticky — plaintext trade data lives in the <fund> repo's history *permanently*,
   and adding encryption forward does not scrub the past (only a history rewrite would).
   Encryption-at-rest was weighed and deferred as an out-of-scope Non-Goal (grill): it buys
   little for a single-operator private repo already gated by GitHub auth, while costing key
@@ -62,7 +62,7 @@ the `captureIngestCommit` seam wired into `ingestInbox` — is the `@numisma/tui
 ## Consequences
 
 - **The `dataDir` resolution rule is an invariant, not a convenience.** The default is
-  **absolute and homedir-derived** (`join(homedir(), "Dev", "accumulus", "data")`) — never
+  **absolute and homedir-derived** (`join(homedir(), "Dev", "<fund>", "data")`) — never
   CWD-relative, never a hardcoded `/Users/...` literal — so launchd (which runs with a bare
   CWD and cannot expand `~`) and the interactive TUI resolve the *same* store. A
   `NUMISMA_DATA_DIR` env override **wins over the default in both planes** (the tui
@@ -88,7 +88,7 @@ the `captureIngestCommit` seam wired into `ingestInbox` — is the `@numisma/tui
   `Co-Authored-By` trailer, no tooling attribution of any kind — a permanent invariant, not
   a default. The commit is the operator's record of their own fund; a tool must never write
   itself into that history.
-- **The allowlist `.gitignore` polarity is load-bearing.** accumulus tracks exactly the
+- **The allowlist `.gitignore` polarity is load-bearing.** The <fund> repo tracks exactly the
   four durable text files (`genesis.json`, `events.jsonl`, `preferences.jsonl`,
   `head-digest.json`); `prices/`, `inbox/`, `ingested/`, `*.tmp`, and `*.quarantine` are
   ignored. The polarity is an *allowlist* (deny-by-default with named exceptions), so the
@@ -98,9 +98,9 @@ the `captureIngestCommit` seam wired into `ingestInbox` — is the `@numisma/tui
   now five files — `orders.jsonl` joined it — and the amendment below states the general
   membership test that admits or excludes any candidate.)_
 - **The retired in-repo `data/` store is orphaned and must be retired as part of this
-  decision.** The flip repointed all code at accumulus but left a full *stale* duplicate
+  decision.** The flip repointed all code at the <fund> repo but left a full *stale* duplicate
   ledger under `numisma/data/`, which has **already diverged** (on the audit machine:
-  `numisma/data/events.jsonl` 41 lines vs. accumulus 42 lines; `diff -q` differs). Two
+  `numisma/data/events.jsonl` 41 lines vs. the <fund> repo's 42 lines; `diff -q` differs). Two
   sources of truth for the sacred log cannot coexist — the old tree must be deleted/archived
   (with its now-orphan tracked `data/.gitignore`) and a guard should assert the repo tree
   contains no `data/events.jsonl`. This divergence is the concrete face of the
@@ -130,8 +130,8 @@ the `captureIngestCommit` seam wired into `ingestInbox` — is the `@numisma/tui
 ### The three SDP tests
 
 - **Hard to reverse.** The substrate move is *already* partly irreversible: the flip left a
-  stale in-repo ledger that has diverged from accumulus (above). Once a hosted app reads
-  accumulus by path and by the `head-digest.json` filename, the sibling-repo substrate and
+  stale in-repo ledger that has diverged from the <fund> repo (above). Once a hosted app reads
+  the <fund> repo by path and by the `head-digest.json` filename, the sibling-repo substrate and
   the commit-per-ingest contract are load-bearing — unwinding them means re-migrating the
   sacred log and re-deciding where it lives, a data-model migration, not a code edit.
   Ratified before that reader exists so no later substrate migration is forced.
@@ -150,14 +150,14 @@ the `captureIngestCommit` seam wired into `ingestInbox` — is the `@numisma/tui
 
 ## Amendment: the tracked-file list, and the membership test that governs it
 
-_Made during: increment one — `Order`, Bitget ingest, and available capital (spec #163,
+_Made during: increment one — `Order`, <exchange> ingest, and available capital (spec #163,
 slice #164, seam `S4`). The first amendment to the tracked-file list since this ADR was
 written._
 
 **`orders.jsonl` joins the allowlist as the fifth tracked file**, alongside
 `genesis.json`, `events.jsonl`, `preferences.jsonl` and `head-digest.json`. It is named
-in four places, and the ORDER in which they are edited is load-bearing: the accumulus
-`.gitignore` allowlist first, then `TRACKED_FILES` (`apps/tui/src/ingest-commit.ts`),
+in four places, and the ORDER in which they are edited is load-bearing: the <fund>
+repo's `.gitignore` allowlist first, then `TRACKED_FILES` (`apps/tui/src/ingest-commit.ts`),
 then the daily-fetch explicit-add loop, then the daily-fetch strict post-check
 (`git status --porcelain` **without** `--ignored`). Reversed, the post-check reports
 clean over a file git is discarding — a **green check over data loss**, strictly worse
@@ -196,9 +196,9 @@ than disciplinary; the membership test is what makes each inclusion arguable.
 
 **The floor is guarded by a test asserting BOTH ends**
 (`apps/tui/src/durable-log-guards.test.ts`): that git does **not** ignore each durable
-file in the accumulus checkout, **and** that `TRACKED_FILES` names exactly that list.
+file in the <fund> checkout, **and** that `TRACKED_FILES` names exactly that list.
 Either end alone is false assurance — an allowlisted file nothing stages is never
 committed, and a staged file the allowlist omits is discarded. The guard is written over
 the **list**, so a sixth member costs one line there too. It runs against the real
-accumulus checkout when present and skips the allowlist half (never the `TRACKED_FILES`
+<fund> repo's checkout when present and skips the allowlist half (never the `TRACKED_FILES`
 half) where that private repo is absent.

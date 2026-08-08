@@ -36,7 +36,7 @@ shared inbox, and `pnpm spine` (in `apps/tui`) owns the guarded, validated appen
 - **The disposable price store** (`src/price-store.ts`) — one
   `<pricesDir>/<instrumentId>.jsonl` file per instrument, one line per trading
   day, upsert-by-`asOf` latest-wins, full-file rewrite per upsert. Disposable
-  (no durability contract beyond the accumulus repo's git-ignore), but writes
+  (no durability contract beyond the `<fund>` repo's git-ignore), but writes
   are atomic (temp+rename, `src/atomic-write.ts`) so a crash mid-write cannot
   corrupt a price file.
 - **The inbox emit** (`src/inbox.ts`) — merges fresh marks into the shared
@@ -85,8 +85,8 @@ shared inbox, and `pnpm spine` (in `apps/tui`) owns the guarded, validated appen
   has already been stored/emitted.
 - **`NUMISMA_DATA_DIR` resolution:** the data root is resolved once via
   `@numisma/engine`'s `resolveDataDir()` at import time (`src/config.ts`) —
-  unset/empty → the absolute, homedir-derived accumulus default
-  (`~/Dev/accumulus/data`); `~`-prefixed → expanded; absolute → normalized; a
+  unset/empty → the absolute, homedir-derived `<fund>` default
+  (`~/Dev/<fund>/data`); `~`-prefixed → expanded; absolute → normalized; a
   relative path is REJECTED loudly (never a CWD-relative `"data"`). See
   `packages/engine/src/data-dir.ts`.
 
