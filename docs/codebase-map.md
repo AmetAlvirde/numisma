@@ -119,9 +119,10 @@ Tests are co-located with their subjects (`*.test.ts` beside the module), so the
 test for any file is its sibling. Characterization snapshots and the engine↔TUI
 formatter contract test are the two suites that pin cross-module behavior.
 
-## Known open items
+## Open items — none at present
 
-The one item the documentation audit left open here has since been resolved:
+The one item the documentation audit left open here has since been resolved;
+its resolution stays in place as the decision record:
 
 - **`@numisma/price-feed` has no consumers — RESOLVED by narrowing the surface
   to the shape a consumer would need.** Nothing in the workspace still imports
