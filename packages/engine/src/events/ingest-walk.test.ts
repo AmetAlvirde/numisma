@@ -91,18 +91,40 @@ function markedInput(overrides: Record<string, unknown> = {}) {
 describe("walkPendingInbox — the one pending-inbox walk", () => {
   it("accepts in order and ADVANCES the reference, so a later event can cite an earlier one", () => {
     const reference = buildEventReference(genesis());
+    // Genesis puts `aapl-usd`'s last close at 150. The open folds a second aapl
+    // position whose weighted-average cost is 100, ADVANCING that close; the mark at
+    // 60 then deviates 40% from 100 (inside the ±50% guard) but 60% from the genesis
+    // 150 (outside it). On an un-advanced reference the mark is REJECTED.
     const walk = walkPendingInbox(
-      [openedInput(), markedInput({ id: "e-mark-btc", instrumentId: "btc-usd", price: 100 })],
+      [
+        openedInput({
+          id: "e-open-aapl",
+          position: {
+            id: "aapl-core-2",
+            portfolioId: "core",
+            tempo: "Liquid",
+            executionMode: "live",
+            accountId: "xtb-usd",
+            instrumentId: "aapl-usd",
+            direction: "long",
+            currency: "USD",
+            lots: [{ quantity: 1, cost: 100, tier: "c1" }],
+          },
+        }),
+        markedInput({ id: "e-mark-aapl", price: 60 }),
+      ],
       reference,
     );
 
     expect(walk.invalid).toBeUndefined();
     expect(walk.rejected).toEqual([]);
-    expect(walk.accepted.map((event) => event.id)).toEqual(["e-open", "e-mark-btc"]);
+    expect(walk.accepted.map((event) => event.id)).toEqual(["e-open-aapl", "e-mark-aapl"]);
     expect(walk.duplicateCount).toBe(0);
-    // The mark cites `btc-usd`, whose only close comes from the open folded a step
-    // earlier in this same batch — it can only pass on an ADVANCED reference.
-    expect([...walk.seenIds]).toEqual(["e-open", "e-mark-btc"]);
+    expect([...walk.seenIds]).toEqual(["e-open-aapl", "e-mark-aapl"]);
+    // And the reference the caller holds afterwards is the world the NEXT event would
+    // be judged against: both accepted events folded in, latest close wins.
+    expect(reference.lastClose.get("aapl-usd")).toEqual({ price: 60, asOf: "2026-06-06" });
+    expect(reference.positionIds.has("aapl-core-2")).toBe(true);
   });
 
   it("dedup-skips an id already seen BEFORE the guard, counting it as a duplicate", () => {
