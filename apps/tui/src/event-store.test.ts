@@ -615,13 +615,16 @@ describe("durable-log migration — legacy-shape events fail loud, then migrate 
     // (fsync before rename, a distinct temp name) must cover the one path that rewrites
     // the WHOLE durable log, so this body must delegate rather than hand-roll.
     const source = await readFile(resolve(dirname(fileURLToPath(import.meta.url)), "event-store.ts"), "utf8");
-    const body = source.slice(
-      source.indexOf("export async function migrateLegacyLog"),
-      source.indexOf("* Append events atomically"),
-    );
+    const startIdx = source.indexOf("export async function migrateLegacyLog");
+    expect(startIdx).toBeGreaterThan(-1);
+    // Bound by the function's own closing brace (first column-0 `}` after the
+    // start) so a docstring reword or a function reorder elsewhere in the file
+    // cannot silently widen or empty the slice.
+    const closingBraceIdx = source.indexOf("\n}", startIdx);
+    expect(closingBraceIdx).toBeGreaterThan(startIdx);
+    const body = source.slice(startIdx, closingBraceIdx + 2);
     expect(body).toContain("writeLogImage(");
-    expect(body).not.toMatch(/\brename\(/);
-    expect(body).not.toMatch(/\bwriteFile\(/);
+    expect(body).not.toMatch(/\b(?:rename|renameSync|writeFile|writeFileSync|appendFile|appendFileSync|createWriteStream)\s*\(/);
   });
 
   it("migrateLegacyLog fails loud (writes nothing) when a legacy record has no supplied leg", async () => {
