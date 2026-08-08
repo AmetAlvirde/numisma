@@ -112,7 +112,7 @@ describe("parseBackfillArgs", () => {
     });
   });
 
-  it("does NOT let --fixture alone trip the credential-free, DB-free path", () => {
+  it("--fixture alone does not set fixtureOnly", () => {
     expect(parseBackfillArgs(["--fixture"]).fixtureOnly).toBe(false);
   });
 

@@ -186,7 +186,7 @@ export interface SnapshotDerivation {
   /**
    * The NARROWED payload written to the `report` JSONB column — built key-by-key
    * by `toProjectionReport`, never the wide `CompositionReport` (D8). Everything
-   * outside `{ totals, dashboard }` stops here and never leaves the machine.
+   * outside `{ totals, dashboard, glance }` stops here and never leaves the machine.
    */
   report: ProjectionReport;
 }
