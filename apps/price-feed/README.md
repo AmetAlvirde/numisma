@@ -141,10 +141,11 @@ unchanged.
 Every non-trivial module is co-located with a `*.test.ts` file directly beside
 it in `src/`: `atomic-write.test.ts`, `banxico-provider.test.ts`,
 `binance-provider.test.ts`, `fetch-prices.test.ts`, `inbox.test.ts`,
-`rejection-check.test.ts`, `schedule-window.test.ts` (asserts properties of
-the launchd plist template and the wrapper script that have an oracle
-elsewhere — see its own header comment), `twelvedata-provider.test.ts`. Run
-via the repo root:
+`index.test.ts` (the barrel's exact-set runtime-surface lock — see
+`docs/codebase-map.md`), `rejection-check.test.ts`, `schedule-window.test.ts`
+(asserts properties of the launchd plist template and the wrapper script that
+have an oracle elsewhere — see its own header comment),
+`twelvedata-provider.test.ts`. Run via the repo root:
 
 ```sh
 pnpm test        # whole monorepo, vitest run
