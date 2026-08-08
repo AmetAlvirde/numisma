@@ -340,8 +340,10 @@ that matters for steps 6 and 7 and for `BETTER_AUTH_URL`.
 
 **CORRECTED — the previous version's Plan A ("change the password via the
 running app's sign-in + change-password UI") points at a UI that does not
-exist. The app has four routes: `__root`, `api`, `index`, `login`. There is no
-change-password screen and no client call to one.**
+exist. The app has five routes: `__root`, `api/auth/$`, `index` (`/`, the
+glance triage surface), `big-picture` (`/big-picture`, the composition
+dashboard, moved here by D11), and `login`. There is no change-password
+screen and no client call to one.**
 
 The tracer seeded `amet@example.com` with `prototype-pw-123`. It is no longer
 in the repo but may still be live, and it is written in plaintext in an earlier
@@ -475,7 +477,9 @@ pnpm --filter @numisma/web push
 **Preconditions, as checkable facts:**
 
 - **`NUMISMA_DATA_DIR` should be UNSET.** Unset resolves to
-  `~/Dev/accumulus/data` — the real durable store (`packages/engine/src/data-dir.ts`).
+  `~/Dev/<fund>/data` — the real durable store (`packages/engine/src/data-dir.ts`).
+  (`<fund>` stands for your own private data repository throughout this doc — the
+  same convention as `<dataDir>`.)
   *Verify it is unset* rather than setting it: exporting it by hand is the risk,
   since a typo silently redirects the fold to a ghost ledger. (A relative value
   is rejected loudly by design; an absolute one is taken at its word.)
@@ -610,7 +614,7 @@ these connection strings rely on. On that upgrade, change them to
 | Seeded account password rotated — old rejected, new accepted | manual | PASS — both halves verified at the deployed URL | 2026-07-25 |
 | Rate-limit attack against the deployed URL (`auth:verify-limit`) | manual | PASS — 150 attempts, `403=14 429=136`, first 429 at #15, exit 0 | 2026-07-25 |
 | Rate-limit counter is DB-backed (D5), not per-instance memory | manual | PASS — 1 row, `has_signin_bucket=t`, `max_count=11` | 2026-07-25 |
-| First real push, push-side signal | manual | PASS — `fundId=accumulus-fund asOf=2026-07-24 schemaVersion=2`; 1 row; keys `{dashboard,totals}` | 2026-07-25 |
+| First real push, push-side signal | manual | PASS — `fundId=<fund>-fund asOf=2026-07-24 schemaVersion=2`; 1 row; keys `{dashboard,totals}` | 2026-07-25 |
 | First real push, **gate-closing** signal (phone, away from desk) | manual | TODO | TODO |
 | Soak: one week spanning a weekend, four conditions hold | manual | TODO | TODO |
 

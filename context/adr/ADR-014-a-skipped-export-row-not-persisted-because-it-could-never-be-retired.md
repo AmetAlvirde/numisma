@@ -8,7 +8,7 @@ only — no behavior lands with this ADR._
 _Scope: product_
 _Status: accepted_
 
-The Bitget open-orders export can carry a row the parser cannot read. Such a row
+The <exchange> open-orders export can carry a row the parser cannot read. Such a row
 is skipped: it reaches stderr and the returned `imported-partial` outcome, and
 then dies with the process. **Nothing durable is written.** `OrderRecord` is four
 kinds — `orderPlaced`, `orderCancelled`, `orderFilled` and `orderFillObserved`

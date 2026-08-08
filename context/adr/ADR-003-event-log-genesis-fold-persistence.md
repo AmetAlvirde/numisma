@@ -352,7 +352,7 @@ aliased to `PositionClosed`** (see the trade-off above).
 
 _Made during: MVI — portable-durable-log increment / 2026-07-03 prototype → AAR → audit →
 reliable conversion (the durable log gains a versioned, restorable history in the private
-sibling repo `~/Dev/accumulus`; the substrate and the best-effort commit-per-ingest
+sibling repo `~/Dev/<fund>`; the substrate and the best-effort commit-per-ingest
 contract are ratified in ADR-006 — this amendment records the one decision that touches
 this ADR's own doctrine)._
 

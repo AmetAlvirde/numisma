@@ -71,8 +71,9 @@ export { buildDashboardDetail } from "./compose/detail.js";
 export { composeRowDependencies } from "./compose/row-dependencies.js";
 export type { RowDependencies } from "./compose/row-dependencies.js";
 
-// PROTOTYPE (mvi 2026-06-29-portfolio-persistence): the event-sourcing spine —
-// pure event validation + the fold to the existing FundReviewData read model.
+// The event-sourcing spine (ADR-003): pure event validation + the fold to the
+// FundReviewData read model. Ten verbs, all shipped; every durable surface in
+// the workspace reads through this.
 export type {
   PortfolioEventType,
   PositionDecision,

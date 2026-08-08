@@ -1,5 +1,7 @@
-// PROTOTYPE. The tenth verb, `ReserveOpened` — the one that lets a cash Reserve be
-// born after t0 without editing the immutable genesis seed.
+// The tenth verb, `ReserveOpened` — the one that lets a cash Reserve be born
+// after t0 without editing the immutable genesis seed. Shipped to `main` in
+// PR #162 (ADR-012); the narrow scope below is a deliberate choice, not
+// prototype-era coverage.
 //
 // Deliberately NARROW. This pins only the two SILENT holes and the reject cases,
 // because those are the failures that do not announce themselves:

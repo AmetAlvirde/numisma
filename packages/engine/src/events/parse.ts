@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE (mvi 2026-06-29-portfolio-persistence). Event-sourcing spine — parse.
+ * Event-sourcing spine — parse.
  *
  * The FIRST ingest gate: validate one untrusted event record's structure in
  * isolation into a typed {@link PortfolioEvent} or an {@link EventError}. Pure — no

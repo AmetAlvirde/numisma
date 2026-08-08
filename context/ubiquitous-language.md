@@ -100,7 +100,7 @@ event log at the separate **Mark Cadence**. Candle intervals are never called
 | **Manual Adjustment**       | A user-entered correction or annotation that changes a recorded value outside a normal execution event.                                    | correction              |
 | **Dashboard**               | A presentation surface for reviewing a focused set of Numisma records.                                                                     | perspective             |
 | **Head Digest**             | A derived, versioned summary of the folded head — `fundValueUsd` from the canonical composition report, open/closed Position counts, head event id, and the writing app version. Re-derivable, committed alongside the durable log on each ingest (`head-digest.json`), overwritten in place, and never a source of truth (no engine reader folds it back). See ADR-006 and the ADR-003 Head Digest amendment. | checkpoint, snapshot    |
-| **Log History**             | The private sibling git repository (`~/Dev/accumulus`) that versions the durable log — `genesis.json`, `events.jsonl`, `preferences.jsonl`, and the Head Digest — giving the git-ignored log a restorable, provenance-stamped history; discovered via `NUMISMA_DATA_DIR`. See ADR-006. | backup, data folder     |
+| **Log History**             | The private sibling git repository (`~/Dev/<fund>`) that versions the durable log — `genesis.json`, `events.jsonl`, `preferences.jsonl`, and the Head Digest — giving the git-ignored log a restorable, provenance-stamped history; discovered via `NUMISMA_DATA_DIR`. See ADR-006. | backup, data folder     |
 
 ## Profit Split and Position Adjustment
 
