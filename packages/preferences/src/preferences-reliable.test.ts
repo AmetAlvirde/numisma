@@ -1,21 +1,16 @@
-// The RELIABLE half of the hardened preferences sidecar IO: the genuinely
-// append-only writer
-// preserves ALL prior entries; the validating loader QUARANTINES malformed/garbage
-// lines (bad JSON/shape, invalid ratio, bad splitBasis, unparseable effectiveAt)
-// instead of throwing through or corrupting as-of replay; blank lines are tolerated;
-// a non-monotonic file replays deterministically through `pickPolicyAsOf`; and seeding
-// goes through the append path (no whole-file overwrite). Prior art: #90/#93.
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+// The RELIABLE half of the hardened preferences sidecar IO. The package has no GENERAL
+// write surface: seeding is the only writer, and it must be genuinely append-only (no
+// whole-file overwrite — a seed onto a file of quarantined lines preserves them). The
+// validating loader QUARANTINES malformed/garbage lines (bad JSON/shape, invalid ratio,
+// bad splitBasis, unparseable effectiveAt) instead of throwing through or corrupting
+// as-of replay; blank lines are tolerated; a non-monotonic file replays deterministically
+// through `pickPolicyAsOf`. Prior art: #90/#93.
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { pickPolicyAsOf, resolveDataDir, type ProfitPolicyEntry } from "@numisma/engine";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  appendPreference,
-  loadPreferences,
-  resolvePreferencesPath,
-  seedDefaultPreferences,
-} from "./preferences.js";
+import { loadPreferences, resolvePreferencesPath, seedDefaultPreferences } from "./preferences.js";
 
 const createdDirs: string[] = [];
 
@@ -45,30 +40,17 @@ function entry(
   };
 }
 
-describe("appendPreference — genuinely append-only", () => {
-  it("preserves ALL prior entries across successive appends", async () => {
-    const path = await tempPath();
-    await appendPreference(path, entry("2026-06-01", "highWaterMark"));
-    await appendPreference(path, entry("2026-06-10", "perClose"));
-    await appendPreference(path, entry("2026-06-20", "highWaterMark"));
+/**
+ * Test-local fixture writer. The package deliberately exposes NO append entry point
+ * (audit finding 34 — a plain-`appendFile` write surface with no lock and no torn-line
+ * handling was DELETED rather than hardened), so loader/ordering fixtures write their
+ * own lines here instead of reaching for a production writer that no longer exists.
+ */
+async function appendLine(path: string, value: ProfitPolicyEntry): Promise<void> {
+  await appendFile(path, `${JSON.stringify(value)}\n`, "utf8");
+}
 
-    const loaded = await loadPreferences(path);
-    expect(loaded.map((e) => e.effectiveAt)).toEqual(["2026-06-01", "2026-06-10", "2026-06-20"]);
-    expect(loaded.map((e) => e.splitBasis)).toEqual(["highWaterMark", "perClose", "highWaterMark"]);
-  });
-
-  it("does not truncate a pre-existing file when adding one line", async () => {
-    const path = await tempPath();
-    await appendPreference(path, entry("2026-06-01"));
-    const before = await readFile(path, "utf8");
-    await appendPreference(path, entry("2026-06-10", "perClose"));
-    const after = await readFile(path, "utf8");
-    expect(after.startsWith(before)).toBe(true); // history is a prefix of the new file
-    expect((await loadPreferences(path)).length).toBe(2);
-  });
-});
-
-describe("seedDefaultPreferences — seeds via the append path", () => {
+describe("seedDefaultPreferences — the only writer, and genuinely append-only", () => {
   it("writes exactly one default line when the sidecar is absent", async () => {
     const path = await tempPath();
     const seeded = await seedDefaultPreferences(path, "2026-06-01", "sink-usdt");
@@ -78,12 +60,30 @@ describe("seedDefaultPreferences — seeds via the append path", () => {
     expect(raw.trim().split("\n")).toHaveLength(1); // one appended line, not a rewrite
   });
 
+  it("seeding a file whose every line is QUARANTINED appends — it never truncates them", async () => {
+    // The only reachable path on which the writer meets a non-empty file: `loadPreferences`
+    // returns [] (all lines quarantined) so the seed proceeds. A whole-file overwrite here
+    // would destroy the very bytes an operator needs to repair the corrupt sidecar.
+    const path = await tempPath();
+    const garbage = `{ not valid json\n${JSON.stringify({ ...entry("2026-06-05"), splitBasis: "lifetime" })}\n`;
+    await writeFile(path, garbage, "utf8");
+
+    await seedDefaultPreferences(path, "2026-06-01", "sink-usdt");
+
+    const after = await readFile(path, "utf8");
+    expect(after.startsWith(garbage)).toBe(true); // the corrupt history is a PREFIX, not a casualty
+    const loaded = await loadPreferences(path);
+    expect(loaded.map((e) => e.effectiveAt)).toEqual(["2026-06-01"]);
+  });
+
   it("does not overwrite an existing valid policy", async () => {
     const path = await tempPath();
-    await appendPreference(path, entry("2026-06-01", "perClose"));
+    await appendLine(path, entry("2026-06-01", "perClose"));
+    const before = await readFile(path, "utf8");
     const result = await seedDefaultPreferences(path, "2026-07-01", "sink-usdt");
     expect(result).toHaveLength(1);
     expect(result[0]?.splitBasis).toBe("perClose"); // untouched, not re-seeded
+    expect(await readFile(path, "utf8")).toBe(before); // and not written at all
   });
 });
 
@@ -172,8 +172,8 @@ describe("non-monotonic file — deterministic as-of replay through the selector
   it("loads in append order; pickPolicyAsOf sorts to the correct as-of policy", async () => {
     const path = await tempPath();
     // Appended OUT of date order on purpose.
-    await appendPreference(path, entry("2026-06-10", "perClose"));
-    await appendPreference(path, entry("2026-06-01", "highWaterMark"));
+    await appendLine(path, entry("2026-06-10", "perClose"));
+    await appendLine(path, entry("2026-06-01", "highWaterMark"));
 
     const loaded = await loadPreferences(path);
     expect(loaded.map((e) => e.effectiveAt)).toEqual(["2026-06-10", "2026-06-01"]); // append order kept
