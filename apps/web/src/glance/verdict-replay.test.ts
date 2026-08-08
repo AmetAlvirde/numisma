@@ -15,11 +15,18 @@
  * construction. Freshness is a render-time derivation against the clock (D6); it is
  * not a property of an anchor and cannot be replayed from one.
  *
- * THE TWO "28"s ARE DIFFERENT SETS OF EQUAL SIZE — do not fuse them. The prototype
- * measured genesis 06-23 + 06-26…07-26; this fixture holds 06-26…07-27. They
- * reconcile only because 06-23 and 07-27 are both *no* days, and the fixture's count
- * GROWS BY ONE on the next push. So nothing below keys on 28: the *yes* days are
- * named by date, and the *no* days are whatever is left.
+ * NOTHING BELOW KEYS ON THE FIXTURE'S COUNT, and that is a hard rule, not a
+ * preference. The prototype measured genesis 06-23 + 06-26…07-26; this fixture holds
+ * 06-26…07-27 — two different sets that happen to be the same size, which is exactly
+ * the coincidence a hard-coded count invites you to fuse. The count also GROWS BY ONE
+ * on every push (`pnpm backfill -- --fixture-only` is the supported regeneration
+ * path), so a pinned total goes red on a day the fund had a perfectly normal one —
+ * and a red test that means "another normal day" teaches regenerate-and-edit-the-
+ * number, which is how the *yes*-day assertion below eventually gets edited too.
+ *
+ * So the expectations here are DERIVED FROM THE FIXTURE: the *yes* days are named by
+ * date, and the *no* days are whatever is left. Adding an anchor changes no literal
+ * in this file unless it changes a VERDICT — which is the only thing worth a red.
  */
 import { describe, expect, it } from "vitest";
 import { loadAnchorFixture } from "../push/anchor-fixture.ts";
@@ -53,15 +60,23 @@ async function replay(): Promise<{ asOf: string; verdict: Verdict }[]> {
 }
 
 describe("the anchor replay", () => {
-  it("reproduces the measured history — 6 yes, 22 no", async () => {
+  it("reproduces the measured history — the named yes days, every other anchor no", async () => {
     const replayed = await replay();
     const yes = replayed.filter((r) => r.verdict.needsYou).map((r) => r.asOf);
     const no = replayed.filter((r) => !r.verdict.needsYou).map((r) => r.asOf);
 
     expect(yes).toEqual(Object.keys(MEASURED_YES));
-    expect(yes.length).toBe(6);
-    expect(no.length).toBe(22);
+    // The *no* days named rather than counted. `toEqual` against the fixture's own
+    // remainder is strictly stronger than a total ever was — it catches a day that
+    // flipped, which a count cannot when two flip in opposite directions — and it
+    // survives the next push, which a count cannot at all.
+    expect(no).toEqual(
+      replayed.map((r) => r.asOf).filter((asOf) => !(asOf in MEASURED_YES)),
+    );
     expect(yes.length + no.length).toBe(replayed.length);
+    // Every named *yes* day is actually in the fixture: `toEqual` above would also
+    // pass if the fixture had silently narrowed to nothing but yes days.
+    expect(replayed.length).toBeGreaterThan(yes.length);
   });
 
   it("attributes each yes to the trigger that took it — 5 feedGap, 1 navMove", async () => {
