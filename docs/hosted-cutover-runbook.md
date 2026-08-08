@@ -511,7 +511,7 @@ all expected rather than faults:
    schemaVersion=3 feedGap=<arrived>/<expected> reserveFloor=<pct|absent>
    suppressed=[<keys>]`; exactly one row for that `(fund_id, as_of)`; the
    `report` JSONB carries exactly `totals`, `dashboard`, and `glance`. Verify
-   all four at once — this asserts what *landed*, which is stronger than the
+   all three at once — this asserts what *landed*, which is stronger than the
    CI contract test's assertion about what the code *would produce*. Read
    `suppressed=[…]` on a first push: any key listed there is a number the
    projection is deliberately NOT rendering because its input was
@@ -619,7 +619,7 @@ these connection strings rely on. On that upgrade, change them to
 | Seeded account password rotated — old rejected, new accepted | manual | PASS — both halves verified at the deployed URL | 2026-07-25 |
 | Rate-limit attack against the deployed URL (`auth:verify-limit`) | manual | PASS — 150 attempts, `403=14 429=136`, first 429 at #15, exit 0 | 2026-07-25 |
 | Rate-limit counter is DB-backed (D5), not per-instance memory | manual | PASS — 1 row, `has_signin_bucket=t`, `max_count=11` | 2026-07-25 |
-| First real push, push-side signal | manual | PASS — `fundId=<fund>-fund asOf=2026-07-24 schemaVersion=2`; 1 row; keys `{dashboard,totals}` | 2026-07-25 |
+| First real push, push-side signal | manual | PASS — `fundId=<fund>-fund asOf=2026-07-24 schemaVersion=2` (v2 was current then; v3 today); 1 row; keys `{dashboard,totals}` | 2026-07-25 |
 | First real push, **gate-closing** signal (phone, away from desk) | manual | TODO | TODO |
 | Soak: one week spanning a weekend, four conditions hold | manual | TODO | TODO |
 
