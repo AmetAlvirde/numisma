@@ -275,7 +275,9 @@ export interface MigrationReport {
  *     supplied leg that overdraws a Reserve or is a fat-finger magnitude fails loud
  *     BEFORE anything touches disk.
  *
- * The rewrite is atomic (temp + rename), like {@link appendEvents}. This is a
+ * The rewrite goes through {@link writeLogImage} — the one temp + rename writer — so
+ * the path that rewrites the WHOLE durable log is hardened by anything landed there,
+ * never left behind by a second hand-rolled copy. This is a
  * deliberate one-time reconstruction, NOT a runtime append path — append-only still
  * holds going forward. Idempotent: re-running a clean log migrates nothing.
  */
@@ -294,12 +296,17 @@ export async function migrateLegacyLog(
   const unresolved: string[] = [];
   let migratedCount = 0;
 
-  const lines = raw
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-
-  for (const [index, line] of lines.entries()) {
+  // Number lines EXACTLY as the read half does (`loadEventLog`): a blank line is a
+  // record to neither half, but it still consumes a line number, so every number
+  // reported here is the physical line an editor shows. When the two halves disagree
+  // the operator hand-edits whichever line the second message named — and in an
+  // append-only durable log that corrupts a good line. Hence: skip blanks INSIDE the
+  // loop, never filter them out before enumerating.
+  for (const [index, rawLine] of raw.split("\n").entries()) {
+    const line = rawLine.trim();
+    if (line.length === 0) {
+      continue;
+    }
     const lineNumber = index + 1;
     let json: unknown;
     try {
@@ -360,11 +367,7 @@ export async function migrateLegacyLog(
     );
   }
 
-  await mkdir(dirname(paths.log), { recursive: true });
-  const body = `${migrated.map((event) => serializeEvent(event)).join("\n")}\n`;
-  const tempPath = `${paths.log}.tmp`;
-  await writeFile(tempPath, body, "utf8");
-  await rename(tempPath, paths.log);
+  await writeLogImage(paths.log, `${migrated.map((event) => serializeEvent(event)).join("\n")}\n`);
 
   return { migratedCount, unchangedCount: migrated.length - migratedCount, outputPath: paths.log };
 }
