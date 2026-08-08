@@ -200,7 +200,11 @@ export interface Verdict {
   needsYou: boolean;
   /** The ONE line. `fired[0]`'s sentence, or the standing *no*. */
   sentence: string;
-  /** Everything that fired, in precedence order. `/big-picture` lists it. */
+  /**
+   * Everything that fired, in precedence order. No component renders it —
+   * `/big-picture` does not list it — but it is NOT dead: the replay suites read
+   * it to pin trigger precedence (audit finding 39).
+   */
   fired: FiredTrigger[];
   /** D3's closed set of exactly three standing numbers. All three always render. */
   slots: {
