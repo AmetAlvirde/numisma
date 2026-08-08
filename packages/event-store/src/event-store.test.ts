@@ -103,6 +103,20 @@ describe("loadEventLog — log-line quarantine", () => {
     expect(lane).toContain("this is not json");
   });
 
+  it("numbers a quarantined line by its PHYSICAL position, blank lines included", async () => {
+    // The number the operator hand-edits by. Blank lines are skipped as records but
+    // still consume a line number, so the reported number matches what an editor
+    // shows — and matches what the one-shot migration reports for the same bytes
+    // (apps/tui `migrateLegacyLog`). The two halves must never disagree.
+    const log = `${JSON.stringify(openBtc())}\n\n\nthis is not json\n`;
+    const paths = await makeStore({ log });
+
+    const { quarantined } = await loadEventLog(paths.log);
+
+    expect(quarantined).toHaveLength(1);
+    expect(quarantined[0]).toMatchObject({ lineNumber: 4, line: "this is not json" });
+  });
+
   it("fails loud on the fold path when any line is unloadable (never a partial fold)", async () => {
     // ADR-003 amendment (M1): the fold/ingest read no longer degrades gracefully —
     // a dropped line would silently skew NAV, so loadFoldedReview refuses to fold a

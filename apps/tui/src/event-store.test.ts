@@ -8,6 +8,7 @@
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import {
   loadEventLog,
   loadFoldedReview,
@@ -580,6 +581,50 @@ describe("durable-log migration — legacy-shape events fail loud, then migrate 
     const data = await loadFoldedReview(paths);
     expect(data.positions.some((position) => position.id === "aapl-core")).toBe(false);
     expect(data.reserves.find((reserve) => reserve.id === "cash-core")?.amount).toBe(1290);
+  });
+
+  it("numbers lines the way the reader does, so both halves name the SAME line", async () => {
+    // Blank lines are records to neither half — but the reader counts them toward the
+    // line number and the migration must too. When they disagree the operator hand-edits
+    // whichever line the second message named, corrupting a *good* line of the durable,
+    // append-only log. Two blanks before the legacy close: physical line 4.
+    const log = `${JSON.stringify(markAapl(160, "pre-mark"))}\n\n\n${JSON.stringify(legacyClose)}\n`;
+    const paths = await makeStore({ log });
+
+    // What the READ half calls it.
+    const { quarantined } = await loadEventLog(paths.log);
+    expect(quarantined[0]?.lineNumber).toBe(4);
+
+    // What the WRITE half calls it — the same number, or the operator edits the wrong line.
+    await expect(migrateLegacyLog(paths, new Map())).rejects.toThrow(/line 4: PositionClosed/);
+  });
+
+  it("migrateLegacyLog writes through writeLogImage — no second temp+rename writer", async () => {
+    const paths = await makeStore({ log: `${JSON.stringify(legacyClose)}\n` });
+    const cashLegs = new Map<string, SuppliedCashLeg>([
+      ["legacy-close-aapl", { settlement: { reserveId: "cash-core", proceeds: 290 } }],
+    ]);
+
+    await migrateLegacyLog(paths, cashLegs);
+
+    // The temp image is renamed away, never left behind (the writeLogImage contract).
+    expect(await exists(`${paths.log}.tmp`)).toBe(false);
+
+    // And structurally: the migration holds no writer of its own. `writeLogImage` is
+    // documented as "the only way the log is written" — any hardening landed there
+    // (fsync before rename, a distinct temp name) must cover the one path that rewrites
+    // the WHOLE durable log, so this body must delegate rather than hand-roll.
+    const source = await readFile(resolve(dirname(fileURLToPath(import.meta.url)), "event-store.ts"), "utf8");
+    const startIdx = source.indexOf("export async function migrateLegacyLog");
+    expect(startIdx).toBeGreaterThan(-1);
+    // Bound by the function's own closing brace (first column-0 `}` after the
+    // start) so a docstring reword or a function reorder elsewhere in the file
+    // cannot silently widen or empty the slice.
+    const closingBraceIdx = source.indexOf("\n}", startIdx);
+    expect(closingBraceIdx).toBeGreaterThan(startIdx);
+    const body = source.slice(startIdx, closingBraceIdx + 2);
+    expect(body).toContain("writeLogImage(");
+    expect(body).not.toMatch(/\b(?:rename|renameSync|writeFile|writeFileSync|appendFile|appendFileSync|createWriteStream)\s*\(/);
   });
 
   it("migrateLegacyLog fails loud (writes nothing) when a legacy record has no supplied leg", async () => {
