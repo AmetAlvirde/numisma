@@ -98,8 +98,10 @@ pnpm verify      # typecheck → test → smoke:startup, the full gate
 pnpm coverage    # the measured Node-side number
 ```
 
-`pnpm test` measured **1357 passed / 19 skipped across 104 files** at the time
-this map was written; re-run rather than trusting the figure.
+`pnpm test` measured **1356 passed / 19 skipped across 104 files** at the time
+this map was written; re-run rather than trusting the figure. (The 19 skips are
+the Postgres integration suites, which opt out unless `NUMISMA_TEST_DATABASE_URL`
+is set — they are not failures.)
 
 Tests are co-located with their subjects (`*.test.ts` beside the module), so the
 test for any file is its sibling. Characterization snapshots and the engine↔TUI
@@ -107,21 +109,41 @@ formatter contract test are the two suites that pin cross-module behavior.
 
 ## Known open items
 
-Surfaced during the documentation audit and deliberately left unfixed — they are
-code or policy changes, not doc changes:
+One item surfaced by the documentation audit remains open, and it is a design
+question rather than a defect:
 
-- **Stale `PROTOTYPE` comments in shipped code.**
-  `packages/engine/src/index.ts:74-76` describes the event-sourcing spine as a
-  prototype; 35 test files now depend on it.
-  `packages/engine/src/reserve-opened.test.ts:1-2` calls itself prototype-era
-  coverage for a verb that shipped in PR #162.
-- **Coverage classification is not uniform.** `import-orders-cli.ts`,
-  `record-fill-cli.ts`, `cancel-order-cli.ts`, and `migrate-legacy-log.ts` are
-  thin CLI wiring counted in the coverage number with no dedicated test and no
-  entry in `coverage-rationale.md` — while the structurally identical
-  `report.ts` / `spine.ts` / `spine-reset.ts` are explicitly excluded *with*
-  documented rationale. `apps/price-feed/src/index.ts` is a pure re-export barrel
-  sitting at 0% for the same reason.
-- **Vendored skill trees.** `.agents/`, `.codex/`, `.cursor/`, and `.opencode/`
-  carry 60 files of `mvi-*` skill copies from a superseded tooling generation.
-  They are not this project's process docs and should not be read as such.
+- **`@numisma/price-feed` has no consumers.** Nothing in the workspace imports
+  the package by its root — not `apps/web`, not `apps/tui`, and not even its own
+  `cli.ts`, which reaches its siblings by relative path. The package's header
+  promises reuse (a future web or scheduler consumer); until one exists, its
+  public surface is asserted by `src/index.test.ts` rather than exercised by real
+  use. Two of the 14 pinned exports look incidental rather than contractual —
+  `atomicWrite` / `AtomicWriteIo` (a generic fs primitive shared internally) and
+  `upsertQuote` (disposable price-store IO). With zero consumers there is no
+  evidence either way, so they were pinned rather than quietly narrowed: any
+  future narrowing has to update that test deliberately, which is the right
+  failure mode.
+
+Three classes of finding from that audit were closed rather than deferred, and
+the guards that keep them closed are worth knowing about:
+
+- **Prototype markers.** `de-prototype.test.ts` is a regression lock asserting
+  that no shipped source under `packages/engine`, `apps/tui`, or
+  `apps/price-feed` carries a prototype marker. Its needles match the marker
+  *shape*, not enumerated dates, so a new marker on any future date fails the
+  suite. An earlier per-increment version of this guard is why ten markers once
+  survived onto `main` in load-bearing code.
+- **Coverage classification.** Thin CLI shells are excluded from the coverage
+  number, and every exclusion has a row in
+  [`coverage-rationale.md`](./coverage-rationale.md) naming the flow module and
+  the tests that cover its logic. The shells are unmeasurable for a structural
+  reason, not a convenient one: importing one *runs the act*, which is exactly
+  why each flow lives in its own injectable module.
+- **Public surfaces.** `pnpm typecheck` is the workspace's mechanical guard for
+  both package surfaces and the no-deep-import discipline, and it is sufficient
+  for *type* exports. It cannot catch a dropped **value** export that nothing
+  imports — so `apps/price-feed/src/index.test.ts` asserts that barrel's runtime
+  surface by exact set equality, deriving both its presence and kind checks from
+  a single source list. It is currently the only test of its kind in the repo;
+  the other packages rely on being imported through their roots by real
+  consumers.
