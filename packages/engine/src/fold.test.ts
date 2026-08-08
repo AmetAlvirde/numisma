@@ -257,11 +257,11 @@ describe("foldEvents — PositionAddedTo refreshes the entry-VWAC fallback mark"
       },
     ]);
 
-    // The anchor and the mark move together: the open seeds 100 at 06-02, the add
-    // re-anchors the blended 150 at its own 06-03.
+    // The anchor and the mark move together, but the blend re-prices the fold's own
+    // cost anchor IN PLACE at its original date — it never appends a new dated point,
+    // because a blended cost is not a price observed on 06-03.
     expect((folded.closes ?? []).filter((close) => close.instrumentId === "btc-usd")).toEqual([
-      { instrumentId: "btc-usd", asOf: "2026-06-02", price: 100 },
-      { instrumentId: "btc-usd", asOf: "2026-06-03", price: 150 },
+      { instrumentId: "btc-usd", asOf: "2026-06-02", price: 150 },
     ]);
 
     // ADR-003's claim holds on the event path: no synthetic mismatch for a scale-in.
@@ -330,6 +330,170 @@ describe("foldEvents — PositionAddedTo refreshes the entry-VWAC fallback mark"
     expect((folded.closes ?? []).filter((close) => close.instrumentId === "btc-usd")).toEqual([
       { instrumentId: "btc-usd", asOf: "2026-06-02", price: 100 },
       { instrumentId: "btc-usd", asOf: "2026-06-03", price: 130 },
+    ]);
+  });
+
+  it("a mark landing the SAME day as a scale-in wins the display anchor (no synthetic mismatch)", () => {
+    // Events sort stable on (asOf, log order), so the add runs first with no mark yet
+    // and blends 150; the mark then lands on the same 06-03. The MARK is the price for
+    // that day — a cost blend must never outrank it.
+    const folded = foldEvents(emptyGenesis(), [
+      opened("open-6", "2026-06-02", {
+        id: "sameday-mark-core",
+        portfolioId: "tactical",
+        tempo: "Liquid",
+        executionMode: "live",
+        accountId: "binance-usd",
+        instrumentId: "btc-usd",
+        direction: "long",
+        currency: "USD",
+        lots: [{ quantity: 10, cost: 100, tier: "c1" }],
+      }),
+      {
+        id: "add-6",
+        asOf: "2026-06-03",
+        type: "PositionAddedTo",
+        positionId: "sameday-mark-core",
+        lot: { quantity: 10, cost: 200, tier: "c1" },
+        funding: { reserveId: "no-such-reserve", amount: 2000 },
+      },
+      marked("mk-3", "2026-06-03", "btc-usd", 130),
+    ]);
+
+    expect(positionById(folded, "sameday-mark-core")?.markPrice).toBe(130);
+    const latest = (folded.closes ?? [])
+      .filter((close) => close.instrumentId === "btc-usd")
+      .reduce((best, close) => (close.asOf >= best.asOf ? close : best));
+    expect(latest.price).toBe(130);
+
+    const report = buildCompositionReport(folded);
+    expect(report.warnings.filter((warning) => warning.code === "markprice-close-mismatch")).toEqual([]);
+  });
+
+  it("an open + add + mark all on ONE day still ends at the mark's price", () => {
+    const folded = foldEvents(emptyGenesis(), [
+      opened("open-7", "2026-06-02", {
+        id: "one-day-core",
+        portfolioId: "tactical",
+        tempo: "Liquid",
+        executionMode: "live",
+        accountId: "binance-usd",
+        instrumentId: "btc-usd",
+        direction: "long",
+        currency: "USD",
+        lots: [{ quantity: 10, cost: 100, tier: "c1" }],
+      }),
+      {
+        id: "add-7",
+        asOf: "2026-06-02",
+        type: "PositionAddedTo",
+        positionId: "one-day-core",
+        lot: { quantity: 10, cost: 200, tier: "c1" },
+        funding: { reserveId: "no-such-reserve", amount: 2000 },
+      },
+      marked("mk-4", "2026-06-02", "btc-usd", 130),
+    ]);
+
+    expect((folded.closes ?? []).filter((close) => close.instrumentId === "btc-usd")).toEqual([
+      { instrumentId: "btc-usd", asOf: "2026-06-02", price: 130 },
+    ]);
+    const report = buildCompositionReport(folded);
+    expect(report.warnings.filter((warning) => warning.code === "markprice-close-mismatch")).toEqual([]);
+  });
+
+  it("two marks on the same day keep the LAST one as that day's anchor", () => {
+    const folded = foldEvents(emptyGenesis(), [
+      opened("open-8", "2026-06-02", {
+        id: "twin-mark-core",
+        portfolioId: "tactical",
+        tempo: "Liquid",
+        executionMode: "live",
+        accountId: "binance-usd",
+        instrumentId: "btc-usd",
+        direction: "long",
+        currency: "USD",
+        lots: [{ quantity: 10, cost: 100, tier: "c1" }],
+      }),
+      marked("mk-5", "2026-06-03", "btc-usd", 120),
+      marked("mk-6", "2026-06-03", "btc-usd", 130),
+    ]);
+
+    // markPrice is latest-wins (130); the display anchor now agrees instead of
+    // stranding the superseded 120 as the day's Close.
+    expect(positionById(folded, "twin-mark-core")?.markPrice).toBe(130);
+    expect((folded.closes ?? []).filter((close) => close.instrumentId === "btc-usd")).toEqual([
+      { instrumentId: "btc-usd", asOf: "2026-06-02", price: 100 },
+      { instrumentId: "btc-usd", asOf: "2026-06-03", price: 130 },
+    ]);
+  });
+
+  it("the scale-in never fabricates a phantom spike in the price journey", () => {
+    const folded = foldEvents(emptyGenesis(), [
+      opened("open-9", "2026-06-02", {
+        id: "journey-core",
+        portfolioId: "tactical",
+        tempo: "Liquid",
+        executionMode: "live",
+        accountId: "binance-usd",
+        instrumentId: "btc-usd",
+        direction: "long",
+        currency: "USD",
+        lots: [{ quantity: 10, cost: 100, tier: "c1" }],
+      }),
+      {
+        id: "add-9",
+        asOf: "2026-06-03",
+        type: "PositionAddedTo",
+        positionId: "journey-core",
+        lot: { quantity: 10, cost: 200, tier: "c1" },
+        funding: { reserveId: "no-such-reserve", amount: 2000 },
+      },
+      marked("mk-7", "2026-06-04", "btc-usd", 105),
+    ]);
+
+    // Appending the blend as a dated point rendered 100 → 150 → 105: a spike the
+    // market never printed, with a nonsense changeAbs/changePct. The journey carries
+    // only the re-anchored cost baseline and the real mark.
+    const journey = buildCompositionReport(folded).priceJourneys.find(
+      (candidate) => candidate.instrumentId === "btc-usd",
+    );
+    expect(journey?.points).toEqual([
+      { asOf: "2026-06-02", price: 150 },
+      { asOf: "2026-06-04", price: 105 },
+    ]);
+    expect(journey?.changeAbs).toBe(-45);
+  });
+
+  it("a scale-in never overwrites a GENESIS-provided Close", () => {
+    // Genesis closes win (the fold only ever fills instruments that have none), so the
+    // add may re-price the fold's own cost anchor but never recorded history.
+    const genesis = emptyGenesis();
+    genesis.closes = [{ instrumentId: "btc-usd", asOf: GENESIS_AS_OF, price: 95 }];
+    const folded = foldEvents(genesis, [
+      opened("open-10", GENESIS_AS_OF, {
+        id: "genesis-close-core",
+        portfolioId: "tactical",
+        tempo: "Liquid",
+        executionMode: "live",
+        accountId: "binance-usd",
+        instrumentId: "btc-usd",
+        direction: "long",
+        currency: "USD",
+        lots: [{ quantity: 10, cost: 100, tier: "c1" }],
+      }),
+      {
+        id: "add-10",
+        asOf: GENESIS_AS_OF,
+        type: "PositionAddedTo",
+        positionId: "genesis-close-core",
+        lot: { quantity: 10, cost: 200, tier: "c1" },
+        funding: { reserveId: "no-such-reserve", amount: 2000 },
+      },
+    ]);
+
+    expect(positionById(folded, "genesis-close-core")?.markPrice).toBe(150);
+    expect((folded.closes ?? []).filter((close) => close.instrumentId === "btc-usd")).toEqual([
+      { instrumentId: "btc-usd", asOf: GENESIS_AS_OF, price: 95 },
     ]);
   });
 });
