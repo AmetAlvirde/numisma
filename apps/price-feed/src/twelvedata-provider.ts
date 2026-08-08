@@ -19,6 +19,11 @@
  * instrument's failure (the others in the chunk succeed), preserving per-symbol
  * attribution.
  *
+ * There is deliberately NO single-symbol fetch. One existed as a thin wrapper and
+ * was deleted (audit finding 18): it had zero non-test callers, and publishing it
+ * invited exactly the per-symbol looping the 8-credit/minute cap punishes. A single
+ * symbol is a one-element batch.
+ *
  * Provider decision (PRD-#105 open question 1): Twelve Data over Alpha Vantage —
  * see the equities rows in `@numisma/engine`'s registry for the rationale. The API
  * key is read from the environment (`TWELVEDATA_API_KEY`), never committed, and
@@ -57,9 +62,9 @@ export interface ProviderFetchResult {
  * problem (missing key, HTTP failure, timeout, non-object body) fails every entry,
  * each attributably; a PER-SYMBOL problem (that symbol's `status:"error"`, a
  * missing row, a non-positive close, an unusable bar date) fails only that entry
- * while the rest of the batch still succeeds. Rides the same `AbortController`
- * timeout envelope as the single fetch (R4). Never throws for a data problem — it
- * maps it to a result — so one bad symbol can never abort the whole run.
+ * while the rest of the batch still succeeds. Every call is bounded by an
+ * `AbortController` timeout (R4). Never throws for a data problem — it maps it to a
+ * result — so one bad symbol can never abort the whole run.
  */
 export async function fetchTwelveDataDailyCloses(
   entries: readonly InstrumentRegistryEntry[],
@@ -121,30 +126,11 @@ export async function fetchTwelveDataDailyCloses(
 }
 
 /**
- * Fetch the latest daily close (USD) for one registry entry from Twelve Data — a
- * thin wrapper over the batched {@link fetchTwelveDataDailyCloses} (a single symbol
- * is just a one-element batch). Throws a symbol-attributable error on a missing key,
- * HTTP failure, a Twelve Data `status:"error"` body, an unexpected payload shape, a
- * non-positive close, or a timeout — the orchestrator records it as a per-symbol
- * failure and keeps going.
- */
-export async function fetchTwelveDataDailyClose(
-  entry: InstrumentRegistryEntry,
-  options: EquitiesFetchOptions,
-): Promise<ProviderObservation> {
-  const [result] = await fetchTwelveDataDailyCloses([entry], options);
-  if (result === undefined || result.observation === undefined) {
-    throw new Error(result?.error ?? `Twelve Data ${entry.symbol} -> no result returned`);
-  }
-  return result.observation;
-}
-
-/**
  * Parse one symbol's slice of a Twelve Data response into a {@link ProviderObservation},
- * or throw a symbol-attributable error. Shared by the single and batched fetches so
- * both apply identical validation. `symbolBody` is the un-keyed `{ values, status }`
- * object for that symbol (the whole body for a single-symbol request, or one keyed
- * entry from a batch).
+ * or throw a symbol-attributable error — which {@link fetchTwelveDataDailyCloses}
+ * catches per entry, so the throw never escapes the batch. `symbolBody` is the
+ * un-keyed `{ values, status }` object for that symbol (the whole body for a
+ * single-symbol request, or one keyed entry from a batch).
  */
 function observationFromBody(
   entry: InstrumentRegistryEntry,
