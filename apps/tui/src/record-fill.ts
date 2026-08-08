@@ -55,18 +55,14 @@ import {
   buildEventReference,
   buildFillAct,
   committedRungs,
-  composeAvailableCapital,
   crossReferenceEvent,
-  deriveFundingTier,
   isObservedAtStamp,
   parseEvent,
   pickRestingOrdersAsOf,
   proposeFillVerdicts,
   reconcileFillActs,
-  resolveLadderPosition,
   scopeBookForFill,
   type BookObservation,
-  type CapitalTier,
   type CommittedRung,
   type FillAct,
   type FundReviewData,
@@ -74,11 +70,12 @@ import {
   type ObservedRungState,
   type OrderRecord,
   type PortfolioEvent,
-  type PositionDecision,
   type ProposedVerdict,
 } from "@numisma/engine";
 import type { OrdersLoad } from "@numisma/preferences";
 import { nextLogImage, serializeEvent } from "./event-store.js";
+import { resolveFunding } from "./record-fill-funding.js";
+import { authorLadderTarget } from "./record-fill-ladder-target.js";
 import { renderSkipMessage } from "./skip-message.js";
 
 /** Everything this act touches that is not a pure function, in one injectable bag. */
@@ -171,11 +168,6 @@ function reject(
 function isAffirmative(answer: string): boolean {
   const normalized = answer.trim().toLowerCase();
   return normalized === "y" || normalized === "yes";
-}
-
-function isNegative(answer: string): boolean {
-  const normalized = answer.trim().toLowerCase();
-  return normalized === "n" || normalized === "no";
 }
 
 /** The rung list the fill prompt renders from — the same rows `S7` substantiates with. */
@@ -295,25 +287,6 @@ async function observeBook(
   }
 
   return { status: "observed", observation: { observedAt, present } };
-}
-
-/** The five authored decision fields. All required; a blank one abandons the act. */
-async function askDecision(io: RecordFillIo): Promise<PositionDecision | undefined> {
-  const entryThesis = (await io.ask("  Entry thesis: ")).trim();
-  const invalidationCondition = (await io.ask("  Invalidation condition: ")).trim();
-  const riskBudget = (await io.ask("  Risk budget: ")).trim();
-  const plannedHoldingHorizon = (await io.ask("  Planned holding horizon: ")).trim();
-  const strategy = (await io.ask("  Strategy: ")).trim();
-  if (
-    !entryThesis ||
-    !invalidationCondition ||
-    !riskBudget ||
-    !plannedHoldingHorizon ||
-    !strategy
-  ) {
-    return undefined;
-  }
-  return { entryThesis, invalidationCondition, riskBudget, plannedHoldingHorizon, strategy };
 }
 
 /**
@@ -568,142 +541,34 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
     );
   }
 
-  const ladder = resolveLadderPosition(folded.positions, {
-    accountId: reserve.accountId,
+  // The authoring interview, behind its own seam (#audit-14). Its rejection arms carry the
+  // reason token and the message this flow used to build inline, so `reject` still prints
+  // the identical bytes; `abandoned` passes straight through, nothing having been written.
+  const authored = await authorLadderTarget(
+    io.ask,
+    io.out,
+    folded.positions,
+    reserve,
     instrumentId,
-  });
-  if (ladder.status === "ambiguous") {
-    return reject(
-      io,
-      "ambiguous-ladder-position",
-      `${ladder.positionIds.join(" and ")} are both open on ${instrumentId} in ` +
-        `${reserve.accountId}; "one Position per ladder" is already violated, and guessing ` +
-        `which decision this lot belongs to would put it in the wrong one`,
-    );
+  );
+  if (authored.status === "rejected") {
+    return reject(io, authored.reason, authored.message);
   }
-
-  let target: LadderTarget;
-  if (ladder.status === "one") {
-    if (isNegative(await io.ask(`Append this lot to '${ladder.positionId}'? [Y/n]: `))) {
-      return { status: "abandoned", message: "the ladder's existing Position was declined" };
-    }
-    target = { mode: "add", positionId: ladder.positionId };
-  } else {
-    // FIRST FILL, WITH NO PLAN BEHIND IT — `T6`, and this path is permanent. The venue has
-    // never heard of a Tempo, so the decision context is authored here, at the moment of
-    // the fill, and nowhere else.
-    io.out("First fill on this ladder — opening the Position.\n");
-    const positionId = (await io.ask("  Position id: ")).trim();
-    if (!positionId) {
-      return { status: "abandoned", message: "no position id was given" };
-    }
-    const tempoAnswer = (await io.ask(`  Tempo [${reserve.tempo}]: `)).trim();
-    const decision = await askDecision(io);
-    if (!decision) {
-      return reject(
-        io,
-        "incomplete-decision",
-        "all five decision fields are required to open a Position; none of them has a default",
-      );
-    }
-    target = {
-      mode: "open",
-      position: {
-        id: positionId,
-        portfolioId: reserve.portfolioId,
-        tempo: tempoAnswer === "" ? reserve.tempo : tempoAnswer,
-        executionMode: reserve.executionMode,
-        accountId: reserve.accountId,
-        instrumentId,
-        direction: "long",
-        currency: reserve.currency,
-      },
-      decision,
-    };
+  if (authored.status === "abandoned") {
+    return authored;
   }
+  const target: LadderTarget = authored.target;
 
   // ---- 6. the cash leg and the tier that is READ, never re-decided ----
-  const proposedFunding = filled.price * filledQuantity;
-  const fundingAnswer = (await io.ask(`Cash debited [${proposedFunding}]: `)).trim();
-  const fundingAmount = fundingAnswer === "" ? proposedFunding : Number(fundingAnswer);
-  if (!Number.isFinite(fundingAmount) || fundingAmount <= 0) {
-    return reject(io, "bad-quantity", `'${fundingAnswer}' is not a positive cash amount`);
+  //
+  // Behind its own seam (#audit-14), handed the reserve this flow already resolved. Its
+  // rejection arms carry the reason token and the message this flow used to build inline,
+  // so `reject` still prints the identical bytes.
+  const funding = await resolveFunding(io.ask, folded, resting, reserve, filled, filledQuantity);
+  if (funding.status === "rejected") {
+    return reject(io, funding.reason, funding.message);
   }
-
-  // `D1` (#177) — THE ACT IS EXEMPT; THE OVERRIDE IS GUARDED, and only upward.
-  //
-  // The arithmetic decides where the guard goes. `available = value − committed`, and this
-  // act moves BOTH terms: the `orderFilled` line drops `committed` by `price × quantity`
-  // and the cash leg drops `value` by the amount debited. So
-  //
-  //     Δavailable = price × quantity − cash debited
-  //
-  // and the DEFAULT answer — `proposedFunding`, the two multiplied — is exactly
-  // available-neutral BY CONSTRUCTION. The fill itself therefore cannot break the
-  // `available ≥ 0` invariant no matter what shape the book is in, which is why this flow
-  // does NOT call `checkFundingCoverage`: that guard weighs the WHOLE book and refuses it
-  // if ANY rung anywhere in it is unplaceable (#179), so one stale `fundingReserveId` on
-  // an unrelated rung would refuse a fill that really happened at the venue. A fill is an
-  // observed fact; the flow does not get to disbelieve it.
-  //
-  // The override is not an observed fact. It is the operator asserting a figure nothing at
-  // the venue vouches for, and it is the ONLY input in this act that can drive a reserve
-  // negative. What is weighed is the EXCESS over the neutral figure — never "post-act
-  // available ≥ 0", which would brick every fill, neutral ones included, on any book that
-  // already sits negative from some other cause. A downward correction FREES availability
-  // and never reaches this branch.
-  const excess = fundingAmount - proposedFunding;
-  if (excess > 0) {
-    // The report's own arithmetic, over the report's own admission policy — not a second
-    // implementation of `value − committed` that could drift from the rendered figure.
-    const capital = composeAvailableCapital(folded, resting);
-    const funder = capital.reserves.find((entry) => entry.reserveId === reserve.id);
-    if (!funder) {
-      return reject(
-        io,
-        "uncovered-override",
-        `you asked to debit ${fundingAmount} against '${reserve.id}' — ${excess} more than the ` +
-          `${proposedFunding} this fill accounts for — but the available-capital report does ` +
-          `not place that reserve (paper execution mode, an unsupported currency, a dangling ` +
-          `account reference), so the excess cannot be weighed against anything. The fill ` +
-          `itself is recordable at the default figure`,
-      );
-    }
-    if (excess > funder.available) {
-      return reject(
-        io,
-        "uncovered-override",
-        `you asked to debit ${fundingAmount} against '${reserve.id}', ${excess} more than the ` +
-          `${proposedFunding} this fill accounts for, and '${reserve.id}' has only ` +
-          `${funder.available} available (${funder.value} balance less ${funder.committed} ` +
-          `committed). The fill's own arithmetic is available-neutral; only the extra is ` +
-          `spending capital that is not there, and a negative available is an IMPOSSIBLE ` +
-          `state rather than a warning. Record the fill at ${proposedFunding}, or record the ` +
-          `fee or funding difference as its own act`,
-      );
-    }
-  }
-
-  const fundingTier = deriveFundingTier(reserve);
-  let tier: CapitalTier;
-  if (fundingTier.status === "derived") {
-    tier = fundingTier.tier;
-  } else if (fundingTier.status === "ambiguous") {
-    // `T4` — the tier ordering was applied ONCE, at Transfer time. Asking here would
-    // re-decide it, which is the one thing this increment must not do.
-    return reject(
-      io,
-      "ambiguous-tier",
-      `'${reserve.id}' holds ${fundingTier.tiers.join(" and ")}; the tier ordering was decided ` +
-        `at Transfer time and this act does not get to re-decide it`,
-    );
-  } else {
-    const answer = (await io.ask("  Capital tier for this lot (c1/c2/c3): ")).trim();
-    if (answer !== "c1" && answer !== "c2" && answer !== "c3") {
-      return reject(io, "ambiguous-tier", `'${answer}' is not a capital tier`);
-    }
-    tier = answer;
-  }
+  const { fundingAmount, tier } = funding;
 
   // ---- 7. BOTH records, built together and validated together, before any write ----
   const act = buildFillAct({
