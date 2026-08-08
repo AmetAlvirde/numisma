@@ -18,10 +18,10 @@ import type {
 } from "../contracts.js";
 import {
   indexById,
+  invalidLotFields,
   isDirection,
   isExecutionMode,
   isNonNegativeNumber,
-  isPositiveNumber,
   isSupportedCurrency,
   pushWarning,
   toUsd,
@@ -288,11 +288,14 @@ export function buildCanonicalState(data: FundReviewData): CanonicalState {
     if (lots.length === 0) {
       invalidNumericFields.push("lots");
     }
+    // Defense in depth, on the SAME rule both ingest doors enforce
+    // (`invalidLotFields`, audit finding 5) — this gate also sees data no parse
+    // door touched: fold output and hand-edited images. It reports EVERY bad
+    // field, not just the first, because one warning has to describe the whole
+    // record. `tier` is already `CapitalTier` here, so that issue cannot fire.
     for (const lot of lots) {
-      if (!isNonNegativeNumber(lot.quantity)) invalidNumericFields.push("quantity");
-      if (!isNonNegativeNumber(lot.cost)) invalidNumericFields.push("cost");
-      if (lot.entryFx !== undefined && !isPositiveNumber(lot.entryFx)) {
-        invalidNumericFields.push("entryFx");
+      for (const issue of invalidLotFields(lot as unknown as Record<string, unknown>)) {
+        invalidNumericFields.push(issue.field);
       }
     }
     if (invalidNumericFields.length > 0) {

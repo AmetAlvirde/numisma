@@ -253,10 +253,16 @@ describe("@numisma/engine buildCompositionReport exclusions and warnings", () =>
   });
 
   it("warns and excludes a Position with invalid Lot quantity, cost, or entryFx", () => {
-    const fixture = cloneFixture(makeCanonicalFixture());
     // markPrice is valid, isolating the per-Lot numeric checks: one Lot per
     // invalid field so quantity, cost, and entryFx branches all fire at once.
-    fixture.positions = [
+    //
+    // Since audit finding 5 the genesis door refuses every one of these lots
+    // too, so the degenerate position is grafted on AFTER parsing — same
+    // direct-construction path as the empty-Lot case below. That is the point of
+    // the gate: `buildCompositionReport` also serves fold output and hand-edited
+    // images, which no parse door ever saw.
+    const data = parseFixture(cloneFixture(makeCanonicalFixture()));
+    data.positions = [
       {
         id: "position-bad-lots",
         portfolioId: "core",
@@ -275,7 +281,7 @@ describe("@numisma/engine buildCompositionReport exclusions and warnings", () =>
       },
     ] as FundReviewData["positions"];
 
-    const report = buildCompositionReport(parseFixture(fixture));
+    const report = buildCompositionReport(data);
 
     const warn = report.warnings.filter(
       (warning) =>
