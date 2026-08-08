@@ -278,9 +278,14 @@ export async function migrateLegacyLog(
     // it could not, it does not parse — which is why the walk had to be re-pointed at
     // the accumulator rather than at the file being read.
     //
-    // O(n²) folds over a one-shot, operator-initiated rewrite of a log this size is a
-    // price worth paying for judging against the real book; if the log ever grows to
-    // where that bites, fold incrementally here rather than reintroducing a shadow.
+    // O(n²) folds — one fold of the output prefix per line — over a one-shot,
+    // operator-initiated rewrite. Measured on a mark-heavy synthetic log (2026-08-08,
+    // Node 24): 1k lines 215 ms, 4k lines 2.8 s. Those are post-fix numbers; before the
+    // fold's `closes[]` lookup became a Map the same walk cost 883 ms and 53 s, because
+    // this path was O(n²) folds of a fold that was itself quadratic in marks (ADR-015).
+    // At these magnitudes the price is worth paying to judge each line against the real
+    // book; if the log ever grows to where that bites, fold incrementally here rather
+    // than reintroducing a shadow.
     const crossRef = crossReferenceEvent(event, buildEventReference(genesis, migrated));
     if (crossRef.kind !== "ok") {
       throw new Error(
