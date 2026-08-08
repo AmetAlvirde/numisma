@@ -89,7 +89,14 @@ under Node while the terminal glue stays isolated in a Bun-only layer.
   durable log (`record-fill-cli.ts` says so in its own header). The flows they
   bind — `import-orders.ts`, `record-fill.ts`, `cancel-order.ts`, and
   `event-store.ts`'s `migrateLegacyLog` — are the tested units and DO count
-  toward the measured number. See `docs/coverage-rationale.md` §1.
+  toward the measured number. `record-fill-cli.ts` itself is STILL EXCLUDED
+  from the number (v8 does not instrument a spawned subprocess) but is no
+  longer untested: `record-fill-cli.test.ts` drives the shell end to end via
+  `spawnSync(tsx, …)` against a throwaway `mkdtemp` data dir and asserts its
+  own wiring — excluded from the coverage number, not untested. The other
+  three shells (`import-orders-cli.ts`, `cancel-order-cli.ts`,
+  `migrate-legacy-log.ts`) have no such spawn test today and remain
+  untested-by-any-suite. See `docs/coverage-rationale.md` §1.
 
 **Excluded from the coverage number (scripts + Bun-only wiring):**
 
