@@ -242,9 +242,13 @@ export {
   buildFillAct,
 } from "./orders/fill.js";
 
+// ADR-015 (one world-state): `buildEventReference` PROJECTS `foldEvents(genesis,
+// acceptedSoFar)` — it is the gate's read of the fold, not a second model of the
+// world. `applyEventToReference` was withdrawn with the shadow it advanced; a caller
+// that needs the world after accepting an event rebuilds from the accepted prefix
+// (`walkPendingInbox` does this for both ingest paths).
 export {
   buildEventReference,
-  applyEventToReference,
   crossReferenceEvent,
   PRICE_MARK_MAGNITUDE_THRESHOLD,
   SETTLEMENT_MAGNITUDE_THRESHOLD,
@@ -258,6 +262,7 @@ export type {
   IngestWalkRejection,
   IngestWalkResult,
   IngestWalkOptions,
+  IngestWalkWorld,
 } from "./events/ingest-walk.js";
 export { walkPendingInbox } from "./events/ingest-walk.js";
 
