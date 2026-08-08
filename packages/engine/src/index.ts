@@ -153,13 +153,7 @@ export { bookedFills, pickRestingOrdersAsOf } from "./orders/select.js";
 // Ingest: the PURE Bitget open-orders parse and the venue-neutral join to the one
 // declared field. The IO shell — reading the export, prompting, appending — is the
 // TUI's, per ADR-001.
-export type {
-  ObservedOpenOrder,
-  OrderIdentity,
-  OrderAttribution,
-  FundingShortfall,
-  FundingCoverage,
-} from "./orders/ingest.js";
+export type { ObservedOpenOrder, OrderIdentity, OrderAttribution } from "./orders/ingest.js";
 // The ONE reserve admission policy and rung-placement rule, shared by the `O1` guard and
 // the available-capital report. `FundableReserve` replaces the old `ReserveBalance`: it
 // carries `currency`, and only `fundableReserves(data)` can produce one (#172).
@@ -174,12 +168,15 @@ export {
   canonicalDecimal,
   synthesizeOrderId,
   buildOrderPlacedRecords,
-  checkFundingCoverage,
   mergeCollidingClaims,
   detectChangedClaims,
   isDescriptorDifference,
   isFilledDifference,
 } from "./orders/ingest.js";
+// The `O1` funding-coverage guard, split from ingest because it changes with
+// reserve-admission policy rather than with the venue's row shape (#172, #179, #183).
+export type { FundingShortfall, FundingCoverage } from "./orders/coverage.js";
+export { checkFundingCoverage } from "./orders/coverage.js";
 export type {
   MergedOrderClaim,
   ChangedClaim,
