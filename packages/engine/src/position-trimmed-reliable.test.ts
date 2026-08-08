@@ -9,7 +9,6 @@
 //   T4 — full-retirement REJECT at the gate, and the position ALWAYS survives a trim
 //        (the fold never deletes).
 import {
-  applyEventToReference,
   buildCompositionReport,
   buildEventReference,
   crossReferenceEvent,
@@ -182,12 +181,12 @@ describe("PositionTrimmed — multi-tier + batch sufficiency (T3)", () => {
 
   it("is batch-aware: a later trim in the same batch sees the shrunk position", () => {
     const seed = genesis();
-    const reference = buildEventReference(seed, []);
 
-    // First trim removes all 4 c2 units; accept it and fold it into the reference.
-    const first = crossRef(seed, trim({ id: "t-a", removals: [{ tier: "c2", quantity: 4 }], proceeds: 400 }), reference);
+    // First trim removes all 4 c2 units; accept it and fold it into the world the rest
+    // of the batch is judged against (ADR-015: the accepted prefix IS the advance).
+    const first = crossRef(seed, trim({ id: "t-a", removals: [{ tier: "c2", quantity: 4 }], proceeds: 400 }), buildEventReference(seed, []));
     expect(first.result.kind).toBe("ok");
-    applyEventToReference(reference, first.event);
+    const reference = buildEventReference(seed, [first.event]);
 
     // A follow-on c2 trim must now fail: the batch-shrunk position holds 0 c2.
     const overC2 = crossRef(seed, trim({ id: "t-b", removals: [{ tier: "c2", quantity: 1 }], proceeds: 100 }), reference);

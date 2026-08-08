@@ -32,7 +32,6 @@ import { mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { captureIngestCommit, readAppVersion, resolveWorkspaceRoot } from "./ingest-commit.js";
 import {
-  applyEventToReference,
   buildEventReference,
   crossReferenceEvent,
   EVENT_SCHEMA_VERSION,
@@ -107,17 +106,22 @@ export async function ingestInbox(
   const existingLoad = await loadEventLog(paths.log);
   assertLogFullyLoaded(existingLoad, paths.log);
   const existing = existingLoad.events;
-  // The known world is genesis + the durable log; accepted batch events extend it
-  // in order, so a position opened earlier in this inbox can be referenced later.
-  const reference = buildEventReference(genesis, existing);
 
-  // The walk itself — parse, dedup by id before the guard, cross-reference, advance
-  // the reference on accept — is the engine's `walkPendingInbox`, shared verbatim
-  // with the price-feed's fetch-time rejection pre-check (audit finding 9). Only the
-  // magnitude dial is passed when the operator set it (`undefined` keeps the engine's
-  // own ±50% default). `haltOnRejection` is THIS caller's all-or-nothing policy: the
-  // walk stops at the first refusal and we throw below, so nothing is appended.
-  const walk = walkPendingInbox(parsed, reference, {
+  // The walk itself — parse, dedup by id before the guard, cross-reference, re-fold on
+  // accept — is the engine's `walkPendingInbox`, shared verbatim with the price-feed's
+  // fetch-time rejection pre-check (audit finding 9). The known world is handed in as
+  // INPUTS (genesis + the durable log) rather than as a pre-built reference: under
+  // ADR-015 the gate reads `foldEvents(genesis, acceptedSoFar)`, so the walk re-derives
+  // per accept and a position opened earlier in this inbox is citable later because the
+  // FOLD says it exists. Only the magnitude dial is passed when the operator set it
+  // (`undefined` keeps the engine's own ±50% default). `haltOnRejection` is THIS
+  // caller's all-or-nothing policy: the walk stops at the first refusal and we throw
+  // below, so nothing is appended.
+  //
+  // NOTE the posture change ADR-015 records: this fold now runs BEFORE the append, so a
+  // book that cannot be folded refuses the batch. That is deliberate, and unlike the
+  // best-effort fold in the capture block further down, which only ever warns.
+  const walk = walkPendingInbox(parsed, { genesis, priorEvents: existing }, {
     seenIds: new Set(existing.map((event) => event.id)),
     haltOnRejection: true,
     ...(options.magnitudeThreshold === undefined
@@ -207,7 +211,6 @@ export async function migrateLegacyLog(
   }
 
   const genesis = await loadGenesis(paths.genesis);
-  const reference = buildEventReference(genesis);
   const migrated: PortfolioEvent[] = [];
   const unresolved: string[] = [];
   let migratedCount = 0;
@@ -265,14 +268,26 @@ export async function migrateLegacyLog(
       migratedCount += 1;
     }
 
-    const crossRef = crossReferenceEvent(event, reference);
+    // WHAT "accepted so far" MEANS MID-MIGRATION (ADR-015 named this the sharp one).
+    // It is `migrated` — the prefix of the OUTPUT image, not of the input file. Every
+    // line before this one has already been repaired into its v2 shape and cleared the
+    // gate, and `migrated` is exactly the log that would exist if the migration stopped
+    // here. So the world this line is judged against is `foldEvents(genesis, migrated)`:
+    // the same question the spine asks of an inbox candidate, asked of the log the
+    // rewrite is building. A legacy line's PRE-migration shape never enters the world —
+    // it could not, it does not parse — which is why the walk had to be re-pointed at
+    // the accumulator rather than at the file being read.
+    //
+    // O(n²) folds over a one-shot, operator-initiated rewrite of a log this size is a
+    // price worth paying for judging against the real book; if the log ever grows to
+    // where that bites, fold incrementally here rather than reintroducing a shadow.
+    const crossRef = crossReferenceEvent(event, buildEventReference(genesis, migrated));
     if (crossRef.kind !== "ok") {
       throw new Error(
         `Migration aborted: line ${lineNumber} fails cross-reference after migration ` +
           `(${crossRef.path}: ${crossRef.message}).`,
       );
     }
-    applyEventToReference(reference, event);
     migrated.push(event);
   }
 

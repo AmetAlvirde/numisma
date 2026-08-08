@@ -1,12 +1,17 @@
 /**
  * Event-sourcing spine — fold.
  *
- * The fold to the read model plus the reserve/tier cash-math seam it and the
- * cross-ref shadow (`./crossref.ts`) share. `foldEvents` replays the genesis seed
- * plus an ordered event log into a plain {@link FundReviewData}, reusing the whole
- * existing `buildCompositionReport`/dashboard downstream. The reserve-delta helpers
- * are pure and exported so the cross-ref sufficiency gate can mirror the same
- * balances before the fold ever runs. See ADR-002 (Tier cost model) and ADR-003.
+ * The fold to the read model plus the reserve/tier cash-math seam. `foldEvents`
+ * replays the genesis seed plus an ordered event log into a plain
+ * {@link FundReviewData}, reusing the whole existing
+ * `buildCompositionReport`/dashboard downstream.
+ *
+ * SINCE ADR-015 THIS IS ALSO THE INGEST GATE'S WORLD. `crossref.ts` no longer mirrors
+ * the transitions below — it projects this function's output — so a change here moves
+ * what the gate admits, not just what the dashboard shows. `reserveDeltasForOpen` is
+ * still exported for the gate's per-Tier sufficiency arithmetic (it prices a debit the
+ * fold has not applied yet), but the BALANCES it checks that debit against come from
+ * here. See ADR-002 (Tier cost model), ADR-003 and ADR-015.
  */
 import type {
   CapitalTier,
@@ -171,18 +176,13 @@ export function foldEvents(
   // `costAnchors` below records ONLY the anchors the fold itself minted, so a
   // scale-in can re-price its own baseline and never recorded history.
   //
-  // First-position-wins here: if two genesis positions ever shared an instrument
-  // with different `markPrice`, this seeds the t0 anchor from the FIRST while the
-  // magnitude guard's `buildEventReference`/`noteClose` keeps the LAST (equal-asOf
-  // overwrite), so the fold anchor and the guard seed could diverge. Unreachable
-  // today (one position per instrument); revisit this tie-break if that changes.
-  //
-  // The two anchors also diverge, legitimately, after any scale-in: the ingest
-  // magnitude gate reads `buildEventReference(genesis)` — the SEED's closes — and
-  // never the fold's output, so the fold re-pricing its own cost anchor below is
-  // invisible to that gate by construction. Nothing reconciles the two, and
-  // nothing needs to: the gate compares an incoming event against recorded
-  // history, while the fold anchor is a display baseline for the journey.
+  // First-position-wins here: if two genesis positions ever shared an instrument with
+  // different `markPrice`, this seeds the t0 anchor from the FIRST. There is no longer
+  // a second seeding rule to disagree with it — ADR-015 made the ingest magnitude
+  // guard read THIS array (`buildEventReference` projects `closes[]` into its
+  // `lastClose` map), so the fold anchor and the guard's comparison point are the same
+  // value by construction, including after a scale-in re-prices the anchor below.
+  // Revisit the tie-break only if one instrument ever carries two genesis positions.
   const seededInstruments = new Set(closes.map((close) => close.instrumentId));
   // The fold-minted cost baseline per instrument (a genesis `markPrice` seed or an
   // entry VWAC), held by reference so a later scale-in can re-price it in place.
