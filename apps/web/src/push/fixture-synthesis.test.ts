@@ -27,6 +27,7 @@ import {
   NAV_JITTER_PP,
   NAV_MOVE_THRESHOLD_PCT,
   synthesizeAnchors,
+  SYNTHETIC_FUND_ID,
   SYNTHETIC_FUND_NAME,
   SYNTHETIC_START_NAV,
 } from "./fixture-synthesis.ts";
@@ -178,9 +179,8 @@ function shapeOf(anchor: SnapshotAnchor): string {
 describe("what survives — the projections slice 4 replays", () => {
   const out = synthesizeAnchors(REAL);
 
-  it("keeps every anchor date, in order, and the fund id", () => {
+  it("keeps every anchor date, in order", () => {
     expect(out.map((a) => a.asOf)).toEqual(REAL.map((a) => a.asOf));
-    expect(out.map((a) => a.fundId)).toEqual(REAL.map((a) => a.fundId));
   });
 
   it("copies the glance block VERBATIM — feedGap, missing[], suppressed, the floor", () => {
@@ -361,16 +361,29 @@ describe("the NAV jitter — closing the last recoverable series", () => {
     }
   });
 
-  it("emits the real 28-anchor fixture without the guard firing", () => {
-    // The end-to-end statement of sufficiency: the fund's own series regenerates
-    // clean. If a future day's move lands inside the band, THIS is where the next
-    // regeneration stops, with the date named.
+  it("leaves the guard silent on an ordinary series — regeneration is not blocked", () => {
+    // The statement of sufficiency, and it is a CONSTRUCTED series, not the fund's:
+    // nothing in this file can read the real 28 anchors (that is the whole point of
+    // the sanitizer). The real series' sufficiency is asserted where the generator
+    // actually holds it — `assertThresholdSideHolds` at regeneration time, which stops
+    // with the date named if a future day's move lands inside the band.
     expect(() => synthesizeAnchors(REAL)).not.toThrow();
   });
 });
 
-describe("what does NOT survive — every magnitude", () => {
+describe("what does NOT survive — every magnitude, and the fund's identity", () => {
   const out = synthesizeAnchors(REAL);
+
+  it("replaces the fund id — the real one never reaches the committed file", () => {
+    // `fundName` has been fictional since slice #149, but every anchor still carried
+    // the production `fund_id`, which named the fund in a PUBLIC repository just as
+    // plainly as the name would have — and it did so 28 times over, once per anchor.
+    // Row ids and labels are a separate matter: those stay verbatim on purpose, so
+    // this is the fund's IDENTITY being replaced, not the file being de-identified.
+    for (const anchor of out) {
+      expect(anchor.fundId).toBe(SYNTHETIC_FUND_ID);
+    }
+  });
 
   it("re-anchors the series at a round, obviously fictional NAV", () => {
     expect(out[0]!.report.totals.fundValueUsd).toBe(SYNTHETIC_START_NAV);

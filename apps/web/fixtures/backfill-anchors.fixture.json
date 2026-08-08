@@ -2,7 +2,7 @@
   "schemaVersion": 3,
   "anchors": [
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-06-26",
       "report": {
         "totals": {
@@ -424,7 +424,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-06-28",
       "report": {
         "totals": {
@@ -810,7 +810,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-06-30",
       "report": {
         "totals": {
@@ -1259,7 +1259,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-07-03",
       "report": {
         "totals": {
@@ -1682,7 +1682,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-07-04",
       "report": {
         "totals": {
@@ -2105,7 +2105,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-07-05",
       "report": {
         "totals": {
@@ -2528,7 +2528,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-07-06",
       "report": {
         "totals": {
@@ -2896,7 +2896,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-07-07",
       "report": {
         "totals": {
@@ -3264,7 +3264,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-07-08",
       "report": {
         "totals": {
@@ -3632,7 +3632,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-07-09",
       "report": {
         "totals": {
@@ -4000,7 +4000,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-07-10",
       "report": {
         "totals": {
@@ -4368,7 +4368,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-07-11",
       "report": {
         "totals": {
@@ -4736,7 +4736,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-07-12",
       "report": {
         "totals": {
@@ -5104,7 +5104,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-07-13",
       "report": {
         "totals": {
@@ -5472,7 +5472,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-07-14",
       "report": {
         "totals": {
@@ -5840,7 +5840,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-07-15",
       "report": {
         "totals": {
@@ -6208,7 +6208,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-07-16",
       "report": {
         "totals": {
@@ -6576,7 +6576,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-07-17",
       "report": {
         "totals": {
@@ -6944,7 +6944,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-07-18",
       "report": {
         "totals": {
@@ -7312,7 +7312,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-07-19",
       "report": {
         "totals": {
@@ -7680,7 +7680,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-07-20",
       "report": {
         "totals": {
@@ -8048,7 +8048,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-07-21",
       "report": {
         "totals": {
@@ -8416,7 +8416,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-07-22",
       "report": {
         "totals": {
@@ -8784,7 +8784,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-07-23",
       "report": {
         "totals": {
@@ -9152,7 +9152,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-07-24",
       "report": {
         "totals": {
@@ -9520,7 +9520,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-07-25",
       "report": {
         "totals": {
@@ -9888,7 +9888,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-07-26",
       "report": {
         "totals": {
@@ -10256,7 +10256,7 @@
       }
     },
     {
-      "fundId": "accumulus-fund",
+      "fundId": "sanitized-exploratory-fund",
       "asOf": "2026-07-27",
       "report": {
         "totals": {
