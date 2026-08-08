@@ -408,29 +408,52 @@ export function detectChangedClaims(
   // to compare the NEXT candidate against, never returned.
   const latestObserved = new Map<string, { observedAt: string; quantity: number }>();
   for (const record of known) {
-    if (record.kind === "orderPlaced") {
-      // FIRST placement wins, matching `pickRestingOrdersAsOf`: a repeat placement line is
-      // ignored there, so it must not be what a change is measured against here.
-      if (!placedById.has(record.id)) {
-        placedById.set(record.id, record);
+    // A SWITCH WITH A `never` LATCH, not an if-cascade closed by a comment. The cascade
+    // this replaces let a FIFTH `OrderKind` compile clean and contribute nothing, and a
+    // kind this function never learned to read is not a no-op here: IDEMPOTENCY LIVES IN
+    // THIS FUNCTION (see the docstring above), so a missed observation-bearing kind is
+    // #181 re-introduced silently — "the venue restated this", on every import, forever.
+    // The same latch the fold carries at `pickRestingOrdersAsOf`, for the same reason and
+    // in the same shape, so the two kind-readers cannot drift apart in what they handle.
+    switch (record.kind) {
+      case "orderPlaced": {
+        // FIRST placement wins, matching `pickRestingOrdersAsOf`: a repeat placement line
+        // is ignored there, so it must not be what a change is measured against here.
+        if (!placedById.has(record.id)) {
+          placedById.set(record.id, record);
+        }
+        break;
       }
-      continue;
-    }
-    if (record.kind === "orderFillObserved") {
-      const seen = latestObserved.get(record.id);
-      // `>=` — the LAST line in file order wins an equal-stamp tie, as above.
-      if (seen === undefined || record.observedAt >= seen.observedAt) {
-        latestObserved.set(record.id, {
-          observedAt: record.observedAt,
-          quantity: record.observedFilledQuantity,
-        });
+      case "orderFillObserved": {
+        const seen = latestObserved.get(record.id);
+        // `>=` — the LAST line in file order wins an equal-stamp tie, as above.
+        if (seen === undefined || record.observedAt >= seen.observedAt) {
+          latestObserved.set(record.id, {
+            observedAt: record.observedAt,
+            quantity: record.observedFilledQuantity,
+          });
+        }
+        break;
+      }
+      case "orderFilled":
+      case "orderCancelled": {
+        // DELIBERATELY NOT READ, and now said in code rather than only in a comment. This
+        // function answers "does the export AGREE with what the file last OBSERVED", which
+        // is a question about the venue's column; what the fund has BOOKED against the
+        // rung, and whether the claim was retired, is what the caller's partition weighs
+        // next, off `pickRestingOrdersAsOf`.
+        break;
+      }
+      default: {
+        // Compile-time only: an unknown kind cannot reach here at runtime, because
+        // `parseOrderRecord` refuses it first. A kind added to `OrderRecord` and never
+        // weighed here has to be given an arm above — including an explicit "not read"
+        // arm — instead of being ignored by silence.
+        const _never: never = record;
+        void _never;
+        break;
       }
     }
-    // `orderFilled` and `orderCancelled` are deliberately not read here. This function
-    // answers "does the export AGREE with what the file last OBSERVED", which is a
-    // question about the venue's column; what the fund has BOOKED against the rung, and
-    // whether the claim was retired, is what the caller's partition weighs next, off
-    // `pickRestingOrdersAsOf`.
   }
 
   const changed: ChangedClaim[] = [];
