@@ -45,8 +45,13 @@ agreed.
 fold consumes a position on close, the shadow did not, so a re-authored second
 `PositionClosed` with a fresh id passed the gate — the shadow still showed the
 position open — and then silently vanished at fold (`foldEvents`'s
-`PositionClosed` arm applies the cash leg only `if (closing)`), with `warnings:
-[]`. On the repo's own `cash-settlement.fixtures.ts` the shadow reached `amount
+`PositionClosed` arm applies the cash leg only `if (closing)`), surfacing as the
+composition report's `warnings: []`. [Precision note, 2026-08-08: read the
+`warnings` here as the report's, not the fold's. `foldEvents` returns
+`FundReviewData`, which has NO warnings field — the only `warnings` in
+`contracts.ts` is on `CompositionReport` (`:487`). The fold has no diagnostics
+channel to warn on at all; that is ledger item 18, still open, and it is why
+every rule of this class has to sit at ingest.] On the repo's own `cash-settlement.fixtures.ts` the shadow reached `amount
 3100 / c1 1400 / c2 1700` where the fold produced `amount 2300 / c1 1200 / c2
 1100`, and the divergence then compounded through a `Withdraw` of the phantom
 balance into a negative reserve lot, a dropped tier rollup, and NAV low by the
@@ -256,6 +261,24 @@ L ≈ 100k.
   rejects for Reserves, and the honest general fix is the same one: reject a verb
   dated before its target exists, at ingest. Not taken here — this ADR adds and
   removes no rejection rule — and recorded as the follow-up it is.
+
+  **THE FOLLOW-UP LANDED (note added 2026-08-08; this ADR's decision is
+  unchanged).** In two increments, both at ingest, both in `crossref.ts`:
+  `requirePositionBornBy` (spec #255 → PR #256, `80827b6`) shuts the birth side
+  exactly as worded above, and `requirePositionUntouchedAfter` (spec #257 → PR
+  #261, `e6ef2a5`) shuts the death side — a `PositionClosed` may not date itself
+  BEFORE a verb the log has already accepted for that position, which the wording
+  above does not cover and which was the wider hole. **The worked example in this
+  bullet is therefore no longer reproducible:** `[PositionOpened asOf 06-05
+  btc-pos, PositionClosed asOf 06-03 btc-pos]` is now rejected at ingest by
+  `requirePositionBornBy`; it is kept as the record of why the rule exists. The
+  cost recorded above — "guard reach on backdated input" — is consequently paid
+  back. The second rule reads one new `EventReference` field,
+  `positionLastVerbAsOf: Map<string, PositionTouch>`, built inside the pass over
+  accepted events that this ADR already pays for; **measured at 0.5% of
+  `buildEventReference` at L=50k, with a share that SHRINKS as L grows, so the
+  budget below is intact and its re-trigger unchanged.** No `compose/*` use, no
+  extra fold.
 
 - **Per-event fold cost is accepted, with the envelope above as the standing
   budget.** The re-trigger is explicit: if a future gate rule needs the `compose/*`

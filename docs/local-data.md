@@ -77,8 +77,12 @@ keeps the literal repo name; see the placeholder convention above.
 ## Validated ingest boundary
 
 Ingest is a validated boundary: every event must pass structural
-`parseEvent`, cross-reference against genesis ids, and a `PriceMarked`
-magnitude guard before it reaches the log. Any rejection leaves the durable
+`parseEvent`, cross-reference against the known ids (genesis plus everything
+the log has already introduced), the `PriceMarked` and settlement magnitude
+guards, and the date-ordering rules — a verb may not be dated before its
+target exists, and a `PositionClosed` may not be dated before a verb the log
+has already accepted for that same position — before it reaches the log. Any
+rejection leaves the durable
 log byte-for-byte unchanged and the inbox in place so it can be fixed and
 re-dropped.
 

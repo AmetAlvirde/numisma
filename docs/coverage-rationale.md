@@ -207,7 +207,9 @@ tests moved with the code into `packages/event-store/src/event-store.test.ts`.
 - **`packages/engine/src/events/*.ts`** (91.6% lines, measured) — the covered
   core is the fold itself (`events/fold.ts`, 96.91% lines) and the ingest
   cross-reference (`events/crossref.ts`, 94.3% lines), exercised by
-  `event-ingest.test.ts` and `fold.test.ts`. Uncovered in both: **per-field
+  `event-ingest.test.ts` and `fold.test.ts` — and, since the date-ordering
+  gates landed, by `position-born-by.test.ts` (29 tests) and
+  `position-seal.test.ts` (PR #261). Uncovered in both: **per-field
   rejection-message branches**. `events/parse.ts` (83.33% lines) is the bulk of
   the gap — 78 lines across 39 ranges, EVERY one the same shape: a
   `return eventError(...)` for one malformed field in one `parse*` function
@@ -227,6 +229,20 @@ tests moved with the code into `packages/event-store/src/event-store.test.ts`.
   `PositionOpened` cross-reference error-message wrapping) — the
   validator/cross-reference logic runs, but not every individual
   malformed-field or error-wrapping fixture exists yet.
+
+  > **STALE, flagged 2026-08-08 — do not trust the `events/crossref.ts` figures
+  > or citations in this bullet until re-measured.** PR #261 (`e6ef2a5`) inserted
+  > ~237 lines into the middle of `events/crossref.ts` and added a 791-line
+  > `position-seal.test.ts`, so **every `crossref.ts` line citation above now
+  > points at unrelated code** (spot-checked: `:361` is prose in a doc comment,
+  > `:636` is `requireReserveBornBy`'s docblock, `:707` is a `};`, `:761` is a
+  > signature line, `:824-825` sits inside `requirePositionUntouchedAfter`'s
+  > docblock) and the 94.3% lines figure predates both the new code and the new
+  > tests. Re-anchoring them by hand would be guesswork: the uncovered RANGES
+  > themselves have moved, not just their numbers. Closing this needs a fresh
+  > `pnpm coverage` run read off the istanbul HTML / `coverage-final.json` — never
+  > the v8 text column. This is ledger item 14's class (citing coverage by line
+  > number) firing exactly as predicted.
 
   `events/fold.ts` has four branches open, not the two this bullet
   used to claim: `:649-650` (the lot-selection helper's zero-`tierTotal` early
