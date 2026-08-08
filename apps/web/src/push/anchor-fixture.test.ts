@@ -3,14 +3,15 @@
  * (PRD #146 slice #149).
  *
  * NOTHING HERE SKIPS, AND THAT IS THE ENTIRE REASON THE FIXTURE EXISTS. Slice 4's
- * load-bearing test — replay all 28 anchors through `verdict.ts` and reproduce the
+ * load-bearing test — replay every anchor through `verdict.ts` and reproduce the
  * measured history — reads this file. If the file were wrong, absent, stale or
  * narrower than the reader expects, slice 4 would go green against a shape that
  * means nothing. So the fixture's own guarantees are proven here, on every machine,
  * with no Postgres and no private log:
  *
  *  - it loads at all, at the CURRENT schema version;
- *  - it holds the 28 anchors the log actually has, ascending and distinct;
+ *  - it holds every anchor the log has, ascending and distinct, starting where the
+ *    log's anchored history starts;
  *  - every payload is a real `ProjectionReport` — `{ totals, dashboard, glance }`
  *    and nothing wider (D8);
  *  - it discloses no mark date anywhere (D14);
@@ -38,22 +39,40 @@ import {
   SYNTHETIC_START_NAV,
 } from "./fixture-synthesis.ts";
 
-/** The log's anchored dates, measured. Genesis (2026-06-23) is t0, not an anchor. */
-const EXPECTED_ANCHOR_COUNT = 28;
+/**
+ * Where the log's anchored history starts. Genesis (2026-06-23) is t0, not an anchor.
+ *
+ * THE TOTAL COUNT IS DELIBERATELY NOT PINNED. The fixture grows by one on every push
+ * — `pnpm backfill -- --fixture-only` is the only supported regeneration path, and
+ * the thing an operator runs after any glance change — so a hard-coded 28 turns red
+ * on a day whose only event was the fund having a normal one. What the count was
+ * really guarding is that the file is not narrower than its readers expect, and that
+ * is asserted below as properties the file keeps as it grows: it starts here, it
+ * holds the dates this suite names, and it is longer than the handful of anchors any
+ * single test reads.
+ */
 const FIRST_ANCHOR = "2026-06-26";
+
+/**
+ * The anchors THIS suite reads by name. Every one must be present, or the assertions
+ * that read them would be asserting over a fixture that no longer contains the case
+ * they were written for. `anchorAt` already throws on a missing date; naming them
+ * here makes the dependency legible in one place instead of four call sites.
+ */
+const NAMED_ANCHORS = [FIRST_ANCHOR, "2026-06-28"];
 
 /**
  * The tripwire's band, expressed WITHOUT the real series.
  *
  * This used to hold three real NAVs and assert none of them appeared in the file.
  * That worked, but it put the very numbers it was protecting into a public
- * repository — and it only ever sampled three anchors out of 28.
+ * repository — and it only ever sampled three anchors out of the whole file.
  *
  * The magnitude-free form is strictly stronger. Synthesis re-anchors the series at
  * {@link SYNTHETIC_START_NAV} and carries it forward by day-over-day moves that are
  * small by construction, so EVERY synthesized NAV sits near that anchor. The real
  * fund's NAV is a different order of magnitude entirely. So "is every number in the
- * file inside the synthetic band" catches a bypassed synthesis on ALL 28 anchors,
+ * file inside the synthetic band" catches a bypassed synthesis on EVERY anchor,
  * needs no real value to compare against, and cannot itself leak one.
  */
 const SYNTHETIC_BAND_FACTOR = 2;
@@ -61,8 +80,14 @@ const SYNTHETIC_BAND_FACTOR = 2;
 describe("the committed anchor fixture", () => {
   it("loads with no database and no durable log", async () => {
     const anchors = await loadAnchorFixture();
-    expect(anchors.length).toBe(EXPECTED_ANCHOR_COUNT);
-    expect(anchors[0]?.asOf).toBe(FIRST_ANCHOR);
+    const dates = anchors.map((a) => a.asOf);
+    expect(dates[0]).toBe(FIRST_ANCHOR);
+    // A real history, not a stub: the named cases are all here, and there is more in
+    // the file than the cases any one test reads.
+    for (const named of NAMED_ANCHORS) {
+      expect(dates, `the fixture no longer holds ${named}`).toContain(named);
+    }
+    expect(dates.length).toBeGreaterThan(NAMED_ANCHORS.length);
   });
 
   it("holds distinct anchored dates in ascending order", async () => {
@@ -137,7 +162,7 @@ describe("the committed anchor fixture", () => {
   it("holds a NAV series that no published NAV can unscale", async () => {
     // THE LEAK THIS CLOSES, ASSERTED ON THE COMMITTED BYTES. If every day-over-day
     // move were exact, `realNav[i] / fixtureNav[i]` would be the SAME constant on
-    // every anchor, and one published NAV would hand over all 28. The jitter makes
+    // every anchor, and one published NAV would hand over the whole series. The jitter makes
     // that ratio wander, so no single divisor reconstructs the series.
     //
     // Checked without the real series in hand: an exactly-preserved history has
