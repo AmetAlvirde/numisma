@@ -35,6 +35,7 @@ import { COMPOSITION_SNAPSHOT_SCHEMA_VERSION } from "../projection/contract.ts";
 import { anchorAt, loadAnchorFixture } from "./anchor-fixture.ts";
 import {
   NAV_MOVE_THRESHOLD_PCT,
+  SYNTHETIC_FUND_ID,
   SYNTHETIC_FUND_NAME,
   SYNTHETIC_START_NAV,
 } from "./fixture-synthesis.ts";
@@ -104,10 +105,15 @@ describe("the committed anchor fixture", () => {
     expect([...dates].sort()).toEqual(dates);
   });
 
-  it("is one fund, and every anchor names it", async () => {
+  it("is one fund, and every anchor names it — by its SYNTHETIC id", async () => {
+    // On the COMMITTED BYTES, not on the generator's output: the file is what this
+    // public repository publishes, and the real `fund_id` used to be in it on all 28
+    // anchors. A regeneration that bypassed synthesis would put it back, and a
+    // generator-side test would not notice.
     const anchors = await loadAnchorFixture();
-    expect(new Set(anchors.map((a) => a.fundId)).size).toBe(1);
-    expect(anchors.every((a) => a.fundId.length > 0)).toBe(true);
+    expect(new Set(anchors.map((a) => a.fundId))).toEqual(
+      new Set([SYNTHETIC_FUND_ID]),
+    );
   });
 
   it("is anchored at a round fictional NAV and names an obviously fictional fund", async () => {
