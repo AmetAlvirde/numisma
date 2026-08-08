@@ -14,15 +14,18 @@
  * that a comment was the only thing holding in place. See
  * `import-orders-changed-claims.test.ts`.
  *
- * THE WORDS STAY IN THE SHELL. Nothing here renders an operator line; each class is
- * returned and `importBitgetOpenOrders` owns the refusal it raises over it, in the order
- * hazard demands.
+ * THE REFUSAL WORDS STAY IN THE SHELL, AND {@link renderClaimDifferences} IS NOT ONE. Each
+ * class is returned and `importBitgetOpenOrders` owns the refusal it raises over it, in the
+ * order hazard demands; what came across is the FOLD OVER A DIFFERENCE LIST that two of
+ * those refusals both printed (#36) — a rendering of this module's own union, beside the
+ * function that classifies it, not a sentence addressed to the operator.
  */
 import {
   isDescriptorDifference,
   isFilledDifference,
   type BitgetOpenOrder,
   type ChangedClaim,
+  type ClaimDifference,
   type RestingOrder,
 } from "@numisma/engine";
 import type { RecordedObservation } from "./import-orders-report.js";
@@ -222,6 +225,28 @@ export function partitionChangedClaims(
   }
 
   return { amended, backwards, descriptors, restated };
+}
+
+/**
+ * The differences one claim carries, as the operator reads them — `field known → observed`,
+ * comma-separated.
+ *
+ * ONE TEMPLATE FOR BOTH REFUSALS, and that is the whole of it (#36). `amended` and
+ * `descriptors` printed this same fold at two sites in `import-orders.ts`, with a comment
+ * at the second saying so, and only one of them was covered by a test: a change to how a
+ * difference reads — units, the `→` in a narrow terminal, quoting a text value — had to be
+ * made twice and could be verified once.
+ *
+ * WELL-TYPED OVER BOTH MEMBERS OF THE UNION, which is what let the two sites share it
+ * rather than branch. `known` and `observed` are a number pair or a string pair depending
+ * on the field, and neither is formatted here beyond interpolation — a `NumericClaimField`
+ * is printed exactly as the engine derived it, so the figure the operator is shown is the
+ * one the comparison was made on.
+ */
+export function renderClaimDifferences(differences: readonly ClaimDifference[]): string {
+  return differences
+    .map((difference) => `${difference.field} ${difference.known} → ${difference.observed}`)
+    .join(", ");
 }
 
 /**

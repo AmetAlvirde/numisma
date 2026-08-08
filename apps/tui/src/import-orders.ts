@@ -35,7 +35,11 @@ import {
 } from "@numisma/engine";
 import type { OrdersLoad } from "@numisma/preferences";
 import { appendKey, currentClaimKeys } from "./import-orders-append-filter.js";
-import { partitionChangedClaims, weighRemainders } from "./import-orders-changed-claims.js";
+import {
+  partitionChangedClaims,
+  renderClaimDifferences,
+  weighRemainders,
+} from "./import-orders-changed-claims.js";
 import { declareFunding } from "./import-orders-funding-declaration.js";
 import { describeMerge } from "./import-orders-merge-notice.js";
 import {
@@ -352,9 +356,7 @@ export async function importBitgetOpenOrders(
   if (amended.length > 0) {
     const detail = amended
       .map((claim) => {
-        const differences = claim.differences
-          .map((difference) => `${difference.field} ${difference.known} → ${difference.observed}`)
-          .join(", ");
+        const differences = renderClaimDifferences(claim.differences);
         // The remainder clause is appended ONLY when the remainder test is what refused
         // this claim, because otherwise it is not the reason and printing it would send
         // the operator after the wrong disagreement. A changed `quantity` refuses on its
@@ -398,16 +400,10 @@ export async function importBitgetOpenOrders(
   }
 
   if (descriptors.length > 0) {
-    // The SAME detail template the amendment refusal renders, over the same
-    // `ClaimDifference` union — `known` and `observed` are a number pair or a string pair
-    // depending on the field, and the template is well-typed over both.
+    // The SAME detail template the amendment refusal renders — literally the same function
+    // since #36, so a change to how a difference reads reaches both refusals at once.
     const detail = descriptors
-      .map((claim) => {
-        const differences = claim.differences
-          .map((difference) => `${difference.field} ${difference.known} → ${difference.observed}`)
-          .join(", ");
-        return `${claim.id} (${differences})`;
-      })
+      .map((claim) => `${claim.id} (${renderClaimDifferences(claim.differences)})`)
       .join("; ");
     return reject(
       io,

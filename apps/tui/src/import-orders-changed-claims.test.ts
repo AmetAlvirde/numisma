@@ -14,6 +14,7 @@ import type { BitgetOpenOrder, ChangedClaim, RestingOrder } from "@numisma/engin
 import { describe, expect, it } from "vitest";
 import {
   partitionChangedClaims,
+  renderClaimDifferences,
   weighRemainders,
 } from "./import-orders-changed-claims.js";
 
@@ -260,5 +261,35 @@ describe("weighRemainders", () => {
       onFile: 10,
       atVenue: 10,
     });
+  });
+});
+
+/**
+ * THE DETAIL TEMPLATE, ASSERTED ONCE — the reason it left `import-orders.ts`. Two refusals
+ * printed the same fold over `ClaimDifference` and only one of them was covered, so a
+ * change to how a difference reads had to be made twice and could be verified once.
+ */
+describe("renderClaimDifferences", () => {
+  it("renders a single difference as `field known → observed`", () => {
+    expect(renderClaimDifferences([filledDifference(6, 8)])).toBe("observedFilledQuantity 6 → 8");
+  });
+
+  it("joins several differences with `, ` in the order the claim carries them", () => {
+    // The mixed union in one call: the template is well-typed over BOTH members, which is
+    // why the two refusal sites could share it rather than branch on the field's type.
+    expect(
+      renderClaimDifferences([
+        filledDifference(6, 8),
+        { field: "timeInForce", known: "GTC", observed: "IOC" },
+        { field: "quantity", known: 10, observed: 12 },
+      ]),
+    ).toBe("observedFilledQuantity 6 → 8, timeInForce GTC → IOC, quantity 10 → 12");
+  });
+
+  it("renders an empty difference list as the empty string", () => {
+    // Unreachable from the partition — a `ChangedClaim` exists BECAUSE something differs —
+    // but the empty fold is what both call sites relied on implicitly, so it is pinned here
+    // rather than left to `Array.prototype.join`'s reputation.
+    expect(renderClaimDifferences([])).toBe("");
   });
 });
