@@ -27,7 +27,8 @@ import {
 import { loadFoldedReview, resolveEventStorePaths } from "@numisma/event-store";
 import { anchorAt, loadAnchorFixture } from "./anchor-fixture.ts";
 import { NAV_JITTER_PP } from "./fixture-synthesis.ts";
-import { buildGlanceBlock, SUPPRESSION_KEYS } from "./glance.ts";
+import { SUPPRESSION_KEYS } from "../projection/contract.ts";
+import { buildGlanceBlock } from "./glance.ts";
 
 /** The measured quiet Sunday. Marks that day: btc, eth, render, gram — the 4 crypto. */
 const QUIET_SUNDAY = "2026-07-26";

@@ -39,21 +39,7 @@ import type {
 } from "@numisma/engine";
 import { addDays, composeRowDependencies, instrumentsForSource } from "@numisma/engine";
 import type { GlanceBlock, GlanceMissingMark } from "../projection/contract.ts";
-
-/**
- * The three header keys — the closed set of standing numbers D3 names.
- *
- * Slice #151 adds `CompositionRow.id`s to the SAME array (see
- * {@link suppressedRowIds}), which costs no schema change: that is the whole reason
- * `suppressed` was a key list and not N booleans, and it is why v3 is still v3.
- * A reader therefore tells the two apart by the key itself — the header keys are
- * these three literals, everything else is a row id.
- */
-export const SUPPRESSION_KEYS = {
-  fundValue: "summary.fundValueUsd",
-  change: "summary.change",
-  reserve: "summary.reserve",
-} as const;
+import { SUPPRESSION_KEYS } from "../projection/contract.ts";
 
 /** How often a venue is expected to produce a mark. */
 type VenueCadence = "daily" | "weekdays";

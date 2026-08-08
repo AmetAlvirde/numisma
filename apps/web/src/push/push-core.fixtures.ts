@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import type { CompositionReport } from "@numisma/engine";
-import type { GlanceBlock } from "../projection/contract.ts";
+import { SUPPRESSION_KEYS, type GlanceBlock } from "../projection/contract.ts";
 import {
   resolveEventStorePaths,
   type EventStorePaths,
@@ -108,5 +108,5 @@ export const TEST_GLANCE: GlanceBlock = {
       { rowId: "instrument:googl", label: "GOOGL (Alphabet Inc.)" },
     ],
   },
-  suppressed: ["summary.fundValueUsd", "summary.change", "summary.reserve"],
+  suppressed: Object.values(SUPPRESSION_KEYS),
 };
