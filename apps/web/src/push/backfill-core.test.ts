@@ -25,6 +25,7 @@ import {
 import {
   enumerateAnchors,
   foldAnchor,
+  parseBackfillArgs,
   runBackfill,
   toSnapshotAnchors,
   writeAnchorFixture,
@@ -80,6 +81,55 @@ const THREE_ANCHORS =
   `${priceMarkedLine("m2", "2026-06-09", 175)}\n` +
   `${priceMarkedLine("m3", "2026-06-09", 176)}\n` +
   `${priceMarkedLine("m4", "2026-06-12", 180)}\n`;
+
+/**
+ * The half `backfill.ts` used to keep unreachable, for the same reason `push.ts`
+ * did: two `argv.includes` calls inside an unimportable `main()`. `--fixture-only`
+ * is the flag that decides whether a WRITE CREDENTIAL is required at all, so fusing
+ * it with `--fixture` would either demand production write access to regenerate a
+ * local fixture or, worse, write to the database on a run the operator asked to keep
+ * local. Pinned here, with no database and no credential.
+ */
+describe("parseBackfillArgs", () => {
+  it("defaults to replay-into-the-DB with no fixture rewrite", () => {
+    expect(parseBackfillArgs([])).toEqual({
+      writeFixture: false,
+      fixtureOnly: false,
+    });
+  });
+
+  it("--fixture replays into the DB AND rewrites the fixture", () => {
+    expect(parseBackfillArgs(["--fixture"])).toEqual({
+      writeFixture: true,
+      fixtureOnly: false,
+    });
+  });
+
+  it("--fixture-only implies writeFixture (the rewrite is its whole point)", () => {
+    expect(parseBackfillArgs(["--fixture-only"])).toEqual({
+      writeFixture: true,
+      fixtureOnly: true,
+    });
+  });
+
+  it("does NOT let --fixture alone trip the credential-free, DB-free path", () => {
+    expect(parseBackfillArgs(["--fixture"]).fixtureOnly).toBe(false);
+  });
+
+  it("ignores the `--` pnpm forwards for `pnpm backfill -- --fixture-only`", () => {
+    expect(parseBackfillArgs(["--", "--fixture-only"])).toEqual({
+      writeFixture: true,
+      fixtureOnly: true,
+    });
+  });
+
+  it("ignores tokens it does not know rather than failing the backfill", () => {
+    expect(parseBackfillArgs(["--verbose", "extra"])).toEqual({
+      writeFixture: false,
+      fixtureOnly: false,
+    });
+  });
+});
 
 describe("enumerateAnchors — the log's DISTINCT anchored dates (V3)", () => {
   it("returns each anchored date once, ascending, never a calendar day", async () => {

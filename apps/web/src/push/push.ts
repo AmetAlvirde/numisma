@@ -5,10 +5,10 @@
  * and idempotently upserts it into the projection DB using the WRITE credential
  * (PROJECTION_WRITE_DATABASE_URL). There is no fixture path and no flag that
  * restores one: this command can only push real data. The
- * pure derivation and the actual upsert SQL live in `push-core.ts` (importable,
- * unit- and integration-tested); this file is just the argv + credential +
- * process-exit wiring around them, so importing `push-core.ts` never runs the
- * script.
+ * pure derivation, the actual upsert SQL and the argv parse all live in
+ * `push-core.ts` (importable, unit- and integration-tested); this file is just the
+ * credential + ordering + process-exit wiring around them, so importing
+ * `push-core.ts` never runs the script.
  *
  *   pnpm --filter @numisma/web push                 # fold the log, upsert the snapshot
  *   pnpm --filter @numisma/web push -- --init       # create table first, then upsert
@@ -31,6 +31,7 @@ import { readSchemaDdl } from "../projection/provision.ts";
 import {
   buildGlanceForAnchor,
   loadCurrentFold,
+  parsePushArgs,
   upsertSnapshot,
 } from "./push-core.ts";
 
@@ -46,9 +47,10 @@ async function initSchema(pool: Pool): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  // Exact-match argv, so `--init-only` never also trips `--init`.
-  const initOnly = process.argv.includes("--init-only");
-  const doInit = initOnly || process.argv.includes("--init");
+  // `argv.slice(2)` drops the node binary and this script's own path; the parser and
+  // the reasoning behind its exact-match flag pairing live in `push-core.ts`, where a
+  // test can reach them.
+  const { init: doInit, initOnly } = parsePushArgs(process.argv.slice(2));
 
   const connectionString = process.env.PROJECTION_WRITE_DATABASE_URL;
   if (!connectionString) {
