@@ -5,7 +5,6 @@
 // contract of both — accept the valid shapes, reject the malformed / unknown-
 // reference / id-collision / implausible-price cases with a precise path/message.
 import {
-  applyEventToReference,
   buildCompositionReport,
   buildEventReference,
   crossReferenceEvent,
@@ -344,8 +343,9 @@ describe("crossReferenceEvent — unknown reference (MF1)", () => {
   });
 
   it("accepts a PositionClosed for an id introduced earlier in the same batch", () => {
-    const reference = buildEventReference(genesis());
-    applyEventToReference(reference, asEvent(openedInput())); // opens btc-core
+    // The world AFTER the open: ADR-015 builds it by folding the accepted prefix,
+    // not by advancing a shadow. Opens btc-core.
+    const reference = buildEventReference(genesis(), [asEvent(openedInput())]);
     // btc-core is 1 lot @ entry/last close 100 → expected ~100; settle at it.
     const close = closedInput({ positionId: "btc-core", settlement: { reserveId: "cash-core", proceeds: 100 } });
     expect(crossReferenceEvent(asEvent(close), reference).kind).toBe("ok");
@@ -410,8 +410,7 @@ describe("crossReferenceEvent — InvalidationMarked reference + post-close gate
   });
 
   it("accepts a mark on a position opened earlier in the same batch", () => {
-    const reference = buildEventReference(genesis());
-    applyEventToReference(reference, asEvent(openedInput())); // opens btc-core
+    const reference = buildEventReference(genesis(), [asEvent(openedInput())]); // opens btc-core
     expect(
       crossReferenceEvent(asEvent(invalidationInput({ positionId: "btc-core" })), reference).kind,
     ).toBe("ok");
@@ -426,8 +425,7 @@ describe("crossReferenceEvent — InvalidationMarked reference + post-close gate
   });
 
   it("rejects a post-close mark and names the closed case distinctly (R4)", () => {
-    const reference = buildEventReference(genesis());
-    applyEventToReference(reference, asEvent(closedInput())); // retires aapl-core
+    const reference = buildEventReference(genesis(), [asEvent(closedInput())]); // retires aapl-core
     const error = expectRejected(
       crossReferenceEvent(asEvent(invalidationInput({ positionId: "aapl-core" })), reference),
     );
@@ -444,9 +442,10 @@ describe("crossReferenceEvent — InvalidationMarked reference + post-close gate
 // NAV drifted with `warnings: []` — the silent-cash-leg class ADR-003's fail-loud
 // posture exists to eliminate.
 //
-// The closed world-state below is built by running a real close through
-// `applyEventToReference` and never by reaching into the reference's internals, so
-// these locks hold whatever encoding the gate later uses to remember a retired id.
+// The closed world-state below is built by folding a real close into the world
+// (`buildEventReference(genesis, [close])`) and never by reaching into the reference's
+// internals, so these locks hold whatever encoding the gate uses to remember a retired
+// id — as they did across ADR-015, which replaced the shadow with the fold itself.
 describe("crossReferenceEvent — PositionClosed post-close gate (audit MUST FIX 1)", () => {
   it("accepts the first close of a known open position", () => {
     expect(crossReferenceEvent(asEvent(closedInput()), buildEventReference(genesis())).kind).toBe(
@@ -455,10 +454,9 @@ describe("crossReferenceEvent — PositionClosed post-close gate (audit MUST FIX
   });
 
   it("rejects a re-authored second close of an already-closed position", () => {
-    const reference = buildEventReference(genesis());
     const first = asEvent(closedInput());
-    expect(crossReferenceEvent(first, reference).kind).toBe("ok");
-    applyEventToReference(reference, first); // retires aapl-core
+    expect(crossReferenceEvent(first, buildEventReference(genesis())).kind).toBe("ok");
+    const reference = buildEventReference(genesis(), [first]); // retires aapl-core
 
     // A fresh event id: the durable log's id-keyed dedup cannot see this as a
     // duplicate, so the gate is the only thing standing between it and the fold.

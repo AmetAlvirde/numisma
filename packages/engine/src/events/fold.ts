@@ -1,12 +1,17 @@
 /**
  * Event-sourcing spine — fold.
  *
- * The fold to the read model plus the reserve/tier cash-math seam it and the
- * cross-ref shadow (`./crossref.ts`) share. `foldEvents` replays the genesis seed
- * plus an ordered event log into a plain {@link FundReviewData}, reusing the whole
- * existing `buildCompositionReport`/dashboard downstream. The reserve-delta helpers
- * are pure and exported so the cross-ref sufficiency gate can mirror the same
- * balances before the fold ever runs. See ADR-002 (Tier cost model) and ADR-003.
+ * The fold to the read model plus the reserve/tier cash-math seam. `foldEvents`
+ * replays the genesis seed plus an ordered event log into a plain
+ * {@link FundReviewData}, reusing the whole existing
+ * `buildCompositionReport`/dashboard downstream.
+ *
+ * SINCE ADR-015 THIS IS ALSO THE INGEST GATE'S WORLD. `crossref.ts` no longer mirrors
+ * the transitions below — it projects this function's output — so a change here moves
+ * what the gate admits, not just what the dashboard shows. `reserveDeltasForOpen` is
+ * still exported for the gate's per-Tier sufficiency arithmetic (it prices a debit the
+ * fold has not applied yet), but the BALANCES it checks that debit against come from
+ * here. See ADR-002 (Tier cost model), ADR-003 and ADR-015.
  */
 import type {
   CapitalTier,
@@ -163,39 +168,78 @@ export function foldEvents(
   let usdMxn = genesis.review.usdMxn;
   let latestAsOf = genesis.review.asOf;
 
+  // O(1) lookup of an existing close by (instrument, date). Held ALONGSIDE `closes[]`
+  // — the array is the output shape and stays exactly as it was — because the
+  // `PriceMarked` arm's same-day lookup used to scan the array, one linear pass per
+  // mark over a list that grows one entry per mark. On the durable log's real shape
+  // (98.5% `PriceMarked`) that made `foldEvents` quadratic, and ADR-015's ingest budget
+  // — a fold per accepted event — multiplies it by the batch size. First-write-wins,
+  // matching the `find` it replaces: when two closes share a key the earlier entry is
+  // the one the arm resolved, and it is the one the map keeps.
+  const closesByKey = new Map<string, Close>();
+  const closeKey = (instrumentId: string, asOf: string): string => `${instrumentId}|${asOf}`;
+  const pushClose = (close: Close): void => {
+    closes.push(close);
+    const key = closeKey(close.instrumentId, close.asOf);
+    if (!closesByKey.has(key)) {
+      closesByKey.set(key, close);
+    }
+  };
+  for (const close of closes) {
+    const key = closeKey(close.instrumentId, close.asOf);
+    if (!closesByKey.has(key)) {
+      closesByKey.set(key, close);
+    }
+  }
+
   // Seed a t0 baseline Close per genesis-held instrument so the FIRST PriceMarked
   // already yields a 2-point journey (the journey builder skips single anchors).
   // The anchor is the genesis `markPrice`, NOT cost: that keeps it coherent with
   // the authoritative valuation, so no synthetic `markprice-close-mismatch` fires.
-  // Genesis-provided closes win — we only fill instruments that have none, and
   // `costAnchors` below records ONLY the anchors the fold itself minted, so a
   // scale-in can re-price its own baseline and never recorded history.
   //
-  // First-position-wins here: if two genesis positions ever shared an instrument
-  // with different `markPrice`, this seeds the t0 anchor from the FIRST while the
-  // magnitude guard's `buildEventReference`/`noteClose` keeps the LAST (equal-asOf
-  // overwrite), so the fold anchor and the guard seed could diverge. Unreachable
-  // today (one position per instrument); revisit this tie-break if that changes.
+  // A GENESIS CLOSE SUPPRESSES THE ANCHOR ONLY IF IT IS DATED `review.asOf` OR LATER.
+  // A genesis close dated BEFORE the seed is stale history, not the seed's valuation:
+  // suppressing the t0 anchor for it made that older price the instrument's latest
+  // close, and since ADR-015 the ingest magnitude guard compares against exactly this
+  // array — so a seed carrying `markPrice 150 @ 06-01` plus a `40 @ 05-01` close would
+  // have judged the next honest 150 mark as a 275% deviation and stalled the price
+  // feed. The rule here is the one the deleted shadow applied (seed every held
+  // instrument at `review.asOf`; let a genesis close win only from that date on), which
+  // is what makes ADR-015's "with the same genesis seeding" claim true.
   //
-  // The two anchors also diverge, legitimately, after any scale-in: the ingest
-  // magnitude gate reads `buildEventReference(genesis)` — the SEED's closes — and
-  // never the fold's output, so the fold re-pricing its own cost anchor below is
-  // invisible to that gate by construction. Nothing reconciles the two, and
-  // nothing needs to: the gate compares an incoming event against recorded
-  // history, while the fold anchor is a display baseline for the journey.
+  // Multiple genesis positions per instrument are NORMAL (the real seed carries three
+  // btc and two eth), so the first-position-wins tie-break below is load-bearing, not
+  // hypothetical. It is safe because those positions share one instrument-level
+  // `markPrice` in the seed — whichever is first mints the same anchor price — and an
+  // instrument whose genesis close already covers `review.asOf` mints no anchor at all.
+  // ADR-015 made the ingest magnitude guard read THIS array (`buildEventReference`
+  // projects `closes[]` into its `lastClose` map), so the fold anchor and the guard's
+  // comparison point are the same value by construction, including after a scale-in
+  // re-prices the anchor below. What would need revisiting is only a seed whose two
+  // positions on one instrument carried DIFFERENT `markPrice`s.
   const seededInstruments = new Set(closes.map((close) => close.instrumentId));
+  const genesisCloseCoversReview = new Set(
+    (genesis.closes ?? [])
+      .filter((close) => close.asOf >= genesis.review.asOf)
+      .map((close) => close.instrumentId),
+  );
   // The fold-minted cost baseline per instrument (a genesis `markPrice` seed or an
   // entry VWAC), held by reference so a later scale-in can re-price it in place.
   const costAnchors = new Map<string, Close>();
   for (const position of genesis.positions) {
-    if (!seededInstruments.has(position.instrumentId)) {
+    if (
+      !genesisCloseCoversReview.has(position.instrumentId) &&
+      !costAnchors.has(position.instrumentId)
+    ) {
       seededInstruments.add(position.instrumentId);
       const anchor: Close = {
         instrumentId: position.instrumentId,
         asOf: genesis.review.asOf,
         price: position.markPrice,
       };
-      closes.push(anchor);
+      pushClose(anchor);
       costAnchors.set(position.instrumentId, anchor);
     }
   }
@@ -240,7 +284,7 @@ export function foldEvents(
             asOf: event.asOf,
             price: entryPrice,
           };
-          closes.push(anchor);
+          pushClose(anchor);
           costAnchors.set(position.instrumentId, anchor);
         }
         // Cash leg: debit the funding reserve. Sufficiency was proven at ingest.
@@ -386,16 +430,18 @@ export function foldEvents(
         // `markprice-close-mismatch`. Overwriting instead makes the display agree with
         // valuation by construction, and makes two marks on one day keep the LAST
         // (matching the latest-wins `markPrice`) rather than the first.
-        const sameDay = closes.find(
-          (close) => close.instrumentId === event.instrumentId && close.asOf === event.asOf,
-        );
+        //
+        // The lookup goes through `closesByKey`, not a scan of `closes[]`: this arm runs
+        // once per mark and the durable log is overwhelmingly marks, so scanning made
+        // the whole fold quadratic in its most common event.
+        const sameDay = closesByKey.get(closeKey(event.instrumentId, event.asOf));
         if (sameDay) {
           // The overwritten close may BE the fold's cost anchor for this instrument;
           // it stays registered but is unreachable to a later scale-in, which refuses
           // to blend once `latestMark` holds a real mark for the instrument.
           sameDay.price = event.price;
         } else {
-          closes.push({ instrumentId: event.instrumentId, asOf: event.asOf, price: event.price });
+          pushClose({ instrumentId: event.instrumentId, asOf: event.asOf, price: event.price });
         }
         if (event.usdMxn !== undefined) {
           usdMxn = event.usdMxn;

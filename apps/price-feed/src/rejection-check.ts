@@ -38,7 +38,6 @@
  * functions, consumed unchanged.
  */
 import {
-  buildEventReference,
   crossReferenceEvent,
   walkPendingInbox,
   type EventReference,
@@ -107,7 +106,7 @@ export interface SpineWorld {
  * Reconstruct the spine's known world the way `ingestInbox` does: genesis + the
  * durable log, THEN fold in the currently-pending inbox events in order (parse
  * each, dedup-skip any id already in the log, `crossReferenceEvent` the rest and
- * `applyEventToReference` the accepted ones so the reference ADVANCES). This is the
+ * re-fold on each accept so the world ADVANCES). This is the
  * exact reference the spine judges this run's fresh marks against — without it a
  * hand-authored corrective mark sitting in the inbox would make the pre-check
  * falsely report a rejection the spine would never raise.
@@ -143,12 +142,6 @@ export async function loadSpineReference(
   assertLogFullyLoaded(load, paths.log);
   const priorEvents: PortfolioEvent[] = load.events;
 
-  // The known world is genesis + the durable log; accepted pending inbox events
-  // extend it in order, exactly as `ingestInbox` — because it is the same walk.
-  // The seed set is the log ids: the ids `walkPendingInbox` dedup-skips before the
-  // guard even runs.
-  const reference = buildEventReference(genesis, priorEvents);
-
   // Fold in the PRE-EXISTING inbox: everything on disk except the tail this run just
   // appended (which are the marks being JUDGED, not batch context — folding them
   // would double-count them against themselves).
@@ -160,13 +153,16 @@ export async function loadSpineReference(
   // THE SAME WALK THE SPINE RUNS (`walkPendingInbox`), differing only in error
   // policy: `ingestInbox` halts on the first refusal and throws; this advisory
   // collects every refusal, because a doomed mark queued by a prior run must not
-  // hide a second one. The walk advances `reference` in place on each accepted
-  // event and never on a rejected one — the spine's behavior, not a copy of it.
+  // hide a second one. The known world goes in as INPUTS (genesis + the durable log,
+  // the seed set being the log ids `walkPendingInbox` dedup-skips before the guard
+  // runs) and comes back out as `walk.reference` — genesis + log + every accepted
+  // pending event, re-folded per accept and never advanced by a rejected one, exactly
+  // as ADR-015 has the spine do it. Not a copy of the spine's behavior: the same walk.
   // The dial rides along: the pending fold is judged by the SAME threshold the fresh
   // marks are (`findMarkRejections`), or the walk would fold the inbox at the engine
   // default while this run's marks were judged at the caller's dial. Only set it when
   // the caller did (exactOptionalPropertyTypes forbids an explicit `undefined`).
-  const walk = walkPendingInbox(pending, reference, {
+  const walk = walkPendingInbox(pending, { genesis, priorEvents }, {
     seenIds: new Set(priorEvents.map((event) => event.id)),
     ...(options?.magnitudeThreshold === undefined
       ? {}
@@ -186,7 +182,7 @@ export async function loadSpineReference(
     toMarkRejection(rejection.event, rejection.path, rejection.message),
   );
 
-  return { reference, seenIds: walk.seenIds, pendingRejections };
+  return { reference: walk.reference, seenIds: walk.seenIds, pendingRejections };
 }
 
 /**

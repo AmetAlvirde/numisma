@@ -5,7 +5,6 @@
 // (partial absent/false). Locks the shared-id grouping so a position's realized
 // history threads a single lineage id no matter how many times it is trimmed.
 import {
-  applyEventToReference,
   buildEventReference,
   crossReferenceEvent,
   foldEvents,
@@ -56,25 +55,26 @@ function genesis(): FundReviewData {
   };
 }
 
-// Accept an event through the real parse + batch-aware cross-ref gate, applying it to
-// a shared reference so a later trim sees the shrunk per-tier balances.
+// Accept an event through the real parse + batch-aware cross-ref gate, judged against
+// the ACCEPTED PREFIX so a later trim sees the shrunk per-tier balances. The gate's
+// world is re-derived from `genesis + accepted` (ADR-015) rather than a shared
+// reference being advanced in place — which is what "batch-aware" now means. The
+// caller appends the returned event to `accepted`.
 function accept(
   seed: FundReviewData,
-  reference: ReturnType<typeof buildEventReference>,
+  accepted: readonly PortfolioEvent[],
   raw: unknown,
 ): PortfolioEvent {
   const parsed = parseEvent(raw);
   if (parsed.kind !== "ok") throw new Error(`parse: ${parsed.path} ${parsed.message}`);
-  const crossRef = crossReferenceEvent(parsed.value, reference);
+  const crossRef = crossReferenceEvent(parsed.value, buildEventReference(seed, accepted));
   if (crossRef.kind !== "ok") throw new Error(`crossref: ${crossRef.path} ${crossRef.message}`);
-  applyEventToReference(reference, parsed.value);
   return parsed.value;
 }
 
 describe("blotter lineage — many partial trims + a final full close thread one id", () => {
   it("shares one positionId across all rows; partials carry partial:true, the close omits it", () => {
     const seed = genesis();
-    const reference = buildEventReference(seed, []);
     const events: PortfolioEvent[] = [];
 
     // Four partial trims, settling each removed portion at the mark (proceeds = qty*100).
@@ -86,7 +86,7 @@ describe("blotter lineage — many partial trims + a final full close thread one
     ] as const;
     trims.forEach((removal, i) => {
       events.push(
-        accept(seed, reference, {
+        accept(seed, events, {
           id: `trim-${i}`,
           asOf: "2026-06-02",
           type: "PositionTrimmed",
@@ -99,7 +99,7 @@ describe("blotter lineage — many partial trims + a final full close thread one
 
     // Final full close of the surviving 6 c1 + 4 c2 = 10 units at the mark.
     events.push(
-      accept(seed, reference, {
+      accept(seed, events, {
         id: "close",
         asOf: "2026-06-03",
         type: "PositionClosed",

@@ -6,17 +6,19 @@
 // Deliberately NARROW. This pins only the two SILENT holes and the reject cases,
 // because those are the failures that do not announce themselves:
 //
-//   - the fold arm and the `applyEventToReference` arm both sit in switches with no
-//     `default` and no return obligation, so OMITTING either compiles clean and
-//     silently no-ops. TypeScript guards the `crossReferenceEvent` arm for free
-//     (every arm returns), so that one needs no test.
+//   - the fold arm sits in a switch with no `default` and no return obligation, so
+//     OMITTING it compiles clean and silently no-ops. TypeScript guards the
+//     `crossReferenceEvent` arm for free (every arm returns), so that one needs no
+//     test. There used to be a SECOND such hole — `applyEventToReference`'s arm in the
+//     cross-ref shadow — and ADR-015 deleted it along with the shadow: the gate now
+//     reads the fold, so the fold arm is the only place a `ReserveOpened` can go
+//     missing and the tests below reach the gate's view THROUGH it.
 //   - the rejects (currency mismatch, id collision, a stated opening balance) are
 //     the difference between failing loud at ingest and admitting an event that
 //     quietly produces a Reserve the read model then drops.
 import {
   buildCompositionReport,
   buildEventReference,
-  applyEventToReference,
   crossReferenceEvent,
   foldEvents,
   parseEvent,
@@ -190,19 +192,23 @@ describe("ReserveOpened — the three registration sites", () => {
     if (parsed.kind !== "ok") return;
     expect(parsed.value.type).toBe("ReserveOpened");
 
-    // Site 2 — crossref.ts's `applyEventToReference` arm, both of its lines.
-    const reference = buildEventReference(genesis());
-    expect(reference.reserveIds.has("capital-cash")).toBe(false);
-    applyEventToReference(reference, parsed.value);
+    // Site 2 — the cross-reference world, which since ADR-015 is a PROJECTION of the
+    // fold: the Reserve shows up here only because fold.ts's arm birthed it. Deleting
+    // that arm reddens this AND the fold assertion below, which is the point — one
+    // registration, not two encodings of it.
+    expect(buildEventReference(genesis()).reserveIds.has("capital-cash")).toBe(false);
+    const reference = buildEventReference(genesis(), [parsed.value]);
     expect(reference.reserveIds.has("capital-cash")).toBe(true);
     expect(reference.reserveBalances.get("capital-cash")).toEqual({
       amount: 0,
-      // An EMPTY tier map, not `null`: the shadow must mirror the fold's `lots: []`,
-      // so the sufficiency gate agrees with the balances the fold will produce.
+      // An EMPTY tier map, not `null` — read straight off the fold's `lots: []`, so
+      // "untiered-because-empty" cannot mean one thing to the gate and another to the
+      // fold. The first credit gives it real Tiers.
       tiers: new Map(),
       currency: "USD",
-      // The third thing the arm registers: the birth date the existence gate reads,
-      // taken from the event's OWN asOf, not from the batch's arrival order.
+      // The one fact the folded record does NOT carry, so the projection derives it
+      // from the event itself: the birth date the existence gate reads, taken from the
+      // event's OWN asOf, not from the batch's arrival order.
       bornAsOf: OPENED_AS_OF,
     });
 
@@ -213,14 +219,13 @@ describe("ReserveOpened — the three registration sites", () => {
 });
 
 describe("ReserveOpened — cross-reference", () => {
-  // Guards the second silent hole: `applyEventToReference` also has no `default` and
-  // no return obligation. Omitting its arm compiles clean, and this same-batch pair —
-  // the entire point of the verb — would fail with a bogus "reserve does not exist".
+  // The same-batch pair that IS the point of the verb. Before ADR-015 this guarded a
+  // second silent hole (`applyEventToReference`'s arm); now it guards that the walk's
+  // re-fold really does let a later event cite a Reserve minted earlier in the batch.
   it("accepts a same-batch ReserveOpened + Transfer into it", () => {
-    const reference = buildEventReference(genesis());
     const opened = accepted(openReserve());
-    expect(crossReferenceEvent(opened, reference).kind).toBe("ok");
-    applyEventToReference(reference, opened);
+    expect(crossReferenceEvent(opened, buildEventReference(genesis())).kind).toBe("ok");
+    const reference = buildEventReference(genesis(), [opened]);
 
     const transfer = accepted({
       id: "evt-move",
@@ -269,9 +274,7 @@ describe("ReserveOpened — cross-reference", () => {
   // ReserveOpened in the same batch exercises it. Two events minting the same id
   // must fail loud, not have the later one silently win at fold.
   it("rejects a second ReserveOpened reusing an id minted earlier in the batch", () => {
-    const reference = buildEventReference(genesis());
-    const first = accepted(openReserve());
-    applyEventToReference(reference, first);
+    const reference = buildEventReference(genesis(), [accepted(openReserve())]);
 
     const result = crossReferenceEvent(
       accepted({ ...openReserve(), id: "evt-open-again" }),
@@ -375,18 +378,17 @@ describe("ReserveOpened — the gate learns time", () => {
     committed: PortfolioEvent[];
     rejection: { path: string; message: string } | null;
   } {
-    const reference = buildEventReference(seed);
     const committed: PortfolioEvent[] = [];
     for (const input of inputs) {
       const parsed = parseEvent(input);
       if (parsed.kind !== "ok") {
         return { committed: [], rejection: { path: parsed.path, message: parsed.message } };
       }
-      const checked = crossReferenceEvent(parsed.value, reference);
+      // The gate's world is genesis + everything committed so far, re-folded (ADR-015).
+      const checked = crossReferenceEvent(parsed.value, buildEventReference(seed, committed));
       if (checked.kind !== "ok") {
         return { committed: [], rejection: { path: checked.path, message: checked.message } };
       }
-      applyEventToReference(reference, parsed.value);
       committed.push(parsed.value);
     }
     return { committed, rejection: null };
