@@ -19,7 +19,8 @@
  */
 import { buildCompositionReport, formatCompositionReport } from "@numisma/engine";
 import { loadFoldedReview, resolveEventStorePaths } from "@numisma/event-store";
-import { ingestInbox, parseAsOfArg, parseMagnitudeThresholdArg } from "./event-store.js";
+import { ingestInbox } from "./event-store.js";
+import { parseAsOfArg, parseMagnitudeThresholdArg } from "./spine-args.js";
 import { plural } from "./plural.js";
 
 try {

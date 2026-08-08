@@ -6,7 +6,7 @@ import {
 import { loadFoldedReview, resolveEventStorePaths } from "@numisma/event-store";
 import { loadOrders, resolveOrdersPath } from "@numisma/preferences";
 import { loadAvailableCapital } from "./available-capital.js";
-import { parseAsOfArg } from "./event-store.js";
+import { parseAsOfArg } from "./spine-args.js";
 
 // Single source of truth (ADR-003 slice 4): `pnpm report` renders the FOLD over
 // the durable genesis + event log, the same read model `pnpm dev` (app.ts) and the
