@@ -6,6 +6,11 @@
  * READ-ONLY projection pool. The read credential and raw `pg` access live only
  * in this server function — they never reach the browser bundle.
  *
+ * It is the ONLY app-code importer of `projection/snapshot-reader.ts`, which is
+ * where the driver lives. The result TYPE comes from `projection/contract.ts`,
+ * which is pg-free, so the render surfaces that consume a `SnapshotHistory` reach
+ * no driver at all.
+ *
  * The gate's core is factored into {@link loadDashboard}, which takes its
  * request headers, its auth surface, and its snapshot reader as INJECTED
  * dependencies (see {@link SessionGateDeps}). That injection seam lets a test
@@ -18,11 +23,11 @@ import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import { redirect } from "@tanstack/react-router";
 import { auth } from "./auth.ts";
+import type { SnapshotHistory } from "../projection/contract.ts";
 import {
   getReaderPool,
   getSnapshotHistory,
-  type SnapshotHistory,
-} from "../projection/contract.ts";
+} from "../projection/snapshot-reader.ts";
 
 /**
  * The session gate's injectable dependencies. Kept deliberately narrow so the
