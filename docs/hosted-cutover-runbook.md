@@ -340,8 +340,10 @@ that matters for steps 6 and 7 and for `BETTER_AUTH_URL`.
 
 **CORRECTED — the previous version's Plan A ("change the password via the
 running app's sign-in + change-password UI") points at a UI that does not
-exist. The app has four routes: `__root`, `api`, `index`, `login`. There is no
-change-password screen and no client call to one.**
+exist. The app has five routes: `__root`, `api/auth/$`, `index` (`/`, the
+glance triage surface), `big-picture` (`/big-picture`, the composition
+dashboard, moved here by D11), and `login`. There is no change-password
+screen and no client call to one.**
 
 The tracer seeded `amet@example.com` with `prototype-pw-123`. It is no longer
 in the repo but may still be live, and it is written in plaintext in an earlier

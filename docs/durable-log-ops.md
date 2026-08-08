@@ -27,7 +27,7 @@ the disposable cache (`prices/`, `inbox/`, `ingested/`) is kept out of history b
 | --- | --- | --- |
 | R-M1 | The ingest commit **never blocks**: `git()` forces `GIT_TERMINAL_PROMPT=0` and bounded push/commit timeouts; a hang, timeout, or any git failure degrades to one loud stderr warning and returns. | `apps/tui/src/ingest-commit.ts` |
 | R-M2 | The orphaned in-repo `data/` ledger is retired; a tree guard asserts no `data/events.jsonl`. | `apps/tui/src/durable-log-guards.test.ts` |
-| R-M3 | `resolvePreferencesPath()` resolves under the accumulus default — never a CWD-relative `"data"`. | `apps/tui/src/preferences.ts` |
+| R-M3 | `resolvePreferencesPath()` resolves under the accumulus default — never a CWD-relative `"data"`. | `packages/preferences/src/preferences.ts` |
 | R-M4 | A fresh install's launchd job finds `pnpm` **and** `node`: `~/.asdf/shims` leads PATH, with a loud named error (not a bare exit-127) if either is unresolvable. | `ops/price-feed/run-daily-fetch.sh` |
 | R-M5 | `spine:reset` refuses whenever `dataDir` resolves to the accumulus default. | `apps/tui/src/spine-reset.ts` |
 | R-M6 | PROTOTYPE banners stripped from shipping engine/runtime durable-log code. | engine + tui |
@@ -38,18 +38,26 @@ The load-bearing invariant behind all of it: **the fold over events is the singl
 source of truth.** The committed Head Digest is a derived breadcrumb with no engine
 reader — nothing folds it back, so it can never become a shadow source of truth.
 
-## 1. Get the branch and confirm green
+## 1. Confirm the suite is green
+
+This reliability cut landed on `main` (PRD #114 / ADR-006; the working branch it
+shipped on, `feature/portable-durable-log`, is long since merged and deleted — do
+not try to check it out). Verify from a current checkout:
 
 ```sh
 cd ~/Dev/numisma
-git checkout feature/portable-durable-log
 pnpm install
-pnpm typecheck && pnpm test        # expect 506 passing / 44 files
+pnpm typecheck && pnpm test
 ```
 
-`pnpm test` should report **506 passing** (the prototype baseline of 471 plus 35
-reliability locks). A failure here means an environment drift — investigate before
-trusting the manual checks below.
+`pnpm test` should report **zero failures**. The suite grows over time, so treat
+any specific pass/fail count as a stale snapshot rather than a target — instead
+confirm the durable-log reliability tests named throughout this page
+(`ingest-commit.test.ts`, `ingest-commit-hardening.test.ts`,
+`durable-log-guards.test.ts`, `go-back-invariant.test.ts`, `data-dir.test.ts`,
+`preferences-reliable.test.ts`) are present among the passing files. A failure
+here means an environment drift — investigate before trusting the manual checks
+below.
 
 ## 2. The `spine:reset` footgun is structurally safe (R-M5)
 
