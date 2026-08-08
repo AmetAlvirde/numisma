@@ -129,6 +129,20 @@ export interface EventReference {
    * open, and the fold keeps it in `positions`.
    */
   closedPositionIds: Set<string>;
+  /**
+   * Every known position id → the date it came into existence: `genesis.review.asOf`
+   * for a genesis-held position, the `PositionOpened`'s own `asOf` for a log-born
+   * one. What makes "does this position exist" answerable AS OF A DATE; see
+   * {@link requirePositionBornBy}. The position-side twin of
+   * {@link ReserveView.bornAsOf}.
+   *
+   * INVARIANT: its key set is exactly {@link positionIds} — every known id is
+   * datable, INCLUDING a retired one. `requirePositionBornBy` answers existence off
+   * `positionBornAsOf.get(id) === undefined`, so a known-but-undatable id would be
+   * reported as a dangling reference and the operator would be told the wrong thing
+   * about a position that plainly did exist.
+   */
+  positionBornAsOf: Map<string, string>;
   /** Latest known close per instrument: the magnitude guard's comparison point. */
   lastClose: Map<string, { price: number; asOf: string }>;
   /**
@@ -212,6 +226,33 @@ export function buildEventReference(
     }
   }
 
+  // Each known position's BIRTH DATE, read off the folded book and only off it. Unlike
+  // a Reserve's, a position's birth date IS carried by the folded record, so there is
+  // no reason to rescan `priorEvents` for it — and a second derivation path for a fact
+  // the fold already carries would re-acquire exactly the divergence class ADR-015
+  // deleted the shadow to remove. One rule holds in this function: read the fold where
+  // the fold carries the fact, read the inputs only where it does not.
+  //
+  // `?? genesisAsOf` is LOAD-BEARING, not defensive. `openedAsOf` is optional on both
+  // record types and is absent precisely for a GENESIS-HELD position — one opened
+  // before the log existed (the fold sets it only at `PositionOpened` and carries it
+  // through the close). A genesis-held position is born with the world, the same rule
+  // `reserveBalances.bornAsOf` applies to a seeded Reserve.
+  //
+  // Survivors first, closed-book rows only for ids not already present: a PARTIAL
+  // (trim) row shares its id with a still-OPEN position, and the open row is the
+  // authority. Together the two passes cover exactly `positionIds`, which is the
+  // key-set invariant `requirePositionBornBy` relies on to answer existence.
+  const positionBornAsOf = new Map<string, string>();
+  for (const position of folded.positions) {
+    positionBornAsOf.set(position.id, position.openedAsOf ?? genesisAsOf);
+  }
+  for (const row of folded.closedPositions ?? []) {
+    if (!positionBornAsOf.has(row.positionId)) {
+      positionBornAsOf.set(row.positionId, row.openedAsOf ?? genesisAsOf);
+    }
+  }
+
   // Latest close per instrument, from the fold's own `closes[]`: the genesis-provided
   // closes, the t0 `markPrice` anchors the fold seeds, every `PriceMarked`, and any
   // entry/blend cost baseline the fold minted. Later-or-equal `asOf` wins, so a mark
@@ -253,6 +294,7 @@ export function buildEventReference(
     instrumentIds: new Set(folded.instruments.map((instrument) => instrument.id)),
     genesisAsOf,
     closedPositionIds,
+    positionBornAsOf,
     lastClose,
     reserveBalances,
     positionLots: new Map(
@@ -421,12 +463,9 @@ function crossReferenceInvalidation(
   event: InvalidationMarkedEvent,
   reference: EventReference,
 ): EventParseResult {
-  if (!reference.positionIds.has(event.positionId)) {
-    return eventError(
-      "positionId",
-      `InvalidationMarked references position id '${event.positionId}', which neither ` +
-        `the genesis seed nor the log contains.`,
-    );
+  const bornBy = requirePositionBornBy(reference, event.positionId, event.asOf, "positionId");
+  if (bornBy) {
+    return { ...bornBy, message: `InvalidationMarked ${bornBy.message}` };
   }
   if (reference.closedPositionIds.has(event.positionId)) {
     return eventError(
@@ -516,6 +555,84 @@ function requireReserveBornBy(
 }
 
 /**
+ * THE ONE PLACE THAT ANSWERS "DOES THIS POSITION EXIST AS OF THIS DATE."
+ *
+ * {@link requireReserveBornBy}'s twin for the CONTAINER the position verbs target, and
+ * the follow-up ADR-015 named rather than took (its "third delta class"). The same two
+ * orderings disagree here: THIS GATE JUDGES IN LOG ORDER, `foldEvents` applies in
+ * (`asOf`, then log) order. A close/trim/add/invalidation dated before its target's
+ * `PositionOpened` reaches the fold FIRST, hits `if (closing)` / `if (trimming)` /
+ * `if (adding)`, and never lands.
+ *
+ * Measured, on `[PositionOpened asOf 06-05 btc-pos, PositionClosed asOf 06-03
+ * btc-pos]`: both passed both gates and were durably appended, the close sorted first
+ * at fold, the cash leg was skipped and NO closed-book row was minted — so
+ * {@link EventReference.closedPositionIds} never gained the id, and a SECOND backdated
+ * close carrying a fresh event id (log dedup keys on `event.id` alone) then cleared the
+ * post-close guard too. Two closes in the log, zero effect on the book, `warnings: []`,
+ * and `foldEvents` has no diagnostics channel to say otherwise.
+ *
+ * IT OWNS BOTH HALVES OF THE QUESTION — unknown id AND not-born-yet — as the reserve
+ * helper does, which is why every call site's own `positionIds.has()` check is gone.
+ * Existence is answered off `positionBornAsOf.get(id)`; `undefined` means unknown, and
+ * that is exactly what the key-set invariant on {@link EventReference.positionBornAsOf}
+ * guarantees is never true of a known id.
+ *
+ * Returns `null` on success and never throws — `checkDebit`'s shape, since unlike the
+ * reserve helper there is no resolved view to hand back. No error-code enum: `path` is
+ * the machine-readable half, the message the human one. The CALLER prefixes the verb
+ * name, matching the reserve call sites, which keeps the unknown-id strings
+ * byte-identical to the ones each site composed inline before.
+ *
+ * ORDERED FIRST at every call site, ahead of the already-closed check. A verb that is
+ * both backdated and aimed at a retired position therefore reports "not born until"
+ * rather than "already closed": the birth fact holds regardless of retirement, and it
+ * mirrors the reserve side where existence and birth are one function's single answer.
+ * It also makes an interaction disappear rather than requiring anyone to reason about
+ * it — a backdated close used to reach the settlement-magnitude gate carrying the
+ * position's FULL lots, comparing proceeds against a quantity it was never going to
+ * remove.
+ *
+ * Deliberately NOT fixed at the fold, for the reason {@link requireReserveBornBy}
+ * records: `foldEvents` is the READ path for the TUI, the web push and the daily
+ * price-feed job, and throwing there would turn an ingest-time defect into a total
+ * dashboard outage.
+ */
+function requirePositionBornBy(
+  reference: EventReference,
+  positionId: string,
+  asOf: string,
+  path: string,
+): EventError | null {
+  const bornAsOf = reference.positionBornAsOf.get(positionId);
+  if (bornAsOf === undefined) {
+    return eventError(
+      path,
+      `references position id '${positionId}', which neither ` +
+        `the genesis seed nor the log contains.`,
+    );
+  }
+  if (asOf < bornAsOf) {
+    // The remedy branches on WHICH KIND of position this is, because one of the two
+    // fixes is impossible for a genesis-held one: it has no `PositionOpened` to move,
+    // so "open the position earlier" would send the operator hunting for an event that
+    // does not exist. Only a log-born position has a birth the operator can redate.
+    const held = bornAsOf === reference.genesisAsOf;
+    const remedy = held
+      ? `Date it on or after the genesis review date, ${bornAsOf}.`
+      : `Date it ${bornAsOf} or later, or open the position earlier.`;
+    return eventError(
+      path,
+      `references position '${positionId}' as of ${asOf}, but that position is not born ` +
+        `until ${bornAsOf}. The fold applies events in date order, so this one would run ` +
+        `BEFORE the position exists and its leg would vanish silently. ` +
+        remedy,
+    );
+  }
+  return null;
+}
+
+/**
  * Per-Tier SUFFICIENCY for a debit, and nothing else. Returns null on success.
  * `amount` here is the cash leaving; an untiered reserve is checked against its
  * total balance, a tiered one against the named Tier's available quantity. Fails
@@ -563,12 +680,9 @@ function crossReferenceClose(
   reference: EventReference,
   threshold = SETTLEMENT_MAGNITUDE_THRESHOLD,
 ): EventParseResult {
-  if (!reference.positionIds.has(event.positionId)) {
-    return eventError(
-      "positionId",
-      `PositionClosed references position id '${event.positionId}', which neither ` +
-        `the genesis seed nor the log contains.`,
-    );
+  const bornBy = requirePositionBornBy(reference, event.positionId, event.asOf, "positionId");
+  if (bornBy) {
+    return { ...bornBy, message: `PositionClosed ${bornBy.message}` };
   }
   // A close retires the id, so a SECOND close of it can never fold to anything — the
   // fold drops it silently, with no warning. Log dedup keys on event id alone and
@@ -632,12 +746,9 @@ function crossReferenceTrim(
   reference: EventReference,
   threshold = SETTLEMENT_MAGNITUDE_THRESHOLD,
 ): EventParseResult {
-  if (!reference.positionIds.has(event.positionId)) {
-    return eventError(
-      "positionId",
-      `PositionTrimmed references position id '${event.positionId}', which neither ` +
-        `the genesis seed nor the log contains.`,
-    );
+  const bornBy = requirePositionBornBy(reference, event.positionId, event.asOf, "positionId");
+  if (bornBy) {
+    return { ...bornBy, message: `PositionTrimmed ${bornBy.message}` };
   }
   if (reference.closedPositionIds.has(event.positionId)) {
     return eventError(
@@ -727,12 +838,9 @@ function crossReferenceAddedTo(
   event: PositionAddedToEvent,
   reference: EventReference,
 ): EventParseResult {
-  if (!reference.positionIds.has(event.positionId)) {
-    return eventError(
-      "positionId",
-      `PositionAddedTo references position id '${event.positionId}', which neither ` +
-        `the genesis seed nor the log contains.`,
-    );
+  const bornBy = requirePositionBornBy(reference, event.positionId, event.asOf, "positionId");
+  if (bornBy) {
+    return { ...bornBy, message: `PositionAddedTo ${bornBy.message}` };
   }
   if (reference.closedPositionIds.has(event.positionId)) {
     return eventError(
