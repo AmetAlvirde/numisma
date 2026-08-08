@@ -40,8 +40,10 @@ File IO is split by direction: the **read** path (genesis, log, quarantine)
 lives in `@numisma/event-store`, the **write/ingest** path (inbox detection,
 dedup persistence, atomic append, archive) and startup orchestration stay in
 `@numisma/tui`, and sidecar IO lives in `@numisma/preferences`. Every app
-consumes its libraries through the package root only — `pnpm typecheck`
-mechanically bars deep imports.
+consumes its libraries through a package's declared entry points — the root
+plus the three deliberate subpath exports named above (`@numisma/engine/format`,
+`@numisma/engine/calendar`, `@numisma/event-store/testkit`) — never an
+undeclared deep import; `pnpm typecheck` mechanically bars those.
 
 ## Documentation
 
