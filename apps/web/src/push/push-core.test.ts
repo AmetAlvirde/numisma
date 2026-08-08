@@ -70,7 +70,7 @@ describe("parsePushArgs", () => {
     expect(parsePushArgs(["--init-only"])).toEqual({ init: true, initOnly: true });
   });
 
-  it("does NOT let --init-only be matched by --init's substring (the old fusion)", () => {
+  it("--init alone does not set initOnly", () => {
     // The regression that mattered ran the other way too: an exact-match on
     // `--init` must not be SATISFIED by `--init-only` alone deciding both, nor
     // `--init` alone ever setting initOnly. Only the second half is a real risk

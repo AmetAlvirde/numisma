@@ -168,7 +168,7 @@ describe.skipIf(!runIntegration)(
  * `loadCurrentFold` — the exact source the `push` command now uses — and
  * asserts the two properties the fixture block never did:
  *
- *  - R4: the pushed `report` JSONB carries EXACTLY `totals` and `dashboard`. The
+ *  - R4: the pushed `report` JSONB carries EXACTLY `totals`, `dashboard` and `glance`. The
  *    payload's WIDTH, asserted on the stored row rather than on the derivation,
  *    so the narrowing is proven where it matters — in the cloud.
  *  - R3: a second push over the SAME unchanged log leaves exactly one row with an
