@@ -507,11 +507,16 @@ all expected rather than faults:
 **Two success signals — do not report one for the other.**
 
 1. **Push-side (code half):** exit `0`, prints
-   `fundId=<slug> asOf=<log's last event date> schemaVersion=2`; exactly one
-   row for that `(fund_id, as_of)`; the `report` JSONB carries exactly
-   `totals` and `dashboard`. Verify all three at once — this asserts what
-   *landed*, which is stronger than the CI contract test's assertion about
-   what the code *would produce*:
+   `[push] pushed snapshot fundId=<slug> asOf=<log's last event date>
+   schemaVersion=3 feedGap=<arrived>/<expected> reserveFloor=<pct|absent>
+   suppressed=[<keys>]`; exactly one row for that `(fund_id, as_of)`; the
+   `report` JSONB carries exactly `totals`, `dashboard`, and `glance`. Verify
+   all four at once — this asserts what *landed*, which is stronger than the
+   CI contract test's assertion about what the code *would produce*. Read
+   `suppressed=[…]` on a first push: any key listed there is a number the
+   projection is deliberately NOT rendering because its input was
+   unexpectedly absent — an empty `[]` is the clean signal, a non-empty list
+   is worth explaining before you move on:
 
    ```sh
    psql "$PROJECTION_WRITE_DATABASE_URL" -c "SELECT fund_id, as_of, schema_version, pushed_at, (SELECT count(*) FROM composition_snapshot) AS total_rows, (SELECT array_agg(k ORDER BY k) FROM jsonb_object_keys(report) AS k) AS report_keys FROM composition_snapshot;"

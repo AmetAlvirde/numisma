@@ -1,7 +1,8 @@
 # Durable-log operations (verify, test, reproduce)
 
-The durable ledger — `events.jsonl`, `genesis.json`, `preferences.jsonl`, and the
-derived `head-digest.json` breadcrumb — lives in the private sibling repo
+The durable ledger — `events.jsonl`, `genesis.json`, `preferences.jsonl`,
+`orders.jsonl`, and the derived `head-digest.json` breadcrumb — lives in the
+private sibling repo
 **`<fund>`** (`~/Dev/<fund>/data` by default, or wherever `NUMISMA_DATA_DIR`
 points). Every successful ingest commits the log + Head Digest under **your own git
 identity**, so a bad-but-honest NAV is **locatable** (`git log -p head-digest.json`)

@@ -113,12 +113,15 @@ database **redirects** rather than serving, and sign-in cannot complete — logg
 in is itself what needs `AUTH_DATABASE_URL`. This is designed behavior, not an
 incident and not a regression.
 
-Measured against a live preview with empty env (2026-07-25):
+The app's actual route table (`apps/web/src/routeTree.gen.ts`) is `/`,
+`/login`, `/big-picture`, and the `/api/auth/$` splat — there is no
+`/dashboard` route (the dashboard renders at `/`) and no `/api/health` route.
+Measured against those real routes on a live preview with empty env:
 
 | Route | Result |
 | --- | --- |
-| `/`, `/login`, `/dashboard` | `200` — shell renders |
-| `/api/auth/get-session`, `/api/auth/session`, `/api/health` | `302` redirect |
+| `/`, `/login`, `/big-picture` | `200` — shell renders |
+| `/api/auth/get-session`, `/api/auth/session` (matched by `/api/auth/$`) | `302` redirect |
 
 **No 500s.** Unauthenticated traffic is redirected before anything touches the
 database, so there is no error to see — which is exactly why the green-looking

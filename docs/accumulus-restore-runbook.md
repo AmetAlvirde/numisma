@@ -93,6 +93,19 @@ ingest was not the tip, git may report a conflict on `events.jsonl` (an append a
 resolve by keeping every surviving line **except** the reverted one, then
 `git revert --continue`.
 
+**The daily wrapper's commit is per-run, not per-file.** `run-daily-fetch.sh` stages
+and commits every tracked sidecar that changed in the same commit as the price marks
+(`events.jsonl`, `genesis.json`, `preferences.jsonl`, `orders.jsonl`) — whatever
+changed that run rides in together. If an `orders:import` or a preferences change
+landed the same day as the bad mark, `git revert` on that commit undoes **all of
+it**, not just the price mark: the `OrderRecord`s and any preferences edits from that
+run disappear too, silently — no skip, no warning, nothing in `available-capital`
+naming what left. Before reverting, run `git show <bad-sha> --stat` and read the diff
+of every changed file, not just `events.jsonl`; if the commit also touched
+`orders.jsonl` or `preferences.jsonl`, either accept losing those changes or use the
+surgical `checkout` alternative below to keep them and hand-remove only the bad
+event line.
+
 (Surgical alternative for a mixed batch: `git checkout <good-sha> -- data/events.jsonl`,
 delete only the bad line in your editor, `git add data/events.jsonl`.)
 
