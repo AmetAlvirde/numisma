@@ -43,7 +43,12 @@
  * them rather than the push shipping a key it would have to version.
  */
 import type { CompositionRow } from "@numisma/engine";
-import type { SnapshotAnchor } from "../projection/contract.ts";
+// The header keys are read from their one declared home, never re-spelled here — see
+// the {@link SUPPRESSION_KEYS} docstring in `../projection/contract.ts` for why.
+import {
+  SUPPRESSION_KEYS,
+  type SnapshotAnchor,
+} from "../projection/contract.ts";
 import { referenceLabel, resolveReferenceAnchor } from "./verdict.ts";
 
 /**
@@ -188,8 +193,8 @@ export function composeBigPicture(
     costBasisLabel: COST_BASIS_LABEL,
     // See the header: the percentage descends from NAV for EVERY row, so it is a
     // page-level absence rather than a per-row one.
-    percentOfFundRendered: !suppressed.has("summary.fundValueUsd"),
-    fundValueRendered: !suppressed.has("summary.fundValueUsd"),
+    percentOfFundRendered: !suppressed.has(SUPPRESSION_KEYS.fundValue),
+    fundValueRendered: !suppressed.has(SUPPRESSION_KEYS.fundValue),
     rows,
   };
 }

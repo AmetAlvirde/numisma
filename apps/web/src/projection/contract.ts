@@ -129,12 +129,44 @@ export interface GlanceBlock {
    * present here means "this number would be wrong, so it is not rendered".
    *
    * A LIST OF KEYS, NOT N BOOLEANS, and that encoding is the point: this slice
-   * emits the three header keys (`summary.fundValueUsd`, `summary.change`,
-   * `summary.reserve`); slice 5 adds `CompositionRow.id`s to the SAME array, at no
-   * schema cost. There is no v4 for that extension (C5).
+   * emits the three header keys ({@link SUPPRESSION_KEYS}); slice 5 adds
+   * `CompositionRow.id`s to the SAME array, at no schema cost. There is no v4 for
+   * that extension (C5).
    */
   suppressed: string[];
 }
+
+/**
+ * THE ONE DECLARED HOME for the three header suppression keys — the closed set of
+ * standing numbers D3 names, spelled here and nowhere else (audit finding 7).
+ *
+ * WHY IT LIVES ON THE WIRE CONTRACT AND NOT PUSH-SIDE, where it was born: these are
+ * not the push's private names. They are values that cross the wire in
+ * {@link GlanceBlock.suppressed} as bare `string`s, so the type system cannot relate
+ * the writer's spelling to the reader's. Before this constant was shared, a rename
+ * push-side still compiled everywhere and the reader silently stopped suppressing —
+ * rendering a NAV computed from a mark that never arrived, the false *no* the design
+ * forbids. One home makes a rename move both halves at once.
+ *
+ * It is a RUNTIME value in a module every browser-reachable surface imports, which is
+ * only safe because this file is pg-free and `contract.test.ts` holds it that way
+ * from the module graph (audit finding 8). That property is what this constant is
+ * standing on; do not import a driver here to save it a hop.
+ *
+ * `glance/suppression-seam.test.ts` pins the set, forbids a hand-typed literal in any
+ * production speller, and drives push-emitted keys through the reader end to end.
+ *
+ * Slice #151 adds `CompositionRow.id`s to the SAME array (see `suppressedRowIds` in
+ * `push/glance.ts`), which costs no schema change: that is the whole reason
+ * `suppressed` was a key list and not N booleans, and it is why v3 is still v3. A
+ * reader therefore tells the two apart by the key itself — the header keys are these
+ * three literals, everything else is a row id.
+ */
+export const SUPPRESSION_KEYS = {
+  fundValue: "summary.fundValueUsd",
+  change: "summary.change",
+  reserve: "summary.reserve",
+} as const;
 
 /**
  * The pushed payload: the engine `Pick` above PLUS a third top-level branch the
