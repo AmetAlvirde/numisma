@@ -582,6 +582,22 @@ describe("durable-log migration — legacy-shape events fail loud, then migrate 
     expect(data.reserves.find((reserve) => reserve.id === "cash-core")?.amount).toBe(1290);
   });
 
+  it("numbers lines the way the reader does, so both halves name the SAME line", async () => {
+    // Blank lines are records to neither half — but the reader counts them toward the
+    // line number and the migration must too. When they disagree the operator hand-edits
+    // whichever line the second message named, corrupting a *good* line of the durable,
+    // append-only log. Two blanks before the legacy close: physical line 4.
+    const log = `${JSON.stringify(markAapl(160, "pre-mark"))}\n\n\n${JSON.stringify(legacyClose)}\n`;
+    const paths = await makeStore({ log });
+
+    // What the READ half calls it.
+    const { quarantined } = await loadEventLog(paths.log);
+    expect(quarantined[0]?.lineNumber).toBe(4);
+
+    // What the WRITE half calls it — the same number, or the operator edits the wrong line.
+    await expect(migrateLegacyLog(paths, new Map())).rejects.toThrow(/line 4: PositionClosed/);
+  });
+
   it("migrateLegacyLog fails loud (writes nothing) when a legacy record has no supplied leg", async () => {
     const log = `${JSON.stringify(legacyClose)}\n`;
     const paths = await makeStore({ log });
