@@ -177,10 +177,21 @@ export interface EventReference {
    * latest date at which this position was touched — rather than a set with a
    * carve-out.
    *
-   * INVARIANT: its key set is a SUBSET of {@link positionIds}, NOT equal to it —
-   * unlike `positionBornAsOf`, whose key set is exactly `positionIds`. A genesis-held
-   * position no log event has ever touched has NO entry, and that absence is the
-   * meaningful answer ("nothing to seal behind"), not a gap wanting a fallback.
+   * KEY SET: strictly SMALLER than {@link positionIds} in the direction that matters —
+   * a genesis-held position no log event has ever touched has NO entry, and that absence
+   * is the meaningful answer ("nothing to seal behind"), not a gap wanting a fallback.
+   * That is the opposite of `positionBornAsOf`, whose key set is exactly `positionIds`.
+   *
+   * IT IS NOT, HOWEVER, A GUARANTEED SUBSET, and the difference matters now that this
+   * field is on the exported {@link EventReference}. The scan keys off the event's OWN
+   * `positionId` without asking whether that id exists, so an accepted event naming an
+   * unknown position would put a DANGLING key here that `positionIds` lacks. Nothing can
+   * reach that state through the ingest path — `crossReferenceEvent` refuses an unknown
+   * position id at every position-targeting verb, so no such event is ever accepted —
+   * but `buildEventReference` is a pure function and will happily build one if handed
+   * such an event directly. The containment is therefore CALL-SITE-DEFENDED, not
+   * structural. Safe for the seal check, which runs behind `requirePositionBornBy` and
+   * never sees an unknown id; NOT something a new consumer may assume without checking.
    */
   positionLastVerbAsOf: Map<string, PositionTouch>;
   /** Latest known close per instrument: the magnitude guard's comparison point. */
@@ -266,9 +277,17 @@ export function buildEventReference(
   // about the LOG, which the fold never claimed to answer. Max, not last-write-wins:
   // the events arrive in LOG order, which is not date order.
   const positionLastVerbAsOf = new Map<string, PositionTouch>();
+  // `>=`, so among verbs sharing the max date the LAST-LOGGED one wins the type slot.
+  // Not a coin-flip: `foldEvents` sorts by (`asOf`, THEN LOG INDEX), so the last-logged
+  // of a same-dated group is the one applied LAST — the event actually sitting on top,
+  // and therefore the one a close would bury first. With `>` the message named the
+  // FIRST-logged instead: `[Trimmed 06-18, AddedTo 06-18, Closed 06-10]` blamed the
+  // trim while the add-to was the buried event carrying the unfired funding debit. No
+  // accept/reject outcome turns on this — the DATE is identical either way, and equal
+  // dates are accepted regardless — only which verb the operator is sent to look at.
   const touchPosition = (positionId: string, event: PortfolioEvent): void => {
     const latest = positionLastVerbAsOf.get(positionId);
-    if (latest === undefined || event.asOf > latest.asOf) {
+    if (latest === undefined || event.asOf >= latest.asOf) {
       positionLastVerbAsOf.set(positionId, { asOf: event.asOf, type: event.type });
     }
   };
@@ -284,12 +303,34 @@ export function buildEventReference(
       case "InvalidationMarked":
         touchPosition(event.positionId, event);
         break;
-      // Everything else — `PriceMarked` above all — targets an instrument or a
-      // Reserve, never a position. Marking a price must not date a position: the feed
+      // DELIBERATELY NOT SCANNED, and said in code rather than only in a comment.
+      // `PriceMarked` targets an INSTRUMENT and the rest target a Reserve or nothing at
+      // all; none of them dates a position. Marking a price above all must not: the feed
       // marks daily, so scanning it would seal every position holding that instrument
-      // behind today for a reason having nothing to do with the position.
-      default:
+      // behind today, for a reason having nothing to do with the position.
+      case "PriceMarked":
+      case "Deposit":
+      case "Withdraw":
+      case "Transfer":
+      case "ReserveOpened":
         break;
+      default: {
+        // EXHAUSTIVENESS LATCH, in the idiom of `fold.ts`'s and `orders/ingest.ts`'s.
+        // This switch has no return obligation, so a `default: break` let verb eleven
+        // compile clean and be silently skipped here — which would reintroduce exactly
+        // the bug this projection exists to close, since a position touched only by the
+        // new verb would look untouched and a close could seal behind it.
+        //
+        // AND THE FALSE ALL-CLEAR IS THE REAL TRAP. `crossReferenceEvent`'s dispatch
+        // has no `default`, so a new verb DOES fail to compile there. An author who
+        // adds one gets a loud error, fixes that one site, sees green, and never learns
+        // this scan needed an arm too. The `never` assignment makes verb eleven a
+        // COMPILE ERROR here as well; `pnpm typecheck` is its proof, and no test can
+        // reach this arm while the switch stays exhaustive.
+        const _never: never = event;
+        void _never;
+        break;
+      }
     }
   }
 
@@ -800,12 +841,37 @@ function requirePositionUntouchedAfter(
   if (latest === undefined || asOf >= latest.asOf) {
     return null;
   }
+  // `InvalidationMarked` is the ONE position verb with no reserve leg (see
+  // `crossReferenceInvalidation`), so the cash clause has to be conditional. Claiming a
+  // vanished cash leg on case D sends the operator hunting for a movement that never
+  // existed — and it is the branch that also decides the remedy below.
+  const movesCash = latest.type !== "InvalidationMarked";
+  const article = movesCash ? "a" : "an";
+  const loss = movesCash
+    ? `that later event would vanish silently, taking its cash leg with it`
+    : `that later event would vanish silently — the level itself, though it moves no cash`;
+  // THE REMEDY BRANCHES, AND THE REASON IS DATA CORRUPTION, not politeness. "Date the
+  // close later" is the WRONG advice whenever the close's date is the true one: a
+  // position opened 06-05, stop moved 06-20, honestly closed 06-15 would be told to
+  // write 06-20 — five days after the trade actually ended — putting a false
+  // `closedAsOf` in the durable log and a false holding period in everything downstream.
+  // The blocking event is the one that can move without lying, and when it is an
+  // invalidation it can move for FREE, because it has no settlement to re-settle. The
+  // sibling `requirePositionBornBy` branches its remedy for the same class of reason:
+  // a single-branch remedy sends the operator after something they cannot honestly do.
+  const remedy = movesCash
+    ? `If the close truly happened on ${asOf}, redate or remove the ${latest.type} ` +
+      `instead — but note its own cash leg moves with it. Only date the close ` +
+      `${latest.asOf} or later if that is genuinely when it closed.`
+    : `If the close truly happened on ${asOf}, redate or retract the ${latest.type} ` +
+      `instead — it has no cash leg, so moving it settles nothing and costs nothing. ` +
+      `Only date the close ${latest.asOf} or later if that is genuinely when it closed.`;
   return eventError(
     path,
-    `closes position '${positionId}' as of ${asOf}, but a ${latest.type} dated ` +
+    `closes position '${positionId}' as of ${asOf}, but ${article} ${latest.type} dated ` +
       `${latest.asOf} has already been accepted for it. The fold applies events in date ` +
-      `order, so this close would run FIRST and that later event would vanish silently, ` +
-      `taking its cash leg with it. Date the close ${latest.asOf} or later.`,
+      `order, so this close would run FIRST and ${loss}. ` +
+      remedy,
   );
 }
 
@@ -888,6 +954,14 @@ function crossReferenceClose(
   // replaces an accidental rejection carrying a misleading reason with a deliberate one
   // carrying the real reason, and makes the interaction disappear rather than requiring
   // anyone to reason about it. Behind born-by, which answers existence for it.
+  //
+  // IT DISPLACES `requireReserveBornBy` TOO, which is the less obvious half. A close
+  // that both seals behind a verb AND settles into a not-yet-born reserve used to report
+  // the reserve fact and now reports the seal. That follows the file's convention —
+  // position facts before reserve facts, the same order `requirePositionBornBy` already
+  // sits in — and the position fact is the more fundamental one here: the settlement leg
+  // is a detail of a close that should not exist at this date at all. Recorded because
+  // it is a real change in which message an operator sees, not only a reordering.
   const untouched = requirePositionUntouchedAfter(
     reference,
     event.positionId,
