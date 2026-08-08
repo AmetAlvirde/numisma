@@ -1,6 +1,8 @@
 /**
  * The projection's POSTGRES READER — the only module in `apps/web` that opens the
- * read-only projection pool and names the `composition_snapshot` table.
+ * read-only projection pool and queries the `composition_snapshot` table at runtime.
+ * (The name appears elsewhere — `contract.ts` prose, the push shell, the
+ * provisioning DDL — but this is the sole pg reader of it.)
  *
  * WHY IT IS NOT IN `contract.ts`. The contract is what everything imports: the row
  * shape, the schema version, the fund-id derivation, the narrowing guard. The

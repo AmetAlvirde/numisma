@@ -6,8 +6,8 @@
  * only `import type` from `@numisma/engine` and the pure `@numisma/engine/format`
  * helpers), but "structurally" is a manual claim — a future value-import of
  * `projection/snapshot-reader.ts` / `dashboard.ts` / `auth.ts` into a client
- * component would
- * re-leak the driver and secrets into the browser bundle SILENTLY. This test
+ * component would re-leak the driver and secrets into the browser bundle
+ * SILENTLY. This test
  * turns that invariant into a build-time fact.
  *
  * It scans the built CLIENT output (`.vercel/output/static`, the Vercel preset's

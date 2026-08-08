@@ -62,8 +62,16 @@ function runtimeImportsOf(source: string): string[] {
 
 /**
  * Walks the RELATIVE import graph from `entry`, returning every bare (package)
- * specifier reachable through runtime imports. Relative edges are followed;
- * package specifiers are leaves — `pg` reachable at any depth is the leak.
+ * specifier reachable through runtime imports. Relative edges are followed to any
+ * depth; bare specifiers are LEAVES — the walker stops at the package boundary and
+ * does not resolve into `node_modules` or into workspace packages. So a package the
+ * app pulls in (say `@numisma/engine/calendar`, which `contract.ts` reaches via
+ * `as-of.ts`) is recorded by name only, and whatever IT imports is out of view.
+ *
+ * That is the walker's stated edge: this guards `pg` through the APP's relative
+ * graph — a value import of the driver written anywhere in `apps/web`'s own files
+ * downstream of `contract.ts`. A driver pulled in transitively by a workspace
+ * package is a different failure and belongs to that package's own guard.
  */
 function reachablePackages(entry: string): Set<string> {
   const seen = new Set<string>();
@@ -92,23 +100,26 @@ function reachablePackages(entry: string): Set<string> {
  *
  * `client-bundle.integration.test.ts` already asserts the CONSEQUENCE, but only
  * against a built tree (it skips without one) and only for the surfaces that happen
- * to be imported today. This asserts the CAUSE, on every `pnpm test`, from the
- * module graph itself — which is what makes the pg-free half safe to put shared
- * runtime constants in.
+ * to be imported today. This asserts the CAUSE, on every `pnpm test`, from the app's
+ * own relative module graph — which is what makes the pg-free half safe to put
+ * shared runtime constants in. Scope, per `reachablePackages` above: relative edges
+ * to any depth, package specifiers as leaves.
  */
 describe("contract.ts stays pg-free", () => {
   const CONTRACT = resolve(HERE, "contract.ts");
   const READER = resolve(HERE, "snapshot-reader.ts");
 
-  it("reaches no runtime pg import, at any depth", () => {
+  it("reaches no runtime pg import through the app's relative import graph", () => {
     const packages = reachablePackages(CONTRACT);
     const pgish = [...packages].filter((p) => p === "pg" || p.startsWith("pg/"));
     expect(pgish, `reachable packages: ${[...packages].join(", ")}`).toEqual([]);
   });
 
-  it("does not reach the reader, which is where pg legitimately lives", () => {
-    // Proves the dependency runs one way only. The reader imports the contract;
-    // a contract that imported back would re-merge the two halves silently.
+  it("does not import the reader directly, which is where pg legitimately lives", () => {
+    // Proves the dependency runs one way only at the seam itself: this checks the
+    // contract's OWN import list, not the whole graph. The reader imports the
+    // contract; a contract that imported back would re-merge the two halves
+    // silently (the pg-free assertion above covers the deeper relative paths).
     const contractSource = readFileSync(CONTRACT, "utf-8");
     expect(runtimeImportsOf(contractSource)).not.toContain("./snapshot-reader.ts");
 
