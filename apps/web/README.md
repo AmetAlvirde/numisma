@@ -4,7 +4,7 @@ The hosted read-projection dashboard — a phone-checkable view of fund
 composition, backed by a disposable Postgres projection of the local event
 log. Built on **TanStack Start** (Vite-based full-stack React), chosen over
 Next.js in ADR-009. Package name `@numisma/web`, version tracks the monorepo
-root (`0.7.5`). Deployed to Vercel as project `numisma-web`; see
+root (`0.8.0`). Deployed to Vercel as project `numisma-web`; see
 `docs/web-deploy-runbook.md` for the deploy mechanism.
 
 ## What this app owns
