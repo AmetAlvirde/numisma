@@ -10,6 +10,7 @@
  */
 import type { CapitalTier, PositionLot } from "../contracts.js";
 import {
+  invalidLotFields,
   isDirection,
   isExecutionMode,
   isIsoDate,
@@ -495,26 +496,29 @@ function parsePriceMarked(
   return { kind: "ok", value };
 }
 
-/** Narrow one untrusted lot record at `path` to a {@link PositionLot} or error. */
+/**
+ * Narrow one untrusted lot record at `path` to a {@link PositionLot} or error.
+ *
+ * Validity is {@link invalidLotFields}'s call, not this door's — see its contract for
+ * why (audit finding 5). This door's own job is the two things the predicate cannot do
+ * for it: refuse a non-object in this door's vocabulary, and report only the FIRST
+ * issue, since an event is rejected whole.
+ */
 function parseLot(raw: unknown, path: string): PositionLot | EventError {
   if (!isRecord(raw)) {
     return eventError(path, "Lot must be an object.");
   }
-  if (!isPositiveNumber(raw.quantity)) {
-    return eventError(`${path}.quantity`, "Lot quantity must be positive.");
+  const [issue] = invalidLotFields(raw);
+  if (issue) {
+    return eventError(`${path}.${issue.field}`, `Lot ${issue.field} ${issue.detail}.`);
   }
-  if (!isPositiveNumber(raw.cost)) {
-    return eventError(`${path}.cost`, "Lot cost must be positive.");
-  }
-  if (raw.tier !== "c1" && raw.tier !== "c2" && raw.tier !== "c3") {
-    return eventError(`${path}.tier`, "Lot tier must be c1, c2, or c3.");
-  }
-  const lot: PositionLot = { quantity: raw.quantity, cost: raw.cost, tier: raw.tier };
+  const lot: PositionLot = {
+    quantity: raw.quantity as number,
+    cost: raw.cost as number,
+    tier: raw.tier as CapitalTier,
+  };
   if (raw.entryFx !== undefined) {
-    if (!isPositiveNumber(raw.entryFx)) {
-      return eventError(`${path}.entryFx`, "Lot entryFx must be positive.");
-    }
-    lot.entryFx = raw.entryFx;
+    lot.entryFx = raw.entryFx as number;
   }
   return lot;
 }

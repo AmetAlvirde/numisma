@@ -6,9 +6,11 @@
 // reference / id-collision / implausible-price cases with a precise path/message.
 import {
   applyEventToReference,
+  buildCompositionReport,
   buildEventReference,
   crossReferenceEvent,
   parseEvent,
+  parseFundReview,
   PRICE_MARK_MAGNITUDE_THRESHOLD,
   type EventError,
   type FundReviewData,
@@ -468,6 +470,132 @@ describe("crossReferenceEvent — PositionClosed post-close gate (audit MUST FIX
 
   // A dangling close (unknown id) staying distinct from a post-close rejection is
   // already locked by the MF1 case above — not re-asserted here.
+});
+
+// Audit 2026-08-07 finding 5. The two ingest doors used to disagree about what a
+// valid Lot is: the event door demanded a positive quantity/cost/entryFx, the
+// genesis door demanded only `typeof === "number"`, and `canonical.ts` — the last
+// line of defense — demanded only non-negative. So `{ quantity: 10, cost: 0 }` was
+// rejected as a `PositionOpened` and admitted unwarned as a seed, with the whole
+// market value reading as unrealized gain and nothing on screen saying so.
+//
+// One predicate now answers "is this Lot valid?" for all three sites, so these
+// cases are written as a matrix: the SAME degenerate lot goes through the genesis
+// door, the event door, and the compose gate, and all three must refuse it.
+describe("Lot validity — one predicate across both ingest doors (audit finding 5)", () => {
+  const DEGENERATE_LOTS: ReadonlyArray<{ label: string; lot: Record<string, unknown>; field: string }> = [
+    { label: "a zero cost", lot: { quantity: 10, cost: 0, tier: "c1" }, field: "cost" },
+    { label: "a negative cost", lot: { quantity: 10, cost: -5, tier: "c1" }, field: "cost" },
+    { label: "a zero quantity", lot: { quantity: 0, cost: 100, tier: "c1" }, field: "quantity" },
+    { label: "a negative quantity", lot: { quantity: -1, cost: 100, tier: "c1" }, field: "quantity" },
+    { label: "a NaN cost", lot: { quantity: 1, cost: Number.NaN, tier: "c1" }, field: "cost" },
+    {
+      label: "a zero entryFx",
+      lot: { quantity: 1, cost: 100, tier: "c1", entryFx: 0 },
+      field: "entryFx",
+    },
+  ];
+
+  /** The genesis seed of `genesis()`, with its one position's lots replaced. */
+  function seedWithLots(lots: unknown): Record<string, unknown> {
+    const seed = genesis() as unknown as Record<string, unknown>;
+    const positions = seed.positions as Array<Record<string, unknown>>;
+    return { ...seed, positions: [{ ...positions[0], lots }] };
+  }
+
+  describe.each(DEGENERATE_LOTS)("$label", ({ lot, field }) => {
+    it("is rejected by the genesis door, naming the field", () => {
+      const result = parseFundReview(seedWithLots([lot]));
+      expect(result.kind).toBe("schema-error");
+      expect(result.kind === "schema-error" ? result.path : undefined).toBe(
+        `positions[0].lots[0].${field}`,
+      );
+    });
+
+    it("is rejected by the event door, naming the same field", () => {
+      const input = openedInput({ position: { ...openedInput().position, lots: [lot] } });
+      expect(expectRejected(parseEvent(input)).path).toBe(`position.lots[0].${field}`);
+    });
+
+    it("is excluded with a warning by the compose gate if it reaches it anyway", () => {
+      // Straight to `buildCompositionReport` with a typed-but-degenerate seed:
+      // `canonical.ts` is defense in depth for data that did not come through a
+      // parse door (a fold result, a hand-edited image), so it may not be silent.
+      const data = genesis();
+      data.positions[0]!.lots = [lot] as unknown as (typeof data.positions)[0]["lots"];
+      const report = buildCompositionReport(data);
+
+      expect(report.excluded.invalid).toBeGreaterThan(0);
+      expect(report.warnings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "invalid-position-number",
+            recordId: "aapl-core",
+            message: expect.stringContaining(field) as unknown as string,
+          }),
+        ]),
+      );
+    });
+  });
+
+  it("still accepts a well-formed lot through the genesis door", () => {
+    expect(parseFundReview(seedWithLots([{ quantity: 2, cost: 100, tier: "c1", entryFx: 20 }])).kind).toBe(
+      "ok",
+    );
+  });
+
+  it("admits a negative cash (Reserve) Lot quantity through the genesis door, leaving the sign to the compose gate", () => {
+    // The cash-lot rule is deliberately NOT the position-lot rule, and not
+    // because a negative leg is fine: the compose gate is where a negative leg
+    // gets SURFACED (`invalid-reserve-lot-quantity`, the Reserve left untiered —
+    // `fund-composition-tiers.test.ts`). Rejecting it here would hide it.
+    const seed = genesis() as unknown as Record<string, unknown>;
+    const reserves = seed.reserves as Array<Record<string, unknown>>;
+    const result = parseFundReview({
+      ...seed,
+      reserves: [
+        {
+          ...reserves[0],
+          lots: [
+            { quantity: -100, tier: "c1" },
+            { quantity: 1100, tier: "c2" },
+          ],
+        },
+      ],
+    });
+    expect(result.kind).toBe("ok");
+  });
+
+  /** The genesis seed with its one reserve's lots replaced. */
+  function seedWithReserveLots(lots: unknown): Record<string, unknown> {
+    const seed = genesis() as unknown as Record<string, unknown>;
+    const reserves = seed.reserves as Array<Record<string, unknown>>;
+    return { ...seed, reserves: [{ ...reserves[0], lots }] };
+  }
+
+  it("rejects a NaN cash (Reserve) Lot quantity at the genesis door — malformed is not signed", () => {
+    // The half of the cash rule the door DOES own. A `NaN` leg is not a
+    // decomposition the gate can surface anything useful about; it poisons every
+    // sum it touches, so `typeof === "number"` was never the right test.
+    const result = parseFundReview(seedWithReserveLots([{ quantity: Number.NaN, tier: "c1" }]));
+    expect(result.kind).toBe("schema-error");
+    expect(result.kind === "schema-error" ? result.path : undefined).toBe(
+      "reserves[0].lots[0].quantity",
+    );
+  });
+
+  it("validates a cash (Reserve) Lot's entryFx when it carries one", () => {
+    // `entryFx` is not gated on `requireCost`: present means checked, whatever the
+    // Lot kind. Real reserve lots never carry one — this pins that the check did
+    // not quietly disappear for them.
+    const result = parseFundReview(
+      seedWithReserveLots([{ quantity: 1000, tier: "c1", entryFx: 0 }]),
+    );
+    expect(result.kind).toBe("schema-error");
+    expect(result.kind === "schema-error" ? result.path : undefined).toBe(
+      "reserves[0].lots[0].entryFx",
+    );
+  });
 });
 
 /** Parse a fixture input and unwrap to a typed event (fixtures are valid). */

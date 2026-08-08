@@ -110,12 +110,20 @@ export function isDirection(value: unknown): value is Direction {
   return value === "long" || value === "short";
 }
 
+/**
+ * A real number — the floor every other numeric guard here stands on, so `NaN` and
+ * the infinities are refused in ONE place rather than once per call site.
+ */
+export function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
 export function isNonNegativeNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+  return isFiniteNumber(value) && value >= 0;
 }
 
 export function isPositiveNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0;
+  return isFiniteNumber(value) && value > 0;
 }
 
 /**
@@ -147,4 +155,86 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
  */
 export function isRecordObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** One invalid Lot field, named, with the phrase that says what it should have been. */
+export interface LotFieldIssue {
+  /** The offending field, for the caller to append to its own path. */
+  readonly field: "quantity" | "cost" | "tier" | "entryFx";
+  /** Predicate-side phrase, e.g. `must be positive`. Callers add subject and period. */
+  readonly detail: string;
+}
+
+/**
+ * THE definition of a valid Lot — the single answer all three Lot-reading sites give.
+ *
+ * Audit 2026-08-07 finding 5: this rule used to be hand-rolled three times with three
+ * different strictnesses — `typeof === "number"` at the genesis door (`parse.ts`),
+ * `isPositiveNumber` at the event door (`events/parse.ts`), `isNonNegativeNumber` at the
+ * compose gate (`compose/canonical.ts`). `{ quantity: 10, cost: 0 }` was therefore
+ * REJECTED as a `PositionOpened` and ADMITTED UNWARNED as a genesis seed, whose entire
+ * market value then read as unrealized gain with nothing on screen saying so. The strict
+ * reading won: a Position Lot with no quantity, no cost, or a zero/negative entry FX is
+ * not a degenerate lot to be tolerated, it is a lot nobody can price.
+ *
+ * The two Lot kinds are NOT one rule with a nullable field — they are two rules that
+ * belong in one place:
+ *
+ * - **Position Lot** (`requireCost: true`, the default): `quantity` and `cost` are
+ *   strictly positive finite numbers and `tier` is a Capital Tier.
+ * - **Cash (Reserve) Lot** (`requireCost: false`): a tier decomposition of the reserve's
+ *   `amount`, so only `quantity`-is-a-real-number and `tier` are structural here. The
+ *   sign is deliberately NOT the door's call — and NOT because a negative reserve leg is
+ *   fine. It is because the COMPOSE GATE is where a negative leg gets SURFACED: the
+ *   Reserve is left untiered with an `invalid-reserve-lot-quantity` warning while
+ *   `amount` stays authoritative for the fund (`buildReserveTierContributions`, pinned by
+ *   "warns and keeps a Reserve untiered when a Lot quantity is invalid" in
+ *   `fund-composition-tiers.test.ts` — "a negative quantity slipped past schema typing").
+ *   Rejecting the seed at the door would hide the very condition that test exists to
+ *   make visible, so the door refuses only what nobody downstream can report on — `NaN`,
+ *   the infinities, a non-number — and the sign question travels to the gate that owns
+ *   it. That is the one honest split in this predicate, and it is a split in WHO
+ *   ANSWERS, not in which numbers are considered malformed: both sides call
+ *   {@link isFiniteNumber}.
+ *
+ * `entryFx` is optional and spans BOTH kinds: absent is fine, present must be a strictly
+ * positive finite number. It is not conditioned on `requireCost` — the entry FX a Lot
+ * actually carries is checked wherever it appears.
+ *
+ * Returns the issues in field order (`quantity`, `cost`, `tier`, `entryFx`) so a door
+ * that reports only the first failure and a gate that reports all of them agree on which
+ * failure comes first. Empty array means valid. The caller narrows to a record first —
+ * "this is not even an object" is a different message in every caller's vocabulary.
+ */
+export function invalidLotFields(
+  lot: Record<string, unknown>,
+  options: { requireCost?: boolean } = {},
+): LotFieldIssue[] {
+  const issues: LotFieldIssue[] = [];
+  const requireCost = options.requireCost ?? true;
+
+  if (requireCost) {
+    if (!isPositiveNumber(lot.quantity)) {
+      issues.push({ field: "quantity", detail: "must be positive" });
+    }
+    if (!isPositiveNumber(lot.cost)) {
+      issues.push({ field: "cost", detail: "must be positive" });
+    }
+  } else if (!isFiniteNumber(lot.quantity)) {
+    issues.push({ field: "quantity", detail: "must be a finite number" });
+  }
+
+  if (lot.tier !== "c1" && lot.tier !== "c2" && lot.tier !== "c3") {
+    issues.push({ field: "tier", detail: "must be c1, c2, or c3" });
+  }
+
+  // Not gated on `requireCost`: an `entryFx` that is PRESENT is validated for every Lot
+  // kind, which is what the genesis door did before this predicate absorbed it. Cash Lots
+  // never carry one in practice, so this costs them nothing — but a cash Lot that grew an
+  // `entryFx: 0` would otherwise be the one field nobody checks.
+  if (lot.entryFx !== undefined && !isPositiveNumber(lot.entryFx)) {
+    issues.push({ field: "entryFx", detail: "must be positive" });
+  }
+
+  return issues;
 }
