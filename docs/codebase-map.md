@@ -119,22 +119,37 @@ Tests are co-located with their subjects (`*.test.ts` beside the module), so the
 test for any file is its sibling. Characterization snapshots and the engine↔TUI
 formatter contract test are the two suites that pin cross-module behavior.
 
-## Known open items
+## Open items — none at present
 
-One item surfaced by the documentation audit remains open, and it is a design
-question rather than a defect:
+The one item the documentation audit left open here has since been resolved;
+its resolution stays in place as the decision record:
 
-- **`@numisma/price-feed` has no consumers.** Nothing in the workspace imports
+- **`@numisma/price-feed` has no consumers — RESOLVED by narrowing the surface
+  to the shape a consumer would need.** Nothing in the workspace still imports
   the package by its root — not `apps/web`, not `apps/tui`, and not even its own
-  `cli.ts`, which reaches its siblings by relative path. The package's header
-  promises reuse (a future web or scheduler consumer); until one exists, its
-  public surface is asserted by `src/index.test.ts` rather than exercised by real
-  use. Two of the 14 pinned exports look incidental rather than contractual —
-  `atomicWrite` / `AtomicWriteIo` (a generic fs primitive shared internally) and
-  `upsertQuote` (disposable price-store IO). With zero consumers there is no
-  evidence either way, so they were pinned rather than quietly narrowed: any
-  future narrowing has to update that test deliberately, which is the right
-  failure mode.
+  `cli.ts`, which reaches its siblings by relative path. That has not changed;
+  what changed is the response to it. The earlier reading was that with no
+  consumer there is no evidence, so the incidental-looking exports were pinned
+  rather than narrowed. The codebase review (finding 18) showed the barrel was
+  not merely over-broad but actively **wrong**: it published
+  `fetchTwelveDataDailyClose` (singular, zero non-test callers) and omitted the
+  batched `fetchTwelveDataDailyCloses` that `runPriceFetch` actually drives — so
+  the obvious front-door use for the registry's 9 Twelve Data symbols would issue
+  9 requests against Twelve Data's 8-credit/minute cap and 429, the exact failure
+  the chunking and 60s pacing exist to prevent.
+
+  The decision (no ADR — it is a surface trim, not an architectural trade-off):
+  shape the barrel for the consumer the package header promises, in the absence
+  of a real one.
+  - `fetchTwelveDataDailyCloses` + `ProviderFetchResult` are now exported; the
+    singular wrapper was **deleted**, not just un-exported. Its test cases moved
+    onto the batched fetch as one-element batches.
+  - `atomicWrite` / `AtomicWriteIo` and `upsertQuote` were **un-exported from the
+    barrel only**. The modules stay — three modules use them by relative import;
+    they were dead at the front door, not dead code.
+
+  `src/index.ts`'s header and the exact-set lock in `src/index.test.ts` carry this
+  decision; the lock is what makes any future change to the set deliberate.
 
 Three classes of finding from that audit were closed rather than deferred, and
 the guards that keep them closed are worth knowing about:
