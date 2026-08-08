@@ -53,6 +53,10 @@ render current state. An `--as-of` earlier than the genesis date fails loud.
 | `pnpm smoke:tui`     | Headless openTUI keypress smoke render (Bun).                                                                                                                       |
 | `pnpm smoke:startup` | Bun: drives the real startup data path + `mountApp` through the openTUI test renderer against an on-disk store, asserting the spine targets on the rendered surface. |
 
-The web app additionally carries its own `dev` / `build` / `start` and six
-`auth:*` scripts; they are scoped to `apps/web` rather than hoisted to the
-root. See [its README](../apps/web/README.md).
+The web app additionally carries its own `dev` / `build` / `start` and five
+`auth:*` scripts (`auth:generate`, `auth:apply`, `auth:migrate`, `auth:seed`,
+`auth:verify-limit`), scoped to `apps/web` rather than hoisted to the root.
+`push` / `backfill` / `gap-report` / `db:init` / `db:provision` / `typecheck`
+are NOT web-only — the root aliases above (`apps/web/package.json` also
+carries package-scoped copies for `pnpm --filter @numisma/web run <script>`
+use). See [its README](../apps/web/README.md).
