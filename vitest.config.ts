@@ -27,6 +27,20 @@ export default defineConfig({
         "apps/tui/src/report.ts",
         "apps/tui/src/spine.ts",
         "apps/tui/src/spine-reset.ts",
+        // Same category: the orders/migration CLI shells. Each is pure
+        // dependency-injection wiring — it binds the real fs, the real data dir, the
+        // real fold and a real readline prompt to a flow module that holds every
+        // decision and every refusal. They are unmeasurable for a reason stronger
+        // than thinness: IMPORTING THE SHELL RUNS THE ACT (top-level await / a
+        // self-executing `main()`), so a test cannot load one to assert it without
+        // performing a real import, a real fill, a real cancel, or a real in-place
+        // rewrite of the durable log. That is precisely why the flow lives in its own
+        // module — `record-fill-cli.ts` says so in its own header — and those modules
+        // ARE measured. See docs/coverage-rationale.md §1.
+        "apps/tui/src/import-orders-cli.ts",
+        "apps/tui/src/record-fill-cli.ts",
+        "apps/tui/src/cancel-order-cli.ts",
+        "apps/tui/src/migrate-legacy-log.ts",
         // Thin price-feed CLI entry: top-level console/exit-code wiring over the
         // tested `runPriceFetch`, no unit to assert.
         "apps/price-feed/src/cli.ts",
