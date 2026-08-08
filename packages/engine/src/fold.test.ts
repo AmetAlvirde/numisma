@@ -233,6 +233,105 @@ describe("foldEvents — PositionAddedTo refreshes the entry-VWAC fallback mark"
     // A real PriceMarked (130) wins over any VWAC fallback — the add never blends it away.
     expect(positionById(folded, "marked-core")?.markPrice).toBe(130);
   });
+
+  it("refreshes the display Close alongside the blended fallback mark, so a legitimate scale-in fires no markprice-close-mismatch", () => {
+    const folded = foldEvents(emptyGenesis(), [
+      opened("open-3", "2026-06-02", {
+        id: "scale-core",
+        portfolioId: "tactical",
+        tempo: "Liquid",
+        executionMode: "live",
+        accountId: "binance-usd",
+        instrumentId: "btc-usd",
+        direction: "long",
+        currency: "USD",
+        lots: [{ quantity: 10, cost: 100, tier: "c1" }],
+      }),
+      {
+        id: "add-3",
+        asOf: "2026-06-03",
+        type: "PositionAddedTo",
+        positionId: "scale-core",
+        lot: { quantity: 10, cost: 200, tier: "c1" },
+        funding: { reserveId: "no-such-reserve", amount: 2000 },
+      },
+    ]);
+
+    // The anchor and the mark move together: the open seeds 100 at 06-02, the add
+    // re-anchors the blended 150 at its own 06-03.
+    expect((folded.closes ?? []).filter((close) => close.instrumentId === "btc-usd")).toEqual([
+      { instrumentId: "btc-usd", asOf: "2026-06-02", price: 100 },
+      { instrumentId: "btc-usd", asOf: "2026-06-03", price: 150 },
+    ]);
+
+    // ADR-003's claim holds on the event path: no synthetic mismatch for a scale-in.
+    const report = buildCompositionReport(folded);
+    expect(report.warnings.filter((warning) => warning.code === "markprice-close-mismatch")).toEqual([]);
+  });
+
+  it("re-anchors in place when the scale-in lands on the same day as the open", () => {
+    // Same-asOf matters because latestCloseByInstrument breaks ties by KEEPING the
+    // first: a naive append would leave the stale 100 as the latest Close.
+    const folded = foldEvents(emptyGenesis(), [
+      opened("open-4", "2026-06-02", {
+        id: "sameday-core",
+        portfolioId: "tactical",
+        tempo: "Liquid",
+        executionMode: "live",
+        accountId: "binance-usd",
+        instrumentId: "btc-usd",
+        direction: "long",
+        currency: "USD",
+        lots: [{ quantity: 10, cost: 100, tier: "c1" }],
+      }),
+      {
+        id: "add-4",
+        asOf: "2026-06-02",
+        type: "PositionAddedTo",
+        positionId: "sameday-core",
+        lot: { quantity: 10, cost: 200, tier: "c1" },
+        funding: { reserveId: "no-such-reserve", amount: 2000 },
+      },
+    ]);
+
+    expect((folded.closes ?? []).filter((close) => close.instrumentId === "btc-usd")).toEqual([
+      { instrumentId: "btc-usd", asOf: "2026-06-02", price: 150 },
+    ]);
+
+    const report = buildCompositionReport(folded);
+    expect(report.warnings.filter((warning) => warning.code === "markprice-close-mismatch")).toEqual([]);
+  });
+
+  it("leaves the display Close alone when the add does not refresh the mark", () => {
+    const folded = foldEvents(emptyGenesis(), [
+      opened("open-5", "2026-06-02", {
+        id: "marked-core",
+        portfolioId: "tactical",
+        tempo: "Liquid",
+        executionMode: "live",
+        accountId: "binance-usd",
+        instrumentId: "btc-usd",
+        direction: "long",
+        currency: "USD",
+        lots: [{ quantity: 10, cost: 100, tier: "c1" }],
+      }),
+      marked("mk-2", "2026-06-03", "btc-usd", 130),
+      {
+        id: "add-5",
+        asOf: "2026-06-04",
+        type: "PositionAddedTo",
+        positionId: "marked-core",
+        lot: { quantity: 10, cost: 200, tier: "c1" },
+        funding: { reserveId: "no-such-reserve", amount: 2000 },
+      },
+    ]);
+
+    // A real mark owns both sides; the add pushes no anchor of its own.
+    expect((folded.closes ?? []).filter((close) => close.instrumentId === "btc-usd")).toEqual([
+      { instrumentId: "btc-usd", asOf: "2026-06-02", price: 100 },
+      { instrumentId: "btc-usd", asOf: "2026-06-03", price: 130 },
+    ]);
+  });
 });
 
 describe("foldEvents — as-of windows", () => {

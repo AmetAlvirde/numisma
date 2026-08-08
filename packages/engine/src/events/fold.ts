@@ -314,7 +314,24 @@ export function foldEvents(
           // print a fabricated unrealized P&L. A real mark — a genesis seed mark (never
           // in the fallback set) or any PriceMarked — is left untouched.
           if (entryWacFallback.has(adding.id) && !latestMark.has(adding.instrumentId)) {
-            adding.markPrice = weightedAverageCost(adding.lots);
+            const blended = weightedAverageCost(adding.lots);
+            adding.markPrice = blended;
+            // Move the display-only Close WITH the fallback mark. The open arm seeds
+            // the two together; omitting the refresh here left the stale pre-add
+            // anchor as the instrument's latest Close and fired a synthetic
+            // `markprice-close-mismatch` on a legitimate scale-in (ADR-003 claims that
+            // warning cannot fire on the event path). Same-day re-anchor is an
+            // in-place edit, not an append: `latestCloseByInstrument` breaks an
+            // equal-asOf tie by keeping the FIRST, so an appended twin would be ignored.
+            const sameDay = closes.find(
+              (close) => close.instrumentId === adding.instrumentId && close.asOf === event.asOf,
+            );
+            if (sameDay) {
+              sameDay.price = blended;
+            } else {
+              seededInstruments.add(adding.instrumentId);
+              closes.push({ instrumentId: adding.instrumentId, asOf: event.asOf, price: blended });
+            }
           }
           applyToReserve(
             reserves,
