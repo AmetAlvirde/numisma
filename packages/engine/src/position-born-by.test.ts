@@ -367,9 +367,38 @@ describe("the position gate learns time", () => {
       expect(reference.positionBornAsOf.get("btc-core")).toBe(GENESIS_AS_OF);
     });
 
-    // A trim's PARTIAL closed-book row shares its id with the still-open position.
-    // The open row is the authority; the partial must not overwrite it.
-    it("a partial (trim) row does not restate an open position's birth date", () => {
+    // The path that keeps the genesis SEEDING (below) safe for the key-set invariant.
+    // Seeding ids straight off `genesis.positions` would put a key in the map that
+    // `positionIds` lacks if the fold could ever drop a genesis position without
+    // minting a closed-book row. It cannot — a genesis position is in `positions` from
+    // t0, so its close always finds it and always pushes a full row — and this is the
+    // case that holds that reasoning to account rather than leaving it in a comment.
+    it("after a genesis-HELD position is fully closed", () => {
+      const reference = buildEventReference(genesis(), [
+        accepted({
+          id: "evt-close-core",
+          asOf: "2026-06-10",
+          type: "PositionClosed",
+          positionId: "btc-core",
+          settlement: { reserveId: "pulse-cash", proceeds: 200 },
+        }),
+      ]);
+
+      expect(reference.closedPositionIds.has("btc-core")).toBe(true);
+      expectSameKeys(reference);
+      expect(reference.positionBornAsOf.get("btc-core")).toBe(GENESIS_AS_OF);
+    });
+
+    // WHAT THIS PROVES, STATED HONESTLY: that a trimmed-but-still-open position is
+    // datable to its log birth, and that the survivor pass and the closed-book pass
+    // AGREE on the value for the id they share. It does NOT prove the
+    // not-already-present guard is load-bearing, and it cannot: `buildClosedPosition`
+    // copies `openedAsOf` off the very `PositionRecord` the surviving row came from, so
+    // last-write-wins would produce a byte-identical map here and through every other
+    // path the fold can currently produce. The guard is inert today and kept for a
+    // future change to how closed rows carry that date; that argument lives at the
+    // guard itself, because no test can carry it.
+    it("dates a trimmed-but-still-open position to its log birth, both passes agreeing", () => {
       const reference = buildEventReference(genesis(), [
         accepted(openLate()),
         accepted({
@@ -385,6 +414,157 @@ describe("the position gate learns time", () => {
       expect(reference.closedPositionIds.has("btc-late")).toBe(false);
       expectSameKeys(reference);
       expect(reference.positionBornAsOf.get("btc-late")).toBe(OPENED_AS_OF);
+    });
+  });
+
+  // THE ACCEPT SIDE FOR A LOG-BORN POSITION, THROUGH THE FULL GATE. The matrix above
+  // only proves these four verbs can be REFUSED; without this, a call site that
+  // rejected unconditionally would pass every rejection case in this file. Dated after
+  // the birth, and on the birth date itself — the boundary is `<`, so a verb dated
+  // exactly on the birth date is legal, the same rule the Reserve side applies.
+  describe("a verb dated on or after a log-born position's birth is accepted", () => {
+    const afterOpening = (verb: Record<string, unknown>, asOf: string) =>
+      ingestBatch([openLate(), { asOf, ...verb }]).rejection;
+
+    const verbs: [string, Record<string, unknown>][] = [
+      [
+        "PositionClosed",
+        {
+          id: "evt-close",
+          type: "PositionClosed",
+          positionId: "btc-late",
+          settlement: { reserveId: "pulse-cash", proceeds: 100 },
+        },
+      ],
+      [
+        "PositionTrimmed",
+        {
+          id: "evt-trim",
+          type: "PositionTrimmed",
+          positionId: "btc-late",
+          removals: [{ quantity: 0.5, tier: "c1" }],
+          settlement: { reserveId: "pulse-cash", proceeds: 50 },
+        },
+      ],
+      [
+        "PositionAddedTo",
+        {
+          id: "evt-add",
+          type: "PositionAddedTo",
+          positionId: "btc-late",
+          lot: { quantity: 1, cost: 100, tier: "c1" },
+          funding: { reserveId: "pulse-cash", amount: 100 },
+        },
+      ],
+      [
+        "InvalidationMarked",
+        {
+          id: "evt-invalidation",
+          type: "InvalidationMarked",
+          positionId: "btc-late",
+          price: 80,
+          direction: "below",
+        },
+      ],
+    ];
+
+    it.each(verbs)("%s dated after the birth", (_verb, input) => {
+      expect(afterOpening(input, "2026-06-20")).toBeNull();
+    });
+
+    it.each(verbs)("%s dated ON the birth date itself", (_verb, input) => {
+      expect(afterOpening(input, OPENED_AS_OF)).toBeNull();
+    });
+  });
+
+  // A GENESIS POSITION CANNOT CLAIM A BIRTH BEFORE THE WORLD'S. `openedAsOf` is
+  // documented as absent for a genesis-held position, but nothing enforces it:
+  // `parseFundReview` passes the seed through as `value as FundReviewData` and
+  // `foldEvents` `structuredClone`s each genesis position verbatim, so a hand-written
+  // seed carrying one reached the birth map intact and dated the position years early.
+  describe("a genesis position's explicit openedAsOf does not move its birth", () => {
+    /** The seed above, with a bogus pre-genesis `openedAsOf` on the held position. */
+    function seededEarly(): FundReviewData {
+      const seed = genesis();
+      return {
+        ...seed,
+        positions: seed.positions.map((position) => ({ ...position, openedAsOf: "2025-03-01" })),
+      };
+    }
+
+    /** After the bogus date, BEFORE the genesis review — the window the bug opened. */
+    const IN_THE_GAP = "2025-06-01";
+
+    it("dates it to the genesis review, not to the field", () => {
+      const reference = buildEventReference(seededEarly());
+
+      expect(reference.positionBornAsOf.get("btc-core")).toBe(GENESIS_AS_OF);
+    });
+
+    // `InvalidationMarked` is the only position verb with NO reserve leg, so it is the
+    // only one `requireReserveBornBy` does not independently catch — the verb where the
+    // two gates would have visibly disagreed about where the world begins.
+    it("rejects an InvalidationMarked dated in the gap between the two dates", () => {
+      const { rejection } = ingestBatch(
+        [
+          {
+            id: "evt-invalidation-early",
+            asOf: IN_THE_GAP,
+            type: "InvalidationMarked",
+            positionId: "btc-core",
+            price: 80,
+            direction: "below",
+          },
+        ],
+        seededEarly(),
+      );
+
+      expect(rejection).not.toBeNull();
+      expect(rejection?.path).toBe("positionId");
+      expect(rejection?.message).toContain("not born until");
+      expect(rejection?.message).toContain(IN_THE_GAP);
+      expect(rejection?.message).toContain(GENESIS_AS_OF);
+      expect(rejection?.message).not.toContain("2025-03-01");
+    });
+
+    // THE REMEDY MUST BE ONE THE OPERATOR CAN PERFORM. A genesis-held position has no
+    // `PositionOpened` to redate, so the log-born branch's advice would send them
+    // hunting for an event that does not exist — which is exactly what a birth date
+    // read off the bogus field produced, since `held` compares against `genesisAsOf`.
+    it("takes the genesis-seeded remedy branch, never 'open the position earlier'", () => {
+      const { rejection } = ingestBatch(
+        [
+          {
+            id: "evt-close-early",
+            asOf: IN_THE_GAP,
+            type: "PositionClosed",
+            positionId: "btc-core",
+            settlement: { reserveId: "pulse-cash", proceeds: 200 },
+          },
+        ],
+        seededEarly(),
+      );
+
+      // The path and the verb prefix are load-bearing here, not decoration: without
+      // them this passes vacuously on the REJECTION FROM THE OTHER GATE. A close in
+      // this window also predates `pulse-cash`, so `requireReserveBornBy` refuses it at
+      // `settlement.reserveId` with its own near-identical genesis-seeded remedy — and
+      // that is precisely the disagreement being pinned, so the assertion has to insist
+      // the POSITION gate is the one speaking.
+      expect(rejection?.path).toBe("positionId");
+      expect(rejection?.message).toMatch(/^PositionClosed references position /);
+      expect(rejection?.message).toContain("not born until");
+      expect(rejection?.message).toContain("genesis review date");
+      expect(rejection?.message).not.toContain("open the position earlier");
+    });
+
+    it("leaves a log-born position's birth alone", () => {
+      const reference = buildEventReference(seededEarly(), [accepted(openLate())]);
+
+      expect(reference.positionBornAsOf.get("btc-late")).toBe(OPENED_AS_OF);
+      expect([...reference.positionBornAsOf.keys()].sort()).toEqual(
+        [...reference.positionIds].sort(),
+      );
     });
   });
 

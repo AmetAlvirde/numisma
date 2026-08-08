@@ -136,6 +136,10 @@ export interface EventReference {
    * {@link requirePositionBornBy}. The position-side twin of
    * {@link ReserveView.bornAsOf}.
    *
+   * "Genesis-held" is decided by MEMBERSHIP IN THE SEED, not by the folded record's
+   * `openedAsOf` being absent — nothing validates that field on a hand-written seed,
+   * and trusting it let a genesis position claim a birth date before the world's.
+   *
    * INVARIANT: its key set is exactly {@link positionIds} — every known id is
    * datable, INCLUDING a retired one. `requirePositionBornBy` answers existence off
    * `positionBornAsOf.get(id) === undefined`, so a known-but-undatable id would be
@@ -182,8 +186,10 @@ export interface EventReference {
  * positions are open, which are retired, each open position's running lots, and the
  * last known close per instrument. The gate therefore cannot be wrong about the world
  * the fold will produce; it is looking at that world. The only facts NOT on the folded
- * output are `genesisAsOf` (the fold restamps `review.asOf` to the latest event) and
- * each Reserve's `bornAsOf`, both of which are read off the inputs directly.
+ * output are `genesisAsOf` (the fold restamps `review.asOf` to the latest event), each
+ * Reserve's `bornAsOf`, and WHICH position ids the seed itself held (the fold clones a
+ * genesis position verbatim, so it cannot tell a seeded one from a logged one on the
+ * record alone) — all read off the inputs directly.
  *
  * COST, and the standing budget. This is O(log length) per call — measured on a
  * MARK-HEAVY synthetic log (the durable log is 98.5% `PriceMarked`, and the original
@@ -226,28 +232,61 @@ export function buildEventReference(
     }
   }
 
-  // Each known position's BIRTH DATE, read off the folded book and only off it. Unlike
-  // a Reserve's, a position's birth date IS carried by the folded record, so there is
-  // no reason to rescan `priorEvents` for it — and a second derivation path for a fact
-  // the fold already carries would re-acquire exactly the divergence class ADR-015
-  // deleted the shadow to remove. One rule holds in this function: read the fold where
-  // the fold carries the fact, read the inputs only where it does not.
+  // Each known position's BIRTH DATE. A LOG-BORN position's is read off the folded
+  // book and only off it: unlike a Reserve's, that date IS carried by the folded
+  // record, so there is no reason to rescan `priorEvents` for it — and a second
+  // derivation path for a fact the fold already carries would re-acquire exactly the
+  // divergence class ADR-015 deleted the shadow to remove. The function's one rule
+  // holds: read the fold where the fold carries the fact, read the inputs only where it
+  // does not. A GENESIS-HELD position is the "does not" case — it is born with the
+  // world by definition, which is a fact about the SEED, not a date the fold derives.
   //
-  // `?? genesisAsOf` is LOAD-BEARING, not defensive. `openedAsOf` is optional on both
-  // record types and is absent precisely for a GENESIS-HELD position — one opened
-  // before the log existed (the fold sets it only at `PositionOpened` and carries it
-  // through the close). A genesis-held position is born with the world, the same rule
-  // `reserveBalances.bornAsOf` applies to a seeded Reserve.
+  // `?? genesisAsOf` stays LOAD-BEARING behind the seeding, not defensive. `openedAsOf`
+  // is optional on both record types and the fold sets it only at `PositionOpened`,
+  // carrying it through the close — so a position the fold knows but cannot date is
+  // one that existed before the log, and it gets the same answer
+  // `reserveBalances.bornAsOf` gives a seeded Reserve.
   //
-  // Survivors first, closed-book rows only for ids not already present: a PARTIAL
-  // (trim) row shares its id with a still-OPEN position, and the open row is the
-  // authority. Together the two passes cover exactly `positionIds`, which is the
-  // key-set invariant `requirePositionBornBy` relies on to answer existence.
-  const positionBornAsOf = new Map<string, string>();
+  // GENESIS IDS ARE SEEDED FIRST, and the not-already-present precedence below then
+  // makes them UN-OVERRIDABLE. A genesis-held position is born with the world by
+  // definition, and `?? genesisAsOf` alone trusted a field nothing enforces: the
+  // contract says `openedAsOf` is absent for a genesis-held position, but
+  // `parseFundReview` passes the seed through as `value as FundReviewData` and
+  // `foldEvents` `structuredClone`s each genesis position verbatim, so a seed carrying
+  // an explicit `openedAsOf: "2025-03-01"` reached the map intact. Two things then went
+  // wrong at once: `InvalidationMarked` — the only position verb with no reserve leg,
+  // hence the only one `requireReserveBornBy` does not independently catch — was
+  // accepted before the genesis review, so the two gates disagreed about where the
+  // world begins; and `held` below went false, sending the operator to "open the
+  // position earlier" for a position that has no `PositionOpened` to redate, which is
+  // precisely what the two-branch remedy exists to prevent. Log-born positions are
+  // untouched: their ids are not in the seed.
+  //
+  // Then survivors, then closed-book rows, each only for ids not already present: a
+  // PARTIAL (trim) row shares its id with a still-OPEN position, and the open row is
+  // the authority. The three passes cover exactly `positionIds` — the key-set
+  // invariant `requirePositionBornBy` relies on to answer existence — because a genesis
+  // position always leaves the fold either surviving in `positions` or carrying a
+  // full-close row in `closedPositions`, never neither. Pinned by the invariant tests,
+  // including one that fully closes a genesis-held position.
+  const positionBornAsOf = new Map<string, string>(
+    genesis.positions.map((position) => [position.id, genesisAsOf]),
+  );
   for (const position of folded.positions) {
-    positionBornAsOf.set(position.id, position.openedAsOf ?? genesisAsOf);
+    if (!positionBornAsOf.has(position.id)) {
+      positionBornAsOf.set(position.id, position.openedAsOf ?? genesisAsOf);
+    }
   }
   for (const row of folded.closedPositions ?? []) {
+    // INERT TODAY, AND KEPT ON PURPOSE. `buildClosedPosition` copies `openedAsOf` off
+    // the very `PositionRecord` the surviving row came from, so a partial row's date is
+    // always byte-equal to the open row's and last-write-wins would produce an
+    // identical map through every path the fold can currently produce. This guard is
+    // here so that a future change to how closed rows carry `openedAsOf` — a
+    // re-derivation, a normalization, a trim that stamps its own date — cannot silently
+    // restate a still-open position's birth date, which would move the gate's answer
+    // for every later verb aimed at it. Do not delete it as redundant without first
+    // making that coupling explicit somewhere else.
     if (!positionBornAsOf.has(row.positionId)) {
       positionBornAsOf.set(row.positionId, row.openedAsOf ?? genesisAsOf);
     }
