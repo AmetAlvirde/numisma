@@ -58,10 +58,14 @@
   The schedule fires EVERY day (7 days/week) ON PURPOSE. Crypto (Binance) trades
   24/7 and SHOULD mark every day, weekends included. Equities do NOT trade
   weekends/holidays, so on a market-closed day the fetch self-skips each equity mark
-  via per-provider bar-date validation (the provider's latest bar is a prior trading
-  day → INFO "equity mark skipped", not a failure) instead of appending a misdated
-  stale mark. So a 7-day schedule is correct for crypto AND safe for equities — a
-  weekday-only schedule would wrongly starve crypto and still misfire on holidays.
+  via bar-date validation applied uniformly to every instrument (the provider's
+  latest bar is a prior trading day → INFO "mark skipped — no fresh close for
+  <asOf>", not a failure) instead of appending a misdated stale mark. So a 7-day
+  schedule is correct for crypto AND safe for equities — a weekday-only schedule
+  would wrongly starve crypto and still misfire on holidays. NOTE: because the skip
+  rule is uniform, the SAME line can print for a crypto symbol; unlike an equity
+  skip, a crypto skip is never expected (Binance never closes) and should be
+  investigated the same day (docs/price-feed-ops.md).
 
   PATH: launchd starts this job with a bare, non-login PATH, so the wrapper sets its
   own PATH to find pnpm AND the node pnpm shells out to (NUMISMA_PATH_PREPEND). With

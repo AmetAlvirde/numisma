@@ -49,14 +49,19 @@ Under that root (`<dataDir>`, e.g. `~/Dev/<fund>/data`):
 | `<dataDir>/head-digest.json`           | Derived, versioned summary of the folded head (the Head Digest) — a breadcrumb that makes a bad-NAV search cheap; never a source of truth (nothing folds it back). | tracked |
 | `<dataDir>/preferences.jsonl`          | Append-only profit-split policy sidecar, validated on load.                           | tracked         |
 | `<dataDir>/orders.jsonl`               | Append-only Orders sidecar — resting claims on capital, joined to the fold at read time and never folded into NAV (ADR-013). | tracked |
+| `<dataDir>/orders.jsonl.lock`          | Transient exclusive-create lock guarding a concurrent `orders.jsonl` write.           | ignored         |
+| `<dataDir>/gap-report.json`            | Derived standup artifact — dates/counts of the fetch window, overwritten every run, no rotation or history. | ignored         |
+| `<dataDir>/job-heartbeat.json`         | Derived launchd-run outcome (one slot, overwritten every run) — where and how the last scheduled run ended. | ignored         |
 | `<dataDir>/inbox/transactions.json`    | Disposable write channel: drop an array of new events here to be ingested on startup. | ignored         |
 | `<dataDir>/ingested/<wall-clock>.json` | Archive of a consumed inbox — stamped, never clobbered.                               | ignored         |
 | `<dataDir>/prices/`                    | Disposable price-quote cache (upserted every fetch).                                  | ignored         |
 | `<dataDir>/events.jsonl.quarantine`    | The side lane for corrupt log lines, surfaced rather than aborting the load.          | ignored         |
 
 `<fund>`'s `.gitignore` is an **allowlist**: only the five durable files are
-tracked; `prices/`, `inbox/`, `ingested/`, `*.tmp`, and `*.quarantine` are
-structurally excluded, so the disposable cache can never enter history.
+tracked; `prices/`, `inbox/`, `ingested/`, `*.tmp`, `*.quarantine`, the
+`orders.jsonl.lock` lock file, and the derived `gap-report.json` /
+`job-heartbeat.json` sidecars are structurally excluded, so the disposable
+cache can never enter history.
 
 ## Reversibility
 
