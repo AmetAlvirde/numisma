@@ -312,7 +312,11 @@ describe("cash leg — the cross-ref shadow tracks the fold exactly (slice #87)"
         tier: "c1",
       },
       // Mixed-Tier close of a genesis position (proceeds split c1 25% / c2 75%).
-      { id: "close-alt", asOf: "2026-06-06", type: "PositionClosed", positionId: "alt-pos", settlement: { reserveId: "tiered", proceeds: 360 } },
+      // Proceeds sit at alt-pos' expected 800 (20 × last close 40): the batch now
+      // runs through the real cross-ref gate, and the old 360 was a 55% deviation
+      // the settlement-magnitude guard rejects. The Tier mix — the thing this leg
+      // exercises — is a property of the closed lots, not of the proceeds figure.
+      { id: "close-alt", asOf: "2026-06-06", type: "PositionClosed", positionId: "alt-pos", settlement: { reserveId: "tiered", proceeds: 800 } },
       // Untiered credit: moves `amount` only, mints no Tier — the null-tiers path.
       { id: "dep-untiered", asOf: "2026-06-07", type: "Deposit", reserveId: "untiered", amount: 100, tier: "c3" },
       // Close a position opened earlier in the SAME batch (both encodings must
@@ -321,18 +325,37 @@ describe("cash leg — the cross-ref shadow tracks the fold exactly (slice #87)"
     ];
   }
 
-  it("every folded reserve equals the shadow's running balance, per amount and per Tier", () => {
-    const events = batch();
-
-    // The fold's encoding: mutate a `ReserveRecord` (amount + lots array).
-    const folded = foldEvents(genesis(), events);
-
-    // The shadow's encoding: advance the cross-ref balances exactly as the
-    // sufficiency gate does across a batch (amount + Tier Map).
+  /**
+   * Drive a batch through the REAL ingest path — the cross-ref gate first, then both
+   * encodings over the ACCEPTED subset — and assert the shadow's running balances
+   * equal the folded reserves, per amount and per Tier. Returns the ids the gate
+   * rejected, so a caller can lock which events never reached either encoding.
+   *
+   * Routing through `crossReferenceEvent` is the load-bearing part (audit finding
+   * 32). Hand-feeding both encodings the same known-good batch could only ever catch
+   * arithmetic drift, never the sharper class: an event THE GATE LETS THROUGH that
+   * only one of the two encodings applies. The fold silently ignores a second close
+   * of a retired position while the shadow re-credits its proceeds, so an unguarded
+   * gate shows up here as a balance mismatch — no error text, no reference internals,
+   * nothing that a rewrite of how the gate remembers a closed id could invalidate.
+   */
+  function expectShadowAgreesWithFold(events: PortfolioEvent[]): string[] {
+    const rejected: string[] = [];
+    const accepted: PortfolioEvent[] = [];
     const reference = buildEventReference(genesis());
     for (const event of events) {
+      if (crossReferenceEvent(event, reference).kind !== "ok") {
+        rejected.push(event.id);
+        continue;
+      }
+      accepted.push(event);
+      // The shadow's encoding: advance the cross-ref balances exactly as the
+      // sufficiency gate does across a batch (amount + Tier Map).
       applyEventToReference(reference, event);
     }
+
+    // The fold's encoding: mutate a `ReserveRecord` (amount + lots array).
+    const folded = foldEvents(genesis(), accepted);
 
     // Sanity: the batch actually moved cash, so the guard is not vacuous.
     expect(reserveById(folded, "tiered").amount).not.toBe(1500);
@@ -359,5 +382,29 @@ describe("cash leg — the cross-ref shadow tracks the fold exactly (slice #87)"
 
     // The reverse: the shadow holds no reserve the fold dropped (same reserve set).
     expect(reference.reserveBalances.size).toBe(folded.reserves.length);
+    return rejected;
+  }
+
+  it("every folded reserve equals the shadow's running balance, per amount and per Tier", () => {
+    // The whole representative batch clears the gate — nothing is dropped before
+    // the comparison, so the agreement below is over all six verbs.
+    expect(expectShadowAgreesWithFold(batch())).toEqual([]);
+  });
+
+  it("a re-authored second close is gated out, so neither encoding sees it (audit 1/32)", () => {
+    const events = batch();
+    // Same position, same reserve, same proceeds as `close-alt` — only the event id
+    // is fresh, which is all the durable log's id-keyed dedup looks at. The gate is
+    // the only thing that can stop it, and if it does not, the shadow credits 360
+    // the fold never books and the agreement assertions above fail.
+    events.push({
+      id: "close-alt-reauthored",
+      asOf: "2026-06-09",
+      type: "PositionClosed",
+      positionId: "alt-pos",
+      settlement: { reserveId: "tiered", proceeds: 800 },
+    });
+
+    expect(expectShadowAgreesWithFold(events)).toEqual(["close-alt-reauthored"]);
   });
 });
