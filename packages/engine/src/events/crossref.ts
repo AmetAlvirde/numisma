@@ -747,6 +747,69 @@ function requirePositionBornBy(
 }
 
 /**
+ * A close may not SEAL BEHIND an event the log has already accepted for the same
+ * position. The death-side twin of {@link requirePositionBornBy}: birth is the earliest
+ * bound on a verb's date, this is the latest bound on a close's.
+ *
+ * THE HOLE THIS SHUTS IS INVISIBLE TO BOTH EVENTS INDIVIDUALLY. When the trim is gated
+ * the close does not exist yet; when the close is gated nothing is retired yet, so
+ * `closedPositionIds` cannot see it either. Both pass, and the fold's (`asOf`, then log)
+ * ordering then applies the close FIRST and drops every event dated after it — and the
+ * drop is UNOBSERVABLE AFTER THE FACT, because `foldEvents` has no diagnostics channel
+ * to report it on: it returns a `FundReviewData`, which carries no warnings field at
+ * all. That is ledger 18's shape, and it is exactly why this rule has to sit at INGEST.
+ * A fold that could complain would still be complaining about an event already durably
+ * logged; a fold that cannot complain leaves nothing behind to notice.
+ *
+ * Measured at 80827b6 on `[Opened 06-05, Trimmed 06-18, Closed 06-10 @ 50]`: a position
+ * that broke even reported `realizedPnlUsd: -50` at full size, because the close landed
+ * on lots the trim should have removed. The add-to case is wider still, and its damage
+ * is quieter than it first looks — the dropped add-to's funding DEBIT never fires, so
+ * the cash STAYS in the reserve and the net cash delta is 0. Nothing in the balances
+ * looks wrong. The lie is in the SIZE: the closed row reports a position of 1 against a
+ * deployment of 2, so a cash-only assertion cannot see this case at all.
+ *
+ * IT OWNS ONE HALF OF THE QUESTION, NOT TWO. Existence and birth are already answered by
+ * {@link requirePositionBornBy}, which runs ahead of it at the call site, so a MISSING
+ * map entry here is SUCCESS — a genesis-held position the log has never touched has
+ * nothing to seal behind — and never a dangling reference. That is the whole reason
+ * `positionLastVerbAsOf`'s key set is a SUBSET of `positionIds` rather than equal to it.
+ *
+ * THE COMPARISON IS STRICT, AND THAT IS LOAD-BEARING. `asOf < latest` rejects; EQUAL IS
+ * ACCEPTED. Trim-then-close on the same day is an ordinary trading sequence, and the
+ * fold sorts by (`asOf`, THEN LOG INDEX), so with equal dates the trim — earlier in the
+ * log — still applies first and the close lands on the already-reduced lots. A `<=`
+ * would refuse correct, common behavior.
+ *
+ * Returns `null` on success and never throws, matching {@link requirePositionBornBy}
+ * exactly: no error-code enum, `path` is the machine-readable half and the message the
+ * human one, and the CALLER prefixes the verb name. The message names BOTH dates and the
+ * blocking verb, so the operator can see the ordering that would have been destroyed.
+ *
+ * NO LEGACY-MIGRATION EXEMPTION, on evidence: the real durable log was scanned at 388
+ * events — 2 position-targeting, 0 backdated. No historical log can trip this rule, so
+ * an exemption would buy nothing and cost the guarantee that the rule holds everywhere.
+ */
+function requirePositionUntouchedAfter(
+  reference: EventReference,
+  positionId: string,
+  asOf: string,
+  path: string,
+): EventError | null {
+  const latest = reference.positionLastVerbAsOf.get(positionId);
+  if (latest === undefined || asOf >= latest.asOf) {
+    return null;
+  }
+  return eventError(
+    path,
+    `closes position '${positionId}' as of ${asOf}, but a ${latest.type} dated ` +
+      `${latest.asOf} has already been accepted for it. The fold applies events in date ` +
+      `order, so this close would run FIRST and that later event would vanish silently, ` +
+      `taking its cash leg with it. Date the close ${latest.asOf} or later.`,
+  );
+}
+
+/**
  * Per-Tier SUFFICIENCY for a debit, and nothing else. Returns null on success.
  * `amount` here is the cash leaving; an untiered reserve is checked against its
  * total balance, a tiered one against the named Tier's available quantity. Fails
@@ -812,6 +875,27 @@ function crossReferenceClose(
       "positionId",
       `PositionClosed targets position id '${event.positionId}', which is already closed.`,
     );
+  }
+  // THE SEAL CHECK, AND THE ONLY CALL SITE IT NEEDS. `PositionClosed` is the sole
+  // retiring verb — a trim that would remove every lot is already refused below ("a full
+  // retirement. A trim must leave the position open; use PositionClosed") — so no other
+  // verb can seal anything behind it.
+  //
+  // ORDERED AHEAD OF THE MAGNITUDE GATE, with evidence. This same batch at
+  // `proceeds: 100` was already refused before this rule, but by magnitude and for the
+  // WRONG REASON: "proceeds 100 deviate 100.0% from expected 50.00" blames the fill size
+  // when the fill was honest and the ORDERING was the defect. Checking the seal first
+  // replaces an accidental rejection carrying a misleading reason with a deliberate one
+  // carrying the real reason, and makes the interaction disappear rather than requiring
+  // anyone to reason about it. Behind born-by, which answers existence for it.
+  const untouched = requirePositionUntouchedAfter(
+    reference,
+    event.positionId,
+    event.asOf,
+    "positionId",
+  );
+  if (untouched) {
+    return { ...untouched, message: `PositionClosed ${untouched.message}` };
   }
   const settlesInto = requireReserveBornBy(
     reference,
