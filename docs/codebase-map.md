@@ -55,13 +55,14 @@ These are the seams most likely to be misread from the tree alone:
    reach the fold": a line in `orders.jsonl` is never a `PortfolioEvent` —
    `parseEvent` rejects it, pinned by `orders-not-events.test.ts`
    ([ADR-013](../context/adr/ADR-013-order-a-claim-on-capital-recorded-beside-the-log.md)).
-   The ADR declines to decide module structure, and one deliberate crossing
+   The ADR leaves module structure undecided, and one deliberate crossing
    exists: `packages/engine/src/orders/fill.ts` imports `PortfolioEvent` /
-   `PositionOpenedEvent` / `PositionAddedToEvent` directly — still the only
-   direct `events/types.ts` import in `orders/` — because the fill act
-   constructs the fold events it writes. `orders/attribution.ts` and
-   `orders/coverage.ts` reach folded state too, but only transitively, through
-   `compose/canonical.js`.
+   `PositionOpenedEvent` / `PositionAddedToEvent` / `PositionDecision` directly
+   — still the only non-test direct `events/types.ts` import in `orders/` —
+   because the fill act constructs the fold events it writes.
+   `orders/attribution.ts`, `orders/coverage.ts`, and `orders/available.ts`
+   reach folded state too, but only transitively — through
+   `compose/canonical.js`, which `attribution.ts` alone imports.
 
 ## Runbooks and operational docs
 

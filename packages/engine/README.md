@@ -112,10 +112,11 @@ The `orders/*` modules are recorded beside the event log, never in it: a line
 in `orders.jsonl` is never a `PortfolioEvent` — `parseEvent` rejects it, pinned
 by `orders-not-events.test.ts` (ADR-013). The ADR leaves module structure
 undecided; `orders/fill.ts` is the one deliberate crossing — still the only
-direct `events/types.ts` import in `orders/` — because it constructs the
-`PositionOpened` / `PositionAddedTo` events the fill act writes.
-`orders/attribution.ts` and `orders/coverage.ts` reach folded state too, but
-only transitively, through `compose/canonical.js`. `calendar.ts` and
+non-test direct `events/types.ts` import in `orders/` — because it constructs
+the `PositionOpened` / `PositionAddedTo` events the fill act writes.
+`orders/attribution.ts`, `orders/coverage.ts`, and `orders/available.ts` reach
+folded state too, but only transitively — through `compose/canonical.js`, which
+`attribution.ts` alone imports. `calendar.ts` and
 `data-dir.ts` have no in-package imports at all. The event modules reuse
 `parseFundReview` (to re-validate genesis) and the composition read model;
 `contracts.ts` depends on nothing else in the package, so there are no cycles.
