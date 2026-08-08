@@ -1,16 +1,17 @@
+/**
+ * The WIRE-CONTRACT half of the projection module (see `contract.ts`). Split from
+ * the reader's suite (`snapshot-reader.test.ts`) along the same seam as the source:
+ * nothing in here needs a Pool, real or stubbed.
+ *
+ * The first suite below is the seam's own guard — it asserts, from the module
+ * graph rather than from a comment, that `contract.ts` stays pg-free.
+ */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { Pool } from "pg";
 import type { CompositionReport } from "@numisma/engine";
-import { afterEach, describe, expect, it } from "vitest";
-import {
-  COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
-  fundIdOf,
-  getSnapshotHistory,
-  getReaderPool,
-  setReaderPoolForTests,
-} from "./contract.ts";
+import { describe, expect, it } from "vitest";
+import { fundIdOf } from "./contract.ts";
 
 // The fixture the push shell + reader share. Its fundName is the canonical
 // slug-derivation case ("Sanitized Exploratory Fund" -> "sanitized-exploratory-fund").
@@ -23,263 +24,108 @@ const fixtureReport = JSON.parse(
   readFileSync(FIXTURE_PATH, "utf-8"),
 ) as CompositionReport;
 
-/**
- * A Pool stand-in whose only job is to return the rows a `SELECT ... LIMIT 1`
- * would yield. The pg driver is mocked here; the empty/stale/ok arbitration and
- * the version comparison inside getSnapshotHistory still run for real.
- */
-function poolReturning(rows: unknown[]): Pool {
-  return {
-    query: async () => ({ rows }),
-  } as unknown as Pool;
-}
-
-/**
- * A Pool stand-in whose query rejects — stands in for a real DB/query failure
- * (as opposed to the two "expected" bad states, which resolve to a refusal).
- */
-function poolRejecting(error: Error): Pool {
-  return {
-    query: async () => {
-      throw error;
-    },
-  } as unknown as Pool;
-}
-
 /** Build a CompositionReport carrying only the fundName the slug derivation reads. */
 function reportNamed(fundName: string): CompositionReport {
   return { dashboard: { summary: { fundName } } } as unknown as CompositionReport;
 }
 
-describe("getSnapshotHistory", () => {
-  it("returns empty when no rows exist", async () => {
-    const result = await getSnapshotHistory(poolReturning([]));
-    expect(result).toEqual({ status: "empty" });
-  });
-
-  it("returns stale when the stored schema_version differs from the expected version", async () => {
-    const storedVersion = COMPOSITION_SNAPSHOT_SCHEMA_VERSION + 1;
-    const result = await getSnapshotHistory(
-      poolReturning([
-        {
-          fund_id: "sanitized-exploratory-fund",
-          as_of: "2026-05-29",
-          schema_version: storedVersion,
-          report: fixtureReport,
-        },
-      ]),
-    );
-    expect(result).toEqual({
-      status: "stale",
-      storedVersion,
-      expectedVersion: COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
-    });
-  });
-
-  it("returns ok when the stored schema_version matches the expected version", async () => {
-    const result = await getSnapshotHistory(
-      poolReturning([
-        {
-          fund_id: "sanitized-exploratory-fund",
-          as_of: "2026-05-29",
-          schema_version: COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
-          report: fixtureReport,
-        },
-      ]),
-    );
-    expect(result).toEqual({
-      status: "ok",
-      latest: {
-        fundId: "sanitized-exploratory-fund",
-        asOf: "2026-05-29",
-        report: fixtureReport,
-      },
-      anchors: [
-        {
-          fundId: "sanitized-exploratory-fund",
-          asOf: "2026-05-29",
-          report: fixtureReport,
-        },
-      ],
-    });
-  });
-
-  it("rejects on an actual DB/query failure rather than returning a refusal", async () => {
-    const boom = new Error("connection refused");
-    await expect(getSnapshotHistory(poolRejecting(boom))).rejects.toThrow(
-      "connection refused",
-    );
-  });
-});
-
 /**
- * Multi-snapshot arbitration (M4). "Latest" must be the genuinely most recent
- * snapshot by its logical `as_of` date — correct by construction, not by the
- * accident that the fixture happens to use zero-padded ISO dates that sort the
- * same lexically and chronologically. These feed several rows to the mocked pool
- * (order-independent, since the SQL no longer sorts) and assert newest-wins.
- */
-describe("getSnapshotHistory multi-snapshot arbitration", () => {
-  /** A stored snapshot row with the given `as_of`; overrides tweak a single field. */
-  function snapshotRow(
-    asOf: string,
-    overrides: Partial<{
-      fund_id: string;
-      schema_version: number;
-      report: CompositionReport;
-    }> = {},
-  ) {
-    return {
-      fund_id: "sanitized-exploratory-fund",
-      as_of: asOf,
-      schema_version: COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
-      report: fixtureReport,
-      ...overrides,
-    };
-  }
-
-  it("returns the snapshot with the most recent as_of regardless of row order", async () => {
-    const result = await getSnapshotHistory(
-      poolReturning([
-        snapshotRow("2026-05-08"),
-        snapshotRow("2026-05-29"),
-        snapshotRow("2026-05-15"),
-      ]),
-    );
-    expect(result).toMatchObject({
-      status: "ok",
-      latest: { asOf: "2026-05-29" },
-    });
-  });
-
-  it("arbitrates on a typed date key, not lexical TEXT order (the trap the old ORDER BY as_of DESC hit)", async () => {
-    // Non-zero-padded month: September "2026-9-1" vs October "2026-10-01".
-    // October is chronologically LATER, but lexically "2026-10-01" < "2026-9-1"
-    // ('1' < '9' at the fifth character), so the old TEXT `ORDER BY as_of DESC
-    // LIMIT 1` would return the WRONG, earlier September snapshot.
-    const september = snapshotRow("2026-9-1");
-    const october = snapshotRow("2026-10-01");
-
-    // Prove the trap is real: a lexical DESC sort picks September, not October.
-    const lexicalDescWinner = [september.as_of, october.as_of]
-      .sort() // ascending lexical
-      .at(-1); // == the row a DESC TEXT sort would place first
-    expect(lexicalDescWinner).toBe("2026-9-1");
-
-    // Typed arbitration returns the genuinely-latest October snapshot instead.
-    const result = await getSnapshotHistory(poolReturning([october, september]));
-    expect(result).toMatchObject({
-      status: "ok",
-      latest: { asOf: "2026-10-01" },
-    });
-  });
-
-  it("judges schema staleness on the latest snapshot, not an older ok one", async () => {
-    const staleVersion = COMPOSITION_SNAPSHOT_SCHEMA_VERSION + 1;
-    const result = await getSnapshotHistory(
-      poolReturning([
-        snapshotRow("2026-05-08"), // older, current version
-        snapshotRow("2026-05-29", { schema_version: staleVersion }), // latest, stale
-      ]),
-    );
-    expect(result).toEqual({
-      status: "stale",
-      storedVersion: staleVersion,
-      expectedVersion: COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
-    });
-  });
-
-  it("rejects rather than silently mis-ordering when an as_of is not a sortable ISO date", async () => {
-    await expect(
-      getSnapshotHistory(
-        poolReturning([snapshotRow("2026-05-29"), snapshotRow("last thursday")]),
-      ),
-    ).rejects.toThrow(/not a sortable ISO calendar date/);
-  });
-});
-
-/**
- * Seam C — the reader returns HISTORY, not a day (PRD #146 slice #148).
+ * Every module specifier `source` imports or re-exports AT RUNTIME — `import type`
+ * and `export type` forms are skipped, because TypeScript erases them and they
+ * therefore cannot pull a driver into anyone's bundle.
  *
- * D4's named reference (the entire change/delta feature) had no delivery mechanism
- * while the return type carried one row. The QUERY always read them all: no WHERE,
- * no LIMIT, full history into memory, everything but the newest thrown away. These
- * cases are about the widened return SHAPE and the version filter on it.
+ * A regex, not the TS compiler API: the repo's import style is plain top-of-file
+ * ES statements, and the alternative (spin up a Program) buys nothing here while
+ * costing a dependency on compiler internals. A dynamic `import()` would slip past
+ * this — none exists in `projection/`, and a value `import` is the failure mode the
+ * seam actually has.
  */
-describe("getSnapshotHistory anchors", () => {
-  function anchorRow(asOf: string, schemaVersion = COMPOSITION_SNAPSHOT_SCHEMA_VERSION) {
-    return {
-      fund_id: "sanitized-exploratory-fund",
-      as_of: asOf,
-      schema_version: schemaVersion,
-      report: fixtureReport,
-    };
+function runtimeImportsOf(source: string): string[] {
+  const specifiers: string[] = [];
+  const statement =
+    /^\s*(?:import|export)\b(?<body>[\s\S]*?)\bfrom\s*["'](?<spec>[^"']+)["']/gm;
+  for (const match of source.matchAll(statement)) {
+    const body = match.groups?.body ?? "";
+    const spec = match.groups?.spec;
+    if (!spec) continue;
+    // `import type X from` / `import { type A }`-only forms are erased at build.
+    if (/^\s*type\b/.test(body)) continue;
+    specifiers.push(spec);
   }
+  // Bare side-effect imports (`import "pg";`) carry no `from` clause.
+  for (const match of source.matchAll(/^\s*import\s*["'](?<spec>[^"']+)["']/gm)) {
+    const spec = match.groups?.spec;
+    if (spec) specifiers.push(spec);
+  }
+  return specifiers;
+}
 
-  it("returns every anchor ASCENDING, regardless of the order the rows arrive in", async () => {
-    const result = await getSnapshotHistory(
-      poolReturning([
-        anchorRow("2026-07-26"),
-        anchorRow("2026-07-24"),
-        anchorRow("2026-07-25"),
-      ]),
-    );
-    expect(result.status).toBe("ok");
-    if (result.status !== "ok") return;
-    expect(result.anchors.map((a) => a.asOf)).toEqual([
-      "2026-07-24",
-      "2026-07-25",
-      "2026-07-26",
-    ]);
-    // `latest` is still the newest, and it is the same anchor the history ends on.
-    expect(result.latest.asOf).toBe("2026-07-26");
-    expect(result.anchors.at(-1)).toEqual(result.latest);
-  });
-
-  it("orders through the TYPED date key, not lexical TEXT order", async () => {
-    // The same trap the "latest" arbitration dodges, one level out: sorting anchors
-    // by string would place October BEFORE a non-zero-padded September, and slice 4
-    // would resolve "nearest anchor <= target" to the wrong day.
-    const result = await getSnapshotHistory(
-      poolReturning([anchorRow("2026-10-01"), anchorRow("2026-9-1")]),
-    );
-    expect(result.status).toBe("ok");
-    if (result.status !== "ok") return;
-    expect(result.anchors.map((a) => a.asOf)).toEqual(["2026-9-1", "2026-10-01"]);
-    // Prove the trap is real rather than assuming it: a lexical sort inverts these.
-    expect(["2026-10-01", "2026-9-1"].sort()).toEqual(["2026-10-01", "2026-9-1"]);
-  });
-
-  it("DROPS rows at another schema version from anchors — the v2→v3 cutover", async () => {
-    // The graceful-cutover case. Leftover v2 rows stay in the table (no credential
-    // in this system can DELETE one, V6) but must never be handed to a v3 reader as
-    // a reference: they are simply unresolvable until the backfill upgrades them.
-    const stale = COMPOSITION_SNAPSHOT_SCHEMA_VERSION - 1;
-    const result = await getSnapshotHistory(
-      poolReturning([
-        anchorRow("2026-07-20", stale),
-        anchorRow("2026-07-24", stale),
-        anchorRow("2026-07-26"),
-      ]),
-    );
-    expect(result.status).toBe("ok");
-    if (result.status !== "ok") return;
-    // The newest row is current, so the surface renders — and it renders with the
-    // ONE anchor it can actually trust.
-    expect(result.anchors.map((a) => a.asOf)).toEqual(["2026-07-26"]);
-    expect(result.latest.asOf).toBe("2026-07-26");
-  });
-
-  it("carries the full payload on every anchor, not just on latest", async () => {
-    const result = await getSnapshotHistory(
-      poolReturning([anchorRow("2026-07-24"), anchorRow("2026-07-26")]),
-    );
-    expect(result.status).toBe("ok");
-    if (result.status !== "ok") return;
-    for (const anchor of result.anchors) {
-      expect(anchor.report).toBe(fixtureReport);
-      expect(anchor.fundId).toBe("sanitized-exploratory-fund");
+/**
+ * Walks the RELATIVE import graph from `entry`, returning every bare (package)
+ * specifier reachable through runtime imports. Relative edges are followed to any
+ * depth; bare specifiers are LEAVES — the walker stops at the package boundary and
+ * does not resolve into `node_modules` or into workspace packages. So a package the
+ * app pulls in (say `@numisma/engine/calendar`, which `contract.ts` reaches via
+ * `as-of.ts`) is recorded by name only, and whatever IT imports is out of view.
+ *
+ * That is the walker's stated edge: this guards `pg` through the APP's relative
+ * graph — a value import of the driver written anywhere in `apps/web`'s own files
+ * downstream of `contract.ts`. A driver pulled in transitively by a workspace
+ * package is a different failure and belongs to that package's own guard.
+ */
+function reachablePackages(entry: string): Set<string> {
+  const seen = new Set<string>();
+  const packages = new Set<string>();
+  const queue = [entry];
+  while (queue.length > 0) {
+    const file = queue.pop() as string;
+    if (seen.has(file)) continue;
+    seen.add(file);
+    for (const spec of runtimeImportsOf(readFileSync(file, "utf-8"))) {
+      if (spec.startsWith(".")) {
+        queue.push(resolve(dirname(file), spec));
+      } else {
+        packages.add(spec);
+      }
     }
+  }
+  return packages;
+}
+
+/**
+ * THE SEAM'S OWN GUARD (audit finding 8). `contract.ts` is the module every
+ * browser-reachable surface imports from; the moment a value import of `pg` is
+ * reachable from it, any runtime value taken from the contract — a schema version,
+ * a shared key list — drags the driver toward the client bundle.
+ *
+ * `client-bundle.integration.test.ts` already asserts the CONSEQUENCE, but only
+ * against a built tree (it skips without one) and only for the surfaces that happen
+ * to be imported today. This asserts the CAUSE, on every `pnpm test`, from the app's
+ * own relative module graph — which is what makes the pg-free half safe to put
+ * shared runtime constants in. Scope, per `reachablePackages` above: relative edges
+ * to any depth, package specifiers as leaves.
+ */
+describe("contract.ts stays pg-free", () => {
+  const CONTRACT = resolve(HERE, "contract.ts");
+  const READER = resolve(HERE, "snapshot-reader.ts");
+
+  it("reaches no runtime pg import through the app's relative import graph", () => {
+    const packages = reachablePackages(CONTRACT);
+    const pgish = [...packages].filter((p) => p === "pg" || p.startsWith("pg/"));
+    expect(pgish, `reachable packages: ${[...packages].join(", ")}`).toEqual([]);
+  });
+
+  it("does not import the reader directly, which is where pg legitimately lives", () => {
+    // Proves the dependency runs one way only at the seam itself: this checks the
+    // contract's OWN import list, not the whole graph. The reader imports the
+    // contract; a contract that imported back would re-merge the two halves
+    // silently (the pg-free assertion above covers the deeper relative paths).
+    const contractSource = readFileSync(CONTRACT, "utf-8");
+    expect(runtimeImportsOf(contractSource)).not.toContain("./snapshot-reader.ts");
+
+    // And the assertion above has teeth only if the reader really does import pg —
+    // otherwise a future move could empty both files and pass vacuously.
+    expect(reachablePackages(READER)).toContain("pg");
   });
 });
 
@@ -311,47 +157,5 @@ describe("fundIdOf slug derivation", () => {
 
   it("passes an already-slugged name through unchanged", () => {
     expect(fundIdOf(reportNamed("already-slug"))).toBe("already-slug");
-  });
-});
-
-describe("getReaderPool (lazy singleton + test seam)", () => {
-  const saved = process.env.PROJECTION_DATABASE_URL;
-
-  afterEach(async () => {
-    // Never leak a pool (or an injected stub) into the next test.
-    setReaderPoolForTests(undefined);
-    if (saved === undefined) {
-      delete process.env.PROJECTION_DATABASE_URL;
-    } else {
-      process.env.PROJECTION_DATABASE_URL = saved;
-    }
-  });
-
-  it("throws when PROJECTION_DATABASE_URL is not set", () => {
-    setReaderPoolForTests(undefined);
-    delete process.env.PROJECTION_DATABASE_URL;
-    expect(() => getReaderPool()).toThrow("PROJECTION_DATABASE_URL is not set");
-  });
-
-  it("lazily constructs a pool from PROJECTION_DATABASE_URL and memoizes it", async () => {
-    setReaderPoolForTests(undefined);
-    process.env.PROJECTION_DATABASE_URL =
-      "postgres://reader@localhost:5432/projection";
-    // pg's Pool does not connect until first query, so constructing it here opens
-    // no socket; this exercises the real lazy-construction branch.
-    const first = getReaderPool();
-    expect(first).toBeInstanceOf(Pool);
-    // Second call returns the memoized instance, not a fresh pool.
-    expect(getReaderPool()).toBe(first);
-    await first.end();
-  });
-
-  it("returns an injected stub without touching the environment", () => {
-    setReaderPoolForTests(undefined);
-    delete process.env.PROJECTION_DATABASE_URL;
-    const stub = poolReturning([]);
-    setReaderPoolForTests(stub);
-    // Env is unset, yet no throw: the injected stub short-circuits construction.
-    expect(getReaderPool()).toBe(stub);
   });
 });

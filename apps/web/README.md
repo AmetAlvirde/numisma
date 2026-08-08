@@ -84,8 +84,9 @@ record. The event log stays local and canonical.
   only), applied through the pg driver with the one-shot
   `PROJECTION_ADMIN_DATABASE_URL`. See `docs/projection-provisioning.md`.
 
-The dashboard reader (`src/lib/dashboard.ts` → `src/projection/contract.ts`)
-runs server-side only, behind the Better Auth session gate, using the
+The dashboard reader (`src/lib/dashboard.ts` → `src/projection/snapshot-reader.ts`
+for the values, with `src/projection/contract.ts` supplying the pg-free contract
+types) runs server-side only, behind the Better Auth session gate, using the
 read-only `PROJECTION_DATABASE_URL`. The read credential and `pg` import
 never reach the client bundle — enforced structurally by TanStack Start's
 `createServerFn` compilation and asserted by
