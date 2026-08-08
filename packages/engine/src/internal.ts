@@ -110,12 +110,20 @@ export function isDirection(value: unknown): value is Direction {
   return value === "long" || value === "short";
 }
 
+/**
+ * A real number — the floor every other numeric guard here stands on, so `NaN` and
+ * the infinities are refused in ONE place rather than once per call site.
+ */
+export function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
 export function isNonNegativeNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+  return isFiniteNumber(value) && value >= 0;
 }
 
 export function isPositiveNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0;
+  return isFiniteNumber(value) && value > 0;
 }
 
 /**
@@ -173,12 +181,25 @@ export interface LotFieldIssue {
  * belong in one place:
  *
  * - **Position Lot** (`requireCost: true`, the default): `quantity` and `cost` are
- *   strictly positive finite numbers, `tier` is a Capital Tier, and `entryFx` — optional
- *   — is a strictly positive finite number when present.
- * - **Cash (Reserve) Lot** (`requireCost: false`): a SIGNED tier decomposition of the
- *   reserve's `amount`, so only `quantity`-is-a-number and `tier` are structural. A
- *   negative leg is legitimate arithmetic, and whether the legs sum to `amount` is
- *   `buildReserveTierContributions`'s judgment, not the parser's.
+ *   strictly positive finite numbers and `tier` is a Capital Tier.
+ * - **Cash (Reserve) Lot** (`requireCost: false`): a tier decomposition of the reserve's
+ *   `amount`, so only `quantity`-is-a-real-number and `tier` are structural here. The
+ *   sign is deliberately NOT the door's call — and NOT because a negative reserve leg is
+ *   fine. It is because the COMPOSE GATE is where a negative leg gets SURFACED: the
+ *   Reserve is left untiered with an `invalid-reserve-lot-quantity` warning while
+ *   `amount` stays authoritative for the fund (`buildReserveTierContributions`, pinned by
+ *   "warns and keeps a Reserve untiered when a Lot quantity is invalid" in
+ *   `fund-composition-tiers.test.ts` — "a negative quantity slipped past schema typing").
+ *   Rejecting the seed at the door would hide the very condition that test exists to
+ *   make visible, so the door refuses only what nobody downstream can report on — `NaN`,
+ *   the infinities, a non-number — and the sign question travels to the gate that owns
+ *   it. That is the one honest split in this predicate, and it is a split in WHO
+ *   ANSWERS, not in which numbers are considered malformed: both sides call
+ *   {@link isFiniteNumber}.
+ *
+ * `entryFx` is optional and spans BOTH kinds: absent is fine, present must be a strictly
+ * positive finite number. It is not conditioned on `requireCost` — the entry FX a Lot
+ * actually carries is checked wherever it appears.
  *
  * Returns the issues in field order (`quantity`, `cost`, `tier`, `entryFx`) so a door
  * that reports only the first failure and a gate that reports all of them agree on which
@@ -199,15 +220,19 @@ export function invalidLotFields(
     if (!isPositiveNumber(lot.cost)) {
       issues.push({ field: "cost", detail: "must be positive" });
     }
-  } else if (typeof lot.quantity !== "number") {
-    issues.push({ field: "quantity", detail: "must be a number" });
+  } else if (!isFiniteNumber(lot.quantity)) {
+    issues.push({ field: "quantity", detail: "must be a finite number" });
   }
 
   if (lot.tier !== "c1" && lot.tier !== "c2" && lot.tier !== "c3") {
     issues.push({ field: "tier", detail: "must be c1, c2, or c3" });
   }
 
-  if (requireCost && lot.entryFx !== undefined && !isPositiveNumber(lot.entryFx)) {
+  // Not gated on `requireCost`: an `entryFx` that is PRESENT is validated for every Lot
+  // kind, which is what the genesis door did before this predicate absorbed it. Cash Lots
+  // never carry one in practice, so this costs them nothing — but a cash Lot that grew an
+  // `entryFx: 0` would otherwise be the one field nobody checks.
+  if (lot.entryFx !== undefined && !isPositiveNumber(lot.entryFx)) {
     issues.push({ field: "entryFx", detail: "must be positive" });
   }
 
