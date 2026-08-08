@@ -244,7 +244,10 @@ describe("@numisma/tui dashboard rendering", () => {
 
   it("renders a per-record tier table without dividing by zero on a zero-value record", () => {
     // A zero-value Position (markPrice 0) still tiers into c1, so expanding it
-    // exercises the Fund %/Rec % guards against a zero denominator.
+    // exercises the Fund %/Rec % guards against a zero denominator. The zero
+    // denominator is `markPrice`'s doing, NOT the Lot's — since audit finding 5
+    // a zero-cost Lot is invalid at every gate, so the Lot carries a real cost
+    // and the record's VALUE is what goes to zero.
     const data: FundReviewData = {
       fund: { id: "f", name: "F", baseCurrency: "USD" },
       review: { asOf: "2026-06-25", usdMxn: 20 },
@@ -263,7 +266,7 @@ describe("@numisma/tui dashboard rendering", () => {
           direction: "long",
           markPrice: 0,
           currency: "USD",
-          lots: [{ quantity: 1, cost: 0, tier: "c1" }],
+          lots: [{ quantity: 1, cost: 100, tier: "c1" }],
         },
       ],
     };

@@ -11,6 +11,7 @@ import type {
   ParseResult,
 } from "./contracts.js";
 import {
+  invalidLotFields,
   isIsoDate,
   isPositiveNumber,
   isRecord,
@@ -339,6 +340,10 @@ function validateLots(
 ): ParseResult | undefined {
   // Position Lots carry a cost; cash (Reserve) Lots are degenerate — value ==
   // face — so they omit `cost`/`entryFx` and only carry `quantity` + `tier`.
+  // WHAT makes each kind valid is `invalidLotFields`'s call, shared with the
+  // event door and the compose gate (audit finding 5); this door only supplies
+  // the path vocabulary and stops at the first issue, as every other
+  // `validate*` here does.
   const requireCost = options.requireCost ?? true;
   if (!Array.isArray(value) || value.length === 0) {
     return schemaError(`${path}.lots`, `${path}.lots must be a non-empty array.`);
@@ -350,29 +355,11 @@ function validateLots(
       return schemaError(lotPath, `${lotPath} must be an object.`);
     }
 
-    const numericFields = requireCost
-      ? (["quantity", "cost"] as const)
-      : (["quantity"] as const);
-    for (const field of numericFields) {
-      if (typeof lot[field] !== "number") {
-        return schemaError(
-          `${lotPath}.${field}`,
-          `${lotPath}.${field} must be a number.`,
-        );
-      }
-    }
-
-    if (lot.tier !== "c1" && lot.tier !== "c2" && lot.tier !== "c3") {
+    const [issue] = invalidLotFields(lot, { requireCost });
+    if (issue) {
       return schemaError(
-        `${lotPath}.tier`,
-        `${lotPath}.tier must be one of c1, c2, c3.`,
-      );
-    }
-
-    if (lot.entryFx !== undefined && typeof lot.entryFx !== "number") {
-      return schemaError(
-        `${lotPath}.entryFx`,
-        `${lotPath}.entryFx must be a number when present.`,
+        `${lotPath}.${issue.field}`,
+        `${lotPath}.${issue.field} ${issue.detail}.`,
       );
     }
   }
