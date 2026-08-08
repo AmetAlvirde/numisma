@@ -12,8 +12,10 @@
  *   data/preferences.jsonl   append-only, one ProfitPolicyEntry JSON per line
  *
  * Durability contract (R4/M5):
- *   - Writes are genuinely APPEND-ONLY (`appendPreference`) — a new policy line never
- *     destroys prior history. There is no whole-file overwrite on the reliable path.
+ *   - There is NO public write surface: `seedDefaultPreferences` is the only writer, and
+ *     its one-line append is inline (audit finding 34 deleted the exported, caller-less
+ *     `appendPreference` rather than hardening it). The seed is genuinely APPEND-ONLY —
+ *     no whole-file overwrite, so prior bytes survive even when every line is quarantined.
  *   - The loader VALIDATES every line on read (`loadPreferences`): shape, a present &
  *     parseable `effectiveAt`, a split whose Reserve fraction lands in [0, 1], and a
  *     `splitBasis` in the enum. Malformed/garbage lines are QUARANTINED (dropped from
@@ -161,18 +163,18 @@ export async function loadPreferences(path: string): Promise<ProfitPolicyEntry[]
 }
 
 /**
- * Genuinely APPEND-ONLY writer: append exactly ONE `ProfitPolicyEntry` as a JSON line
- * without touching prior entries. This is the reliable write path — a new policy never
- * destroys history.
- */
-export async function appendPreference(path: string, entry: ProfitPolicyEntry): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await appendFile(path, `${JSON.stringify(entry)}\n`, "utf8");
-}
-
-/**
  * Seed a NEW sidecar with this fund's locked default policy if it holds no valid entry
- * yet. Uses the append-only writer so seeding, like every write, preserves history.
+ * yet. The one-line append is INLINE here on purpose: this package exposes no general
+ * write surface (audit finding 34). A public `appendPreference` was exported, documented
+ * and tested with no caller outside this seeder, carrying a weaker durability contract than
+ * `appendOrders` — a plain `appendFile` with no lock and no torn-line handling, the shape
+ * that has concretely lost records before. Rather than harden a writer nothing used, the
+ * write surface was DELETED. Any future caller that genuinely needs to write a policy
+ * (a `preferences:set` CLI) must add its entry point deliberately, on the
+ * lock + temp + rename contract of `orders.ts`, instead of inheriting the rejected shape.
+ *
+ * Seeding still preserves history: it appends rather than rewriting, so the one file it
+ * can meet non-empty — every line quarantined by the loader — keeps its bytes for repair.
  *
  * This is a SEED FOR A NEW SIDECAR, and it is NOT a read-gap fallback — the distinction
  * is load-bearing. It writes `defaultProfitPolicyEntry`, whose `reserveTargetPct` is
@@ -192,6 +194,7 @@ export async function seedDefaultPreferences(
     return existing;
   }
   const seeded = defaultProfitPolicyEntry(effectiveAt, routingReserveId);
-  await appendPreference(path, seeded);
+  await mkdir(dirname(path), { recursive: true });
+  await appendFile(path, `${JSON.stringify(seeded)}\n`, "utf8");
   return [seeded];
 }
