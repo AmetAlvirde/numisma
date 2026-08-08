@@ -76,6 +76,20 @@ export interface ReserveView {
 }
 
 /**
+ * The latest position-targeting event the log has accepted for one position: WHEN it
+ * landed, and WHICH VERB it was. Both halves are load-bearing in the rejection message
+ * {@link requirePositionUntouchedAfter} composes — the date shows the ordering a close
+ * would have destroyed, the verb tells the operator what would have been buried, which
+ * is the difference between "something is wrong with this date" and "your trim on the
+ * 18th would vanish". Kept as ONE record rather than two parallel maps so the two halves
+ * cannot disagree about which event they describe.
+ */
+export interface PositionTouch {
+  asOf: string;
+  type: PortfolioEvent["type"];
+}
+
+/**
  * The known world an event is cross-referenced against: every id the genesis seed
  * and the durable log have introduced, plus the last known close per instrument
  * for the magnitude guard. A READ-ONLY PROJECTION of `foldEvents(genesis,
@@ -147,6 +161,28 @@ export interface EventReference {
    * about a position that plainly did exist.
    */
   positionBornAsOf: Map<string, string>;
+  /**
+   * Every position id the LOG has touched → the latest `asOf` among the
+   * position-targeting events accepted so far. The death-side twin of
+   * {@link positionBornAsOf}: birth is the EARLIEST bound on a verb's date, this is
+   * the LATEST bound on a close's — a close dated before it would seal behind an
+   * event already durably accepted, which the fold's (`asOf`, then log) ordering then
+   * drops silently.
+   *
+   * Covers all five position-targeting verbs — `PositionOpened`, `PositionClosed`,
+   * `PositionTrimmed`, `PositionAddedTo`, `InvalidationMarked`. `PriceMarked` targets
+   * an INSTRUMENT, not a position, and is not scanned. `PositionOpened` is counted
+   * even though `requirePositionBornBy` independently refuses a verb dated before
+   * birth: it costs one branch, and it makes the map's meaning unconditional — the
+   * latest date at which this position was touched — rather than a set with a
+   * carve-out.
+   *
+   * INVARIANT: its key set is a SUBSET of {@link positionIds}, NOT equal to it —
+   * unlike `positionBornAsOf`, whose key set is exactly `positionIds`. A genesis-held
+   * position no log event has ever touched has NO entry, and that absence is the
+   * meaningful answer ("nothing to seal behind"), not a gap wanting a fallback.
+   */
+  positionLastVerbAsOf: Map<string, PositionTouch>;
   /** Latest known close per instrument: the magnitude guard's comparison point. */
   lastClose: Map<string, { price: number; asOf: string }>;
   /**
@@ -187,9 +223,11 @@ export interface EventReference {
  * last known close per instrument. The gate therefore cannot be wrong about the world
  * the fold will produce; it is looking at that world. The only facts NOT on the folded
  * output are `genesisAsOf` (the fold restamps `review.asOf` to the latest event), each
- * Reserve's `bornAsOf`, and WHICH position ids the seed itself held (the fold clones a
+ * Reserve's `bornAsOf`, WHICH position ids the seed itself held (the fold clones a
  * genesis position verbatim, so it cannot tell a seeded one from a logged one on the
- * record alone) — all read off the inputs directly.
+ * record alone), and each position's LATEST accepted verb date (`InvalidationLevel` and
+ * `PositionLot` carry no `asOf`, so the folded book cannot answer it) — all read off the
+ * inputs directly.
  *
  * COST, and the standing budget. This is O(log length) per call — measured on a
  * MARK-HEAVY synthetic log (the durable log is 98.5% `PriceMarked`, and the original
@@ -216,6 +254,42 @@ export function buildEventReference(
   for (const event of priorEvents) {
     if (event.type === "ReserveOpened") {
       bornAsOf.set(event.reserve.id, event.asOf);
+    }
+  }
+
+  // The latest verb date per position is the other fact the folded record does not
+  // carry, and for a sharper reason than the Reserve's: `InvalidationLevel` and
+  // `PositionLot` carry no `asOf` at all, so a fold-only projection would see the trim
+  // (a partial row's `closedAsOf`) and miss the invalidation and the add-to entirely.
+  // Not a shadow of the fold either — birth is a fact about the WORLD, which the fold
+  // owns and carries, whereas "what have I already accepted for this id" is a fact
+  // about the LOG, which the fold never claimed to answer. Max, not last-write-wins:
+  // the events arrive in LOG order, which is not date order.
+  const positionLastVerbAsOf = new Map<string, PositionTouch>();
+  const touchPosition = (positionId: string, event: PortfolioEvent): void => {
+    const latest = positionLastVerbAsOf.get(positionId);
+    if (latest === undefined || event.asOf > latest.asOf) {
+      positionLastVerbAsOf.set(positionId, { asOf: event.asOf, type: event.type });
+    }
+  };
+  for (const event of priorEvents) {
+    switch (event.type) {
+      // The open keys off the position it MINTS; every other verb names an id it found.
+      case "PositionOpened":
+        touchPosition(event.position.id, event);
+        break;
+      case "PositionClosed":
+      case "PositionTrimmed":
+      case "PositionAddedTo":
+      case "InvalidationMarked":
+        touchPosition(event.positionId, event);
+        break;
+      // Everything else — `PriceMarked` above all — targets an instrument or a
+      // Reserve, never a position. Marking a price must not date a position: the feed
+      // marks daily, so scanning it would seal every position holding that instrument
+      // behind today for a reason having nothing to do with the position.
+      default:
+        break;
     }
   }
 
@@ -334,6 +408,7 @@ export function buildEventReference(
     genesisAsOf,
     closedPositionIds,
     positionBornAsOf,
+    positionLastVerbAsOf,
     lastClose,
     reserveBalances,
     positionLots: new Map(
