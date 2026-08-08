@@ -3,8 +3,9 @@
  * REAL throwaway Postgres, through the WRITER credential, over the exact
  * `ON CONFLICT (fund_id, as_of) DO UPDATE` the daily push runs.
  *
- * THIS IS A WRITE TEST, AND SELF-SKIPPING IS RIGHT FOR IT. It proves that 28 rows
- * land, at v3, with the right NAVs, and that a second run is idempotent — claims
+ * THIS IS A WRITE TEST, AND SELF-SKIPPING IS RIGHT FOR IT. It proves that one row
+ * per anchored date lands, at v3, with the right NAVs, and that a second run is
+ * idempotent — claims
  * that are simply not checkable without a database and without the operator's
  * private log. It is gated on BOTH.
  *
@@ -134,13 +135,19 @@ describe.skipIf(!runIntegration)("backfill → the projection DB", () => {
     await db?.drop();
   });
 
-  it("writes ONE row per anchored date — 28 of them", async () => {
-    // 28, not 34: of the 34 calendar days from genesis, 28 are anchored. Five of
-    // the six gaps are pre-launchd weekdays that would fold to rows where all
-    // thirteen instruments were expected and absent, i.e. NAV permanently blank on
-    // five historical rows no later run could repair (V3).
-    expect(anchors).toHaveLength(28);
-    expect(first).toHaveLength(28);
+  it("writes ONE row per anchored date, and nothing else", async () => {
+    // NOT a count. `enumerateAnchors` reads the REAL log, which gains a day on
+    // every push, so any number written here goes red on the next evening's run —
+    // on precisely the machines that can run this test. The claim is a
+    // correspondence: the rows in the table ARE the enumerated anchors, in order,
+    // one apiece. Fewer calendar days are anchored than have elapsed — the
+    // pre-launchd weekdays would fold to rows where all thirteen instruments were
+    // expected and absent, i.e. NAV permanently blank on history no later run could
+    // repair (V3) — and enumeration, not this assertion, is what decides which.
+    expect(anchors.length).toBeGreaterThan(0);
+    expect(new Set(anchors).size).toBe(anchors.length);
+    expect([...anchors].sort()).toEqual(anchors);
+    expect(first).toHaveLength(anchors.length);
     expect(first.map((r) => r.as_of)).toEqual(anchors);
   });
 
@@ -185,15 +192,18 @@ describe.skipIf(!runIntegration)("backfill → the projection DB", () => {
     }
   });
 
-  it("R6: a second run leaves 28 rows, identical payloads, later pushed_at", async () => {
+  it("R6: a second run leaves the same rows, identical payloads, later pushed_at", async () => {
     // A gap so the refreshed pushed_at is unambiguously later (now() is a
     // transaction timestamp).
     await new Promise((r) => setTimeout(r, 25));
     await runBackfill({ pool: writerPool });
     const second = await readAll(writerPool);
 
-    // No duplicates: the conflict key absorbed all 28 re-writes.
-    expect(second).toHaveLength(28);
+    // No duplicates: the conflict key absorbed every re-write. Compared against the
+    // FIRST run rather than a count — idempotence is "the second run changed
+    // nothing", which is a cross-run equality, and stating it that way survives the
+    // log growing by a day.
+    expect(second).toHaveLength(first.length);
     expect(second.map((r) => r.as_of)).toEqual(first.map((r) => r.as_of));
     expect(second.map((r) => r.report)).toEqual(first.map((r) => r.report));
     expect(second.map((r) => r.schema_version)).toEqual(
@@ -207,7 +217,7 @@ describe.skipIf(!runIntegration)("backfill → the projection DB", () => {
   });
 
   it("R7: the durable log is byte-identical after the full backfill", async () => {
-    // Re-asserted across all 28 folds (twice over, by now — this runs after the
+    // Re-asserted across every fold (twice over, by now — this runs after the
     // idempotence case). The read path's only write is the quarantine sidecar
     // BESIDE the log, and only for a log that does not read clean.
     const paths = resolveEventStorePaths();

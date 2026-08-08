@@ -71,7 +71,7 @@ describe("the anchor replay", () => {
     // flipped, which a count cannot when two flip in opposite directions — and it
     // survives the next push, which a count cannot at all.
     expect(no).toEqual(
-      replayed.map((r) => r.asOf).filter((asOf) => !(asOf in MEASURED_YES)),
+      replayed.map((r) => r.asOf).filter((asOf) => !Object.hasOwn(MEASURED_YES, asOf)),
     );
     expect(yes.length + no.length).toBe(replayed.length);
     // Every named *yes* day is actually in the fixture: `toEqual` above would also
