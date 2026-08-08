@@ -16,11 +16,12 @@ immutable **genesis seed**. Everything else — the report, the dashboard, the
 hosted projection, the Head Digest — is derived and rebuildable.
 
 The store is **not in this checkout**. It lives in a private sibling repo
-(`accumulus`, default `~/Dev/accumulus/data`, overridable with
+(placeholder `<fund>`, default `~/Dev/<fund>/data`, overridable with
 `NUMISMA_DATA_DIR`), so no trade data is ever in this repository's history
 ([ADR-006](../context/adr/ADR-006-private-sibling-data-repo-commit-per-ingest.md)).
-The layout of that directory is tabulated in the [root README](../README.md)
-under *Local data*.
+The layout of that directory, and the `<fund>`/`<dataDir>`/`<exchange>`
+placeholder convention itself, are documented in
+[`local-data.md`](./local-data.md).
 
 ## Packages
 
@@ -62,11 +63,14 @@ These are the seams most likely to be misread from the tree alone:
 | [`price-feed-ops.md`](./price-feed-ops.md) | How the hands-off daily price run is scheduled, where provider tokens live, and how to triage a failed or rejected run. |
 | [`../ops/price-feed/launchagent-reinstall.md`](../ops/price-feed/launchagent-reinstall.md) | How to reinstall the launchd job from scratch, and the verify commands for each step. |
 | [`durable-log-ops.md`](./durable-log-ops.md) | Day-to-day operations against the durable log. |
-| [`accumulus-restore-runbook.md`](./accumulus-restore-runbook.md) | How to locate and reverse a bad-but-valid append using `head-digest.json` + `git revert` + re-fold. |
+| [`accumulus-restore-runbook.md`](./accumulus-restore-runbook.md) | How to locate and reverse a bad-but-valid append (in the `<fund>` sibling repo) using `head-digest.json` + `git revert` + re-fold. |
 | [`projection-provisioning.md`](./projection-provisioning.md) | How the Postgres projection is provisioned idempotently and how the two-role grants work. |
 | [`web-deploy-runbook.md`](./web-deploy-runbook.md) | How the hosted app is deployed and which credentials belong in which scope. |
 | [`hosted-cutover-runbook.md`](./hosted-cutover-runbook.md) | The end-to-end cutover to hosted, step by step. |
 | [`coverage-rationale.md`](./coverage-rationale.md) | What the measured coverage number includes, what is excluded, and why each exclusion is honest. |
+| [`domain-model.md`](./domain-model.md) | The domain vocabulary: the verbs, position semantics, the closed book, the invalidation watch, the profit-split, and Orders. |
+| [`scripts.md`](./scripts.md) | The full `pnpm` script reference across all workspace members. |
+| [`local-data.md`](./local-data.md) | The durable-store rule, the `<dataDir>` layout, the write allowlist, and the `<fund>`/`<exchange>` placeholder convention. |
 
 ## Decisions
 
@@ -98,7 +102,7 @@ pnpm verify      # typecheck → test → smoke:startup, the full gate
 pnpm coverage    # the measured Node-side number
 ```
 
-`pnpm test` measured **1356 passed / 19 skipped across 104 files** at the time
+`pnpm test` measured **1359 passed / 19 skipped across 105 files** at the time
 this map was written; re-run rather than trusting the figure. (The 19 skips are
 the Postgres integration suites, which opt out unless `NUMISMA_TEST_DATABASE_URL`
 is set — they are not failures.)
