@@ -135,7 +135,7 @@ export interface SpineWorld {
  */
 export async function loadSpineReference(
   paths: SpineReferencePaths,
-  options?: { freshlyQueuedCount?: number },
+  options?: { freshlyQueuedCount?: number; magnitudeThreshold?: number },
 ): Promise<SpineWorld> {
   const genesis = await loadGenesis(paths.genesis);
 
@@ -162,8 +162,15 @@ export async function loadSpineReference(
   // collects every refusal, because a doomed mark queued by a prior run must not
   // hide a second one. The walk advances `reference` in place on each accepted
   // event and never on a rejected one — the spine's behavior, not a copy of it.
+  // The dial rides along: the pending fold is judged by the SAME threshold the fresh
+  // marks are (`findMarkRejections`), or the walk would fold the inbox at the engine
+  // default while this run's marks were judged at the caller's dial. Only set it when
+  // the caller did (exactOptionalPropertyTypes forbids an explicit `undefined`).
   const walk = walkPendingInbox(pending, reference, {
     seenIds: new Set(priorEvents.map((event) => event.id)),
+    ...(options?.magnitudeThreshold === undefined
+      ? {}
+      : { magnitudeThreshold: options.magnitudeThreshold }),
   });
   if (walk.invalid) {
     // A structurally invalid pending event dooms the whole spine ingest too; the
@@ -269,7 +276,12 @@ export async function scanFetchedMarks(
   }
   let world: SpineWorld;
   try {
-    world = await loadSpineReference(paths, { freshlyQueuedCount: result.emittedCount });
+    world = await loadSpineReference(paths, {
+      freshlyQueuedCount: result.emittedCount,
+      ...(options?.magnitudeThreshold === undefined
+        ? {}
+        : { magnitudeThreshold: options.magnitudeThreshold }),
+    });
   } catch (error) {
     // Includes a MISSING genesis (ENOENT from `loadGenesis`): unseeded or damaged,
     // it is surfaced as one Note rather than an unexplained silent skip.
