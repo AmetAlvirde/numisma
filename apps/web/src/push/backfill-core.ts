@@ -48,10 +48,15 @@
  * synthesizeAnchors}), and that is the only path to the file. What survives is what
  * slice 4 reads and nothing else: every anchor date, the `glance` block verbatim, the
  * Reserve row's `percentOfFund`, the day-over-day NAV percentage, and the full
- * structural shape down to which rows genuinely lack a cost basis. What does not
- * survive is every magnitude: NAV is re-anchored at a round fictional 100000 and each
+ * structural shape down to which rows genuinely lack a cost basis — INCLUDING every
+ * row id and row label, which are load-bearing shape and stay verbatim (repo policy,
+ * `docs/local-data.md`: code identifiers keep their literal names). What does not
+ * survive is every magnitude — NAV is re-anchored at a round fictional 100000 and each
  * row's `usdValue` / `costBasisUsd` / `unrealizedPnlUsd` / `percentOfFund` is invented
- * from documented parameters.
+ * from documented parameters — plus the fund's own IDENTITY: `fundName` becomes
+ * "Sanitized Exploratory Fund" (#149) and `fundId` is re-derived as that name's slug
+ * rather than carried over, so the real `fund_id` no longer rides on all 28 anchors.
+ * That is the whole list: the file is sanitized, not de-identified.
  *
  * A uniform SCALE of the real payload was the cheap alternative and it is rejected,
  * because it is reversible: issues #146 and #149 already publish three real NAVs, so
