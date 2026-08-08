@@ -1,8 +1,9 @@
 // Scenario-level behavior locks for the cash leg, split out of
 // cash-settlement.test.ts to keep both files navigable: the
 // durable-log migration/versioning contract, the real-shaped mixed-tier close, the
-// deliberate un-marked-instrument gate-skip, and the cross-ref shadow equivalence
-// guard. The core per-verb legs + seam + ingest gates live in cash-settlement.test.ts.
+// deliberate un-marked-instrument gate-skip, and the gate-walk cash lock (what the
+// ingest gate admits, and the balances that batch leaves behind).
+// The core per-verb legs + seam + ingest gates live in cash-settlement.test.ts.
 import {
   buildEventReference,
   crossReferenceEvent,
@@ -256,25 +257,44 @@ describe("cash leg — un-marked-instrument close skips the settlement-magnitude
   });
 });
 
-// Slice #87 (guard against mirror divergence). The cross-ref shadow
-// `applyDeltasToBalance` deliberately re-implements the seam's per-Tier delta
-// arithmetic so the sufficiency gate sees the balances the fold WILL produce.
-// Two encodings of the same math now coexist: the fold mutates a `ReserveRecord`
-// (authoritative `amount` + a lots array), the shadow mutates the cross-ref
-// balance (`amount` + a Tier→quantity Map). The delta COMPUTATION is already
-// shared (`reserveDeltasForOpen/Close` → `TierDelta[]`); the risk is the two
-// APPLICATION encodings drifting. This batch equivalence check is the guard —
-// fold a representative batch of all six verbs (a mixed-Tier close, an untiered
-// amount-only move, and a mid-stream open+close among them) and assert, reserve
-// by reserve, that the shadow's running balances equal the folded reserves. It
-// fails loud the day one encoding is changed to disagree with the other.
-describe("cash leg — the cross-ref shadow tracks the fold exactly (slice #87)", () => {
+// Slice #87, re-aimed by ADR-015. This began as a mirror-divergence guard: the
+// cross-ref gate maintained a SHADOW of the fold's per-Tier arithmetic, and the check
+// was that the two encodings agreed. ADR-015 deleted the shadow — `buildEventReference`
+// now PROJECTS `foldEvents(...)` — so comparing the projection with the fold is the same
+// computation on both sides and proves nothing but that a Map-building loop runs.
+//
+// What survives, and what this now locks: drive a representative batch of all six verbs
+// (a mixed-Tier close, an untiered amount-only move, and a mid-stream open+close among
+// them) through the REAL gate walk, and assert the resulting cash against HAND-COMPUTED
+// figures — per reserve, per Tier, on the folded book and on the view the gate reads.
+// The finding-32 class the file was written for is the second test: an event the gate
+// LETS THROUGH that the fold silently ignores (a second close of a retired position,
+// MUST FIX 1). It is caught by the gate rejecting it and by the balances staying at the
+// hand-computed figures rather than gaining proceeds the fold never books.
+describe("cash leg — the ingest gate walk, and the cash it leaves behind (slice #87)", () => {
   const TIERS = ["c1", "c2", "c3"] as const;
+
+  /**
+   * Hand-computed cash after the full `batch()` clears the gate, from genesis
+   * (tiered 1500 = c1 1000 + c2 500; untiered 800):
+   *
+   *   dep-tiered   +250 c1                                  → 1750 (c1 1250, c2 500)
+   *   open-btc     −300, cost weights 2:1 → −200 c1, −100 c2 → 1450 (c1 1050, c2 400)
+   *   wd-tiered    −100 c2                                  → 1350 (c1 1050, c2 300)
+   *   xfer         −150 c1 out of tiered, +150 into untiered → 1200 (c1  900, c2 300)
+   *   close-alt    +800, alt-pos basis 25:75 → +200 / +600   → 2000 (c1 1100, c2 900)
+   *   dep-untiered +100 into untiered (amount only)
+   *   close-btc    +300, btc-pos basis 2:1 → +200 c1, +100 c2 → 2300 (c1 1300, c2 1000)
+   */
+  const EXPECTED = {
+    tiered: { amount: 2300, tiers: { c1: 1300, c2: 1000, c3: 0 } },
+    untiered: { amount: 1050, tiers: null },
+  } as const;
 
   /** A representative batch touching every verb, in ascending-asOf order so the
    * fold's (asOf, then original order) sort is a no-op relative to input order.
-   * The shadow applies in input order, so equal ordering keeps the two encodings
-   * comparing the same sequence. */
+   * The gate walk judges in input order, so equal ordering means the sequence the
+   * hand-computed figures above follow is the sequence both halves see. */
   function batch(): PortfolioEvent[] {
     return [
       { id: "dep-tiered", asOf: "2026-06-02", type: "Deposit", reserveId: "tiered", amount: 250, tier: "c1" },
@@ -318,34 +338,27 @@ describe("cash leg — the cross-ref shadow tracks the fold exactly (slice #87)"
       { id: "close-alt", asOf: "2026-06-06", type: "PositionClosed", positionId: "alt-pos", settlement: { reserveId: "tiered", proceeds: 800 } },
       // Untiered credit: moves `amount` only, mints no Tier — the null-tiers path.
       { id: "dep-untiered", asOf: "2026-06-07", type: "Deposit", reserveId: "untiered", amount: 100, tier: "c3" },
-      // Close a position opened earlier in the SAME batch (both encodings must
-      // have learned btc-pos' lots mid-stream to settle it).
+      // Close a position opened earlier in the SAME batch (the gate must have learned
+      // btc-pos' lots mid-stream to admit it, and the fold to settle it).
       { id: "close-btc", asOf: "2026-06-08", type: "PositionClosed", positionId: "btc-pos", settlement: { reserveId: "tiered", proceeds: 300 } },
     ];
   }
 
   /**
    * Drive a batch through the REAL ingest path — the cross-ref gate, event by event,
-   * re-deriving the gate's world from the ACCEPTED subset as the walk does — and
-   * assert the balances the sufficiency gate reads equal the folded reserves, per
-   * amount and per Tier. Returns the ids the gate rejected, so a caller can lock which
-   * events never reached the book at all.
+   * re-deriving the gate's world from the ACCEPTED subset exactly as `walkPendingInbox`
+   * does — then assert the cash it left behind against {@link EXPECTED}, on BOTH the
+   * folded book and the view the sufficiency gate reads. Returns the ids the gate
+   * rejected, so a caller can lock which events never reached the book at all.
    *
-   * Routing through `crossReferenceEvent` is the load-bearing part (audit finding
-   * 32). Hand-feeding a known-good batch straight to the fold could only ever catch
+   * Routing through `crossReferenceEvent` is the load-bearing part (audit finding 32).
+   * Hand-feeding a known-good batch straight to the fold could only ever catch
    * arithmetic drift, never the sharper class: an event THE GATE LETS THROUGH that the
    * fold then silently ignores — a second close of a retired position being the one
-   * that actually shipped (MUST FIX 1). That shows up here as a balance mismatch, with
-   * no error text and no reference internals involved.
-   *
-   * The assertions are deliberately unchanged across ADR-015, which made the gate READ
-   * the fold instead of shadowing it. They now check the PROJECTION — that
-   * `reserveBalances` reproduces `foldEvents(...).reserves` faithfully, Tier map for
-   * lots array — rather than two encodings agreeing. The gate-level claim they defend
-   * is the same one either way: what the gate believes a Reserve holds is what the
-   * fold will produce.
+   * that actually shipped (MUST FIX 1). Here that shows up as cash above the expected
+   * figures, with no error text and no gate internals involved.
    */
-  function expectShadowAgreesWithFold(events: PortfolioEvent[]): string[] {
+  function walkAndExpectCash(events: PortfolioEvent[]): string[] {
     const rejected: string[] = [];
     const accepted: PortfolioEvent[] = [];
     let reference = buildEventReference(genesis());
@@ -360,49 +373,47 @@ describe("cash leg — the cross-ref shadow tracks the fold exactly (slice #87)"
       reference = buildEventReference(genesis(), accepted);
     }
 
-    // The fold's encoding: mutate a `ReserveRecord` (amount + lots array).
     const folded = foldEvents(genesis(), accepted);
 
-    // Sanity: the batch actually moved cash, so the guard is not vacuous.
-    expect(reserveById(folded, "tiered").amount).not.toBe(1500);
+    for (const [reserveId, expected] of Object.entries(EXPECTED)) {
+      const reserve = reserveById(folded, reserveId);
+      const view = reference.reserveBalances.get(reserveId);
 
-    for (const reserve of folded.reserves) {
-      const shadow = reference.reserveBalances.get(reserve.id);
-      expect(shadow).toBeDefined();
-      if (!shadow) continue;
+      // The authoritative `amount`, hand-computed above (float tolerance for the
+      // proportional splits) — and the same figure in what the gate believes it holds.
+      expect(reserve.amount).toBeCloseTo(expected.amount, 6);
+      expect(view?.amount).toBeCloseTo(expected.amount, 6);
 
-      // Authoritative `amount` agrees (float tolerance for the proportional splits).
-      expect(shadow.amount).toBeCloseTo(reserve.amount, 6);
-
-      if (reserve.lots) {
-        // Tiered reserve: the shadow is tiered too, and every Tier's quantity agrees.
-        expect(shadow.tiers).not.toBeNull();
-        for (const tier of TIERS) {
-          expect(shadow.tiers?.get(tier) ?? 0).toBeCloseTo(tierQty(reserve, tier), 6);
-        }
-      } else {
-        // Untiered reserve: the shadow tracks `amount` only (no Tier map) — matching.
-        expect(shadow.tiers).toBeNull();
+      if (expected.tiers === null) {
+        // Untiered reserve: `amount` is the whole truth, and no Tier map is minted.
+        expect(reserve.lots).toBeUndefined();
+        expect(view?.tiers).toBeNull();
+        continue;
+      }
+      for (const tier of TIERS) {
+        expect(tierQty(reserve, tier)).toBeCloseTo(expected.tiers[tier], 6);
+        expect(view?.tiers?.get(tier) ?? 0).toBeCloseTo(expected.tiers[tier], 6);
       }
     }
 
-    // The reverse: the shadow holds no reserve the fold dropped (same reserve set).
+    // No reserve appears or disappears across the batch (the seed's two, and only those).
+    expect(folded.reserves.map((reserve) => reserve.id).sort()).toEqual(["tiered", "untiered"]);
     expect(reference.reserveBalances.size).toBe(folded.reserves.length);
     return rejected;
   }
 
-  it("every folded reserve equals the shadow's running balance, per amount and per Tier", () => {
-    // The whole representative batch clears the gate — nothing is dropped before
-    // the comparison, so the agreement below is over all six verbs.
-    expect(expectShadowAgreesWithFold(batch())).toEqual([]);
+  it("the whole six-verb batch clears the gate and lands the hand-computed cash", () => {
+    // Nothing is dropped before the assertions, so the figures above are the arithmetic
+    // of all six verbs applied in order.
+    expect(walkAndExpectCash(batch())).toEqual([]);
   });
 
-  it("a re-authored second close is gated out, so neither encoding sees it (audit 1/32)", () => {
+  it("a re-authored second close is gated out, so the book never sees it (audit 1/32)", () => {
     const events = batch();
     // Same position, same reserve, same proceeds as `close-alt` — only the event id
-    // is fresh, which is all the durable log's id-keyed dedup looks at. The gate is
-    // the only thing that can stop it, and if it does not, the shadow credits 360
-    // the fold never books and the agreement assertions above fail.
+    // is fresh, which is all the durable log's id-keyed dedup looks at. The gate is the
+    // only thing that can stop it; if it does not, the gate credits 800 the fold never
+    // books, and the hand-computed figures above fail on both sides.
     events.push({
       id: "close-alt-reauthored",
       asOf: "2026-06-09",
@@ -411,6 +422,6 @@ describe("cash leg — the cross-ref shadow tracks the fold exactly (slice #87)"
       settlement: { reserveId: "tiered", proceeds: 800 },
     });
 
-    expect(expectShadowAgreesWithFold(events)).toEqual(["close-alt-reauthored"]);
+    expect(walkAndExpectCash(events)).toEqual(["close-alt-reauthored"]);
   });
 });

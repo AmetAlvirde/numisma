@@ -71,31 +71,65 @@ Stated as the line itself:
 ## The measurement this decision was contingent on
 
 Approval was explicitly conditional: the audit's own words were _"inbox batches
-are small; measure before committing."_ Spiked 2026-08-07 on synthetic logs
-modeled on the repo's fixtures, Node 24.
+are small; measure before committing."_ The measurement was taken, the decision
+shipped on it — **and the measurement was wrong.** Both the history and the
+corrected numbers are recorded here, because the way it was wrong is the
+instructive part.
 
-**`foldEvents` is linear at ≈0.1 ms per 1k log events** — L=1k → 0.13 ms; L=5k →
-0.47 ms; L=20k → 2.08 ms; L=100k → 10.0 ms. Total gate overhead, measured on the
-real n-re-folds loop rather than extrapolated: L=5k, n=50 → ≈30 ms; L=20k, n=50 →
-≈85–90 ms; L=100k, n=50 → ≈445–496 ms.
+### What the original spike measured, and why it certified a quadratic fold
 
-Against the repo's realistic sizes: the price-feed instrument registry
-(`packages/engine/src/price-feed/registry.ts`) holds **13** instruments (4 Binance
-+ 3 Twelve Data equities + 6 derived `*-mxn`), so a daily batch is n ≈ 13, and the
-accepted log grows ≈4.7k events/year. **Today that is ≈6 ms per ingest.** A
-50-event batch does not cross one second until L ≈ 200k events — decades away at
-the observed growth rate.
+Spiked 2026-08-07 on synthetic logs **modeled on the repo's fixtures**, Node 24.
+It reported `foldEvents` as **linear at ≈0.1 ms per 1k log events** (L=1k → 0.13
+ms; L=100k → 10.0 ms), and a 50-event batch not crossing one second until L ≈ 200k
+— "decades away."
+
+The fixtures are almost mark-free. **The durable log is 98.5% `PriceMarked`.** The
+fold's `PriceMarked` arm resolved its same-day close by scanning `closes[]`, an
+array that grows one entry per mark — so the fold was **O(marks²)**, and the
+fixture-shaped log had too few marks for that term to appear at all. The spike
+measured a shape the ingest path never sees, pronounced the fold linear, and this
+ADR then multiplied that per-event cost by the batch size (n+1 folds) on the
+strength of it. Re-measured on the real shape, the "decades away" second was
+**thirteen months** away.
+
+Two lessons, recorded rather than quietly fixed: a synthetic log must be modeled
+on the **log**, not on the fixtures; and an ADR that puts an O(n) claim on the
+critical path owes that claim a benchmark in the dominant event's own dimension.
+
+### The corrected measurement
+
+The scan is now a `Map` keyed `instrumentId|asOf`, maintained alongside the
+unchanged `closes[]` output, so the fold is linear in marks. Re-measured on a
+**mark-heavy synthetic log** — 13 instruments, ~98.5% `PriceMarked`, a 13-mark
+ingest batch with the per-accept rebuild this ADR mandates (n+1 = 14 folds), Node
+24, 2026-08-08:
+
+| L (log events) | bare fold, before | bare fold, after | 13-mark batch, before | 13-mark batch, after |
+| -------------- | ----------------- | ---------------- | --------------------- | -------------------- |
+| 388 (today)    | 1.5 ms            | 0.7 ms           | **12 ms**             | **3 ms**             |
+| 2,500          | 30 ms             | 0.9 ms           | 201 ms                | 14 ms                |
+| 5,000          | 56 ms             | 1.7 ms           | 770 ms                | 26 ms                |
+| 10,000         | 215 ms            | 3.8 ms           | 3.0 s                 | 52 ms                |
+| 50,000         | 5.5 s             | 19 ms            | **82 s**              | **284 ms**           |
+
+The before column is the shape the decision actually shipped with: ≈1 s per ingest
+at L ≈ 5–6k, which the log reaches in about thirteen months at ≈4.7k events/year —
+not decades. After the fix the batch is linear (14 × the bare fold, as the model
+says it should be) and a **50k-event log costs 284 ms per ingest**, so the one
+second this ADR treats as the pain threshold is not reached until L well past
+100k — now genuinely decades out at the observed growth rate.
 
 The cost is also **not new**. `ingestInbox` already ran one full-log
 `foldEvents(genesis, [...existing, ...toAppend])` on every ingest that appends.
 Unification turns 1 fold into n+1 folds of a cost the path already pays.
 
-**Caveat, recorded deliberately:** the spike measured **bare `foldEvents` only** —
+**Caveat, recorded deliberately:** these measure **bare `foldEvents` only** —
 which is exactly what the gate reads, since the gate needs balances, positions and
 last-close anchors, all of which the fold's own output carries. If an
 implementation ever needs the `compose/*` pipeline per event rather than the raw
 fold, this envelope does not apply and the measurement must be retaken before the
-loop ships.
+loop ships. Re-measure, on a mark-heavy log, if the accepted log approaches
+L ≈ 100k.
 
 ## Considered options
 
@@ -145,16 +179,25 @@ loop ships.
     own question of the log the rewrite is building. A legacy line's
     pre-migration shape never enters the world — it could not, it does not parse
     — which is why the walk had to be re-pointed at the accumulator rather than at
-    the file being read. The cost is O(n²) folds over a one-shot,
-    operator-initiated rewrite; if the log ever grows to where that bites, fold
-    incrementally there rather than reintroducing a shadow.
+    the file being read. The cost is O(n²) folds — n lines, each folding the prefix
+    before it — over a one-shot, operator-initiated rewrite. Measured on the same
+    mark-heavy log, 2026-08-08: **1k lines 215 ms, 4k lines 2.8 s** (before the
+    fold's linearity fix: 883 ms and 53 s — the migration was O(n²) folds of an
+    O(n²) fold, which is where the fixture-shaped envelope hid the most). The
+    quadratic term is inherent to walking prefixes and stays; at these magnitudes it
+    is a price worth paying to judge each line against the real book. If the log
+    ever grows to where that bites, fold incrementally there rather than
+    reintroducing a shadow.
 
   Five engine test files imported `applyEventToReference` and were re-pointed
-  mechanically to `buildEventReference(genesis, acceptedPrefix)`. **A1's guard and
-  its agreement test survive**: the guard verbatim, and the test's assertions
-  unchanged — they now check that the projection reproduces the folded reserves
-  rather than that two encodings agree, which is the same gate-level claim either
-  way.
+  mechanically to `buildEventReference(genesis, acceptedPrefix)`. **A1's guard
+  survives, but its INPUT SET NARROWS**: the `closedPositionIds` check is the same
+  code, reading a set now derived from the fold's own closed book — and for a
+  BACKDATED close that set is smaller than the shadow's was (third delta class,
+  below). Its agreement test survives too, re-aimed: it drives the same batch
+  through the real gate walk and asserts hand-computed cash, since comparing the
+  projection with the fold it is projected from would compare a computation with
+  itself.
 
 - **The fold moves onto the ingest critical path, and that is a posture change.**
   The existing per-run fold in `ingestInbox` sits **after** the atomic append,
@@ -176,7 +219,7 @@ loop ships.
   is derived from `foldEvents(...).closes` and no fragment of the shadow needed to
   be kept alive.
 
-  **Two corners where the derived anchor deliberately differs from the deleted
+  **Two corners where the derived ANCHOR deliberately differs from the deleted
   shadow's,** both of which are the fold's answer winning: (1) a `PositionOpened`
   on an instrument that ALREADY has a baseline no longer moves the anchor — an
   entry price is not a market close, and the fold only mints a baseline for an
@@ -184,7 +227,35 @@ loop ships.
   cost anchor to the blended VWAC now moves the gate's comparison point with it.
   The pre-existing note in `foldEvents` that the two anchors "diverge,
   legitimately" and that "nothing reconciles the two" is retired by this decision:
-  they are one value now.
+  they are one value now. The genesis seeding is unchanged and stays that way
+  deliberately — the fold suppresses its t0 `markPrice` anchor only for an
+  instrument whose genesis close is dated `review.asOf` or LATER, which is exactly
+  the rule the shadow applied. (The first implementation of this decision dropped
+  the date test and suppressed on any genesis close; a seed carrying a close dated
+  before the review would then have handed the magnitude guard a stale comparison
+  point and rejected honest marks. Pinned by a fold test.)
+
+- **A THIRD delta class, in the OPPOSITE direction: a backdated verb no longer
+  lands, so the gate's world for it is smaller.** The gate walks a batch in LOG
+  order; the fold applies it in **(`asOf`, then log) order**. A verb dated before
+  the event that creates its target therefore reaches the fold FIRST and hits a
+  skip branch — `PositionClosed`'s `if (closing)`, `PositionTrimmed`'s
+  `if (trimming)`, `PositionAddedTo`'s `if (adding)` — and never lands at all.
+  Measured on `[PositionOpened asOf 06-05 btc-pos, PositionClosed asOf 06-03
+  btc-pos]`: both events pass both gates, the fold leaves btc-pos **open**, mints no
+  closed-book row and books no proceeds, so `closedPositionIds` comes back EMPTY
+  where the shadow — advancing in log order — would have held `btc-pos`.
+
+  The new set is a **subset** of the old one, and every element it drops is one the
+  fold was going to ignore anyway, so each divergence moves the gate's answer toward
+  the fold's. What it costs is guard reach on backdated input: a SECOND backdated
+  close of that position is no longer rejected by A1's guard, because as far as the
+  book is concerned the first one never happened. Both are then silently dropped —
+  the same shape MUST FIX 1 named, minus the NAV corruption, since neither close
+  books cash. This is the container-side twin of what `requireReserveBornBy` already
+  rejects for Reserves, and the honest general fix is the same one: reject a verb
+  dated before its target exists, at ingest. Not taken here — this ADR adds and
+  removes no rejection rule — and recorded as the follow-up it is.
 
 - **Per-event fold cost is accepted, with the envelope above as the standing
   budget.** The re-trigger is explicit: if a future gate rule needs the `compose/*`

@@ -11,8 +11,9 @@
  * shadow in place; now each accept re-derives the gate's view from
  * `foldEvents(genesis, [...priorEvents, ...accepted])`, so what the next candidate is
  * judged against is the book the fold will actually produce. That is n+1 folds for an
- * n-event batch — ≈6 ms per ingest at today's log length; see
- * {@link buildEventReference} for the standing budget.
+ * n-event batch — ≈3 ms for the price-feed's 13-mark batch at today's log length, and
+ * ≈284 ms at a 50k-event log; see {@link buildEventReference} for the standing budget
+ * and ADR-015 for the mark-heavy table it comes from.
  *
  * Two callers walk it, and the second one's ENTIRE value is byte-fidelity to the
  * first:

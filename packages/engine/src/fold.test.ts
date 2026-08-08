@@ -7,6 +7,8 @@
 // regression net for the fold's own logic.
 import {
   buildCompositionReport,
+  buildEventReference,
+  crossReferenceEvent,
   foldEvents,
   parseFundReview,
   type FundReviewData,
@@ -643,6 +645,45 @@ describe("foldEvents — Close seeding", () => {
 
     // The genesis Close is preserved; no synthetic markPrice anchor is added on top.
     expect(anchors).toEqual([{ instrumentId: "aapl-usd", asOf: GENESIS_AS_OF, price: 999 }]);
+  });
+
+  it("still seeds the t0 anchor when the genesis Close PREDATES the review date", () => {
+    // The genesis close is stale history, not the seed's valuation. Suppressing the
+    // t0 anchor for it made that older price the instrument's LATEST close — and since
+    // ADR-015 the ingest magnitude guard compares against exactly this array, so the
+    // next honest mark at the seed's own markPrice would read as a fat finger.
+    const genesis = seededGenesis();
+    genesis.closes = [{ instrumentId: "aapl-usd", asOf: "2026-05-01", price: 40 }];
+    const folded = foldEvents(genesis, []);
+    const anchors = (folded.closes ?? []).filter((close) => close.instrumentId === "aapl-usd");
+
+    // Recorded history is preserved AND the t0 anchor is minted on top of it.
+    expect(anchors).toEqual([
+      { instrumentId: "aapl-usd", asOf: "2026-05-01", price: 40 },
+      { instrumentId: "aapl-usd", asOf: GENESIS_AS_OF, price: 150 },
+    ]);
+
+    // The consequence that makes this load-bearing: the gate's comparison point is the
+    // t0 anchor (150), so a legitimate 150 mark is admitted rather than rejected as a
+    // 275% deviation off the stale 40 — which would stall the price feed outright.
+    const reference = buildEventReference(genesis);
+    expect(reference.lastClose.get("aapl-usd")).toEqual({ price: 150, asOf: GENESIS_AS_OF });
+    expect(crossReferenceEvent(marked("m", "2026-06-02", "aapl-usd", 150), reference).kind).toBe("ok");
+  });
+
+  it("mints one anchor for an instrument carrying several genesis positions", () => {
+    // Multi-position instruments are normal in the real seed. The tie-break is
+    // first-position-wins, and it is safe because they share one instrument markPrice.
+    const genesis = seededGenesis();
+    genesis.positions = [
+      ...genesis.positions,
+      { ...genesis.positions[0]!, id: "aapl-tactical", portfolioId: "tactical" },
+    ];
+    const folded = foldEvents(genesis, []);
+
+    expect((folded.closes ?? []).filter((close) => close.instrumentId === "aapl-usd")).toEqual([
+      { instrumentId: "aapl-usd", asOf: GENESIS_AS_OF, price: 150 },
+    ]);
   });
 
   it("drops an entry-price anchor when an instrument is first held mid-stream", () => {

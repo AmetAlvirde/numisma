@@ -171,12 +171,14 @@ export interface EventReference {
  * output are `genesisAsOf` (the fold restamps `review.asOf` to the latest event) and
  * each Reserve's `bornAsOf`, both of which are read off the inputs directly.
  *
- * COST, and the standing budget. This is O(log length) per call, ≈0.1 ms per 1k events
- * (measured 2026-08-07, Node 24; ADR-015 records the envelope). A batch walk rebuilds
- * once per accepted event, so an n-event batch against an L-event log costs n+1 folds —
- * ≈6 ms at today's L, and a 50-event batch does not cross one second until L ≈ 200k.
- * Re-measure before assuming this still holds if a future gate rule needs the
- * `compose/*` pipeline per event rather than the bare fold.
+ * COST, and the standing budget. This is O(log length) per call — measured on a
+ * MARK-HEAVY synthetic log (the durable log is 98.5% `PriceMarked`, and the original
+ * fixture-shaped benchmark missed a quadratic term because of it; ADR-015 records both
+ * the mistake and the corrected table). 2026-08-08, Node 24: a bare fold is 0.7 ms at
+ * L=388, 1.7 ms at L=5k, 19 ms at L=50k. A batch walk rebuilds once per accepted event,
+ * so the price-feed's 13-mark batch costs 14 folds — ≈3 ms at today's L, 26 ms at L=5k,
+ * 284 ms at L=50k. Re-measure, on a mark-heavy log, if a future gate rule needs the
+ * `compose/*` pipeline per event rather than the bare fold, or if L approaches 100k.
  */
 export function buildEventReference(
   genesis: FundReviewData,
@@ -449,14 +451,23 @@ type ReserveLookup =
  * `reserveBalances.has()`/`.get()` directly. Before `ReserveOpened` the eight sites
  * that asked could each own half the question safely, because every cross-ref-approved
  * reserve id was a genesis reserve present in the fold from t0 — existence was TOTAL.
- * `ReserveOpened` makes it PARTIAL, and the two halves then disagree: this gate walks
- * the batch in LOG order, while `foldEvents` applies it in (`asOf`, then log) order.
+ * `ReserveOpened` makes it PARTIAL, and the two orderings then disagree: THIS GATE
+ * JUDGES IN LOG ORDER, while `foldEvents` applies in (`asOf`, then log) order. ADR-015
+ * did not close that gap — it moved the gate's world onto the fold, so the gate now
+ * sees the fold's answer, but the WALK still hands it candidates in log order, and a
+ * backdated candidate is still judged before the fold has had the chance to skip it.
  *
  * Measured, on `[ReserveOpened asOf 06-15, Transfer asOf 06-10 into it]`: both events
  * passed both gates, the Transfer sorted FIRST at fold, `applyToReserve` silently
  * skipped the destination that did not exist yet, and cash went 1000 → 600 with
  * `warnings: []` while the new Reserve reported a balance of 0. Rejecting here makes
  * the batch fail all-or-nothing and loud, at ingest, per ADR-003.
+ *
+ * This is the ONLY verb-target for which the date half is asked. The position verbs
+ * have the same exposure — a close/trim/add dated before its target's `PositionOpened`
+ * hits the fold's `if (closing)` / `if (trimming)` / `if (adding)` skip and never lands
+ * — and it is recorded as the open follow-up in ADR-015's third delta class rather than
+ * fixed here.
  *
  * Deliberately NOT fixed at the fold. `foldEvents` is the READ path for the TUI, the
  * web push and the daily price-feed job; throwing there would turn an ingest-time
