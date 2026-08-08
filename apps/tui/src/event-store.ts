@@ -294,12 +294,17 @@ export async function migrateLegacyLog(
   const unresolved: string[] = [];
   let migratedCount = 0;
 
-  const lines = raw
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-
-  for (const [index, line] of lines.entries()) {
+  // Number lines EXACTLY as the read half does (`loadEventLog`): a blank line is a
+  // record to neither half, but it still consumes a line number, so every number
+  // reported here is the physical line an editor shows. When the two halves disagree
+  // the operator hand-edits whichever line the second message named — and in an
+  // append-only durable log that corrupts a good line. Hence: skip blanks INSIDE the
+  // loop, never filter them out before enumerating.
+  for (const [index, rawLine] of raw.split("\n").entries()) {
+    const line = rawLine.trim();
+    if (line.length === 0) {
+      continue;
+    }
     const lineNumber = index + 1;
     let json: unknown;
     try {
