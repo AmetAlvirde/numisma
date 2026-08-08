@@ -79,8 +79,12 @@ under Node while the terminal glue stays isolated in a Bun-only layer.
   `migrate-legacy-log.ts` — the four orders/migration CLI entries. These run
   under Node (`tsx`), but `vitest.config.ts` excludes all four from coverage
   `include` — not for thinness alone but because **importing the shell runs the
-  act**: each binds the real fs, the real data dir, and a real readline prompt
-  to a flow module, so a test cannot load one to assert it without performing a
+  act**: each is a self-executing entry (top-level await / a `main()` that
+  calls itself) binding the real fs and the real data dir to a flow module —
+  plus a real readline prompt in the two importers that have one
+  (`import-orders-cli.ts`, `record-fill-cli.ts`; `cancel-order-cli.ts` is
+  deliberately promptless so it stays scriptable, and the migration takes only
+  argv) — so a test cannot load one to assert it without performing a
   real import, a real fill, a real cancel, or a real in-place rewrite of the
   durable log (`record-fill-cli.ts` says so in its own header). The flows they
   bind — `import-orders.ts`, `record-fill.ts`, `cancel-order.ts`, and

@@ -174,15 +174,17 @@ verb's naive reading would have collided with).
   `TS2322: Type 'WithdrawEvent' is not assignable to type 'never'`. Both verified
   by deliberate removal and restored.
 
-  **Superseded in part (2026-08-08, ADR-015):** the paragraph above records what
-  was true when this ADR was written. ADR-015 subsequently deleted
-  `applyEventToReference` and the cross-ref shadow it advanced entirely — the
-  ingest gate now reads world-state from `foldEvents` directly, so there is no
-  second switch left to latch. The `foldEvents` half of the finding stands
-  unchanged; the `applyEventToReference` half is moot because the function it
-  describes no longer exists. This paragraph is left as-written rather than
-  edited, since it accurately narrates a decision made at the time; see ADR-015
-  for the current shape.
+  **Superseded in part (2026-08-08, ADR-015):** the paragraph above and the
+  "finer-grained half" paragraph below both record what was true when this ADR
+  was written. ADR-015 subsequently deleted `applyEventToReference` and the
+  cross-ref shadow it advanced entirely — the ingest gate now reads world-state
+  from `foldEvents` directly, so there is no second switch left to latch, and
+  the per-arm mutation killers described below (`reserveIds.add`,
+  `reserveBalances.set`) no longer exist as lines to delete. The `foldEvents`
+  half of the finding stands unchanged; the `applyEventToReference` half is
+  moot because the function it describes no longer exists. Both paragraphs are
+  left as-written rather than edited, since they accurately narrate a decision
+  made at the time; see ADR-015 for the current shape.
 
   The finer-grained half of the finding is closed too. The prototype's mutation
   pass showed the `ReserveOpened` cross-ref arm writes **two** id structures
