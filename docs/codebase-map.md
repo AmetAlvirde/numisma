@@ -86,7 +86,7 @@ These are the seams most likely to be misread from the tree alone:
 
 ## Decisions
 
-Fourteen ADRs, indexed with current status in
+Fifteen ADRs, indexed with current status in
 [`context/adr/INDEX.md`](../context/adr/INDEX.md). The ones that explain the
 most structure:
 
@@ -114,10 +114,10 @@ pnpm verify      # typecheck → test → smoke:startup, the full gate
 pnpm coverage    # the measured Node-side number
 ```
 
-`pnpm test` measured **1359 passed / 19 skipped across 105 files** at the time
-this map was written; re-run rather than trusting the figure. (The 19 skips are
-the Postgres integration suites, which opt out unless `NUMISMA_TEST_DATABASE_URL`
-is set — they are not failures.)
+`pnpm test` measured **1538 passed / 19 skipped across 115 files** (118 files
+total, 3 fully skipped) at the time this map was written; re-run rather than
+trusting the figure. (The 19 skips are the Postgres integration suites, which
+opt out unless `NUMISMA_TEST_DATABASE_URL` is set — they are not failures.)
 
 Tests are co-located with their subjects (`*.test.ts` beside the module), so the
 test for any file is its sibling. Characterization snapshots and the engine↔TUI
