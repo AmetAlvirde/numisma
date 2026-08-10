@@ -291,33 +291,96 @@ describe("the plans authoring runbook", () => {
  * does not exist yet, so it is read before it is doubted.
  *
  * The tests above could not catch it, because asserting that a page CONTAINS a command
- * says nothing about what that command RETURNS. So these lift the command off the page
- * — the real argument, parsed out of the real fenced block — and run it against the
- * real `<fund>` checkout, asserting the exit status section 0 tells the operator to
- * expect. Revert the path to the bare form and this goes red.
+ * says nothing about what that command RETURNS. So these lift BOTH HALVES of section 0's
+ * command off the page — the `cd` target AND the path argument, parsed out of the one
+ * fenced block section 0 actually carries, so they provably belong to the same command —
+ * and run that pair against the real `<fund>` checkout, asserting the exit status the page
+ * tells the operator to expect. The mismatch is the bug, so the pair is what is tested:
+ * revert the path to the bare form and this goes red, and move the `cd` down into
+ * `data/` while keeping the path and it goes red too.
+ *
+ * What this does NOT cover: the page writes `~/Dev/<fund>` as a documented PLACEHOLDER,
+ * and these tests re-point that placeholder at the real checkout rather than expanding it,
+ * so a wrong literal repo NAME on the page is out of reach here (nothing in the numisma
+ * checkout knows the operator's repo name). The prose around the block — `echo`,
+ * `# expect ignored=1`, the remediation paragraph — is read by the string assertions
+ * above, not executed here. And only section 0's block is executed; the later `cd` lines
+ * in sections 4 and 5 are prose to those tests.
  */
 describe("the runbook's precondition check, actually run", () => {
   const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
   const RUNBOOK = join(REPO_ROOT, "docs", "plans-authoring-runbook.md");
 
+  /** How the page spells the `<fund>` repo root — a placeholder, not a real path. */
+  const FUND_ROOT_PLACEHOLDER = "~/Dev/<fund>";
+
   /**
-   * The path argument section 0 hands to `git check-ignore`, read off the page. Parsed
-   * rather than hardcoded: a hardcoded copy is another string assertion, and would keep
-   * passing while the page drifted away beneath it.
+   * `git check-ignore -q` reports its answer as an EXIT STATUS, and the polarity inverts
+   * against every intuition: it exits 0 to say "yes, ignored". Section 0 wants the OTHER
+   * one — it prints the raw `$?` and tells the operator to expect `ignored=1`, i.e. the
+   * file is NOT discarded. Named both ways so neither this test nor its next reader can
+   * quietly flip it.
+   */
+  const CHECK_IGNORE_STATUS = { pathIsIgnored: 0, pathIsNotIgnored: 1 } as const;
+
+  /**
+   * Section 0's fenced `sh` block, verbatim. Every argument these tests run is parsed out
+   * of THIS ONE STRING, which is what makes the working directory and the path halves of
+   * the command provably the same command — the bug being guarded was the two disagreeing.
+   * There is a second `cd ~/Dev/<fund>` further down the page (section 4's append step),
+   * so a bare search for the `cd` would be reading a different instruction.
+   */
+  function sectionZeroBlock(): string {
+    const text = readFileSync(RUNBOOK, "utf8");
+    const section = /^## 0\.[^\n]*\n([\s\S]*?)(?=^## )/m.exec(text);
+    if (section === null) {
+      throw new Error("the runbook no longer has a `## 0.` precondition section");
+    }
+    const block = /^```sh\n([\s\S]*?)^```/m.exec(section[1]!);
+    if (block === null) {
+      throw new Error("section 0 no longer carries a fenced `sh` block to run");
+    }
+    return block[1]!;
+  }
+
+  /**
+   * The path argument section 0 hands to `git check-ignore`. Parsed rather than hardcoded:
+   * a hardcoded copy is another string assertion, and would keep passing while the page
+   * drifted away beneath it.
    */
   function pathUnderTest(): string {
-    const text = readFileSync(RUNBOOK, "utf8");
-    const command = /^git check-ignore [^\n]*?--\s+(\S+)/m.exec(text);
+    const command = /^git check-ignore [^\n]*?--\s+(\S+)/m.exec(sectionZeroBlock());
     if (command === null) {
-      throw new Error("section 0's `git check-ignore` command is no longer on the page");
+      throw new Error("section 0's `git check-ignore` command is no longer in its block");
     }
     return command[1]!;
   }
 
   /**
-   * `~/Dev/<fund>` — the repo root the runbook says to `cd` into, which is the PARENT
-   * of the data dir. Evaluating at the root is exactly what makes the leading `/` in
-   * `!/data/plans.jsonl` bite, so the check has to run there and nowhere else.
+   * The directory section 0 says to run the check IN, resolved against the real checkout.
+   * The page's `cd` target is a placeholder path, so it is re-pointed rather than expanded:
+   * the `~/Dev/<fund>` prefix becomes the real root and whatever the page appends to it is
+   * appended here too. A page that said `cd ~/Dev/<fund>/data` therefore really does run
+   * one directory down, which is how the directory half of the mismatch becomes visible.
+   */
+  function checkDirUnderTest(root: string): string {
+    const cd = /^cd\s+(\S+)/m.exec(sectionZeroBlock());
+    if (cd === null) {
+      throw new Error("section 0's block no longer says which directory to run the check in");
+    }
+    const target = cd[1]!;
+    expect(
+      target.startsWith(FUND_ROOT_PLACEHOLDER),
+      `section 0 cd's to \`${target}\`, which is not under the page's own ` +
+        `${FUND_ROOT_PLACEHOLDER} placeholder`,
+    ).toBe(true);
+    return join(root, target.slice(FUND_ROOT_PLACEHOLDER.length));
+  }
+
+  /**
+   * `~/Dev/<fund>` — the real repo root, which is the PARENT of the data dir. Evaluating at
+   * the root is exactly what makes the leading `/` in `!/data/plans.jsonl` bite, which is
+   * why the page's own `cd` is asserted to land here and nowhere else.
    *
    * accumulus is a separate private repo (ADR-006) a fresh numisma clone will not have,
    * so this skips with a stated reason instead of going flaky, matching
@@ -342,20 +405,45 @@ describe("the runbook's precondition check, actually run", () => {
   });
 
   it.skipIf(root === undefined)(
-    "returns the `ignored=1` section 0 tells the operator to expect",
+    "runs the check from the repo ROOT the root-anchored allowlist entry is relative to",
+    () => {
+      // `--show-prefix` is the path of the cwd BELOW the repo root, so the empty string is
+      // the root itself. Any other value means the page walks the operator somewhere the
+      // relative path argument means something else.
+      const dir = checkDirUnderTest(root!);
+      const prefix = spawnSync("git", ["-C", dir, "rev-parse", "--show-prefix"], {
+        encoding: "utf8",
+      });
+      expect(
+        prefix.status,
+        `git could not read \`${dir}\`, the directory section 0 cd's into: ${prefix.stderr}`,
+      ).toBe(0);
+      expect(
+        prefix.stdout.trim(),
+        "section 0 cd's BELOW the `<fund>` repo root, so its relative path argument no " +
+          "longer names the file the root-anchored allowlist entry names",
+      ).toBe("");
+    },
+  );
+
+  it.skipIf(root === undefined)(
+    "reports the file as NOT ignored — the `ignored=1` section 0 tells the operator to expect",
     () => {
       const status = spawnSync("git", [
         "-C",
-        root!,
+        checkDirUnderTest(root!),
         "check-ignore",
         "-q",
         "--no-index",
         "--",
         pathUnderTest(),
       ]).status;
-      // `check-ignore -q` exits 0 when the path IS ignored, 1 when it is not. The
-      // runbook wants 1, and prints that expectation inline as `# expect ignored=1`.
-      expect(status).toBe(1);
+      expect(
+        status,
+        `section 0's directory + path pair reports the durable file as IGNORED (status ` +
+          `${String(status)}); the page would tell the operator that a correctly ` +
+          `allowlisted checkout is discarding it`,
+      ).toBe(CHECK_IGNORE_STATUS.pathIsNotIgnored);
     },
   );
 });
