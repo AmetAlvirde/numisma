@@ -305,6 +305,47 @@ export {
 // reachable browser-side via the pure `@numisma/engine/calendar` subpath.
 export { addDays, daysBetween } from "./calendar.js";
 
+// The `plans.jsonl` sidecar (ADR-004's class, fourth member) — the operator's
+// durable DECLARATION OF INTENT per position, recorded BESIDE the log and never
+// folded. Pure declarations only: the record contract, the strict calendar-date
+// predicate, and the two closed vocabularies. The file IO lives in
+// `@numisma/preferences`, per ADR-001.
+//
+// Beside them, the pure as-of SELECTORS: `pickPlanAsOf` answers for one position and
+// `listPlansAsOf` for every position the sidecar names, both through the five-arm
+// `PlanLookup` union — a type, not a convention, so a caller cannot reach `plan`
+// without first naming the status.
+//
+// MANUAL BLOCK, exactly like the orders one above and for the same reason: this
+// list is NOT derived from the `PlanRecord` union, so a kind added to the union is
+// nameable outside the package only if it is added HERE too.
+export type {
+  PlanKind,
+  DcaCadence,
+  IsoDate,
+  DcaRung,
+  DcaLadderPlanRecord,
+  DcaTimePlanRecord,
+  NoPlanRecord,
+  PlanRecord,
+  LoadedPlanRecord,
+  PlanSkipReason,
+  SkippedPlanLine,
+  LoadedPlans,
+  ActivePlan,
+  LoadedNoPlanRecord,
+  PlanLookup,
+  PlanRow,
+  PlansAsOf,
+} from "./plans.js";
+export {
+  PLAN_KINDS,
+  DCA_CADENCES,
+  isIsoCalendarDate,
+  pickPlanAsOf,
+  listPlansAsOf,
+} from "./plans.js";
+
 // The ONE pure resolver for the durable ledger's data root, honoring the
 // `NUMISMA_DATA_DIR` env override with an absolute, homedir-derived accumulus
 // default. Shared by the tui event-store, the price-feed config, and the

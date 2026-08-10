@@ -1,0 +1,213 @@
+# Authoring a plan line: `plans.jsonl` by hand
+
+A **plan** is your durable declaration of intent for one position: *this position is a
+four-rung ladder*, *this position buys \$25 weekly*, *this position is done*. It lives
+in `data/plans.jsonl` in the private sibling repo **`<fund>`** (`~/Dev/<fund>/data` by
+default, or wherever `NUMISMA_DATA_DIR` points), beside the event log and the other
+sidecars — durable, append-only, git-versioned, and **never folded**. Nothing you write
+here can move NAV.
+
+Throughout this page, `<fund>` stands for your own private data repository — the same
+convention as `<dataDir>` — so substitute your actual repo name/path before running any
+command below. Every figure on this page is **synthetic**; no real position, price or
+size appears in the numisma checkout.
+
+**The file is authored by hand, by you.** Agents never write it and never touch the
+`<fund>` checkout. `pnpm plans` is read-only: it reads the file and reports, it never
+appends and never touches git.
+
+This page is the companion to three neighbours:
+[`durable-log-ops.md`](./durable-log-ops.md) (the durable-file floor these lines rely
+on), [`accumulus-restore-runbook.md`](./accumulus-restore-runbook.md) (going back when
+a committed value is wrong), and [`local-data.md`](./local-data.md) (where the store
+lives).
+
+## Why the file needs a runbook at all
+
+The durability chain proves a file is **committed**. It never proves the file **parses**,
+which position a line attributed to, or which state it resolves to today. A plausible
+stamp like `"08/10/2026"` is accepted by your editor, commits green, and — section 3
+works this through — sorts *ahead of every ISO date in the file*. Nothing in the daily
+run would tell you. `pnpm plans` is what tells you, at the desk, in one command.
+
+## 0. Precondition: the durable-file floor
+
+A new durable file in `<fund>` is **silently ephemeral** until the allowlist names it.
+`plans.jsonl` was added to all three links of that chain (spec #267, slice 1), but the
+first link lives in the `<fund>` checkout's own `.gitignore`, which is not in this
+repository — so confirm it before you author anything:
+
+```sh
+cd ~/Dev/<fund>
+git check-ignore -q --no-index -- plans.jsonl ; echo "ignored=$?"   # expect ignored=1
+```
+
+`1` means git does **not** ignore it — the answer you want. A `0` means the allowlist is
+still discarding the file, and every line you author would be written, ignored, and lost
+with a green check over the loss. Add the `plans.jsonl` allowlist entry beside the other
+durable files first, then re-run the check.
+
+The other two links are code and are guarded by test
+(`apps/tui/src/durable-log-guards.test.ts` asserts **both ends**: not `check-ignore`'d,
+and named in `TRACKED_FILES`). Run `pnpm test` and confirm that file is green before you
+trust the file to survive.
+
+## 1. The envelope
+
+One JSON object per line, newline-terminated, appended and never edited. Three fields
+are required on **every** line, whatever the kind:
+
+| Field | Meaning |
+| --- | --- |
+| `kind` | `dcaLadder`, `dcaTime`, or `noPlan` (the terminator). |
+| `positionId` | The position this plan is about. **Not validated against the fold.** |
+| `effectiveAt` | The date this plan takes effect. Strict `YYYY-MM-DD` — see section 3. |
+
+**A plan naming a position that does not exist yet is legal, and is the normal case.**
+Declaring the ladder a position is *going to become* is precisely the fact you are
+authoring; the position is born later, when the first fill lands. Until then the desk
+renders that row `pending` — never `$0`. Zero is a measurement; pending is the absence of
+one.
+
+Identity is `positionId` + `effectiveAt`. There is no id field and no line number in the
+file: line numbers are read-side only, stamped by the loader so a diagnostic can tell you
+where to look.
+
+## 2. The two kinds, worked
+
+**A ladder** — resting rungs declared as one plan, which is the fact the orders sidecar
+structurally cannot carry (it holds no `positionId` and no ladder id). `tierOrder` is the
+order capital is drawn down in; it is closed and strict (`c1`, `c2`, `c3`), non-empty, no
+repeats. Every rung needs a distinct `id` and a finite, positive `priceUsd` and `sizeUsd`.
+
+```json
+{"kind":"dcaLadder","positionId":"pos-demo-001","effectiveAt":"2026-08-10","tierOrder":["c1","c2"],"rungs":[{"id":"r1","priceUsd":90000,"sizeUsd":250},{"id":"r2","priceUsd":85000,"sizeUsd":250},{"id":"r3","priceUsd":80000,"sizeUsd":250},{"id":"r4","priceUsd":75000,"sizeUsd":250}]}
+```
+
+**A time plan** — buy `amountUsd` every `cadence` (`daily`, `weekly`, `monthly`).
+`anchorAt` is the **cadence anchor**, not a first-buy date: `weekly` alone does not say
+which weekday, and the anchor fixes the phase. An anchor in the past is normal after your
+first supersession.
+
+```json
+{"kind":"dcaTime","positionId":"pos-demo-002","effectiveAt":"2026-08-10","cadence":"weekly","anchorAt":"2026-08-03","amountUsd":25,"tierOrder":["c1"]}
+```
+
+**The terminator** — this plan is over. `reason` is optional free prose for your own
+record; it is never parsed and never rendered as fact.
+
+```json
+{"kind":"noPlan","positionId":"pos-demo-001","effectiveAt":"2026-09-01","reason":"ladder filled out"}
+```
+
+## 3. The date format is strict, and here is the trap it closes
+
+`effectiveAt` must be `YYYY-MM-DD` **and a real calendar date**. This is the file
+format's own rule, not a style preference, because **selection is string comparison**:
+the desk picks the latest `effectiveAt` at or before the query date by comparing the
+strings directly.
+
+Work the trap through. Suppose you superseded a ladder on the 10th of August and typed
+the date the way you say it out loud:
+
+```json
+{"kind":"dcaLadder","positionId":"pos-demo-001","effectiveAt":"2026-08-01", …}
+{"kind":"dcaLadder","positionId":"pos-demo-001","effectiveAt":"08/10/2026", …}
+```
+
+`"08/10/2026"` starts with `"0"`; every ISO date in the file starts with `"1"` or `"2"`.
+Under string comparison the *newer* line therefore sorts **below** the older one — behind
+every date the file will ever hold. Ask the desk for today and the selection returns the
+**August 1st ladder**: no throw, no warning, a perfectly plausible wrong answer that
+would have been committed green by the daily run. `Date.parse` accepts that string
+happily, which is exactly why a parse-based check would not have saved you.
+
+The same reasoning rejects `"2026-02-30"`: `Date.parse` succeeds by rolling it over to
+March 2nd, so a shape-only check would accept a string that **sorts as February and means
+March**. The loader re-renders the date and compares it back, so a genuine end-of-month
+date like `"2026-01-31"` passes and the overflow does not.
+
+**What you actually see today.** Because the rule is enforced at load, the bad line above
+is not selected — it is **skipped**, and because it is the newest thing known about that
+position, `pnpm plans` renders the row `unreadable` and exits non-zero. That is the
+designed outcome: an unreadable row and a failing exit code, never a confident wrong
+ladder. Fix it by appending a corrected line (section 4).
+
+## 4. Editing is supersession. There is no edit and no delete
+
+To change a plan, **append a new line** for the same `positionId` with a later
+`effectiveAt`. The later line wins; two lines sharing a date are broken by file order,
+last one wins. Never go back and modify a line you have already committed — as-of replay
+reads this file as history, and rewriting history changes answers to questions that were
+already asked.
+
+To stop a plan, append the `noPlan` terminator. **Pause and end are the same act**:
+resumption is simply a later plan line. Without a terminator the last plan stays in force
+forever, because selection is "latest line at or before the query date" and an absence is
+not an ending.
+
+Append with your editor, or from the shell:
+
+```sh
+cd ~/Dev/<fund>
+$EDITOR data/plans.jsonl        # one object per line, newline at the end of the file
+```
+
+## 5. Verify — the rendered row and the exit code
+
+**Reading the warnings is not the verification step.** A loud warning printed into a
+launchd log reaches no one; that is the whole reason the desk command carries an exit
+code. Verify these two things, in this order.
+
+### 5a. The row renders as you authored it, and the command exits 0
+
+```sh
+cd ~/Dev/numisma
+pnpm plans ; echo "EXIT=$?"
+```
+
+Read the row for the position you just authored and confirm three facts:
+
+- **the state** — `pending` for a position not yet born (declared, not yet realized),
+  `active` once it exists on the book, `ended` after a terminator, `none` when no line is
+  in force at this date, and `unreadable` when the newest line for it could not be read;
+- **the `effectiveAt` that was selected** — it must be the date you authored, not an
+  earlier one. A different date here is the section 3 trap, or a supersession that did not
+  win;
+- **the body** — the rung count for a ladder, the cadence and anchor for a time plan.
+
+Then confirm **`EXIT=0`**. The contract is exact: `0` if and only if the file was read and
+**every** line in it was readable. Any skipped line exits non-zero after printing the
+diagnostics, which name the line number, the bucket, and what to do — a corrupt line
+(append a corrected one) against a line this checkout is too old to understand (pull and
+retry). The diagnostics never quote the line itself, because plan bodies carry your
+figures; go and read line *N* in your editor.
+
+An absent `plans.jsonl` is the normal starting state and exits `0` with no rows. Use
+`--as-of YYYY-MM-DD` to ask what the file said on a prior date.
+
+### 5b. Durability, confirmed by observation
+
+A warning about a discarded file is exactly the thing nobody sees, so confirm durability
+by looking at what git actually holds. After the next daily run (or after committing the
+file yourself in the `<fund>` checkout):
+
+```sh
+git -C ~/Dev/<fund> log -- data/plans.jsonl
+```
+
+A commit must be listed. If the log is empty while the file is on disk with content, the
+allowlist is discarding it — go back to section 0, fix the `.gitignore` entry, and commit
+again. Nothing else on this page is worth anything until that log has an entry in it.
+
+## Notes
+
+- `pnpm plans` is read-only and standalone. It never writes the sidecar and never touches
+  git, and a plans failure never kills the NAV fold or withholds a push — the fold does
+  not read this file at all.
+- The plan **bodies** are provisional (they are parked on the fills export); the
+  **envelope** is not. If a body shape changes later, the repair path is the file's own
+  mechanism: supersede with a new line.
+- Do not hand-edit `plans.jsonl` to "clean it up". Every line in it is a statement about
+  what you intended on a date, and the file is only as trustworthy as its append-only
+  discipline.

@@ -90,13 +90,15 @@ the `captureIngestCommit` seam wired into `ingestInbox` — is the `@numisma/tui
   itself into that history.
 - **The allowlist `.gitignore` polarity is load-bearing.** The <fund> repo tracks exactly the
   four durable text files (`genesis.json`, `events.jsonl`, `preferences.jsonl`,
-  `head-digest.json`); `prices/`, `inbox/`, `ingested/`, `*.tmp`, and `*.quarantine` are
+  `head-digest.json`) — now six, with `orders.jsonl` and `plans.jsonl`; `prices/`,
+  `inbox/`, `ingested/`, `*.tmp`, and `*.quarantine` are
   ignored. The polarity is an *allowlist* (deny-by-default with named exceptions), so the
   disposable, re-fetchable cache is **structurally unable to enter durable history** — a
   stray `prices/foo.json` or `*.tmp` cannot be committed even by mistake, and the scoped
   stage above reinforces the same guarantee from the writer side. _(Amended: the list is
-  now five files — `orders.jsonl` joined it — and the amendment below states the general
-  membership test that admits or excludes any candidate.)_
+  now six files — `orders.jsonl` joined it under the amendment below, and `plans.jsonl`
+  followed as the one-line extension that amendment's general membership test provides
+  for.)_
 - **The retired in-repo `data/` store is orphaned and must be retired as part of this
   decision.** The flip repointed all code at the <fund> repo but left a full *stale* duplicate
   ledger under `numisma/data/`, which has **already diverged** (on the audit machine:
@@ -172,8 +174,11 @@ a further amendment:**
 Durable: losing it loses fund history that cannot be reconstructed. Non-re-derivable:
 nothing can recompute it from something else that is tracked. Both must hold. A file that
 answers yes belongs in the allowlist, in `TRACKED_FILES`, in the explicit-add loop and in
-the strict post-check — as one line in each. (`plans.jsonl`, arriving in increment two, is
-exactly such a one-line extension, not a second amendment.)
+the strict post-check — as one line in each. (`plans.jsonl` — the operator-authored,
+append-only per-position plan sidecar — is exactly such a one-line extension, taken
+without a second amendment: it is durable, non-re-derivable truth, and as-of replay
+depends on its history. The tracked list is therefore six: `genesis.json`,
+`events.jsonl`, `preferences.jsonl`, `head-digest.json`, `orders.jsonl`, `plans.jsonl`.)
 
 **The warrant is DURABILITY, not secrecy.** This ADR's own justification for the sibling
 repo is that the log had *"no history and no backup"*, leaving the operator unable to tell

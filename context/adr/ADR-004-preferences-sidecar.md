@@ -7,7 +7,9 @@ preferences-sidecar boundary" (#97)._
 _Scope: product_
 _Status: accepted (supersedes the grill's genesis-field idea and the deferred
 `ProfitPolicySet` 8th verb — see "Considered Options"); **amended 2026-07-30** —
-see "Amendment: the sidecar class, the name debt, and three stale claims" below._
+see "Amendment: the sidecar class, the name debt, and three stale claims" below;
+**amended again 2026-08-10** — see "Second amendment: `effectiveAt` is a
+lexicographically-ordered ISO calendar date, on the wire" below._
 
 Trader **policy** — the profit-split ratio (this fund's default 60/40) and the
 loss-netting basis (`highWaterMark` default / `perClose`) — is persisted in a **second
@@ -190,3 +192,83 @@ Each was verified against the code before being corrected here.
    carries the trailing *"Verb count now 9→10 — see ADR-012"*, and **ADR-012**
    itself, which is the document that added it. Cite those, not ADR-003's body,
    for any claim about the current verb count.
+
+## Second amendment: `effectiveAt` is a lexicographically-ordered ISO calendar date, on the wire
+
+_Amended 2026-08-10, during the `plans.jsonl` sidecar increment (spec #267, slice
+#269), alongside the fourth member of this class. No decision here is reversed —
+this amendment RAISES to the class level a rule the first two members already
+depended on and neither wrote down, and it lands **before the first plan line
+exists**, which is the only moment at which it can land for free._
+
+### The decision
+
+**Every `effectiveAt` in this class is a strict ISO `YYYY-MM-DD` calendar date, and
+selection is STRING COMPARISON over it.** Both halves are the decision:
+
+- **Strict `YYYY-MM-DD`, validated by shape AND by round trip.** Shape alone is not
+  enough: `Date.parse("2026-02-30")` succeeds — it rolls over to March 2 — so a
+  shape-only check accepts a string that *sorts* as February and *means* March. The
+  validator re-renders the parsed date and compares it back to the input, which
+  rejects the overflow while leaving a legitimate `"2026-01-31"` untouched.
+- **Selection is lexicographic.** `pickPolicyAsOf` already selects the latest
+  `effectiveAt ≤ asOf` by comparing strings, and the plans selector will do the same.
+  This is the property that makes the format's strictness load-bearing rather than
+  fastidious: under string comparison a `Date.parse`-able non-ISO stamp
+  (`"08/10/2026"`) sorts under `"0"`, ahead of every ISO date in the file, and
+  **silently selects the wrong policy** — no throw, no warning, a plausible answer.
+- **The same strictness binds `asOf`,** the other operand of every comparison. A
+  strict left-hand side compared against a loose right-hand side is not a comparison.
+
+### Why this is an ADR amendment and not a code comment
+
+**It is a property of the WIRE, not of the reader.** These are append-only,
+git-versioned files. The accepted string set can be *widened* later at any time; it
+can never be *narrowed* without migrating a durable artifact and re-validating every
+historical as-of replay. So the decision has exactly one cheap moment, and that moment
+is before the first line of a new member exists — which is why it rides the slice that
+introduces `plans.jsonl`'s loader and precedes any write to it.
+
+**It also writes down a precedent `preferences.jsonl` set unwritten.** That file has
+enforced this rule in code since it shipped: `packages/preferences/src/preferences.ts`
+carries an `ISO_DATE` regex and a comment explaining that a `Date.parse`-able but
+non-ISO stamp "would sort wrong and silently select the wrong policy." The rule was
+real, was correct, and existed nowhere but a validator's docstring — so the second
+member of the class (`orders.jsonl`) reached for a different stamp for its own reasons
+and nothing in the record connected the two choices. Naming it here makes it
+inheritable: a fifth member does not get to rediscover it.
+
+### What it does NOT say
+
+- **It does not make every timestamp in the class a date.** `orders.jsonl`'s
+  `observedAt` is deliberately second-granular (`YYYY-MM-DDTHH:MM:SS`, ADR-013),
+  because several rungs of one ladder are submitted within the same minute and a
+  date-only stamp cannot order them. That stamp is an OBSERVATION time; this
+  amendment governs the **as-of selection key** — the field a selector compares
+  against a query date to decide which record is in force. `observedAt` is likewise
+  lexicographically ordered, which is the general rule underneath both: **a field
+  that is selected on must sort as a string in the same order it sorts in time.**
+- **It does not constrain the bodies.** `plans.jsonl`'s `anchorAt` is validated to the
+  same strict form because it is a date, but nothing is selected on it and no relation
+  to `effectiveAt` is enforced.
+
+### The three SDP tests
+
+- **Hard to reverse.** It is the definition of a field in an append-only, git-versioned
+  file with a replay contract. Once a durable line carries a looser stamp the set
+  cannot be narrowed without a migration — and the failure it prevents is a SILENT
+  wrong answer rather than a crash, so a violation is not discoverable after the fact
+  by anything short of an audit.
+- **Surprising without context.** "Use ISO dates" reads as a style rule, and the
+  natural implementation — `Date.parse` — is precisely the one that accepts
+  `"2026-02-30"` and `"08/10/2026"`. That the strictness exists to keep
+  **lexicographic order equal to chronological order** is the non-obvious part, and it
+  is invisible to anyone who has not noticed that selection never constructs a `Date`
+  at all.
+- **A real trade-off.** A closed, strict format at the wire versus a permissive reader
+  that normalizes what it is given. Permissive costs nothing at authoring time and
+  buys a file whose accepted set is whatever the current normalizer happens to do;
+  strict costs the operator an occasional rejected line — reported as a corrupt-line
+  skip they must correct and re-append — and buys a file where a date means one thing
+  forever. Chosen strict, and only because it is being chosen before the first line
+  exists; on an established file the same choice would be a migration.
