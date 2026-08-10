@@ -48,6 +48,7 @@ export const TRACKED_FILES = [
   "genesis.json",
   "preferences.jsonl",
   "orders.jsonl",
+  "plans.jsonl",
 ];
 
 /**
