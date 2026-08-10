@@ -23,12 +23,13 @@
  * readable — one-directional, deliberately. Non-zero does NOT imply a bad plan line:
  * the `catch` below also exits 1 when `loadFoldedReview` throws (a partially-loadable
  * event log, an `--as-of` before genesis), and in that case the plans diagnostics were
- * never printed at all. A checker that reads 1 as "the sidecar is broken" can be
- * looking at a perfect sidecar and a broken event log; the printed diagnostics, not
- * the code alone, say which. Otherwise non-zero, after the diagnostics are printed.
- * The policy is
- * `unattendedPlansVerdict`'s, reached through the formatter — a launchd job's stderr
- * goes to a log nobody reads, so the verdict has to be a value something can check.
+ * never printed at all — the error goes to stderr instead. A checker that reads 1 as
+ * "the sidecar is broken" can be looking at a perfect sidecar and a broken event log;
+ * the printed diagnostics, not the code alone, say which. On the sidecar path the
+ * report is written before the code is set, so THERE a non-zero code always arrives
+ * after its diagnostics. The policy is `unattendedPlansVerdict`'s, reached through the
+ * formatter — a launchd job's stderr goes to a log nobody reads, so the verdict has to
+ * be a value something can check.
  *
  * `--as-of <YYYY-MM-DD>` renders the sidecar as the fund saw it on a prior date, the
  * same flag the fold surfaces take; with no flag the query date is TODAY in the
