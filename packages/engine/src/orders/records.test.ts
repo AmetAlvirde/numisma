@@ -58,6 +58,60 @@ describe("parseOrderRecord refuses a non-object line attributably", () => {
 });
 
 /**
+ * `observedAt` IS SELECTED ON, so ADR-004's general rule reaches it — *a field that is
+ * selected on must sort as a string in the same order it sorts in time.*
+ *
+ * The amendment exempts `observedAt` from the class's `YYYY-MM-DD` requirement, and that
+ * exemption is about GRANULARITY and holds: a fixed-width, zero-padded second-granular
+ * stamp satisfies the rule rather than waiving it. What it never covered is the ROUND
+ * TRIP. Every case below matches the shape regex exactly and is still a lie about time —
+ * `2026-02-30T…` sorts as February and means March 2; `…T99:99:99` sorts after every
+ * real time of its day. Both would silently answer "what was resting on date X" with the
+ * wrong set, which is the whole failure the format exists to prevent.
+ *
+ * Synthetic throughout: invented pair, round sizes, round prices.
+ */
+describe("observedAt is a real calendar date and time, not merely the right shape", () => {
+  const record = (observedAt: string) => ({
+    id: "rung-synthetic",
+    observedAt,
+    kind: "orderCancelled",
+    currency: "USD",
+  });
+
+  const MALFORMED = {
+    status: "skip",
+    problem: "malformed",
+    message: "observedAt must be YYYY-MM-DDTHH:MM:SS, a real calendar date and time",
+  };
+
+  it("refuses a calendar overflow that would sort a month early", () => {
+    expect(parseOrderRecord(record("2026-02-30T09:30:00"))).toEqual(MALFORMED);
+    expect(parseOrderRecord(record("2025-02-29T09:30:00"))).toEqual(MALFORMED);
+    expect(parseOrderRecord(record("2026-13-01T09:30:00"))).toEqual(MALFORMED);
+  });
+
+  it("refuses an out-of-range time that would sort after every real time that day", () => {
+    expect(parseOrderRecord(record("2026-01-01T99:99:99"))).toEqual(MALFORMED);
+    expect(parseOrderRecord(record("2026-01-01T24:00:00"))).toEqual(MALFORMED);
+    expect(parseOrderRecord(record("2026-01-01T09:60:00"))).toEqual(MALFORMED);
+  });
+
+  it("admits the real boundaries — the narrowing rejects lies, not legitimate stamps", () => {
+    // Midnight, the last second of a day, a genuine end-of-month and a real leap day all
+    // have to survive, or the rule would cost the operator correct lines.
+    for (const stamp of [
+      "2026-01-01T00:00:00",
+      "2026-01-31T23:59:59",
+      "2024-02-29T12:00:00",
+      "2026-06-30T15:08:02",
+    ]) {
+      expect(parseOrderRecord(record(stamp))).toMatchObject({ status: "ok" });
+    }
+  });
+});
+
+/**
  * THE CANONICAL KEY ORDER, PINNED (#12 of the 2026-08-07 audit).
  *
  * `KEY_ORDER` is derived by `Object.keys` over per-kind `Record<keyof …Record, true>`
