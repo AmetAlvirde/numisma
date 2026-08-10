@@ -20,11 +20,13 @@
  *      the real loader and asserts that no line of it appears in the output, so an
  *      implementation that interpolated the offending line would fail here.
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveDataDir } from "@numisma/engine";
 import { loadPlans } from "@numisma/preferences";
 import type { LoadedPlans, SkippedPlanLine } from "@numisma/engine";
 import { describe, expect, it } from "vitest";
@@ -274,4 +276,84 @@ describe("the plans authoring runbook", () => {
     expect(text).toContain("08/10/2026");
     expect(text).toContain("string comparison");
   });
+});
+
+/**
+ * SECTION 0 IS EXECUTED, NOT SPELL-CHECKED — and the distinction is the whole reason
+ * this block exists. The precondition check shipped asking about a BARE `plans.jsonl`
+ * evaluated at the `<fund>` repo root. The allowlist entry is `!/data/plans.jsonl`,
+ * anchored at that root, so the bare path matches nothing, falls through to the
+ * leading `*`, and reports `ignored=0` — which the page then reads back to the
+ * operator as "the allowlist is still discarding the file" on a checkout that is
+ * perfectly correct. It is the FIRST instruction in the FIRST runbook for a file that
+ * does not exist yet, so it is read before it is doubted.
+ *
+ * The tests above could not catch it, because asserting that a page CONTAINS a command
+ * says nothing about what that command RETURNS. So these lift the command off the page
+ * — the real argument, parsed out of the real fenced block — and run it against the
+ * real `<fund>` checkout, asserting the exit status section 0 tells the operator to
+ * expect. Revert the path to the bare form and this goes red.
+ */
+describe("the runbook's precondition check, actually run", () => {
+  const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+  const RUNBOOK = join(REPO_ROOT, "docs", "plans-authoring-runbook.md");
+
+  /**
+   * The path argument section 0 hands to `git check-ignore`, read off the page. Parsed
+   * rather than hardcoded: a hardcoded copy is another string assertion, and would keep
+   * passing while the page drifted away beneath it.
+   */
+  function pathUnderTest(): string {
+    const text = readFileSync(RUNBOOK, "utf8");
+    const command = /^git check-ignore [^\n]*?--\s+(\S+)/m.exec(text);
+    if (command === null) {
+      throw new Error("section 0's `git check-ignore` command is no longer on the page");
+    }
+    return command[1]!;
+  }
+
+  /**
+   * `~/Dev/<fund>` — the repo root the runbook says to `cd` into, which is the PARENT
+   * of the data dir. Evaluating at the root is exactly what makes the leading `/` in
+   * `!/data/plans.jsonl` bite, so the check has to run there and nowhere else.
+   *
+   * accumulus is a separate private repo (ADR-006) a fresh numisma clone will not have,
+   * so this skips with a stated reason instead of going flaky, matching
+   * `durable-log-guards.test.ts`.
+   */
+  function fundRepoRoot(): string | undefined {
+    const dataDir = resolveDataDir();
+    if (!existsSync(dataDir)) {
+      return undefined;
+    }
+    const root = dirname(dataDir);
+    const inRepo = spawnSync("git", ["-C", root, "rev-parse", "--git-dir"], { encoding: "utf8" });
+    return inRepo.status === 0 ? root : undefined;
+  }
+
+  const root = fundRepoRoot();
+
+  it("asks about the path the allowlist entry is anchored at", () => {
+    // Independent of any checkout: `!/data/plans.jsonl` is root-anchored, so the only
+    // path that can ever match it is the one carrying the `data/` prefix.
+    expect(pathUnderTest()).toBe("data/plans.jsonl");
+  });
+
+  it.skipIf(root === undefined)(
+    "returns the `ignored=1` section 0 tells the operator to expect",
+    () => {
+      const status = spawnSync("git", [
+        "-C",
+        root!,
+        "check-ignore",
+        "-q",
+        "--no-index",
+        "--",
+        pathUnderTest(),
+      ]).status;
+      // `check-ignore -q` exits 0 when the path IS ignored, 1 when it is not. The
+      // runbook wants 1, and prints that expectation inline as `# expect ignored=1`.
+      expect(status).toBe(1);
+    },
+  );
 });

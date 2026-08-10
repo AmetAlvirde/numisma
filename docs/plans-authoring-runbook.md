@@ -39,8 +39,13 @@ repository — so confirm it before you author anything:
 
 ```sh
 cd ~/Dev/<fund>
-git check-ignore -q --no-index -- plans.jsonl ; echo "ignored=$?"   # expect ignored=1
+git check-ignore -q --no-index -- data/plans.jsonl ; echo "ignored=$?"   # expect ignored=1
 ```
+
+**The path is `data/plans.jsonl`, and the prefix is load-bearing.** The allowlist entry is
+`!/data/plans.jsonl`, anchored at the repo root; a bare `plans.jsonl` evaluated from the
+root matches nothing and falls through to the leading `*`, so it reports `ignored=0` on a
+checkout that is *correctly* allowlisted. Ask about the path git will actually see.
 
 `1` means git does **not** ignore it — the answer you want. A `0` means the allowlist is
 still discarding the file, and every line you author would be written, ignored, and lost
