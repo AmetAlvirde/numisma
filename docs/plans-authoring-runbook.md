@@ -39,8 +39,13 @@ repository — so confirm it before you author anything:
 
 ```sh
 cd ~/Dev/<fund>
-git check-ignore -q --no-index -- plans.jsonl ; echo "ignored=$?"   # expect ignored=1
+git check-ignore -q --no-index -- data/plans.jsonl ; echo "ignored=$?"   # expect ignored=1
 ```
+
+**The path is `data/plans.jsonl`, and the prefix is load-bearing.** The allowlist entry is
+`!/data/plans.jsonl`, anchored at the repo root; a bare `plans.jsonl` evaluated from the
+root matches nothing and falls through to the leading `*`, so it reports `ignored=0` on a
+checkout that is *correctly* allowlisted. Ask about the path git will actually see.
 
 `1` means git does **not** ignore it — the answer you want. A `0` means the allowlist is
 still discarding the file, and every line you author would be written, ignored, and lost
@@ -176,12 +181,18 @@ Read the row for the position you just authored and confirm three facts:
   win;
 - **the body** — the rung count for a ladder, the cadence and anchor for a time plan.
 
-Then confirm **`EXIT=0`**. The contract is exact: `0` if and only if the file was read and
-**every** line in it was readable. Any skipped line exits non-zero after printing the
-diagnostics, which name the line number, the bucket, and what to do — a corrupt line
-(append a corrected one) against a line this checkout is too old to understand (pull and
-retry). The diagnostics never quote the line itself, because plan bodies carry your
-figures; go and read line *N* in your editor.
+Then confirm **`EXIT=0`**. The contract is exact and one-directional: the command exits
+`0` **only if** the file was read and **every** line in it was readable. Any skipped line
+exits non-zero after printing the diagnostics, which name the line number, the bucket, and
+what to do — a corrupt line (append a corrected one) against a line this checkout is too
+old to understand (pull and retry). The diagnostics never quote the line itself, because
+plan bodies carry your figures; go and read line *N* in your editor.
+
+**Do not read a non-zero exit backwards.** It does not mean your plan line is bad. The
+command also exits `1` when it cannot read the *event log* — a quarantined log line, or an
+`--as-of` earlier than genesis — and in that case it never reached the sidecar and printed
+no plans diagnostics at all. So read the output, not just the code: **no diagnostics block
+means the failure was upstream of `plans.jsonl`**, and `pnpm spine` is where to look.
 
 An absent `plans.jsonl` is the normal starting state and exits `0` with no rows. Use
 `--as-of YYYY-MM-DD` to ask what the file said on a prior date.
@@ -202,9 +213,13 @@ again. Nothing else on this page is worth anything until that log has an entry i
 
 ## Notes
 
-- `pnpm plans` is read-only and standalone. It never writes the sidecar and never touches
-  git, and a plans failure never kills the NAV fold or withholds a push — the fold does
-  not read this file at all.
+- `pnpm plans` is standalone, and never writes what you authored. It never writes the
+  sidecar and never touches git, and a plans failure never kills the NAV fold or
+  withholds a push — the fold does not read this file at all. It is not, however, write-
+  free: reading the fold maintains the event log's `events.jsonl.quarantine` lane, which
+  it removes once every log line parses. That lane is gitignored and belongs to the log,
+  not to your plans; it is named here only so a vanished breadcrumb after a `pnpm plans`
+  run is not a mystery.
 - The plan **bodies** are provisional (they are parked on the fills export); the
   **envelope** is not. If a body shape changes later, the repair path is the file's own
   mechanism: supersede with a new line.

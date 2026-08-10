@@ -57,6 +57,7 @@ import {
   committedRungs,
   crossReferenceEvent,
   isObservedAtStamp,
+  OBSERVED_AT_RULE,
   parseEvent,
   pickRestingOrdersAsOf,
   proposeFillVerdicts,
@@ -347,9 +348,16 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
     return reject(io, "unknown-rung", `no resting rung matches '${picked}'`);
   }
 
-  const observedAt = (await io.ask("Fill timestamp (YYYY-MM-DDTHH:MM:SS): ")).trim();
+  // The prompt states the rule in advance and the refusal restates it — both from the one
+  // shared phrase (#181), so neither can promise the operator a looser rule than the
+  // predicate on the next line enforces.
+  const observedAt = (await io.ask(`Fill timestamp (${OBSERVED_AT_RULE}): `)).trim();
   if (!isObservedAtStamp(observedAt)) {
-    return reject(io, "bad-timestamp", `'${observedAt}' is not a YYYY-MM-DDTHH:MM:SS stamp`);
+    return reject(
+      io,
+      "bad-timestamp",
+      `'${observedAt}' is not a valid stamp — ${OBSERVED_AT_RULE}`,
+    );
   }
   if (observedAt < filled.observedAt) {
     return reject(

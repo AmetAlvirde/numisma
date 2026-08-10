@@ -123,6 +123,21 @@ the second member of that kind. The class is:
 > own on-load validation contract, joined to the fold at read time by a pure
 > selector, and never folded.**
 
+> **Counting note, added 2026-08-10.** There are THREE counts in this record and they
+> do not all agree, which is not an error in any of them: **sidecar-class membership**
+> counts `preferences.jsonl` (1), `orders.jsonl` (2), `plans.jsonl` (3); **durable
+> artifacts** counts `events.jsonl` first, which is why ADR-013 correctly calls
+> `orders.jsonl` "a third durable artifact" while this ADR correctly calls it the
+> second member; and **tracked files** — ADR-006's `.gitignore` allowlist /
+> `TRACKED_FILES` census (INDEX.md's ADR-006 row) — counts `genesis.json`,
+> `events.jsonl`, `preferences.jsonl`, `head-digest.json`, `orders.jsonl`,
+> `plans.jsonl`, making `plans.jsonl` the **sixth** tracked file under that count. The
+> event log is deliberately NOT in the sidecar class — that is this amendment's whole
+> point. `plans.jsonl` shipped calling itself the class's "fourth member" in five places
+> by crossing the first two counts above; say which count you mean. (This note does not
+> attempt to reconcile ADR-006's "sixth tracked file" and this ADR's "third member"
+> under one shared vocabulary — that is a separate, larger edit than naming the axes.)
+
 Membership is not about the data being small, or configuration-shaped, or
 private. It is about the artifact being durable truth that **NAV must not fold
 from** — policy in `preferences.jsonl` because it is descriptive and revisable,
@@ -196,7 +211,7 @@ Each was verified against the code before being corrected here.
 ## Second amendment: `effectiveAt` is a lexicographically-ordered ISO calendar date, on the wire
 
 _Amended 2026-08-10, during the `plans.jsonl` sidecar increment (spec #267, slice
-#269), alongside the fourth member of this class. No decision here is reversed —
+#269), alongside the THIRD member of this class. No decision here is reversed —
 this amendment RAISES to the class level a rule the first two members already
 depended on and neither wrote down, and it lands **before the first plan line
 exists**, which is the only moment at which it can land for free._
@@ -229,25 +244,66 @@ historical as-of replay. So the decision has exactly one cheap moment, and that 
 is before the first line of a new member exists — which is why it rides the slice that
 introduces `plans.jsonl`'s loader and precedes any write to it.
 
-**It also writes down a precedent `preferences.jsonl` set unwritten.** That file has
-enforced this rule in code since it shipped: `packages/preferences/src/preferences.ts`
-carries an `ISO_DATE` regex and a comment explaining that a `Date.parse`-able but
-non-ISO stamp "would sort wrong and silently select the wrong policy." The rule was
-real, was correct, and existed nowhere but a validator's docstring — so the second
-member of the class (`orders.jsonl`) reached for a different stamp for its own reasons
-and nothing in the record connected the two choices. Naming it here makes it
-inheritable: a fifth member does not get to rediscover it.
+**It also writes down a precedent `preferences.jsonl` REASONED ITS WAY TO and left
+unwritten.** `packages/preferences/src/preferences.ts` carried an `ISO_DATE` regex and a
+comment explaining that a `Date.parse`-able but non-ISO stamp "would sort wrong and
+silently select the wrong policy." The reasoning was real, was correct, and existed
+nowhere but a validator's docstring — so the second member of the class
+(`orders.jsonl`) reached for a different stamp for its own reasons and nothing in the
+record connected the two choices. Naming it here makes it inheritable: a fourth member
+does not get to rediscover it.
+
+**Corrected 2026-08-10, fix-forward on this increment's own review.** That paragraph
+first shipped saying `preferences.jsonl` "has enforced this rule in code since it
+shipped." **It had not.** `validateProfitPolicyEntry` checked shape plus `Date.parse` —
+exactly the insufficient pair this amendment rejects three paragraphs above, since
+`Date.parse("2026-02-30")` succeeds by rolling over to March 2. So the entry was
+accepted, sorted as February, meant March, and took force a month early on the live push
+path (`push-core.ts` → `loadReserveFloorAsOf` → `buildGlanceForAnchor`) with no warning
+anywhere.
+
+**An amendment that records an unmet invariant as satisfied is worse than no amendment**,
+which is why this correction is in the ADR rather than only in the code: the false
+version gave a future reader positive reason NOT to check. The rule was raised to class
+level by the same slice that exported `isIsoCalendarDate` and made applying it a one-line
+change, and it was not applied. It is applied now — that loader round-trips, and
+`preferences-reliable.test.ts` locks both the overflow it must reject and the legitimate
+`"2026-01-31"` it must not take with it.
+
+The narrowing cost nothing, and its being free is this amendment's own argument holding
+rather than luck: at the moment it landed `preferences.jsonl` held two lines and both
+were already valid calendar dates, so no historical as-of replay changed. That is the
+check this ADR says must precede narrowing a durable artifact. It was run, not assumed.
 
 ### What it does NOT say
 
 - **It does not make every timestamp in the class a date.** `orders.jsonl`'s
   `observedAt` is deliberately second-granular (`YYYY-MM-DDTHH:MM:SS`, ADR-013),
   because several rungs of one ladder are submitted within the same minute and a
-  date-only stamp cannot order them. That stamp is an OBSERVATION time; this
-  amendment governs the **as-of selection key** — the field a selector compares
-  against a query date to decide which record is in force. `observedAt` is likewise
-  lexicographically ordered, which is the general rule underneath both: **a field
-  that is selected on must sort as a string in the same order it sorts in time.**
+  date-only stamp cannot order them. `observedAt` is likewise fixed-width and
+  zero-padded, so it is lexicographically ordered too — which is the general rule
+  underneath both: **a field that is selected on must sort as a string in the same
+  order it sorts in time.**
+
+  **The exemption is about GRANULARITY only — clarified 2026-08-10, fix-forward on
+  this increment's review.** As first written this bullet leaned on `observedAt` being
+  "an OBSERVATION time" rather than an as-of selection key, and that reasoning does not
+  survive its own rule: `observedAt` **is** selected on — `pickRestingOrdersAsOf` compares
+  those strings to answer "what was resting on date X" — so the general rule reaches it
+  and the exemption cannot rest on it being outside the rule's scope. It rests instead
+  on the narrower and true claim: a fixed-width second-granular stamp **satisfies** the
+  ordering rule, so the class's `YYYY-MM-DD` requirement is a shape the rule does not
+  actually demand of it.
+
+  **What the exemption never covered is the ROUND TRIP,** and `records.ts` was shape-
+  only, so `"2026-02-30T00:00:00"` was accepted — sorting as February, meaning March 2.
+  That is the identical defect this amendment describes for `effectiveAt`, wearing a
+  time suffix, and the shape regex `\d{2}:\d{2}:\d{2}` additionally accepted
+  `"99:99:99"`, which sorts after every real time of its day. Both are now rejected:
+  the date half round-trips through the same `isIsoCalendarDate` the class uses, and
+  the time half is range-checked. The narrowing was verified free before it landed —
+  all eight `observedAt` values then in `orders.jsonl` were real calendar dates and
+  times, so no historical as-of replay changed.
 - **It does not constrain the bodies.** `plans.jsonl`'s `anchorAt` is validated to the
   same strict form because it is a date, but nothing is selected on it and no relation
   to `effectiveAt` is enforced.

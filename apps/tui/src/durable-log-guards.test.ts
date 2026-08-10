@@ -106,8 +106,10 @@ describe("spine:reset destructive-default guard (R-M5)", () => {
 // allowlist `.gitignore` does NOT ignore it (or every write is silently
 // discarded), AND `TRACKED_FILES` names it (or nothing ever stages it). Either
 // end alone is FALSE ASSURANCE — a green check over a file git is throwing away.
-// So this guard asserts both, over the LIST rather than per filename: adding a
-// sixth durable file is a one-line change to EXPECTED_DURABLE_FILES.
+// So this guard asserts both, over the LIST rather than per filename: adding the
+// NEXT durable file is a one-line change to EXPECTED_DURABLE_FILES. (It said "a
+// sixth" while six already existed — a count in a comment goes stale on the very
+// change it describes, so it no longer names one.)
 //
 // Membership test (ADR-006, amended): "is this durable, non-re-derivable truth?"
 // ---------------------------------------------------------------------------
@@ -155,7 +157,7 @@ function gitIgnores(dataDir: string, file: string): boolean {
 describe("durable-file floor — both ends of the allowlist/TRACKED_FILES contract", () => {
   const dataDir = accumulusDataDir();
 
-  it("end 2: TRACKED_FILES names exactly the durable files (incl. orders.jsonl)", () => {
+  it("end 2: TRACKED_FILES names exactly the durable files", () => {
     expect([...TRACKED_FILES].sort()).toEqual(EXPECTED_DURABLE_FILES);
   });
 

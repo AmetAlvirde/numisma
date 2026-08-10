@@ -29,6 +29,7 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import {
   defaultProfitPolicyEntry,
+  isIsoCalendarDate,
   resolveDataDir,
   type ProfitPolicyEntry,
   type SplitBasis,
@@ -60,15 +61,6 @@ function isFiniteNonNegative(value: unknown): value is number {
 }
 
 /**
- * Strict ISO calendar date (`YYYY-MM-DD`, no time component). The pure as-of selector
- * (`pickPolicyAsOf`) orders and filters entries by STRING comparison, so `effectiveAt`
- * must be lexicographically sortable-as-chronological. A `Date.parse`-able but
- * non-ISO stamp (`01/02/2026`, `Jan 2 2026`) or a date-time (`...T00:00:00Z`) would
- * sort wrong and silently select the wrong policy, so those are quarantined here.
- */
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-/**
  * Validate ONE untrusted sidecar value into a well-formed `ProfitPolicyEntry`, or
  * return `undefined` so the loader can quarantine the line. Rejects: a non-object;
  * an `effectiveAt` that is not a strict ISO `YYYY-MM-DD` calendar date; a `splitBasis`
@@ -82,10 +74,26 @@ function validateProfitPolicyEntry(value: unknown): ProfitPolicyEntry | undefine
   }
   const entry = value as Record<string, unknown>;
 
-  const effectiveAt = entry.effectiveAt;
-  if (typeof effectiveAt !== "string" || !ISO_DATE.test(effectiveAt) || Number.isNaN(Date.parse(effectiveAt))) {
+  // STRICT ISO CALENDAR DATE — shape AND round trip, ADR-004's second amendment.
+  //
+  // `pickPolicyAsOf` orders and filters these by STRING comparison, so `effectiveAt`
+  // must be lexicographically sortable-as-chronological. Shape alone rejects the
+  // obvious offenders (`01/02/2026`, `Jan 2 2026`, `...T00:00:00Z`), each of which
+  // would sort wrong and silently select the wrong policy.
+  //
+  // Shape is only half the rule, and this loader used to ship only that half: shape
+  // plus `Date.parse`, which SUCCEEDS on `"2026-02-30"` by rolling it over to March 2.
+  // The accepted string then sorts as February and means March — the very defect the
+  // check exists to prevent, arriving through the check meant to prevent it. On the
+  // live path (`push-core.ts` → `loadReserveFloorAsOf` → `buildGlanceForAnchor`) that
+  // is a new policy in force a month early, silently. `isIsoCalendarDate` re-renders
+  // the parsed date and compares it back, which rejects the overflow and leaves a
+  // legitimate `"2026-01-31"` alone. The amendment cited this file as the precedent
+  // for the class; it is applied here now rather than only claimed.
+  if (!isIsoCalendarDate(entry.effectiveAt)) {
     return undefined;
   }
+  const effectiveAt = entry.effectiveAt;
 
   if (!isSplitBasis(entry.splitBasis)) {
     return undefined;
