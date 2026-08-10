@@ -33,6 +33,7 @@ import {
   committedRungs,
   formatObservedAt,
   isObservedAtStamp,
+  OBSERVED_AT_RULE,
   pickRestingOrdersAsOf,
   type OrderCancelledRecord,
   type OrderRecord,
@@ -110,7 +111,13 @@ export async function cancelOrder(options: OrderCancelOptions): Promise<OrderCan
     // stamp through would put a line in the file that this build's own loader then skips
     // as malformed — a claim that reads as retired to the operator and as resting to
     // every consumer.
-    return reject(io, "bad-timestamp", `'${supplied}' is not a YYYY-MM-DDTHH:MM:SS stamp`);
+    // Same rule, same words as the reader — one shared phrase (#181), so the sentence the
+    // operator is refused with cannot describe a looser rule than the one just applied.
+    return reject(
+      io,
+      "bad-timestamp",
+      `'${supplied}' is not a valid stamp — ${OBSERVED_AT_RULE}`,
+    );
   }
   const observedAt = supplied === "" ? formatObservedAt(io.now()) : supplied;
 

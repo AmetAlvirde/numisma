@@ -229,6 +229,18 @@ describe("every refusal writes NOTHING — the file is byte-identical afterwards
     await refuses({ orderId: "rung-a", observedAt: "2026-01-02" }, "bad-timestamp");
   });
 
+  // THE SENTENCE, NOT ONLY THE REASON CODE. `2026-02-30T09:30:00` is the shape this shell
+  // used to name as the whole rule, so the old message quoted the operator a string and told
+  // them it broke a rule it satisfies — while the impossible date went unmentioned. The
+  // clause is asserted as a substring: red if it is dropped, quiet under rewording.
+  it("tells the operator WHICH rule an impossible date broke, not just the shape", async () => {
+    const h = await refuses(
+      { orderId: "rung-a", observedAt: "2026-02-30T09:30:00" },
+      "bad-timestamp",
+    );
+    expect(h.errors.join("")).toContain("a real calendar date and time");
+  });
+
   it("refuses a stamp that predates the placement, which would be inert", async () => {
     // The selector replays in `observedAt` order, so a cancellation stamped before its
     // placement is consumed first and the rung keeps resting: a permanent line asserting

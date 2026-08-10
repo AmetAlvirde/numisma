@@ -146,6 +146,7 @@ export {
   parseOrderRecord,
   buildOrderFillObserved,
   isObservedAtStamp,
+  OBSERVED_AT_RULE,
   formatObservedAt,
 } from "./orders/records.js";
 export type { RestingOrder } from "./orders/select.js";
