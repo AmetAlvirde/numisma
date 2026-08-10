@@ -186,7 +186,21 @@ export async function appendSidecarLines(path: string, lines: string[]): Promise
     const prefix = existing && existing.length > 0 && !existing.endsWith("\n") ? "\n" : "";
     const next = `${existing ?? ""}${prefix}${body}\n`;
     const tempPath = tempPathFor(path);
-    await writeFile(tempPath, next, "utf8");
-    await rename(tempPath, path);
+    try {
+      await writeFile(tempPath, next, "utf8");
+      await rename(tempPath, path);
+    } finally {
+      // The temp file is the append's OTHER sibling, and it needs the same discipline
+      // the lock already gets. If `rename` throws — a full volume, a read-only dir —
+      // the lock is released by the `finally` above and the temp is simply abandoned,
+      // one per failed attempt, forever and invisibly: accumulus ignores `/data/*.tmp`,
+      // so nothing on the durability path would ever surface the litter.
+      //
+      // `finally` rather than `catch` for the same reason the lock uses one: it covers
+      // every exit. After a successful `rename` the temp name no longer exists and
+      // `force` makes this a no-op, so the success path pays one cheap syscall to make
+      // the guarantee unconditional rather than conditional on which line threw.
+      await rm(tempPath, { force: true });
+    }
   });
 }
