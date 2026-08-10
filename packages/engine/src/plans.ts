@@ -7,12 +7,13 @@
  * git-versioned, beside the event log and NEVER folded. `parseEvent` never sees a
  * plan line, `foldEvents` never reads one, and nothing declared here can move NAV.
  *
- * This module is PURE (ADR-001): types, the strict date predicate, and the two
- * closed vocabularies (`PLAN_KINDS`, `DCA_CADENCES`). All file IO — resolve, load,
- * append — lives in `@numisma/preferences` (`plans.ts`). The as-of selectors are a
- * later slice and will land beside these declarations, at the engine's TOP LEVEL
- * rather than under `compose/`: every `compose/*` module imports `FundReviewData`
- * and this one never does.
+ * This module is PURE (ADR-001): types, the strict date predicate, the two closed
+ * vocabularies (`PLAN_KINDS`, `DCA_CADENCES`), and the as-of SELECTORS
+ * ({@link pickPlanAsOf}, {@link listPlansAsOf}), which are IO-free. All file IO —
+ * resolve, load, append — lives in `@numisma/preferences` (`plans.ts`). The selectors
+ * sit beside these declarations at the engine's TOP LEVEL rather than under
+ * `compose/`: every `compose/*` module imports `FundReviewData` and this one never
+ * does, and filing it there would imply a dependency every future reader must defend.
  *
  * THE FILE'S OWN VOCABULARY, stated once here because the file is append-only:
  *
@@ -260,4 +261,258 @@ export interface LoadedPlans {
   load: LoadOutcome;
   plans: LoadedPlanRecord[];
   skipped: SkippedPlanLine[];
+}
+
+/**
+ * The winning line when it is a PLAN rather than the terminator — the only shape
+ * {@link PlanLookup}'s `pending` and `active` arms expose.
+ *
+ * `noPlan` is deliberately excluded: a caller holding an `ActivePlan` is holding a
+ * declaration of intent it can render, never an ending it must special-case.
+ */
+export type ActivePlan = (DcaLadderPlanRecord | DcaTimePlanRecord) & { line: number };
+
+/** The winning line when it is the terminator — what `ended` carries. */
+export type LoadedNoPlanRecord = NoPlanRecord & { line: number };
+
+/**
+ * What the sidecar says about ONE position at ONE date — a FIVE-ARM DISCRIMINATED
+ * UNION, a type rather than a convention: a caller cannot reach `plan` without first
+ * naming the status, and there is no shape in which a missing plan and an unreadable
+ * one look alike.
+ *
+ * The arms:
+ *
+ *   - **`none`** — the sidecar names no in-window line for this position at all. The
+ *     honest "there is nothing here", and the ONLY arm that can say it.
+ *   - **`pending`** — a plan is in force and names a position that does not exist
+ *     yet: DECLARED, NOT YET REALIZED. Day zero renders `pending`, never `$0` — zero
+ *     is a measurement, pending is the absence of one. Born-ness is supplied by the
+ *     caller (`existingPositionIds`), so the selector stays pure and fold-type-free.
+ *     **`pending` replaces `active` ONLY** — `ended` and `unreadable` are unchanged
+ *     by born-ness.
+ *   - **`active`** — a plan is **IN FORCE**. *In force, NOT accumulating.* A ladder
+ *     effective months ago whose rungs sit far below spot is `active` with zero
+ *     fills, possibly forever; a `dcaTime` plan whose anchor grid has not yet
+ *     produced a buy is likewise `active`. The word names the POLICY in effect at
+ *     that date (ADR-004), never activity in the account.
+ *   - **`ended`** — the winning line is the explicit terminator, carried as
+ *     `endedBy` so the caller can name the date and the operator's reason.
+ *   - **`unreadable`** — the newest in-window line for this position was SKIPPED, or
+ *     the whole file failed to load. Never collapsed into `none`: "the file could not
+ *     be read" is not the same fact as "this position has no plan."
+ *
+ * `skipped` carries the position's own in-window skips — the ones that were INPUTS
+ * to this selection, in FILE ORDER. `unattributable` is FILE-GLOBAL: see
+ * {@link pickPlanAsOf}.
+ */
+export type PlanLookup =
+  | { status: "none"; unattributable: SkippedPlanLine[] }
+  | {
+      status: "pending";
+      plan: ActivePlan;
+      skipped: SkippedPlanLine[];
+      unattributable: SkippedPlanLine[];
+    }
+  | {
+      status: "active";
+      plan: ActivePlan;
+      skipped: SkippedPlanLine[];
+      unattributable: SkippedPlanLine[];
+    }
+  | {
+      status: "ended";
+      endedBy: LoadedNoPlanRecord;
+      skipped: SkippedPlanLine[];
+      unattributable: SkippedPlanLine[];
+    }
+  | { status: "unreadable"; skipped: SkippedPlanLine[]; unattributable: SkippedPlanLine[] };
+
+/** One row of {@link PlansAsOf} — a position the sidecar names, and its lookup. */
+export interface PlanRow {
+  positionId: string;
+  lookup: PlanLookup;
+}
+
+/**
+ * Every position the SIDECAR names, at one date.
+ *
+ * `unattributable` is repeated at the top level on purpose: a file whose only corrupt
+ * lines are unattributable yields `positions: []`, so the top level is the SOLE
+ * channel for them. The duplication is structural, not stylistic.
+ */
+export interface PlansAsOf {
+  positions: PlanRow[];
+  unattributable: SkippedPlanLine[];
+}
+
+/**
+ * `asOf` is REQUIRED and validated by the SAME predicate `effectiveAt` goes through.
+ *
+ * Both operands of every comparison in this module are strings compared with `<` and
+ * `>`, so a lax `asOf` (`"2026-7-1"`, `"08/10/2026"`) does not merely look wrong — it
+ * SORTS wrong and silently selects a different plan. Refusing is the only honest
+ * answer; there is no fallback that is not a guess.
+ */
+function requireAsOf(asOf: IsoDate, caller: string): void {
+  if (!isIsoCalendarDate(asOf)) {
+    throw new Error(`${caller}: ${JSON.stringify(asOf)} is not a calendar date`);
+  }
+}
+
+/**
+ * The supersession comparison: the pair `(effectiveAt, line)`, lexicographic, with
+ * **`effectiveAt` PRIMARY**.
+ *
+ * Inverting the keys breaks as-of replay outright: a back-dated correction appended
+ * today would beat a plan appended last month, and every historical query would
+ * answer with a policy that was not yet in effect.
+ */
+function isLater(
+  a: { effectiveAt: IsoDate; line: number },
+  b: { effectiveAt: IsoDate; line: number },
+): boolean {
+  return a.effectiveAt === b.effectiveAt ? a.line > b.line : a.effectiveAt > b.effectiveAt;
+}
+
+/** File order — the operator's own reading order, and the only order a diagnostic list may take. */
+function byLine<T extends { line: number }>(entries: readonly T[]): T[] {
+  return [...entries].sort((a, b) => a.line - b.line);
+}
+
+/**
+ * The sidecar's answer for ONE position at ONE date.
+ *
+ * **It takes the WHOLE {@link LoadedPlans}, and that is the point.** "Not readable"
+ * is knowable only from the skips, so the skips are an **INPUT TO SELECTION**, not a
+ * warning channel riding alongside the answer. A selector handed only the plans
+ * computes a confident wrong answer whenever the newest line failed to parse.
+ *
+ * The rule:
+ *
+ *   1. `load-failed` → `unreadable` for EVERY position, never `none`. No new status:
+ *      a whole-file failure is `unreadable`'s limiting case.
+ *   2. The winner is the latest in-window (`effectiveAt ≤ asOf`) plan for the
+ *      position by the pair `(effectiveAt, line)` — last-in-file wins a tie.
+ *   3. A skip attributed to the position supersedes the winner iff it is in-window
+ *      AND strictly later by the same pair. A DATED skip is in-window by its scraped
+ *      `effectiveAt`; an UNDATED skip is CONSERVATIVELY in-window and compares by
+ *      `line` alone. A superseding skip yields `unreadable` — `P3`: a strictly-newer
+ *      skipped line never resolves to the plan the fund had already replaced.
+ *   4. Otherwise the winner decides: the terminator → `ended`; a plan → `active`, or
+ *      `pending` when `existingPositionIds` does not name the position.
+ *
+ * **`unattributable` is FILE-GLOBAL.** It is identical on every lookup derived from
+ * the same `LoadedPlans` — *not this position's damage*. A skip whose envelope was
+ * too broken to yield a `positionId` belongs to NO row; smearing it across the rows
+ * would turn one broken line into a fund-wide blackout.
+ *
+ * **STATED LIMIT (the `P4` residual, deliberate — not a defect to fix):** an UNDATED
+ * skip with NO readable winner blacks out its position at EVERY date, including dates
+ * before the position's first plan existed, until the file is superseded. An undated
+ * skip could carry any date, including a back-dated one, so with no winner the honest
+ * answer stays `unreadable`. Flooring the blackout at `min(effectiveAt)` is unsound —
+ * back-dated corrections are legal, so the floor floors nothing. The repair is the
+ * file's own mechanism: append a corrected line.
+ */
+export function pickPlanAsOf(
+  loaded: LoadedPlans,
+  positionId: string,
+  asOf: IsoDate,
+  existingPositionIds: ReadonlySet<string>,
+): PlanLookup {
+  requireAsOf(asOf, "pickPlanAsOf");
+
+  const unattributable = byLine(loaded.skipped.filter((entry) => entry.positionId === undefined));
+
+  const skipped = byLine(
+    loaded.skipped.filter(
+      (entry) =>
+        entry.positionId === positionId &&
+        // Undated skips are conservatively in-window: the date they would have
+        // carried is exactly what could not be read.
+        (entry.effectiveAt === undefined || entry.effectiveAt <= asOf),
+    ),
+  );
+
+  if (loaded.load.status === "load-failed") {
+    return { status: "unreadable", skipped, unattributable };
+  }
+
+  let winner: LoadedPlanRecord | undefined;
+  for (const plan of loaded.plans) {
+    if (plan.positionId !== positionId || plan.effectiveAt > asOf) continue;
+    if (winner === undefined || isLater(plan, winner)) winner = plan;
+  }
+
+  if (winner === undefined) {
+    // No readable winner: any in-window skip is the newest thing known about this
+    // position, and the honest answer is `unreadable` — the stated `P4` residual.
+    return skipped.length > 0
+      ? { status: "unreadable", skipped, unattributable }
+      : { status: "none", unattributable };
+  }
+
+  const carrier = winner;
+  const superseded = skipped.some((entry) =>
+    entry.effectiveAt === undefined
+      ? entry.line > carrier.line
+      : isLater({ effectiveAt: entry.effectiveAt, line: entry.line }, carrier),
+  );
+  if (superseded) {
+    return { status: "unreadable", skipped, unattributable };
+  }
+
+  if (winner.kind === "noPlan") {
+    return { status: "ended", endedBy: winner, skipped, unattributable };
+  }
+  return {
+    status: existingPositionIds.has(positionId) ? "active" : "pending",
+    plan: winner,
+    skipped,
+    unattributable,
+  };
+}
+
+/**
+ * Every position the SIDECAR names, at one date — the roster surface.
+ *
+ * A row exists for a position that any plan line or any ATTRIBUTABLE skip names,
+ * whatever its date; rows are in first-mention file order. Positions with no sidecar
+ * line are OMITTED — {@link pickPlanAsOf} is the single-position surface, and it is
+ * the one that answers `none` for them.
+ *
+ * A position can therefore appear solely because of a FUTURE-DATED skip, as a `none`
+ * row: a deliberate leak of "the sidecar knows this id", never of any figure.
+ */
+export function listPlansAsOf(
+  loaded: LoadedPlans,
+  asOf: IsoDate,
+  existingPositionIds: ReadonlySet<string>,
+): PlansAsOf {
+  requireAsOf(asOf, "listPlansAsOf");
+
+  const unattributable = byLine(loaded.skipped.filter((entry) => entry.positionId === undefined));
+  if (loaded.load.status === "load-failed") {
+    return { positions: [], unattributable };
+  }
+
+  const named: { line: number; positionId: string }[] = [
+    ...loaded.plans.map((plan) => ({ line: plan.line, positionId: plan.positionId })),
+    ...loaded.skipped.flatMap((entry) =>
+      entry.positionId === undefined ? [] : [{ line: entry.line, positionId: entry.positionId }],
+    ),
+  ];
+
+  const seen = new Set<string>();
+  const positions: PlanRow[] = [];
+  for (const mention of byLine(named)) {
+    if (seen.has(mention.positionId)) continue;
+    seen.add(mention.positionId);
+    positions.push({
+      positionId: mention.positionId,
+      lookup: pickPlanAsOf(loaded, mention.positionId, asOf, existingPositionIds),
+    });
+  }
+  return { positions, unattributable };
 }
