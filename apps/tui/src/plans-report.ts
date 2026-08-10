@@ -26,8 +26,11 @@
  * already shows real positions, and a rung count an operator cannot read is a row
  * they cannot check their authored line against. Only diagnostics are prose-only.
  *
- * READ-ONLY, ALWAYS. Nothing here or downstream writes the sidecar or touches git,
- * and a plans failure never reaches the fold: the fold does not read this file.
+ * PURE, and the sidecar is never written. Nothing here or downstream writes any file
+ * or touches git, and a plans failure never reaches the fold: the fold does not read
+ * this file. The one write on the whole `pnpm plans` path is UPSTREAM of this module
+ * and belongs to the event log — `loadEventLog`'s quarantine lane, named in
+ * `plans-cli.ts`'s header.
  */
 import { formatUsd, listPlansAsOf, type IsoDate, type LoadedPlans, type PlanLookup } from "@numisma/engine";
 import { unattendedPlansVerdict } from "@numisma/preferences";

@@ -146,6 +146,7 @@ export {
   parseOrderRecord,
   buildOrderFillObserved,
   isObservedAtStamp,
+  OBSERVED_AT_RULE,
   formatObservedAt,
 } from "./orders/records.js";
 export type { RestingOrder } from "./orders/select.js";
@@ -305,7 +306,7 @@ export {
 // reachable browser-side via the pure `@numisma/engine/calendar` subpath.
 export { addDays, daysBetween } from "./calendar.js";
 
-// The `plans.jsonl` sidecar (ADR-004's class, fourth member) — the operator's
+// The `plans.jsonl` sidecar (ADR-004's class, THIRD member) — the operator's
 // durable DECLARATION OF INTENT per position, recorded BESIDE the log and never
 // folded. Pure declarations only: the record contract, the strict calendar-date
 // predicate, and the two closed vocabularies. The file IO lives in

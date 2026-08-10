@@ -493,7 +493,15 @@ describe("listPlansAsOf — one row per position NAMED BY THE SIDECAR", () => {
     expect(pickPlanAsOf(file, "pos-z", "2026-07-10", BORN("pos-z")).status).toBe("none");
   });
 
-  it("agrees with `pickPlanAsOf` row by row", () => {
+  /**
+   * The title used to be "agrees with `pickPlanAsOf` row by row", and it carried a
+   * second assertion — `expect(row.lookup).toEqual(pickPlanAsOf(file, row.positionId,
+   * …))` — that was a TAUTOLOGY: `listPlansAsOf` builds each row by making exactly that
+   * call, so it holds for any delegating implementation including a broken one. It has
+   * been removed rather than rewritten; what a roster test can actually pin is that the
+   * three states come out in file order, which is what remains.
+   */
+  it("resolves each row's state, in first-mention file order", () => {
     const file = loaded(
       [
         ladder("pos-a", "2026-07-01", 1),
@@ -509,9 +517,6 @@ describe("listPlansAsOf — one row per position NAMED BY THE SIDECAR", () => {
       "ended",
       "unreadable",
     ]);
-    for (const row of roster.positions) {
-      expect(row.lookup).toEqual(pickPlanAsOf(file, row.positionId, "2026-07-10", born));
-    }
   });
 
   it("keeps its own top-level `unattributable` when there are no rows at all", () => {

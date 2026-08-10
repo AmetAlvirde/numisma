@@ -27,6 +27,7 @@ import type { Currency } from "../contracts.js";
 // engine's kernel beside its loose sibling `isRecord` so the contrast between them is
 // stated once, in one place, rather than rediscovered here.
 import { isRecordObject } from "../internal.js";
+import { isIsoCalendarDate } from "../plans.js";
 
 /**
  * The lifecycle verbs of the sidecar (`S2`): one line per order placed, one further
@@ -264,7 +265,7 @@ const CURRENCIES: Record<Currency, true> = { USD: true, MXN: true };
  * lexicographically sortable-as-chronological; a `Date.parse`-able but non-ISO stamp
  * would sort wrong and silently answer "what was resting on date X" with the wrong set.
  */
-const OBSERVED_AT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/;
+const OBSERVED_AT = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})$/;
 
 /**
  * THE stamp rule, as a predicate, so no producer has to restate the regex.
@@ -273,10 +274,54 @@ const OBSERVED_AT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/;
  * the way back IN — but by then the line is already on disk in an append-only file. A
  * producer that wants to refuse BEFORE it writes (`orders:cancel` takes its stamp from
  * argv) asks here, and asks the same question the reader will.
+ *
+ * SHAPE IS NOT ENOUGH, and this predicate used to be shape alone. ADR-004's second
+ * amendment states the general rule underneath both sidecars — *a field that is
+ * SELECTED ON must sort as a string in the same order it sorts in time* — and exempts
+ * `observedAt` from the class's `YYYY-MM-DD` requirement. That exemption is about
+ * GRANULARITY and it stands: a fixed-width, zero-padded second-granular stamp sorts as
+ * a string exactly as it sorts in time, which is the rule satisfied rather than waived.
+ *
+ * What the exemption never covered is the ROUND TRIP. `"2026-02-30T00:00:00"` matches
+ * the shape, sorts as February, and means March 2 — the identical defect the amendment
+ * describes for `effectiveAt`, wearing a time suffix. `observedAt` IS selected on
+ * (`pickRestingOrdersAsOf` compares these strings), so the rule reaches it. The date half
+ * therefore round-trips through the same `isIsoCalendarDate` the rest of the class
+ * uses, and the time half is range-checked, because `\d{2}:\d{2}:\d{2}` alone accepts
+ * `99:99:99` — which likewise sorts after every real time of that day.
  */
 export function isObservedAtStamp(value: string): boolean {
-  return OBSERVED_AT.test(value);
+  const match = OBSERVED_AT.exec(value);
+  if (match === null) {
+    return false;
+  }
+  const [, date, hours, minutes, seconds] = match;
+  return (
+    isIsoCalendarDate(date) &&
+    Number(hours) <= 23 &&
+    Number(minutes) <= 59 &&
+    // 59, not 60: a leap second has never appeared in a venue export, and admitting one
+    // would mean admitting the typo that produces the same string far more often.
+    Number(seconds) <= 59
+  );
 }
+
+/**
+ * THE ONE PLACE THE STAMP RULE IS PUT INTO WORDS, beside the predicate that enforces it —
+ * the same one-shared-sentence move `renderSkipMessage` makes for skipped lines (#181).
+ *
+ * {@link isObservedAtStamp} was narrowed from shape alone to shape PLUS a round-tripped
+ * calendar date and a range-checked time. Four messages described the rule, the reader's
+ * was the only one updated, and the other three went on quoting the operator a string that
+ * satisfies the shape they name — a refusal whose stated reason the input does not violate.
+ * A wrong diagnosis on an append-only file is expensive: it sends the operator to retype a
+ * stamp that was already the right shape, and never names the impossible date.
+ *
+ * So it is a PHRASE, not a finished sentence. The reader says `observedAt must be …`, the
+ * producer says the same, the two TUI shells quote the value back and the prompt states the
+ * rule in advance — four grammars, one clause, and no way for them to drift apart again.
+ */
+export const OBSERVED_AT_RULE = "YYYY-MM-DDTHH:MM:SS, a real calendar date and time";
 
 /**
  * Format an instant into THE stamp shape: `YYYY-MM-DDTHH:MM:SS`, LOCAL, no timezone.
@@ -452,7 +497,7 @@ export function buildOrderFillObserved(claim: ObservedFillClaim): OrderFillObser
     return { status: "refused", message: "id must be a non-empty string" };
   }
   if (!isObservedAtStamp(claim.observedAt)) {
-    return { status: "refused", message: "observedAt must be YYYY-MM-DDTHH:MM:SS" };
+    return { status: "refused", message: `observedAt must be ${OBSERVED_AT_RULE}` };
   }
   if (!(claim.currency in CURRENCIES)) {
     return { status: "refused", message: "currency must be a known currency" };
@@ -492,11 +537,11 @@ export function parseOrderRecord(value: unknown): OrderRecordParse {
   if (!isNonEmptyString(value.id)) {
     return { status: "skip", problem: "malformed", message: "id must be a non-empty string" };
   }
-  if (typeof value.observedAt !== "string" || !OBSERVED_AT.test(value.observedAt)) {
+  if (typeof value.observedAt !== "string" || !isObservedAtStamp(value.observedAt)) {
     return {
       status: "skip",
       problem: "malformed",
-      message: "observedAt must be YYYY-MM-DDTHH:MM:SS",
+      message: `observedAt must be ${OBSERVED_AT_RULE}`,
     };
   }
   if (typeof value.kind !== "string" || !(value.kind in KNOWN_KINDS)) {

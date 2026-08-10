@@ -114,8 +114,12 @@ function isEexist(error: unknown): boolean {
  * so two overlapping appends can both read image `I`, and the second rename silently
  * DISCARDS the first one's batch. That is a lost record with no torn line, no error
  * and no trace: exactly the unattributable loss this module exists to prevent. The
- * CLIs that write here (`orders:import`, `orders:cancel`) are separate processes, so
- * an in-process mutex would not see each other.
+ * CLIs that write here — `orders:import`, `orders:fill` (`record-fill.ts`) and
+ * `orders:cancel` — are separate processes, so an in-process mutex would not see each
+ * other. `plans.jsonl` has no CLI writer at all: it is authored by hand, and its
+ * `appendPlan` exists to give the format one executable definition. The lock still
+ * covers it, because "the operator's editor and a test are not the same process"
+ * is the same argument.
  *
  * `open(…, "wx")` is the primitive: an EXCLUSIVE create is atomic in the kernel, so
  * the winner is decided by the filesystem and not by our own read of it.
@@ -186,7 +190,21 @@ export async function appendSidecarLines(path: string, lines: string[]): Promise
     const prefix = existing && existing.length > 0 && !existing.endsWith("\n") ? "\n" : "";
     const next = `${existing ?? ""}${prefix}${body}\n`;
     const tempPath = tempPathFor(path);
-    await writeFile(tempPath, next, "utf8");
-    await rename(tempPath, path);
+    try {
+      await writeFile(tempPath, next, "utf8");
+      await rename(tempPath, path);
+    } finally {
+      // The temp file is the append's OTHER sibling, and it needs the same discipline
+      // the lock already gets. If `rename` throws — a full volume, a read-only dir —
+      // the lock is released by the `finally` above and the temp is simply abandoned,
+      // one per failed attempt, forever and invisibly: accumulus ignores `/data/*.tmp`,
+      // so nothing on the durability path would ever surface the litter.
+      //
+      // `finally` rather than `catch` for the same reason the lock uses one: it covers
+      // every exit. After a successful `rename` the temp name no longer exists and
+      // `force` makes this a no-op, so the success path pays one cheap syscall to make
+      // the guarantee unconditional rather than conditional on which line threw.
+      await rm(tempPath, { force: true });
+    }
   });
 }

@@ -151,6 +151,35 @@ describe("loadPreferences — validating loader (quarantine, not throw)", () => 
     await expect(loadPreferences(path)).resolves.toEqual([]);
   });
 
+  /**
+   * THE OVERFLOW DATE, which the shape check alone lets through. `"2026-02-30"` matches
+   * `\d{4}-\d{2}-\d{2}` and `Date.parse` SUCCEEDS on it, rolling it over to March 2 — so
+   * the pair the loader shipped with accepted a string that SORTS as February and MEANS
+   * March. Under `pickPolicyAsOf`'s string comparison the entry then takes force from
+   * March 1st, a month before the operator intended, on the live push path and with no
+   * warning anywhere. Only the round trip (`isIsoCalendarDate`) rejects it.
+   */
+  it("quarantines a Date.parse-able CALENDAR OVERFLOW that would sort a month early", async () => {
+    const path = await tempPath();
+    const feb30 = { ...entry("2026-06-05"), effectiveAt: "2026-02-30" };
+    const feb29NonLeap = { ...entry("2026-06-06"), effectiveAt: "2025-02-29" };
+    await writeFile(path, `${JSON.stringify(feb30)}\n${JSON.stringify(feb29NonLeap)}\n`, "utf8");
+    await expect(loadPreferences(path)).resolves.toEqual([]);
+  });
+
+  it("admits a genuine end-of-month date — the round trip rejects overflow, not February", async () => {
+    // The other half of the narrowing, and the reason it is a round trip rather than a
+    // stricter regex: `2026-01-31` and a real leap day must still load.
+    const path = await tempPath();
+    await writeFile(
+      path,
+      `${JSON.stringify(entry("2026-01-31"))}\n${JSON.stringify(entry("2024-02-29"))}\n`,
+      "utf8",
+    );
+    const loaded = await loadPreferences(path);
+    expect(loaded.map((e) => e.effectiveAt)).toEqual(["2026-01-31", "2024-02-29"]);
+  });
+
   it("quarantines an out-of-range reserveTargetPct (a NAV share must be a percentage in [0, 100])", async () => {
     const path = await tempPath();
     const overHundred = { ...entry("2026-06-05"), reserveTargetPct: 500 };
