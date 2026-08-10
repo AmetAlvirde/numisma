@@ -229,14 +229,36 @@ historical as-of replay. So the decision has exactly one cheap moment, and that 
 is before the first line of a new member exists — which is why it rides the slice that
 introduces `plans.jsonl`'s loader and precedes any write to it.
 
-**It also writes down a precedent `preferences.jsonl` set unwritten.** That file has
-enforced this rule in code since it shipped: `packages/preferences/src/preferences.ts`
-carries an `ISO_DATE` regex and a comment explaining that a `Date.parse`-able but
-non-ISO stamp "would sort wrong and silently select the wrong policy." The rule was
-real, was correct, and existed nowhere but a validator's docstring — so the second
-member of the class (`orders.jsonl`) reached for a different stamp for its own reasons
-and nothing in the record connected the two choices. Naming it here makes it
-inheritable: a fifth member does not get to rediscover it.
+**It also writes down a precedent `preferences.jsonl` REASONED ITS WAY TO and left
+unwritten.** `packages/preferences/src/preferences.ts` carried an `ISO_DATE` regex and a
+comment explaining that a `Date.parse`-able but non-ISO stamp "would sort wrong and
+silently select the wrong policy." The reasoning was real, was correct, and existed
+nowhere but a validator's docstring — so the second member of the class
+(`orders.jsonl`) reached for a different stamp for its own reasons and nothing in the
+record connected the two choices. Naming it here makes it inheritable: a fourth member
+does not get to rediscover it.
+
+**Corrected 2026-08-10, fix-forward on this increment's own review.** That paragraph
+first shipped saying `preferences.jsonl` "has enforced this rule in code since it
+shipped." **It had not.** `validateProfitPolicyEntry` checked shape plus `Date.parse` —
+exactly the insufficient pair this amendment rejects three paragraphs above, since
+`Date.parse("2026-02-30")` succeeds by rolling over to March 2. So the entry was
+accepted, sorted as February, meant March, and took force a month early on the live push
+path (`push-core.ts` → `loadReserveFloorAsOf` → `buildGlanceForAnchor`) with no warning
+anywhere.
+
+**An amendment that records an unmet invariant as satisfied is worse than no amendment**,
+which is why this correction is in the ADR rather than only in the code: the false
+version gave a future reader positive reason NOT to check. The rule was raised to class
+level by the same slice that exported `isIsoCalendarDate` and made applying it a one-line
+change, and it was not applied. It is applied now — that loader round-trips, and
+`preferences-reliable.test.ts` locks both the overflow it must reject and the legitimate
+`"2026-01-31"` it must not take with it.
+
+The narrowing cost nothing, and its being free is this amendment's own argument holding
+rather than luck: at the moment it landed `preferences.jsonl` held two lines and both
+were already valid calendar dates, so no historical as-of replay changed. That is the
+check this ADR says must precede narrowing a durable artifact. It was run, not assumed.
 
 ### What it does NOT say
 
