@@ -11,6 +11,7 @@
     "dev": "bun apps/tui/src/app.ts",
     "report": "tsx apps/tui/src/report.ts",
     "spine": "tsx apps/tui/src/spine.ts",
+    "plans": "tsx apps/tui/src/plans-cli.ts",
     "prices:fetch": "tsx apps/price-feed/src/cli.ts",
     "spine:reset": "tsx apps/tui/src/spine-reset.ts",
     "migrate:log": "tsx apps/tui/src/migrate-legacy-log.ts",

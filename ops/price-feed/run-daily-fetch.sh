@@ -310,7 +310,7 @@ pnpm spine
 #    `git add -u` restages tracked modifications only, so a FIRST-TIME untracked
 #    source-of-truth file (e.g. an initial genesis.json) would slip past this
 #    backstop and then FATAL the post-check. The source-of-truth files
-#    (events.jsonl, genesis.json, preferences.jsonl, orders.jsonl) are NEVER
+#    (events.jsonl, genesis.json, preferences.jsonl, orders.jsonl, plans.jsonl) are NEVER
 #    ignored — the accumulus allowlist names each one — so also add them
 #    explicitly. head-digest.json is deliberately NOT added here — it may be intentionally ignored, and `git add` of an ignored
 #    path aborts under `set -e`. Each explicit add is guarded on file existence so a
@@ -320,7 +320,7 @@ if ! git -C "$DATA_DIR" rev-parse --git-dir >/dev/null 2>&1; then
   echo "[$STAMP] WARNING: $DATA_DIR is not inside a git repo — skipping commit (durable log left uncommitted)."
 else
   git -C "$DATA_DIR" add -u -- .
-  for f in events.jsonl genesis.json preferences.jsonl orders.jsonl; do
+  for f in events.jsonl genesis.json preferences.jsonl orders.jsonl plans.jsonl; do
     if [[ -e "$DATA_DIR/$f" ]]; then
       git -C "$DATA_DIR" add -- "$f"
     fi
@@ -364,11 +364,11 @@ if git -C "$DATA_DIR" rev-parse --git-dir >/dev/null 2>&1; then
     echo "[$STAMP] WARNING: head-digest.json uncaptured after ingest (forensic breadcrumb lagging, not fatal):"
     echo "$DIGEST_DIRTY"
   fi
-  # orders.jsonl belongs in THIS (strict, no --ignored) arm: it is a TRACKED durable
-  # file per the accumulus allowlist, not an only-ignored breadcrumb like
-  # head-digest.json. Naming it here is only honest because the allowlist landed
+  # orders.jsonl and plans.jsonl belong in THIS (strict, no --ignored) arm: they are
+  # TRACKED durable files per the accumulus allowlist, not only-ignored breadcrumbs
+  # like head-digest.json. Naming them here is only honest because the allowlist landed
   # first — over an ignored path this arm would report clean while git discards it.
-  LOG_DIRTY="$(git -C "$DATA_DIR" status --porcelain -- events.jsonl genesis.json preferences.jsonl orders.jsonl)"
+  LOG_DIRTY="$(git -C "$DATA_DIR" status --porcelain -- events.jsonl genesis.json preferences.jsonl orders.jsonl plans.jsonl)"
   if [[ -n "$LOG_DIRTY" ]]; then
     echo "[$STAMP] FATAL: durable LOG uncaptured after ingest + backstop — real fund data at risk:"
     echo "$LOG_DIRTY"
@@ -400,9 +400,9 @@ fi
 #    log. It writes into $DATA_DIR, the accumulus tree step 3 just committed, but
 #    cannot dirty it: accumulus uses an allowlist .gitignore under which
 #    gap-report.json falls through to /data/* (ignored, untracked), and step 4's
-#    strict arm runs `git status --porcelain` WITHOUT `--ignored` over the FOUR
-#    durable files it names, so the sidecar is invisible to it either way. (Four,
-#    not five: the allowlist versions five files, but head-digest.json is handled
+#    strict arm runs `git status --porcelain` WITHOUT `--ignored` over the FIVE
+#    durable files it names, so the sidecar is invisible to it either way. (Five,
+#    not six: the allowlist versions six files, but head-digest.json is handled
 #    by the lenient `--ignored` arm above, and that arm reports rather than fails.)
 #
 #    ZERO-ARGUMENT, and it stays that way even as the log ages: the command floors

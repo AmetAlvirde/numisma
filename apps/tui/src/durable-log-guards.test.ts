@@ -116,6 +116,7 @@ const EXPECTED_DURABLE_FILES = [
   "genesis.json",
   "head-digest.json",
   "orders.jsonl",
+  "plans.jsonl",
   "preferences.jsonl",
 ].sort();
 

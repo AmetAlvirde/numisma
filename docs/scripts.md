@@ -26,6 +26,12 @@ render current state. An `--as-of` earlier than the genesis date fails loud.
 | `pnpm orders:fill`                | Interactive: record a fill — atomically retires the claim in `orders.jsonl` **and** appends the resulting transaction to `events.jsonl`. The only orders command that writes the log. |
 | `pnpm orders:cancel <orderId> [YYYY-MM-DDTHH:MM:SS]` | Retire one resting rung in `orders.jsonl`. Scriptable — the whole assertion is in argv, no readline; never touches the event log.                |
 
+## Plans
+
+| Script        | What it does                                                                                                                                                                                                     |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm plans`  | Render the plan sidecar at the desk: per position the state (`none` / `pending` / `active` / `ended` / `unreadable`), the `effectiveAt` selected, and the rung count or cadence and anchor. Accepts `--as-of <YYYY-MM-DD>`. Read-only — it never writes `plans.jsonl` and never touches git. Exits 0 only when the file loaded and every line was readable; any skip exits non-zero after printing prose diagnostics that never quote a line of the file. An absent sidecar is the normal starting state and exits 0. |
+
 ## Market data
 
 | Script              | What it does                                                                                                                                                                                                                                                                                                                          |
