@@ -1,0 +1,551 @@
+/**
+ * The RELIABLE half of the `plans.jsonl` sidecar IO: the loader is TOTAL, the skip
+ * taxonomy splits by INSTRUCTION, diagnostics never quote the file, the append is
+ * genuine, and everything the writer accepts the loader reads back.
+ *
+ * Every plan here is SYNTHETIC and every figure invented and round. The fund's real
+ * ladder is figures and must never enter this repository (ADR-007); these tests assert
+ * PROPERTIES of the IO, never a real value. Nothing here touches the real accumulus
+ * checkout — every path is a temp directory created and removed by this file.
+ */
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import {
+  resolveDataDir,
+  type DcaLadderPlanRecord,
+  type DcaTimePlanRecord,
+  type LoadedPlanRecord,
+  type PlanRecord,
+} from "@numisma/engine";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  appendNoPlan,
+  appendPlan,
+  loadPlans,
+  resolvePlansPath,
+  unattendedPlansVerdict,
+} from "./plans.js";
+
+const createdDirs: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(createdDirs.map((dir) => rm(dir, { recursive: true, force: true })));
+  createdDirs.length = 0;
+});
+
+/** A throwaway `plans.jsonl` path under a temp data dir. The file does not exist yet. */
+async function tempPath(): Promise<string> {
+  const dir = await mkdtemp(resolve(tmpdir(), "numisma-plans-"));
+  createdDirs.push(dir);
+  const path = resolvePlansPath(resolve(dir, "data"));
+  await mkdir(dirname(path), { recursive: true });
+  return path;
+}
+
+/** Write a raw file image, bypassing the writer — the only way to test a corrupt file. */
+async function writeRaw(path: string, image: string): Promise<void> {
+  await writeFile(path, image, "utf8");
+}
+
+const LADDER: DcaLadderPlanRecord = {
+  kind: "dcaLadder",
+  positionId: "position-synthetic",
+  effectiveAt: "2026-08-01",
+  tierOrder: ["c2", "c1"],
+  rungs: [
+    { id: "rung-1", priceUsd: 100, sizeUsd: 10 },
+    { id: "rung-2", priceUsd: 90, sizeUsd: 10 },
+  ],
+};
+
+const TIMED: DcaTimePlanRecord = {
+  kind: "dcaTime",
+  positionId: "position-synthetic",
+  effectiveAt: "2026-10-01",
+  cadence: "weekly",
+  anchorAt: "2026-01-01",
+  amountUsd: 10,
+  tierOrder: ["c2"],
+};
+
+describe("resolvePlansPath — ADR-006's invariant, at every door", () => {
+  it("resolves ABSOLUTE with no argument, under the shared data dir", () => {
+    const path = resolvePlansPath();
+    expect(isAbsolute(path)).toBe(true);
+    expect(path).toBe(join(resolveDataDir(), "plans.jsonl"));
+  });
+
+  it('an explicit "" does NOT resolve CWD-relative — it falls through to the default', () => {
+    // `resolve("")` is the process's working directory, and `""` is exactly what an
+    // unset shell variable expands to. A durable, git-tracked artifact written into
+    // whatever directory a script started in is a split-brain ledger.
+    expect(resolvePlansPath("")).toBe(resolvePlansPath());
+    expect(resolvePlansPath("   ")).toBe(resolvePlansPath());
+    expect(resolvePlansPath("").startsWith(process.cwd() + "/plans.jsonl")).toBe(false);
+  });
+
+  it("honors an ABSOLUTE override verbatim", () => {
+    expect(resolvePlansPath(resolve("/synthetic/data"))).toBe(
+      resolve("/synthetic/data/plans.jsonl"),
+    );
+  });
+
+  it("THROWS LOUDLY on a relative override rather than splitting the store", () => {
+    expect(() => resolvePlansPath("data")).toThrow(/absolute/i);
+    expect(() => resolvePlansPath("./data")).toThrow(/absolute/i);
+    expect(() => resolvePlansPath("../accumulus/data")).toThrow(/absolute/i);
+  });
+});
+
+describe("loadPlans is TOTAL — it never throws, on any input", () => {
+  it("an ABSENT file is `loaded` with empty buckets — the normal starting state", async () => {
+    const dir = await mkdtemp(resolve(tmpdir(), "numisma-plans-"));
+    createdDirs.push(dir);
+    const loaded = await loadPlans(resolvePlansPath(resolve(dir, "never-created")));
+    expect(loaded.load.status).toBe("loaded");
+    expect(loaded.plans).toEqual([]);
+    expect(loaded.skipped).toEqual([]);
+  });
+
+  it("any OTHER read error is `load-failed` with empty buckets, and does not throw", async () => {
+    // A directory where a file should be: readFile fails with EISDIR, which is a
+    // stand-in for the real cases (permissions, a half-mounted data directory).
+    const dir = await mkdtemp(resolve(tmpdir(), "numisma-plans-"));
+    createdDirs.push(dir);
+    const path = resolvePlansPath(resolve(dir, "data"));
+    await mkdir(path, { recursive: true });
+
+    const loaded = await loadPlans(path);
+    expect(loaded.load.status).toBe("load-failed");
+    if (loaded.load.status === "load-failed") {
+      expect(loaded.load.message).not.toBe("");
+    }
+    // The distinction is load-bearing: empty buckets WITHOUT the outcome would assert
+    // "this fund has no plans" when the truth is "the file could not be read".
+    expect(loaded.plans).toEqual([]);
+    expect(loaded.skipped).toEqual([]);
+  });
+});
+
+describe("file-shape edges — forgiving of shape, strict about content", () => {
+  it("an EMPTY file loads clean", async () => {
+    const path = await tempPath();
+    await writeRaw(path, "");
+    const loaded = await loadPlans(path);
+    expect(loaded.load.status).toBe("loaded");
+    expect(loaded.plans).toEqual([]);
+    expect(loaded.skipped).toEqual([]);
+  });
+
+  it("CRLF terminators read as records, not as corrupt lines", async () => {
+    const path = await tempPath();
+    await writeRaw(path, `${JSON.stringify(LADDER)}\r\n${JSON.stringify(TIMED)}\r\n`);
+    const loaded = await loadPlans(path);
+    expect(loaded.skipped).toEqual([]);
+    expect(loaded.plans.map((plan) => plan.effectiveAt)).toEqual(["2026-08-01", "2026-10-01"]);
+  });
+
+  it("a leading BOM does not make line 1 look corrupt", async () => {
+    // An editor prepends it invisibly. A loader that did not strip it would report the
+    // FIRST line of a perfectly good hand-authored file as broken.
+    const path = await tempPath();
+    await writeRaw(path, `﻿${JSON.stringify(LADDER)}\n`);
+    const loaded = await loadPlans(path);
+    expect(loaded.skipped).toEqual([]);
+    expect(loaded.plans).toHaveLength(1);
+    expect(loaded.plans[0]?.line).toBe(1);
+  });
+
+  it("a WHITESPACE-ONLY line is tolerated, not skipped", async () => {
+    const path = await tempPath();
+    await writeRaw(path, `${JSON.stringify(LADDER)}\n   \n${JSON.stringify(TIMED)}\n`);
+    const loaded = await loadPlans(path);
+    expect(loaded.skipped).toEqual([]);
+    // The line NUMBERS still count it — they are the file's, not the reader's.
+    expect(loaded.plans.map((plan) => plan.line)).toEqual([1, 3]);
+  });
+
+  it("valid JSON that is NOT an object is an `invalid` skip", async () => {
+    const path = await tempPath();
+    await writeRaw(path, '["dcaLadder"]\n42\n"noPlan"\n');
+    const loaded = await loadPlans(path);
+    expect(loaded.plans).toEqual([]);
+    expect(loaded.skipped.map((skip) => [skip.line, skip.reason])).toEqual([
+      [1, "invalid"],
+      [2, "invalid"],
+      [3, "invalid"],
+    ]);
+  });
+
+  it("a line that is not JSON at all is an `invalid` skip", async () => {
+    const path = await tempPath();
+    await writeRaw(path, `{"kind":"dcaLadder",\n${JSON.stringify(TIMED)}\n`);
+    const loaded = await loadPlans(path);
+    expect(loaded.plans).toHaveLength(1);
+    expect(loaded.skipped).toEqual([{ line: 1, reason: "invalid", detail: "line is not JSON" }]);
+  });
+});
+
+describe("the envelope is parsed FIRST, so a broken body is still attributable", () => {
+  it("attributes a malformed BODY to its position and date", async () => {
+    const path = await tempPath();
+    await writeRaw(
+      path,
+      `${JSON.stringify({ ...LADDER, rungs: [] })}\n`,
+    );
+    const loaded = await loadPlans(path);
+    expect(loaded.plans).toEqual([]);
+    // Without envelope-first parsing this skip would name no position at all, and the
+    // selector could not tell "this position is unreadable" from "the fund is".
+    expect(loaded.skipped[0]?.positionId).toBe("position-synthetic");
+    expect(loaded.skipped[0]?.effectiveAt).toBe("2026-08-01");
+    expect(loaded.skipped[0]?.reason).toBe("invalid");
+  });
+
+  it("attributes an UNSUPPORTED kind to its position and date too", async () => {
+    const path = await tempPath();
+    await writeRaw(
+      path,
+      `${JSON.stringify({ kind: "dcaPyramid", positionId: "position-future", effectiveAt: "2026-08-01" })}\n`,
+    );
+    const loaded = await loadPlans(path);
+    expect(loaded.skipped[0]).toMatchObject({
+      line: 1,
+      reason: "unsupported",
+      positionId: "position-future",
+      effectiveAt: "2026-08-01",
+    });
+  });
+
+  it("a plan naming an UNBORN position is LEGAL — nothing here validates against the fold", async () => {
+    const path = await tempPath();
+    await appendPlan(path, { ...LADDER, positionId: "position-not-yet-opened" });
+    const loaded = await loadPlans(path);
+    expect(loaded.skipped).toEqual([]);
+    expect(loaded.plans[0]?.positionId).toBe("position-not-yet-opened");
+  });
+});
+
+describe("skips split by INSTRUCTION: `unsupported` = pull, `invalid` = fix the line", () => {
+  it("an unrecognized `kind` is `unsupported`, never `invalid`", async () => {
+    const path = await tempPath();
+    await writeRaw(
+      path,
+      `${JSON.stringify({ kind: "dcaPyramid", positionId: "p", effectiveAt: "2026-08-01" })}\n`,
+    );
+    const loaded = await loadPlans(path);
+    expect(loaded.skipped[0]?.reason).toBe("unsupported");
+    expect(loaded.skipped[0]?.detail).toMatch(/pull/);
+  });
+
+  it("an unrecognized `cadence` is `unsupported` — the same rule, one level down", async () => {
+    const path = await tempPath();
+    await writeRaw(path, `${JSON.stringify({ ...TIMED, cadence: "fortnightly" })}\n`);
+    const loaded = await loadPlans(path);
+    expect(loaded.skipped[0]?.reason).toBe("unsupported");
+    expect(loaded.skipped[0]?.detail).toMatch(/pull/);
+  });
+
+  it("a non-strict `effectiveAt` is `invalid` — the line is corrupt, not the checkout", async () => {
+    const path = await tempPath();
+    await writeRaw(
+      path,
+      [
+        JSON.stringify({ ...LADDER, effectiveAt: "08/10/2026" }),
+        JSON.stringify({ ...LADDER, effectiveAt: "2026-7-1" }),
+        JSON.stringify({ ...LADDER, effectiveAt: "2026-02-30" }),
+        JSON.stringify({ ...LADDER, effectiveAt: "2026-01-31" }),
+      ].join("\n") + "\n",
+    );
+    const loaded = await loadPlans(path);
+    expect(loaded.skipped.map((skip) => [skip.line, skip.reason])).toEqual([
+      [1, "invalid"],
+      [2, "invalid"],
+      [3, "invalid"],
+    ]);
+    // The legitimate end-of-month date survives — strictness must not cost real dates.
+    expect(loaded.plans.map((plan) => plan.effectiveAt)).toEqual(["2026-01-31"]);
+  });
+
+  it("an unrecognized `tierOrder` entry is `invalid`, NOT `unsupported`", async () => {
+    // `tierOrder` is CLOSED where `kind` and `cadence` are open: it is consumed to
+    // route capital, so an unrecognized tier is unusable, not merely unreadable.
+    const path = await tempPath();
+    await writeRaw(path, `${JSON.stringify({ ...LADDER, tierOrder: ["c1", "c9"] })}\n`);
+    const loaded = await loadPlans(path);
+    expect(loaded.skipped[0]?.reason).toBe("invalid");
+    expect(loaded.skipped[0]?.detail).not.toMatch(/pull/);
+  });
+
+  it("a repeated tier, an empty rung list and a non-positive figure are all `invalid`", async () => {
+    const path = await tempPath();
+    await writeRaw(
+      path,
+      [
+        JSON.stringify({ ...LADDER, tierOrder: ["c1", "c1"] }),
+        JSON.stringify({ ...LADDER, rungs: [] }),
+        JSON.stringify({ ...LADDER, rungs: [{ id: "r", priceUsd: 0, sizeUsd: 10 }] }),
+        JSON.stringify({ ...LADDER, rungs: [{ id: "r", priceUsd: 10, sizeUsd: null }] }),
+        JSON.stringify({
+          ...LADDER,
+          rungs: [
+            { id: "same", priceUsd: 10, sizeUsd: 10 },
+            { id: "same", priceUsd: 20, sizeUsd: 10 },
+          ],
+        }),
+        JSON.stringify({ ...TIMED, amountUsd: -5 }),
+        JSON.stringify({ ...TIMED, anchorAt: "2026-02-30" }),
+      ].join("\n") + "\n",
+    );
+    const loaded = await loadPlans(path);
+    expect(loaded.plans).toEqual([]);
+    expect(loaded.skipped).toHaveLength(7);
+    expect(loaded.skipped.every((skip) => skip.reason === "invalid")).toBe(true);
+  });
+});
+
+describe("M3 — diagnostics are PROSE-ONLY and never quote the line", () => {
+  it("names an arbitrary `kind` only as a bounded sanitized token, never in the prose", async () => {
+    // The unknown-kind path is the one where `kind` is ARBITRARY file content; on the
+    // body-malformed path it is already one of three literals. So this is where an
+    // implementation that interpolates would leak, and this is where it is locked.
+    const path = await tempPath();
+    const hostileKind =
+      'dcaLadder-v2 sizeUsd=1234.56 priceUsd=98765.43\n{"kind":"forged","positionId":"p"}' +
+      "x".repeat(4096);
+    await writeRaw(
+      path,
+      `${JSON.stringify({ kind: hostileKind, positionId: "position-synthetic", effectiveAt: "2026-08-01" })}\n`,
+    );
+
+    const loaded = await loadPlans(path);
+    const skip = loaded.skipped[0];
+    expect(skip?.reason).toBe("unsupported");
+
+    // The prose is FIXED. Asserting equality — not a `not.toContain` — is what makes
+    // this fail against ANY implementation that interpolates, including one that
+    // interpolates a value this test did not think to plant.
+    expect(skip?.detail).toBe(
+      "unrecognized plan kind; this checkout may be older than the file — pull and retry",
+    );
+    expect(skip?.detail).not.toContain("1234.56");
+    expect(skip?.detail).not.toContain("98765.43");
+
+    // The raw value rides in a typed field: bounded, and stripped of anything that
+    // could forge a second log line.
+    expect(skip?.kindToken).toBe("dcaLadder-v2sizeUsd12345");
+    expect(skip?.kindToken?.length).toBeLessThanOrEqual(24);
+    expect(skip?.kindToken).toMatch(/^[A-Za-z0-9_-]+$/);
+  });
+
+  it("carries no `kindToken` at all when nothing token-shaped survives sanitization", async () => {
+    const path = await tempPath();
+    await writeRaw(
+      path,
+      `${JSON.stringify({ kind: "€€ ¥¥", positionId: "p", effectiveAt: "2026-08-01" })}\n`,
+    );
+    const loaded = await loadPlans(path);
+    expect(loaded.skipped[0]?.reason).toBe("unsupported");
+    expect(loaded.skipped[0]?.kindToken).toBeUndefined();
+  });
+
+  it("no skip detail anywhere quotes the body of the line it describes", async () => {
+    const path = await tempPath();
+    await writeRaw(
+      path,
+      [
+        // Invalid for a reason that has NOTHING to do with the figures it carries —
+        // an unknown tier — so any figure in a diagnostic came from the line.
+        JSON.stringify({
+          ...LADDER,
+          tierOrder: ["c9"],
+          rungs: [{ id: "r", priceUsd: 424242, sizeUsd: 313131 }],
+        }),
+        JSON.stringify({ ...TIMED, cadence: "fortnightly", amountUsd: 515151 }),
+        JSON.stringify({ ...TIMED, amountUsd: 626262, anchorAt: "nope" }),
+      ].join("\n") + "\n",
+    );
+    const loaded = await loadPlans(path);
+    expect(loaded.skipped).toHaveLength(3);
+    for (const skip of loaded.skipped) {
+      for (const figure of ["424242", "313131", "515151", "626262"]) {
+        expect(skip.detail).not.toContain(figure);
+      }
+    }
+  });
+});
+
+describe("M5 — the round-trip invariant: what the writer accepts, the loader reads back", () => {
+  it("reads back EVERY kind byte-for-byte through the loader's own predicates", async () => {
+    const path = await tempPath();
+    const written: PlanRecord[] = [
+      LADDER,
+      { kind: "noPlan", positionId: "position-synthetic", effectiveAt: "2026-09-01", reason: "paused" },
+      TIMED,
+      { kind: "noPlan", positionId: "position-synthetic", effectiveAt: "2026-11-01" },
+    ];
+    for (const record of written) {
+      await appendPlan(path, record);
+    }
+
+    const loaded = await loadPlans(path);
+    expect(loaded.load.status).toBe("loaded");
+    expect(loaded.skipped).toEqual([]);
+    // The read shape is the write shape PLUS the read-side line stamp, and nothing else.
+    expect(loaded.plans).toEqual(
+      written.map((record, index) => ({ ...record, line: index + 1 })),
+    );
+  });
+
+  it("REFUSES to write a record its own loader could not read back", async () => {
+    const path = await tempPath();
+    // An append-only file is the one place where writing something unreadable is
+    // unrecoverable, so the refusal is loud and nothing lands.
+    await expect(
+      appendPlan(path, { ...LADDER, effectiveAt: "08/10/2026" }),
+    ).rejects.toThrow(/could not read back/);
+    await expect(appendPlan(path, { ...LADDER, rungs: [] })).rejects.toThrow(/could not read back/);
+    await expect(
+      appendPlan(path, { ...TIMED, tierOrder: ["c1", "c1"] }),
+    ).rejects.toThrow(/could not read back/);
+
+    const loaded = await loadPlans(path);
+    expect(loaded.plans).toEqual([]);
+  });
+
+  it("NEVER stamps the read-side `line` into the file", async () => {
+    // `LoadedPlanRecord` is structurally a `PlanRecord`, so round-tripping a loaded
+    // record through the writer typechecks perfectly. The serializer is field-by-field
+    // precisely so that call cannot persist a second, immediately-stale identity.
+    const path = await tempPath();
+    const loadedShape: LoadedPlanRecord = { ...LADDER, line: 7 };
+    await appendPlan(path, loadedShape);
+
+    const image = await readFile(path, "utf8");
+    expect(image).not.toContain('"line"');
+    const reloaded = await loadPlans(path);
+    expect(reloaded.plans[0]?.line).toBe(1);
+  });
+
+  it("appendNoPlan takes ONE OBJECT, so a positionId/effectiveAt swap is unrepresentable", async () => {
+    const path = await tempPath();
+    await appendNoPlan(path, {
+      positionId: "position-synthetic",
+      effectiveAt: "2026-09-01",
+      reason: "paused",
+    });
+    const loaded = await loadPlans(path);
+    expect(loaded.plans).toEqual([
+      {
+        kind: "noPlan",
+        positionId: "position-synthetic",
+        effectiveAt: "2026-09-01",
+        reason: "paused",
+        line: 1,
+      },
+    ]);
+  });
+});
+
+describe("M4 — the append is GENUINE, to the event store's standard", () => {
+  it("appending after a terminator-less final line yields TWO readable records", async () => {
+    // The prototype's suffix-only `appendFile` CONCATENATED onto the torn line and
+    // lost both records unattributably. The repair is supplying the missing newline.
+    const path = await tempPath();
+    await writeRaw(path, JSON.stringify(LADDER)); // no trailing "\n"
+
+    await appendPlan(path, TIMED);
+
+    const loaded = await loadPlans(path);
+    expect(loaded.skipped).toEqual([]);
+    expect(loaded.plans).toHaveLength(2);
+    expect(loaded.plans.map((plan) => plan.effectiveAt)).toEqual(["2026-08-01", "2026-10-01"]);
+  });
+
+  it("preserves EVERY prior record across successive appends", async () => {
+    const path = await tempPath();
+    await appendPlan(path, LADDER);
+    await appendPlan(path, TIMED);
+    await appendNoPlan(path, { positionId: "position-synthetic", effectiveAt: "2026-12-01" });
+
+    const loaded = await loadPlans(path);
+    expect(loaded.plans.map((plan) => plan.kind)).toEqual(["dcaLadder", "dcaTime", "noPlan"]);
+  });
+
+  it("leaves no temp or lock sibling behind, and creates the data directory", async () => {
+    const dir = await mkdtemp(resolve(tmpdir(), "numisma-plans-"));
+    createdDirs.push(dir);
+    const path = resolvePlansPath(resolve(dir, "nested", "data"));
+
+    await appendPlan(path, LADDER);
+
+    const loaded = await loadPlans(path);
+    expect(loaded.plans).toHaveLength(1);
+    await expect(readFile(`${path}.lock`, "utf8")).rejects.toThrow();
+  });
+});
+
+describe("the unattended-caller exit policy", () => {
+  it("exits 0 with nothing to say on a clean load", async () => {
+    const path = await tempPath();
+    await appendPlan(path, LADDER);
+    const verdict = unattendedPlansVerdict(await loadPlans(path));
+    expect(verdict).toEqual({ exitCode: 0, messages: [] });
+  });
+
+  it("exits 0 on an ABSENT file — not authoring plans yet is not a failure", async () => {
+    const dir = await mkdtemp(resolve(tmpdir(), "numisma-plans-"));
+    createdDirs.push(dir);
+    const verdict = unattendedPlansVerdict(
+      await loadPlans(resolvePlansPath(resolve(dir, "never-created"))),
+    );
+    expect(verdict.exitCode).toBe(0);
+  });
+
+  it("warns loudly AND exits NON-ZERO on `load-failed`", async () => {
+    // The warrant is the daily-fetch script's own finding: a launchd job's stderr goes
+    // to an unread log, so a "loud warning" reaches no one. An exit code is a CHECKED
+    // value; a warning is a thing someone must happen to read.
+    const dir = await mkdtemp(resolve(tmpdir(), "numisma-plans-"));
+    createdDirs.push(dir);
+    const path = resolvePlansPath(resolve(dir, "data"));
+    await mkdir(path, { recursive: true });
+
+    const verdict = unattendedPlansVerdict(await loadPlans(path));
+    expect(verdict.exitCode).toBe(1);
+    expect(verdict.messages.length).toBeGreaterThan(0);
+  });
+
+  it("exits NON-ZERO on ANY skip, including an `unsupported` one", async () => {
+    const path = await tempPath();
+    await writeRaw(
+      path,
+      `${JSON.stringify({ kind: "dcaPyramid", positionId: "p", effectiveAt: "2026-08-01" })}\n`,
+    );
+    const verdict = unattendedPlansVerdict(await loadPlans(path));
+    expect(verdict.exitCode).toBe(1);
+    expect(verdict.messages).toHaveLength(1);
+    expect(verdict.messages[0]).toMatch(/line 1/);
+  });
+
+  it("its messages are prose-only — no line content reaches the terminal", async () => {
+    const path = await tempPath();
+    await writeRaw(
+      path,
+      `${JSON.stringify({
+        ...LADDER,
+        rungs: [
+          { id: "same", priceUsd: 777777, sizeUsd: 888888 },
+          { id: "same", priceUsd: 777777, sizeUsd: 888888 },
+        ],
+      })}\n`,
+    );
+    const verdict = unattendedPlansVerdict(await loadPlans(path));
+    expect(verdict.exitCode).toBe(1);
+    for (const message of verdict.messages) {
+      expect(message).not.toContain("777777");
+      expect(message).not.toContain("888888");
+    }
+  });
+});

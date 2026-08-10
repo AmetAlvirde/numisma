@@ -22,16 +22,14 @@
  *     distinguishes UNREADABLE from ABSENT, and reports every skipped line rather than
  *     swallowing it.
  */
-import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { setTimeout as delay } from "node:timers/promises";
-import { dirname, join, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
 import {
   parseOrderRecord,
-  resolveDataDir,
   serializeOrderRecord,
   type OrderRecord,
   type OrderRecordProblem,
 } from "@numisma/engine";
+import { appendSidecarLines, resolveSidecarPath } from "./sidecar-io.js";
 
 /**
  * Resolve the orders sidecar path. With no `dataDir` we resolve under the shared engine
@@ -40,8 +38,8 @@ import {
  * durable, git-tracked artifact into whatever directory the process happened to start
  * in. An explicit `dataDir` is honored verbatim for callers (e.g. tests) that pass one.
  */
-export function resolveOrdersPath(dataDir = resolveDataDir()): string {
-  return join(resolve(dataDir), "orders.jsonl");
+export function resolveOrdersPath(dataDir?: string): string {
+  return resolveSidecarPath("orders.jsonl", dataDir);
 }
 
 /** One line the loader could not turn into a record, reported rather than swallowed. */
@@ -134,141 +132,14 @@ export async function loadOrders(path: string, options: LoadOrdersOptions = {}):
 }
 
 /**
- * Per-process counter behind the temp file's unique name. Combined with the pid it makes
- * the name unique across BOTH concurrency axes — two processes, and two overlapping
- * `await`s inside one — which a fixed `.tmp` sibling is unique across neither.
- */
-let tempCounter = 0;
-
-/**
- * A UNIQUE, same-directory temp sibling for one append.
+ * Genuinely APPEND-ONLY writer: add records without touching prior lines.
  *
- * Same directory is the non-negotiable half: rename(2) is only atomic within a
- * filesystem, and atomicity is the sole reason this module writes through a temp at all.
- * Unique is the half a fixed `${path}.tmp` was missing — two concurrent appends shared
- * one temp name, so writer A's rename moved the file out from under writer B and B's
- * rename then failed ENOENT having already discarded its batch. The suffix stays `.tmp`
- * so accumulus's `/data/*.tmp` ignore rule still covers it.
- */
-function tempPathFor(path: string): string {
-  tempCounter += 1;
-  return `${path}.${process.pid}.${tempCounter}.tmp`;
-}
-
-/**
- * Read a file that may not exist, mapping ENOENT to `undefined`.
- *
- * A DELIBERATE PRIVATE COPY OF `@numisma/event-store`'s `readOptional`, NOT DRIFT (#198).
- * Importing the canonical one would draw a permanent `@numisma/preferences ->
- * @numisma/event-store` edge — this package's only dependency today is `@numisma/engine`.
- * ADR-013 makes the sidecar's separation from the durable log load-bearing: an `Order` is
- * recorded BESIDE `events.jsonl`, `parseEvent` never sees one, and the module that writes
- * `orders.jsonl` has no business knowing the event store exists.
- *
- * The duplication is affordable because the helper carries ZERO POLICY — its entire
- * content is "ENOENT means absent", a rule of the filesystem rather than of either file
- * format. There is nothing here that can drift into disagreeing with the other copy.
- * #141 once required exactly one definition repo-wide; that criterion is retired, because
- * counting definitions was the wrong test for a policy-free adapter.
- */
-async function readOptional(path: string): Promise<string | undefined> {
-  try {
-    return await readFile(path, "utf8");
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return undefined;
-    }
-    throw error;
-  }
-}
-
-/** How long a waiter sleeps between attempts to take the append lock. */
-const LOCK_RETRY_MS = 20;
-/** How long a waiter keeps trying before it REFUSES rather than write over a peer. */
-const LOCK_TIMEOUT_MS = 10_000;
-
-function isEexist(error: unknown): boolean {
-  return error instanceof Error && "code" in error && error.code === "EEXIST";
-}
-
-/**
- * Serialize the read-modify-write of the whole sidecar image, across processes.
- *
- * A unique temp name alone is NOT enough, and the difference is the whole point. The
- * append reads the existing image, adds to it and renames the result over the file — so
- * two overlapping appends can both read image `I`, and the second rename silently
- * DISCARDS the first one's batch. That is a lost record with no torn line, no error and
- * no trace: exactly the unattributable loss this module exists to prevent. The pair of
- * CLIs that write here (`orders:import`, `orders:cancel`) are separate processes, so an
- * in-process mutex would not see each other.
- *
- * `open(…, "wx")` is the primitive: an EXCLUSIVE create is atomic in the kernel, so the
- * winner is decided by the filesystem and not by our own read of it.
- *
- * A holder that dies without releasing leaves the lock behind, and a waiter then REFUSES
- * after `LOCK_TIMEOUT_MS` with the path to delete. That is deliberate: breaking a lock we
- * cannot prove is stale would reintroduce the very race, and a loud refusal an operator
- * clears by hand is cheaper than a batch that vanishes.
- */
-async function withAppendLock<T>(path: string, write: () => Promise<T>): Promise<T> {
-  const lockPath = `${path}.lock`;
-  const deadline = Date.now() + LOCK_TIMEOUT_MS;
-  for (;;) {
-    let handle;
-    try {
-      handle = await open(lockPath, "wx");
-    } catch (error) {
-      if (!isEexist(error)) {
-        throw error;
-      }
-      if (Date.now() >= deadline) {
-        throw new Error(
-          `another writer holds ${lockPath} and did not release it within ` +
-            `${LOCK_TIMEOUT_MS}ms; nothing was written. If no import or cancel is running, ` +
-            `delete that file by hand.`,
-        );
-      }
-      await delay(LOCK_RETRY_MS);
-      continue;
-    }
-    try {
-      await handle.close();
-      return await write();
-    } finally {
-      await rm(lockPath, { force: true });
-    }
-  }
-}
-
-/**
- * Genuinely APPEND-ONLY writer: add records without touching prior lines, to the
- * repo's own standard (`apps/tui/src/event-store.ts`).
- *
- * Build the full next image, write it to a sibling temp file, then `rename` over the
- * sidecar. rename(2) within a directory is atomic, so a crash mid-write leaves the
- * prior file intact and a reader never sees a truncated final line. This is O(n) in the
- * existing file rather than an O(1) `appendFile`, and that is the deliberate price of
- * the crash-atomicity — the event store's own comment rejects `appendFile` "for exactly
- * this."
- *
- * The `prefix` is the other half, and the half the plans-sidecar prototype omitted: if
- * the existing file's last line lacks its terminator, a suffix write CONCATENATES the
- * new record onto that torn line and both are lost — unattributably, because neither
- * parses and neither is recoverable from the mangled result. Supplying the missing
- * newline REPAIRS the torn line instead of compounding it.
+ * The mechanics — the cross-process lock, the unique same-directory temp sibling,
+ * the torn-terminator repair and the atomic rename — live in `./sidecar-io.ts`,
+ * shared with the plans sidecar, which needs byte-identical durability for the same
+ * reason. What stays here is the only part that is about ORDERS: the canonical
+ * serialization of a record.
  */
 export async function appendOrders(path: string, records: OrderRecord[]): Promise<void> {
-  if (records.length === 0) {
-    return;
-  }
-  await mkdir(dirname(path), { recursive: true });
-  await withAppendLock(path, async () => {
-    const lines = records.map((record) => serializeOrderRecord(record)).join("\n");
-    const existing = await readOptional(path);
-    const prefix = existing && existing.length > 0 && !existing.endsWith("\n") ? "\n" : "";
-    const next = `${existing ?? ""}${prefix}${lines}\n`;
-    const tempPath = tempPathFor(path);
-    await writeFile(tempPath, next, "utf8");
-    await rename(tempPath, path);
-  });
+  await appendSidecarLines(path, records.map((record) => serializeOrderRecord(record)));
 }
