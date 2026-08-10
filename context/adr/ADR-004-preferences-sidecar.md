@@ -265,11 +265,30 @@ check this ADR says must precede narrowing a durable artifact. It was run, not a
 - **It does not make every timestamp in the class a date.** `orders.jsonl`'s
   `observedAt` is deliberately second-granular (`YYYY-MM-DDTHH:MM:SS`, ADR-013),
   because several rungs of one ladder are submitted within the same minute and a
-  date-only stamp cannot order them. That stamp is an OBSERVATION time; this
-  amendment governs the **as-of selection key** — the field a selector compares
-  against a query date to decide which record is in force. `observedAt` is likewise
-  lexicographically ordered, which is the general rule underneath both: **a field
-  that is selected on must sort as a string in the same order it sorts in time.**
+  date-only stamp cannot order them. `observedAt` is likewise fixed-width and
+  zero-padded, so it is lexicographically ordered too — which is the general rule
+  underneath both: **a field that is selected on must sort as a string in the same
+  order it sorts in time.**
+
+  **The exemption is about GRANULARITY only — clarified 2026-08-10, fix-forward on
+  this increment's review.** As first written this bullet leaned on `observedAt` being
+  "an OBSERVATION time" rather than an as-of selection key, and that reasoning does not
+  survive its own rule: `observedAt` **is** selected on — `pickOpenOrdersAsOf` compares
+  those strings to answer "what was resting on date X" — so the general rule reaches it
+  and the exemption cannot rest on it being outside the rule's scope. It rests instead
+  on the narrower and true claim: a fixed-width second-granular stamp **satisfies** the
+  ordering rule, so the class's `YYYY-MM-DD` requirement is a shape the rule does not
+  actually demand of it.
+
+  **What the exemption never covered is the ROUND TRIP,** and `records.ts` was shape-
+  only, so `"2026-02-30T00:00:00"` was accepted — sorting as February, meaning March 2.
+  That is the identical defect this amendment describes for `effectiveAt`, wearing a
+  time suffix, and the shape regex `\d{2}:\d{2}:\d{2}` additionally accepted
+  `"99:99:99"`, which sorts after every real time of its day. Both are now rejected:
+  the date half round-trips through the same `isIsoCalendarDate` the class uses, and
+  the time half is range-checked. The narrowing was verified free before it landed —
+  all eight `observedAt` values then in `orders.jsonl` were real calendar dates and
+  times, so no historical as-of replay changed.
 - **It does not constrain the bodies.** `plans.jsonl`'s `anchorAt` is validated to the
   same strict form because it is a date, but nothing is selected on it and no relation
   to `effectiveAt` is enforced.
