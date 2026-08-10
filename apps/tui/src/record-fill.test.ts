@@ -691,6 +691,27 @@ describe("the proposal reasons over the same book the questions observed (#175)"
   });
 });
 
+// THE FILL PROMPT'S REFUSAL HAS TO NAME THE RULE IT APPLIED. `isObservedAtStamp` checks the
+// round-tripped calendar date and the range of the time, but this shell's message named the
+// SHAPE alone — so `2026-02-30T09:30:00` was quoted back to the operator as breaking a rule
+// it keeps, with the impossible date never named. Asserted as a substring of the clause, and
+// not against the exported phrase, which is the value being interpolated.
+describe("a shape-valid but impossible fill stamp is refused in words that name the rule", () => {
+  it("names the calendar rule for a date that does not exist", async () => {
+    const harness = new Harness({ answers: ["rung-400", "2026-02-30T09:30:00"] });
+    const ordersBefore = harness.ordersImage;
+
+    const outcome = await recordFill(harness.io);
+
+    expect(outcome.status).toBe("rejected");
+    if (outcome.status !== "rejected") throw new Error("expected a rejection");
+    expect(outcome.reason).toBe("bad-timestamp");
+    expect(outcome.message).toContain("a real calendar date and time");
+    expect(harness.ordersImage).toBe(ordersBefore);
+    expect(harness.logImage).toBeUndefined();
+  });
+});
+
 // #177 item 2.
 describe("`filled_quantity observed` refuses anything `<= 0`, never reads it as untouched", () => {
   it("refuses instead of recording a `0` — which is the encoding for UNTOUCHED", async () => {

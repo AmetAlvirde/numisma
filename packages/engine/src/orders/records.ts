@@ -285,7 +285,7 @@ const OBSERVED_AT = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})$/;
  * What the exemption never covered is the ROUND TRIP. `"2026-02-30T00:00:00"` matches
  * the shape, sorts as February, and means March 2 — the identical defect the amendment
  * describes for `effectiveAt`, wearing a time suffix. `observedAt` IS selected on
- * (`pickOpenOrdersAsOf` compares these strings), so the rule reaches it. The date half
+ * (`pickRestingOrdersAsOf` compares these strings), so the rule reaches it. The date half
  * therefore round-trips through the same `isIsoCalendarDate` the rest of the class
  * uses, and the time half is range-checked, because `\d{2}:\d{2}:\d{2}` alone accepts
  * `99:99:99` — which likewise sorts after every real time of that day.
@@ -305,6 +305,23 @@ export function isObservedAtStamp(value: string): boolean {
     Number(seconds) <= 59
   );
 }
+
+/**
+ * THE ONE PLACE THE STAMP RULE IS PUT INTO WORDS, beside the predicate that enforces it —
+ * the same one-shared-sentence move `renderSkipMessage` makes for skipped lines (#181).
+ *
+ * {@link isObservedAtStamp} was narrowed from shape alone to shape PLUS a round-tripped
+ * calendar date and a range-checked time. Four messages described the rule, the reader's
+ * was the only one updated, and the other three went on quoting the operator a string that
+ * satisfies the shape they name — a refusal whose stated reason the input does not violate.
+ * A wrong diagnosis on an append-only file is expensive: it sends the operator to retype a
+ * stamp that was already the right shape, and never names the impossible date.
+ *
+ * So it is a PHRASE, not a finished sentence. The reader says `observedAt must be …`, the
+ * producer says the same, the two TUI shells quote the value back and the prompt states the
+ * rule in advance — four grammars, one clause, and no way for them to drift apart again.
+ */
+export const OBSERVED_AT_RULE = "YYYY-MM-DDTHH:MM:SS, a real calendar date and time";
 
 /**
  * Format an instant into THE stamp shape: `YYYY-MM-DDTHH:MM:SS`, LOCAL, no timezone.
@@ -480,7 +497,7 @@ export function buildOrderFillObserved(claim: ObservedFillClaim): OrderFillObser
     return { status: "refused", message: "id must be a non-empty string" };
   }
   if (!isObservedAtStamp(claim.observedAt)) {
-    return { status: "refused", message: "observedAt must be YYYY-MM-DDTHH:MM:SS" };
+    return { status: "refused", message: `observedAt must be ${OBSERVED_AT_RULE}` };
   }
   if (!(claim.currency in CURRENCIES)) {
     return { status: "refused", message: "currency must be a known currency" };
@@ -524,7 +541,7 @@ export function parseOrderRecord(value: unknown): OrderRecordParse {
     return {
       status: "skip",
       problem: "malformed",
-      message: "observedAt must be YYYY-MM-DDTHH:MM:SS, a real calendar date and time",
+      message: `observedAt must be ${OBSERVED_AT_RULE}`,
     };
   }
   if (typeof value.kind !== "string" || !(value.kind in KNOWN_KINDS)) {

@@ -109,6 +109,43 @@ describe("observedAt is a real calendar date and time, not merely the right shap
       expect(parseOrderRecord(record(stamp))).toMatchObject({ status: "ok" });
     }
   });
+
+  /**
+   * THE REFUSAL HAS TO NAME THE RULE IT APPLIED. The narrowing landed on the predicate and
+   * on the reader's sentence only; three producer messages went on saying
+   * `YYYY-MM-DDTHH:MM:SS` alone, which `2026-02-30T09:30:00` satisfies. The operator was
+   * quoted their own string and told it broke a rule it kept, with the impossible date
+   * never named — so they retype a stamp that was already the right shape.
+   *
+   * Asserted as a SUBSTRING of the calendar clause, and deliberately not against the
+   * exported phrase: comparing to the constant that gets interpolated would pass no matter
+   * what either side said.
+   */
+  const claim = (observedAt: string) => ({
+    id: "rung-synthetic",
+    observedAt,
+    currency: "USD" as const,
+    observedFilledQuantity: 1,
+  });
+
+  it("names the calendar rule when the PRODUCER refuses, not the shape rule alone", () => {
+    const built = buildOrderFillObserved(claim("2026-02-30T09:30:00"));
+    expect(built.status).toBe("refused");
+    expect(built.status === "refused" && built.message).toContain(
+      "a real calendar date and time",
+    );
+  });
+
+  // The range-checked half, at the one producer site where it is cheapest to reach: this is
+  // a pure call, so the same coverage costs no harness. `99:99:99` matches the shape and
+  // sorts after every real time of its day.
+  it("names the same rule for an out-of-range TIME, which the shape also admits", () => {
+    const built = buildOrderFillObserved(claim("2026-01-01T99:99:99"));
+    expect(built.status).toBe("refused");
+    expect(built.status === "refused" && built.message).toContain(
+      "a real calendar date and time",
+    );
+  });
 });
 
 /**
