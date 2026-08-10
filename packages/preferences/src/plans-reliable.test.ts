@@ -8,7 +8,7 @@
  * PROPERTIES of the IO, never a real value. Nothing here touches the real accumulus
  * checkout — every path is a temp directory created and removed by this file.
  */
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -33,6 +33,11 @@ afterEach(async () => {
   await Promise.all(createdDirs.map((dir) => rm(dir, { recursive: true, force: true })));
   createdDirs.length = 0;
 });
+
+/** Every entry in `dir`, sorted — the append's siblings, litter included. */
+async function siblingsOf(dir: string): Promise<string[]> {
+  return (await readdir(dir)).sort();
+}
 
 /** A throwaway `plans.jsonl` path under a temp data dir. The file does not exist yet. */
 async function tempPath(): Promise<string> {
@@ -350,6 +355,64 @@ describe("M3 — diagnostics are PROSE-ONLY and never quote the line", () => {
     expect(loaded.skipped[0]?.kindToken).toBeUndefined();
   });
 
+  /**
+   * `positionId` RIDES THE SAME ENVELOPE AS `kind`, and the sanitizing argument above
+   * applies to it whole: unbounded operator-authored content that could hold a newline
+   * forging a second row. It travels further than `kind` does — into a `PlanRow` and
+   * onto the desk page, padded into a column — so it is the field where a forged line
+   * would actually be READ, on the exact page the runbook says to check against.
+   *
+   * It is VALIDATED rather than sanitized because it is identity: a mangled id would
+   * attribute a plan to the wrong position or to none, silently, which is worse than
+   * the leak. So an unsafe id makes the line corrupt AND unattributable — the loader
+   * will not render an id it will not vouch for.
+   */
+  it("an id holding a newline is corrupt and UNATTRIBUTABLE, never a forged row", async () => {
+    const path = await tempPath();
+    const forging = 'position-synthetic\n  pos-forged   active   ladder, 4 rungs @ 2026-08-01';
+    await writeRaw(
+      path,
+      `${JSON.stringify({ kind: "noPlan", positionId: forging, effectiveAt: "2026-08-01" })}\n`,
+    );
+
+    const loaded = await loadPlans(path);
+    expect(loaded.skipped[0]?.reason).toBe("invalid");
+    // The id is withheld from the skip, so nothing downstream can render or attribute
+    // by it. An unattributable line belongs to no position — which is the honest bucket.
+    expect(loaded.skipped[0]?.positionId).toBeUndefined();
+    expect(loaded.skipped[0]?.detail).not.toContain("pos-forged");
+    expect(loaded.plans).toHaveLength(0);
+  });
+
+  it("bounds the id's length, because one long id sets the column width for every row", async () => {
+    const path = await tempPath();
+    const loaded = await loadPlans(path);
+    expect(loaded.plans).toHaveLength(0);
+
+    await writeRaw(
+      path,
+      [
+        JSON.stringify({ kind: "noPlan", positionId: "p".repeat(65), effectiveAt: "2026-08-01" }),
+        JSON.stringify({ kind: "noPlan", positionId: "p".repeat(64), effectiveAt: "2026-08-01" }),
+      ].join("\n") + "\n",
+    );
+
+    const reloaded = await loadPlans(path);
+    // 64 is the boundary and it is INCLUSIVE — the bound rejects the absurd, not the
+    // merely long, so a legitimate id is never quietly turned into a corrupt line.
+    expect(reloaded.skipped.map((skip) => skip.line)).toEqual([1]);
+    expect(reloaded.plans.map((plan) => plan.positionId)).toEqual(["p".repeat(64)]);
+  });
+
+  it("REFUSES to append an id its own loader would not render", async () => {
+    // The writer and the reader are the same code (M5), so the rule binds both ends
+    // with no second list to keep in sync. Asserted rather than assumed.
+    const path = await tempPath();
+    await expect(
+      appendNoPlan(path, { positionId: "position\nsynthetic", effectiveAt: "2026-08-01" }),
+    ).rejects.toThrow(/positionId/);
+  });
+
   it("no skip detail anywhere quotes the body of the line it describes", async () => {
     const path = await tempPath();
     await writeRaw(
@@ -483,7 +546,14 @@ describe("M4 — the append is GENUINE, to the event store's standard", () => {
     const loaded = await loadPlans(path);
     expect(loaded.plans).toHaveLength(1);
     await expect(readFile(`${path}.lock`, "utf8")).rejects.toThrow();
+    // The TEMP half of this test's own title, which it used to leave uncovered.
+    expect(await siblingsOf(dirname(path))).toEqual(["plans.jsonl"]);
   });
+
+  // The FAILING append — the only path that can leak, since a successful `rename`
+  // consumes the temp file — needs `rename` itself to fail, which no arrangement of
+  // real files induces without failing the read first. It lives in
+  // `sidecar-io-append-failure.test.ts`, which mocks that one call.
 });
 
 describe("the unattended-caller exit policy", () => {

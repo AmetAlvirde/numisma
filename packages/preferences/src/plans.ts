@@ -105,6 +105,42 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim() !== "";
 }
 
+/** How long a `positionId` may be before the line is treated as corrupt. */
+const POSITION_ID_MAX_LENGTH = 64;
+
+/**
+ * Is this `positionId` safe to carry out of the module and RENDER?
+ *
+ * `kind` is bounded and sanitized above, on the stated grounds that operator-authored
+ * file content "could contain newlines that forge a second log line." `positionId`
+ * rides the same envelope, gets read the same way, and travels FURTHER — into
+ * `SkippedPlanLine.positionId`, into a `PlanRow`, and onto the desk page padded into a
+ * column. An id holding a newline forges a whole fabricated ROW on the exact page the
+ * runbook tells the operator to check their authored line against. The asymmetry was
+ * the defect; this closes it.
+ *
+ * It VALIDATES rather than sanitizes, and the difference matters: `kind` is a token in
+ * a diagnostic, so mangling it loses nothing, while `positionId` is IDENTITY — it is
+ * matched against the fold's real position ids to decide `pending` against `active`.
+ * A silently mangled id would attribute a plan to the wrong position, or to none,
+ * which is a worse failure than the one being fixed. So an unsafe id makes the line
+ * corrupt, and the loader's existing skip taxonomy carries it.
+ *
+ * The bound is the same argument once more: an unbounded id is not just a long string,
+ * it sets `idWidth` for EVERY row on the page. Real ids in this fund run to a dozen
+ * characters; 64 is far above any plausible one and still a column.
+ */
+function isRenderableId(value: unknown): value is string {
+  return (
+    isNonEmptyString(value) &&
+    value.length <= POSITION_ID_MAX_LENGTH &&
+    // C0 controls plus DEL. `\n` and `\r` are the forging pair; the rest join them
+    // because none of them belongs in an identifier and every one moves a cursor.
+    // eslint-disable-next-line no-control-regex -- matching control chars is the point
+    !/[\u0000-\u001F\u007F]/.test(value)
+  );
+}
+
 function isFinitePositive(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
@@ -210,7 +246,11 @@ function readPlanLine(value: unknown, line: number): PlanLineRead {
   }
 
   // --- envelope, before any dispatch on kind ------------------------------------
-  const positionId = isNonEmptyString(value.positionId) ? value.positionId : undefined;
+  // An id that fails {@link isRenderableId} is left OFF `scraped` deliberately: the
+  // scraped id is the one that reaches a `PlanRow` and the page, so an id this module
+  // will not render is also an id it will not attribute by. The line becomes
+  // unattributable, which is the honest bucket for "we cannot say whose this is."
+  const positionId = isRenderableId(value.positionId) ? value.positionId : undefined;
   const effectiveAt = isIsoCalendarDate(value.effectiveAt) ? value.effectiveAt : undefined;
   /** Everything readable about WHOSE line this is, attached to every skip below. */
   const scraped: Partial<SkippedPlanLine> = {
@@ -219,7 +259,12 @@ function readPlanLine(value: unknown, line: number): PlanLineRead {
   };
 
   if (positionId === undefined) {
-    return invalid(line, "positionId must be a non-empty string", scraped);
+    return invalid(
+      line,
+      `positionId must be a non-empty string of at most ${POSITION_ID_MAX_LENGTH} ` +
+        "characters, holding no control characters",
+      scraped,
+    );
   }
   if (effectiveAt === undefined) {
     return invalid(
