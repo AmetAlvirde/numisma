@@ -2,7 +2,7 @@
  * IO shell over the `plans.jsonl` sidecar — resolve-path, load, append.
  *
  * A `Plan` is the operator's DECLARATION OF INTENT for one position, and this file is
- * the fourth member of ADR-004's sidecar class: durable, append-only, git-versioned,
+ * the THIRD member of ADR-004's sidecar class: durable, append-only, git-versioned,
  * beside the event log and never folded. ADR-001 bars file IO from `@numisma/engine`,
  * so the pure half — the record contract, the closed vocabularies, the strict
  * calendar-date predicate — lives at `packages/engine/src/plans.ts` and only the disk

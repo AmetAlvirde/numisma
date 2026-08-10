@@ -114,8 +114,12 @@ function isEexist(error: unknown): boolean {
  * so two overlapping appends can both read image `I`, and the second rename silently
  * DISCARDS the first one's batch. That is a lost record with no torn line, no error
  * and no trace: exactly the unattributable loss this module exists to prevent. The
- * CLIs that write here (`orders:import`, `orders:cancel`) are separate processes, so
- * an in-process mutex would not see each other.
+ * CLIs that write here — `orders:import`, `orders:fill` (`record-fill.ts`) and
+ * `orders:cancel` — are separate processes, so an in-process mutex would not see each
+ * other. `plans.jsonl` has no CLI writer at all: it is authored by hand, and its
+ * `appendPlan` exists to give the format one executable definition. The lock still
+ * covers it, because "the operator's editor and a test are not the same process"
+ * is the same argument.
  *
  * `open(…, "wx")` is the primitive: an EXCLUSIVE create is atomic in the kernel, so
  * the winner is decided by the filesystem and not by our own read of it.
