@@ -130,7 +130,9 @@ describe("the plans desk report", () => {
     expect(row(text, "pos-future")).toContain("none");
 
     // The file-global count, reported once and never smeared across the rows.
-    expect(text).toMatch(/unattributable[^\n]*1/);
+    // `toMatch(/unattributable[^\n]*1/)` also passed for 10, 11, 12, 21 — the count
+    // is the assertion, so it is matched exactly.
+    expect(text).toContain("unattributable line(s): 1");
   });
 
   it("distinguishes pending from active by BORN-NESS, not by the line", () => {

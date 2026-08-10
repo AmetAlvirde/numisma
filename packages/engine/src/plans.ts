@@ -3,7 +3,7 @@
  *
  * A `Plan` is the operator's DECLARATION OF INTENT for one position: "this position
  * is a four-rung ladder", "this position buys $10 weekly", "this position is done".
- * It is a fourth member of ADR-004's sidecar class — durable, append-only,
+ * It is the THIRD member of ADR-004's sidecar class — durable, append-only,
  * git-versioned, beside the event log and NEVER folded. `parseEvent` never sees a
  * plan line, `foldEvents` never reads one, and nothing declared here can move NAV.
  *
@@ -484,6 +484,19 @@ export function pickPlanAsOf(
  *
  * A position can therefore appear solely because of a FUTURE-DATED skip, as a `none`
  * row: a deliberate leak of "the sidecar knows this id", never of any figure.
+ *
+ * COST, priced rather than hidden, because this module prices its costs everywhere
+ * else. This delegates per row, and {@link pickPlanAsOf} re-filters `loaded.skipped`
+ * twice and re-scans `loaded.plans` on each call: `O(P·(S+N))` for `P` positions, `S`
+ * skips and `N` plan lines, plus `P` identical `unattributable` arrays allocated and
+ * thrown away. It is NOT optimized, deliberately. Hoisting the shared work means
+ * either an internal `pickPlanAsOf` variant taking pre-filtered inputs or a second
+ * selection path, and a second path through the supersession comparison is the one
+ * piece of this module where a divergence would be a silently wrong ladder rather
+ * than a slow one. At operator scale — a fund with a few dozen positions and a
+ * hand-authored file — the whole roster is microseconds. Revisit if `P·S` ever
+ * reaches a size a desk command can feel; delegating to ONE comparison is worth
+ * more than the constant factor until then.
  */
 export function listPlansAsOf(
   loaded: LoadedPlans,

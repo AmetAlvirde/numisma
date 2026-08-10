@@ -119,6 +119,15 @@ The original decision reads as a decision about `preferences.jsonl`. It was
 always a decision about a **kind of artifact**, and ADR-013's `orders.jsonl` is
 the second member of that kind. The class is:
 
+> **Counting note, added 2026-08-10.** There are TWO counts in this record and they do
+> not agree, which is not an error in either: **sidecar-class membership** counts
+> `preferences.jsonl` (1), `orders.jsonl` (2), `plans.jsonl` (3); **durable artifacts**
+> counts `events.jsonl` first, which is why ADR-013 correctly calls `orders.jsonl`
+> "a third durable artifact" while this ADR correctly calls it the second member. The
+> event log is deliberately NOT in the class — that is this amendment's whole point.
+> `plans.jsonl` shipped calling itself the class's "fourth member" in five places by
+> crossing the two; say which count you mean.
+
 > **A durable, append-only, git-versioned file beside the event log, carrying its
 > own on-load validation contract, joined to the fold at read time by a pure
 > selector, and never folded.**
@@ -196,7 +205,7 @@ Each was verified against the code before being corrected here.
 ## Second amendment: `effectiveAt` is a lexicographically-ordered ISO calendar date, on the wire
 
 _Amended 2026-08-10, during the `plans.jsonl` sidecar increment (spec #267, slice
-#269), alongside the fourth member of this class. No decision here is reversed —
+#269), alongside the THIRD member of this class. No decision here is reversed —
 this amendment RAISES to the class level a rule the first two members already
 depended on and neither wrote down, and it lands **before the first plan line
 exists**, which is the only moment at which it can land for free._
