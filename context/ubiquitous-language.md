@@ -99,6 +99,9 @@ event log at the separate **Mark Cadence**. Candle intervals are never called
 | **Transfer**                | A ledgered movement of capital between Accounts, Portfolios, or other supported scopes.                                                    | movement                |
 | **Manual Adjustment**       | A user-entered correction or annotation that changes a recorded value outside a normal execution event.                                    | correction              |
 | **Dashboard**               | A presentation surface for reviewing a focused set of Numisma records.                                                                     | perspective             |
+| **Durable Log**             | The append-only, ordered record of material actions (`events.jsonl`, layered on Genesis) that is the source of truth for portfolio history — git-ignored and resolved via `NUMISMA_DATA_DIR`, versioned in the Log History repo. Nothing is ever edited in place: current state and every as-of view are derived from it by Fold. Untrusted events must clear the ingest gate before they reach it. See ADR-003. | database, event table, snapshot store |
+| **Genesis**                 | The immutable seed `FundReviewData` at t0 (`genesis.json`) — the start of recorded history, which the Durable Log is layered on. A Fold as-of a date strictly *before* `genesis.review.asOf` throws rather than answering: relabelling the whole genesis composition with a date on which it did not yet exist would be misleading, not merely degenerate. See ADR-003. | initial state, migration, seed data |
+| **Fold**                    | The pure derivation of state from history: Genesis plus the Durable Log's events, applied in `asOf` order and then log order so same-day events resolve by the order they were appended, producing a `FundReviewData` read model as of a point in time (`foldEvents`, `packages/engine/src/events/fold.ts`). It is the **one** canonical derivation — `buildCompositionReport` and the whole dashboard consume its output unchanged, and since ADR-015 the ingest gate projects that output rather than mirroring its transitions, so a change to the Fold moves what the gate admits and not only what the dashboard shows. The result shares no mutable state with Genesis. See ADR-003 and ADR-015. | reduce, projection, rebuild |
 | **Head Digest**             | A derived, versioned summary of the folded head — `fundValueUsd` from the canonical composition report, open/closed Position counts, head event id, and the writing app version. Re-derivable, committed alongside the durable log on each ingest (`head-digest.json`), overwritten in place, and never a source of truth (no engine reader folds it back). See ADR-006 and the ADR-003 Head Digest amendment. | checkpoint, snapshot    |
 | **Log History**             | The private sibling git repository (`~/Dev/<fund>`) that versions the durable log — `genesis.json`, `events.jsonl`, `preferences.jsonl`, `orders.jsonl`, and the Head Digest — giving the git-ignored log a restorable, provenance-stamped history; discovered via `NUMISMA_DATA_DIR`. See ADR-006 (`orders.jsonl` joined the tracked-file allowlist as its fifth member). | backup, data folder     |
 
@@ -135,6 +138,9 @@ event log at the separate **Mark Cadence**. Candle intervals are never called
 - An **Order** encumbers the availability of exactly one **Reserve** and changes
   that Reserve's value only by filling — at which point it stops being an
   **Order** and becomes a **Lot** in a **Position**.
+- A **Fold** derives a read model from exactly one **Genesis** plus the
+  **Durable Log**; it is the only path from history to state.
+- A **Head Digest** summarises the output of a **Fold** and is never folded back.
 - A **Perspective** never owns capital.
 - A **Close** can exist at **Fund** level or **Portfolio** level.
 - **Execution Mode** controls whether performance can contribute to canonical
