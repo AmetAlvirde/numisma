@@ -119,18 +119,24 @@ The original decision reads as a decision about `preferences.jsonl`. It was
 always a decision about a **kind of artifact**, and ADR-013's `orders.jsonl` is
 the second member of that kind. The class is:
 
-> **Counting note, added 2026-08-10.** There are TWO counts in this record and they do
-> not agree, which is not an error in either: **sidecar-class membership** counts
-> `preferences.jsonl` (1), `orders.jsonl` (2), `plans.jsonl` (3); **durable artifacts**
-> counts `events.jsonl` first, which is why ADR-013 correctly calls `orders.jsonl`
-> "a third durable artifact" while this ADR correctly calls it the second member. The
-> event log is deliberately NOT in the class — that is this amendment's whole point.
-> `plans.jsonl` shipped calling itself the class's "fourth member" in five places by
-> crossing the two; say which count you mean.
-
 > **A durable, append-only, git-versioned file beside the event log, carrying its
 > own on-load validation contract, joined to the fold at read time by a pure
 > selector, and never folded.**
+
+> **Counting note, added 2026-08-10.** There are THREE counts in this record and they
+> do not all agree, which is not an error in any of them: **sidecar-class membership**
+> counts `preferences.jsonl` (1), `orders.jsonl` (2), `plans.jsonl` (3); **durable
+> artifacts** counts `events.jsonl` first, which is why ADR-013 correctly calls
+> `orders.jsonl` "a third durable artifact" while this ADR correctly calls it the
+> second member; and **tracked files** — ADR-006's `.gitignore` allowlist /
+> `TRACKED_FILES` census (INDEX.md's ADR-006 row) — counts `genesis.json`,
+> `events.jsonl`, `preferences.jsonl`, `head-digest.json`, `orders.jsonl`,
+> `plans.jsonl`, making `plans.jsonl` the **sixth** tracked file under that count. The
+> event log is deliberately NOT in the sidecar class — that is this amendment's whole
+> point. `plans.jsonl` shipped calling itself the class's "fourth member" in five places
+> by crossing the first two counts above; say which count you mean. (This note does not
+> attempt to reconcile ADR-006's "sixth tracked file" and this ADR's "third member"
+> under one shared vocabulary — that is a separate, larger edit than naming the axes.)
 
 Membership is not about the data being small, or configuration-shaped, or
 private. It is about the artifact being durable truth that **NAV must not fold
@@ -282,7 +288,7 @@ check this ADR says must precede narrowing a durable artifact. It was run, not a
   **The exemption is about GRANULARITY only — clarified 2026-08-10, fix-forward on
   this increment's review.** As first written this bullet leaned on `observedAt` being
   "an OBSERVATION time" rather than an as-of selection key, and that reasoning does not
-  survive its own rule: `observedAt` **is** selected on — `pickOpenOrdersAsOf` compares
+  survive its own rule: `observedAt` **is** selected on — `pickRestingOrdersAsOf` compares
   those strings to answer "what was resting on date X" — so the general rule reaches it
   and the exemption cannot rest on it being outside the rule's scope. It rests instead
   on the narrower and true claim: a fixed-width second-granular stamp **satisfies** the
