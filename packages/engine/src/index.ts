@@ -309,7 +309,12 @@ export { addDays, daysBetween } from "./calendar.js";
 // durable DECLARATION OF INTENT per position, recorded BESIDE the log and never
 // folded. Pure declarations only: the record contract, the strict calendar-date
 // predicate, and the two closed vocabularies. The file IO lives in
-// `@numisma/preferences`, per ADR-001; the as-of selectors are a later slice.
+// `@numisma/preferences`, per ADR-001.
+//
+// Beside them, the pure as-of SELECTORS: `pickPlanAsOf` answers for one position and
+// `listPlansAsOf` for every position the sidecar names, both through the five-arm
+// `PlanLookup` union — a type, not a convention, so a caller cannot reach `plan`
+// without first naming the status.
 //
 // MANUAL BLOCK, exactly like the orders one above and for the same reason: this
 // list is NOT derived from the `PlanRecord` union, so a kind added to the union is
@@ -327,8 +332,19 @@ export type {
   PlanSkipReason,
   SkippedPlanLine,
   LoadedPlans,
+  ActivePlan,
+  LoadedNoPlanRecord,
+  PlanLookup,
+  PlanRow,
+  PlansAsOf,
 } from "./plans.js";
-export { PLAN_KINDS, DCA_CADENCES, isIsoCalendarDate } from "./plans.js";
+export {
+  PLAN_KINDS,
+  DCA_CADENCES,
+  isIsoCalendarDate,
+  pickPlanAsOf,
+  listPlansAsOf,
+} from "./plans.js";
 
 // The ONE pure resolver for the durable ledger's data root, honoring the
 // `NUMISMA_DATA_DIR` env override with an absolute, homedir-derived accumulus
