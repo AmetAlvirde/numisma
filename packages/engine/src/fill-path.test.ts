@@ -27,6 +27,14 @@
  *   - the positive-and-finite gate on the three measured figures → emitting them
  *     unconditionally: the no-zero invariant fails with `deployedUsd: 0` on the fixture
  *     that has no lots at all.
+ *   - `claimed.add` moved back inside the joined branch, so only a HONORED declaration
+ *     claims its order: all three `a declaration is never overridden` tests fail, each
+ *     with the declared order seated on r3 by its price.
+ *   - the orphan join keyed on `lot.cost` against the declared prices again: 7 tests fail,
+ *     including `explains a booked lot whose per-unit cost does not land on the declared
+ *     price` — a correctly booked fill reported as an orphan.
+ *   - the retired-placement pass skipped: the cancelled rung reads `bookedQuantity: 0`
+ *     and its lot is orphaned while `deployedUsd` still counts it (2 tests).
  *   - `waitingRestingUsd` also counting a rung that was DECLARED and never placed: it reads
  *     4200 against the resting 2700 and 6500 on day zero, collapsing into
  *     `waitingDeclaredUsd`. That collapse is exactly the hidden encumbrance the split
@@ -233,6 +241,189 @@ describe("@numisma/engine reconcileFillPath — the join and its provenance", ()
     const view = reconcileFillPath(input());
 
     expect(view.orphans).toEqual([{ lot: ORPHAN_LOT, label: "orphan" }]);
+  });
+});
+
+/**
+ * A DECLARATION THIS LADDER CANNOT HONOR IS STILL A DECLARATION. Each case below is a
+ * line the operator ratified onto an append-only file; none of them may be handed to the
+ * price matcher, because seating a declared order on a rung nobody named is precisely the
+ * inference the declared join was built to remove.
+ */
+describe("@numisma/engine reconcileFillPath — a declaration is never overridden", () => {
+  const OTHER_PLAN = "00000000-0000-4000-8000-000000000009";
+
+  it("does not price-match an order that declares ANOTHER ladder onto this one", () => {
+    const view = reconcileFillPath(
+      input({
+        orders: [
+          placed({ id: "order:0009", price: 13000, planId: OTHER_PLAN, rungId: "r1" }),
+        ],
+        lots: [],
+      }),
+    );
+
+    expect(rungById(view, "r3").joinProvenance).toBeUndefined();
+    expect(rungById(view, "r3").venueAxis).toBe("not-placed");
+    expect(view.rungs.every((row) => row.orderId === undefined)).toBe(true);
+  });
+
+  it("does not re-seat a second order declaring an already-claimed rung", () => {
+    const view = reconcileFillPath(
+      input({
+        orders: [
+          placed({ id: "order:0001", price: 11000, planId: PLAN_ID, rungId: "r1" }),
+          // Same rung declared twice — the pick-list's own duplicate-proposal hole. The
+          // second line joins to NOTHING; it must not slide onto r3 by its price.
+          placed({ id: "order:0002", price: 13000, planId: PLAN_ID, rungId: "r1" }),
+        ],
+        lots: [],
+      }),
+    );
+
+    expect(rungById(view, "r1").orderId).toBe("order:0001");
+    expect(rungById(view, "r3").joinProvenance).toBeUndefined();
+    expect(rungById(view, "r3").venueAxis).toBe("not-placed");
+  });
+
+  it("does not price-match an order declaring a rung this ladder does not have", () => {
+    // A stale pick after a supersession, or a typo. Unjoinable is the honest answer.
+    const view = reconcileFillPath(
+      input({
+        orders: [placed({ id: "order:0003", price: 13000, planId: PLAN_ID, rungId: "zzz" })],
+        lots: [],
+      }),
+    );
+
+    expect(rungById(view, "r3").joinProvenance).toBeUndefined();
+    expect(rungById(view, "r3").venueAxis).toBe("not-placed");
+  });
+
+  it("still price-matches a line that declares NOTHING — the permanent fallback", () => {
+    const view = reconcileFillPath(
+      input({ orders: [placed({ id: "order:0003", price: 13000 })], lots: [] }),
+    );
+
+    expect(rungById(view, "r3").joinProvenance).toBe("price-matched");
+  });
+});
+
+/**
+ * THE ORPHAN SET IS A JOIN FAILURE, SO IT JOINS ON ORDER IDENTITY. `PositionLot.cost` is
+ * `fundingAmount / filledQuantity` — a quotient of the cash that really left the reserve,
+ * not a price — so comparing it against a declared limit by float equality manufactures
+ * orphans on the ordinary path. The lot's `quantity` is the `orderFilled` line's own
+ * `filledQuantity`, copied through `buildFillAct` without arithmetic, which is why THAT
+ * is the exact correspondence.
+ */
+describe("@numisma/engine reconcileFillPath — orphans join on the order, not on a price", () => {
+  function bookedAt(cost: number, quantity = 0.1): FillPathInput {
+    return input({
+      orders: [
+        placed({ id: "order:0001", price: 11000, quantity, planId: PLAN_ID, rungId: "r1" }),
+        filled("order:0001", "2026-02-02T10:00:00", quantity),
+      ],
+      lots: [{ quantity, cost, tier: "c1" }],
+    });
+  }
+
+  it("explains a booked lot whose per-unit cost does not land on the declared price", () => {
+    // The ACCEPT-THE-DEFAULT path: the prompt offers `price × quantity` as the funding
+    // amount, the lot divides it back down, and the quotient is not the price it came
+    // from. Roughly one plausible quantity in twelve does this; no fee required.
+    const quantity = 0.00019;
+    const drifted = (11000 * quantity) / quantity;
+    expect(drifted).not.toBe(11000);
+
+    expect(reconcileFillPath(bookedAt(drifted, quantity)).orphans).toEqual([]);
+  });
+
+  it("explains a booked lot the venue debited at something other than the limit", () => {
+    // A fill at better than limit, or with a fee — both entirely ordinary.
+    expect(reconcileFillPath(bookedAt(11033.742331288344)).orphans).toEqual([]);
+  });
+
+  it("still reports a lot no booked fill accounts for", () => {
+    const view = reconcileFillPath(bookedAt(11000));
+    expect(view.orphans).toEqual([]);
+
+    const extra: PositionLot = { quantity: 0.07, cost: 11000, tier: "c2" };
+    const withExtra = reconcileFillPath({
+      ...bookedAt(11000),
+      lots: [{ quantity: 0.1, cost: 11000, tier: "c1" }, extra],
+    });
+    // The cost sits exactly on a declared rung price and it is STILL an orphan: nothing
+    // the fund booked stands for it. A price was never the question.
+    expect(withExtra.orphans).toEqual([{ lot: extra, label: "orphan" }]);
+  });
+
+  it("explains each booked fill ONCE — two identical lots, one fill", () => {
+    const lot: PositionLot = { quantity: 0.1, cost: 11000, tier: "c1" };
+    const view = reconcileFillPath({ ...bookedAt(11000), lots: [lot, { ...lot }] });
+
+    expect(view.orphans).toHaveLength(1);
+  });
+});
+
+/**
+ * FINDING: a rung cancelled after a booked partial read `declared — not placed` with
+ * `bookedQuantity: 0`, while the very same lot was counted in `deployedUsd` — the two
+ * halves of one card disagreeing over an entirely ordinary DCA lifecycle.
+ */
+describe("@numisma/engine reconcileFillPath — a cancelled rung keeps its booking", () => {
+  function cancelledAfterPartial(): FillPathInput {
+    return input({
+      orders: [
+        placed({ id: "order:0001", price: 11000, quantity: 0.1, planId: PLAN_ID, rungId: "r1" }),
+        filled("order:0001", "2026-02-02T10:00:00", 0.04),
+        {
+          kind: "orderCancelled",
+          id: "order:0001",
+          observedAt: "2026-02-03T10:00:00",
+          currency: "USD",
+        } as OrderRecord,
+      ],
+      lots: [{ quantity: 0.04, cost: 11000, tier: "c1" }],
+    });
+  }
+
+  it("reports the booked quantity rather than an unplaced rung the fund bought against", () => {
+    const row = rungById(reconcileFillPath(cancelledAfterPartial()), "r1");
+
+    expect(row.bookedQuantity).toBe(0.04);
+    expect(row.orderId).toBe("order:0001");
+    expect(row.bookAxis).toBe("recorded");
+    expect(row.label).not.toBe("declared — not placed");
+    // The claim DID leave the book, and the venue axis still says so.
+    expect(row.venueAxis).toBe("not-placed");
+    expect(row.resting).toBe(false);
+  });
+
+  it("explains that rung's lot instead of orphaning capital it just counted", () => {
+    const view = reconcileFillPath(cancelledAfterPartial());
+
+    expect(view.orphans).toEqual([]);
+    expect(view.figures.deployedUsd).toBeCloseTo(0.04 * 11000, 10);
+  });
+
+  it("leaves a cancelled rung with NOTHING booked as declared — not placed", () => {
+    const view = reconcileFillPath(
+      input({
+        orders: [
+          placed({ id: "order:0001", price: 11000, quantity: 0.1, planId: PLAN_ID, rungId: "r1" }),
+          {
+            kind: "orderCancelled",
+            id: "order:0001",
+            observedAt: "2026-02-03T10:00:00",
+            currency: "USD",
+          } as OrderRecord,
+        ],
+        lots: [],
+      }),
+    );
+
+    expect(rungById(view, "r1").label).toBe("declared — not placed");
+    expect(rungById(view, "r1").joinProvenance).toBeUndefined();
   });
 });
 
