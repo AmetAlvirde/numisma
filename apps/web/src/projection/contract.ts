@@ -137,6 +137,69 @@ export interface GlanceBlock {
 }
 
 /**
+ * The DCA branch (spec #277) — the plans sidecar's as-of roster, narrowed to what a
+ * phone glance can honestly show. DECLARED HERE, NOT YET ON THE WIRE: slice 1 defines
+ * the shape and the builder; the cutover that adds it to {@link ProjectionReport},
+ * latches it in {@link ProjectionKeyAllowList} and pays the version bump is slice 2.
+ *
+ * PROJECTION-OWNED, like {@link GlanceBlock} and for the same reason: the engine must
+ * stay unaware that a cloud exists, so the "what may leave the machine" narrowing
+ * lives on the web side. `DcaWireRung` deliberately does NOT reuse the engine's
+ * `DcaRung` (`{ id, priceUsd, sizeUsd }`) — that is a different shape, and it stays
+ * off the wire whole.
+ *
+ * NO DATE-SHAPED VALUE ANYWHERE IN THIS BRANCH. `effectiveAt` is a desk fact
+ * (`pnpm plans` shows it), and three deliberate invariants depend on the payload
+ * carrying exactly one date: `push/projection-payload.test.ts`,
+ * `push/anchor-fixture.test.ts`, and ADR-007's prose form.
+ */
+export interface DcaBlock {
+  /**
+   * The loader's WHOLE-FILE outcome, which the per-row states cannot express: with
+   * zero rows enumerable there is no row to carry a discriminant. A missing file is
+   * `loaded`-with-empty — the normal starting state — while a real read error is
+   * `load-failed`, mapped here to `"unreadable"`. Without this field the wire renders
+   * a failed read as "no plans", the exact lie the engine names at `plans.ts:254-258`.
+   */
+  source: "loaded" | "unreadable";
+  /**
+   * One row per position the sidecar names, in the roster's first-mention file order.
+   * Rows whose lookup is `none` are OMITTED — absence is the encoding, and `none`
+   * never appears on the wire (`D5`).
+   */
+  positions: DcaPositionRow[];
+  /**
+   * The COUNT of file-global skipped lines, never their content. Same discipline as
+   * the glance block's conclusions: ship the conclusion, not the inputs.
+   */
+  unattributable: number;
+}
+
+/** One position's plan status at one anchor — a conclusion, never the fold inputs. */
+export interface DcaPositionRow {
+  positionId: string;
+  /**
+   * The engine's five-arm `PlanLookup` minus `none`. `pending` means DECLARED, NOT
+   * YET REALIZED (day zero renders the state word, never `$0`); `active` means the
+   * plan is in force, which is a statement about policy and not about activity.
+   */
+  state: "pending" | "active" | "ended" | "unreadable";
+  /** Present on `pending` and `active` rows only — the arms that carry a plan. */
+  kind?: "dcaLadder" | "dcaTime";
+  /** Present on `pending`/`active` `dcaLadder` rows only. Absent, never empty. */
+  rungs?: DcaWireRung[];
+}
+
+/**
+ * A rung narrowed to its PRICE AXIS alone. The card IS the price axis; `sizeUsd` is a
+ * capital figure with no phone-glance use, and `id` is a join key for a fill export
+ * that does not exist yet. Omitting both also halves the fixture-sanitization surface.
+ */
+export interface DcaWireRung {
+  priceUsd: number;
+}
+
+/**
  * THE ONE DECLARED HOME for the three header suppression keys — the closed set of
  * standing numbers D3 names, spelled here and nowhere else (audit finding 7).
  *
