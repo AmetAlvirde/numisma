@@ -15,7 +15,7 @@ const SESSION_COOKIE = "numisma.session_token=abc123.sig456";
 const SNAPSHOT: SnapshotHistory = {
   status: "stale",
   storedVersion: 99,
-  expectedVersion: 1,
+  expectedVersions: { min: 4, max: 5 },
 };
 
 /**

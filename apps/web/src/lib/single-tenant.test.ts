@@ -37,7 +37,7 @@ describe("single-tenant: an anonymous visitor reaches no fund data", () => {
   const SNAPSHOT: SnapshotHistory = {
     status: "stale",
     storedVersion: 99,
-    expectedVersion: 1,
+    expectedVersions: { min: 4, max: 5 },
   };
 
   it("redirects to /login (zero-byte body) and never reads the snapshot", async () => {

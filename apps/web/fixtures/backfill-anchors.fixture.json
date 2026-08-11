@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "anchors": [
     {
       "fundId": "sanitized-exploratory-fund",
@@ -15988,30 +15988,39 @@
               "kind": "dcaLadder",
               "rungs": [
                 {
+                  "id": "rung-1",
                   "priceUsd": 9962.55
                 },
                 {
+                  "id": "rung-2",
                   "priceUsd": 9365.53
                 },
                 {
+                  "id": "rung-3",
                   "priceUsd": 8801.52
                 },
                 {
+                  "id": "rung-4",
                   "priceUsd": 8274.08
                 },
                 {
+                  "id": "rung-5",
                   "priceUsd": 7775.81
                 },
                 {
+                  "id": "rung-6",
                   "priceUsd": 7309.83
                 },
                 {
+                  "id": "rung-7",
                   "priceUsd": 6869.63
                 },
                 {
+                  "id": "rung-8",
                   "priceUsd": 6457.95
                 }
-              ]
+              ],
+              "planId": "00000000-0000-4000-8000-000000000001"
             }
           ]
         }
