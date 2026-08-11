@@ -15983,33 +15983,33 @@
           "unattributable": 0,
           "positions": [
             {
-              "positionId": "dca-btc-accumulation-A-bitget",
+              "positionId": "synthetic-position-1",
               "state": "pending",
               "kind": "dcaLadder",
               "rungs": [
                 {
-                  "priceUsd": 9907.61
+                  "priceUsd": 9962.55
                 },
                 {
-                  "priceUsd": 9312.42
+                  "priceUsd": 9365.53
                 },
                 {
-                  "priceUsd": 8752.98
+                  "priceUsd": 8801.52
                 },
                 {
-                  "priceUsd": 8227.15
+                  "priceUsd": 8274.08
                 },
                 {
-                  "priceUsd": 7737.79
+                  "priceUsd": 7775.81
                 },
                 {
-                  "priceUsd": 7272.95
+                  "priceUsd": 7309.83
                 },
                 {
-                  "priceUsd": 6836.04
+                  "priceUsd": 6869.63
                 },
                 {
-                  "priceUsd": 6425.37
+                  "priceUsd": 6457.95
                 }
               ]
             }
