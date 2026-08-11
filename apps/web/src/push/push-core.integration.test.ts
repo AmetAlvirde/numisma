@@ -169,9 +169,9 @@ describe.skipIf(!runIntegration)(
  * `loadCurrentFold` — the exact source the `push` command now uses — and
  * asserts the two properties the fixture block never did:
  *
- *  - R4: the pushed `report` JSONB carries EXACTLY `totals`, `dashboard` and `glance`. The
- *    payload's WIDTH, asserted on the stored row rather than on the derivation,
- *    so the narrowing is proven where it matters — in the cloud.
+ *  - R4: the pushed `report` JSONB carries EXACTLY `totals`, `dashboard`, `glance`
+ *    and `dca`. The payload's WIDTH, asserted on the stored row rather than on the
+ *    derivation, so the narrowing is proven where it matters — in the cloud.
  *  - R3: a second push over the SAME unchanged log leaves exactly one row with an
  *    identical payload; only `pushed_at` moves.
  */
@@ -209,7 +209,7 @@ describe.skipIf(!runIntegration)("real-fold push (folds the durable log)", () =>
     await db?.drop();
   });
 
-  it("R4: the pushed report JSONB carries exactly `totals`, `dashboard` and `glance`", async () => {
+  it("R4: the pushed report JSONB carries exactly `totals`, `dashboard`, `glance` and `dca`", async () => {
     const { report } = await loadCurrentFold();
     // Sanity: the fold really ran — asOf is the LATER event's date, not genesis.
     expect(report.dashboard.summary.asOf).toBe("2026-06-09");
@@ -222,6 +222,7 @@ describe.skipIf(!runIntegration)("real-fold push (folds the durable log)", () =>
     const stored = await readRow(writerPool, fundId, asOf);
     expect(Object.keys(stored.report).sort()).toEqual([
       "dashboard",
+      "dca",
       "glance",
       "totals",
     ]);
