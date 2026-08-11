@@ -103,6 +103,38 @@ export function pickRestingOrdersAsOf(records: OrderRecord[], asOf?: string): Re
   return resting;
 }
 
+/**
+ * THE AS-OF BOUNDARY ON A WHOLE STREAM: every line the given date could have known
+ * about, in FILE ORDER, and nothing after it.
+ *
+ * WHY A READER NEEDS THIS WHEN {@link foldOrderStream} ALREADY TAKES AN `asOf`. The
+ * fill-path reconciliation reads the stream twice — through the fold, and through
+ * {@link bookedFills} — and only the fold has a boundary parameter. So a caller asking a
+ * HISTORICAL question (the push's backfill replays every anchor the log holds) cannot
+ * get one by handing a date down: it has to bound the stream first, once, and hand the
+ * bounded stream to everything. A June anchor reporting an August fill is otherwise
+ * exactly what comes out, and it would look like data rather than like a bug.
+ *
+ * ONE SPELLING OF THE DAY-WIDENING RULE, which is the other reason this is here and not
+ * in the caller: {@link upperBound} is subtle, its absence is silent, and it has cost
+ * this repo a wrong answer before. Filtering inline at a call site would be a second
+ * copy of it, free to drift.
+ *
+ * A FILTER AND NOTHING MORE. It does not sort: replay order is the fold's contract
+ * (see {@link pickRestingOrdersAsOf}), and a second ordering rule in front of it would
+ * be one more thing that can disagree with the one that counts.
+ */
+export function selectOrdersThrough(
+  records: readonly OrderRecord[],
+  asOf?: string,
+): OrderRecord[] {
+  if (asOf === undefined) {
+    return [...records];
+  }
+  const bound = upperBound(asOf);
+  return records.filter((record) => record.observedAt <= bound);
+}
+
 /** One rung as the four-verb fold left it: the placement line and its running baseline. */
 export interface FoldedRung {
   placed: OrderPlacedRecord;
