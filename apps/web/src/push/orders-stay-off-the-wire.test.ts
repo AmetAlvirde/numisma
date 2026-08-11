@@ -104,8 +104,16 @@ describe("`Q7` — nothing from this increment reaches the phone", () => {
 
   it("no projection or push source carries a committed/available/rung field name", () => {
     const sources = projectionSources();
+    // THE RUNG MARKER IS ORDERS-QUALIFIED, and was narrowed deliberately. Its target
+    // has always been ORDERS-COMMITTED capital reaching the wire under a renamed
+    // field — not the word `rungs`. The generic `\brungs?\s*[:,)]` form could not
+    // survive spec #277 slice 1: plan-DECLARED ladders now legitimately name `rungs`
+    // in push and projection source (`push/dca-block.ts`, the projection's own
+    // `DcaBlock`), because the DCA branch derives its rungs from the plans sidecar,
+    // which is a declaration of intent and not an order. Orders-DERIVED rung capital
+    // remains banned, here and in ORDERS_SYMBOLS above.
     const markers =
-      /\b(availableCapital|committedRungs|committedByReserve|fundingReserveId|restingOrder)\b|[.:]\s*committed\b|\brungs?\s*[:,)]/i;
+      /\b(availableCapital|committedRungs|committedByReserve|fundingReserveId|restingOrder)\b|[.:]\s*committed\b|\b[a-z]*(?:committed|resting|order)[a-z]*rungs?\s*[:,)]|\brungs?(?:committed|resting|order)[a-z]*\s*[:,)]/i;
     const hits = sources
       .filter((file) => markers.test(file.source))
       .map((file) => file.path);
