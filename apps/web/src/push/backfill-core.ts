@@ -80,8 +80,9 @@ import {
   serializeAnchorFixture,
 } from "./anchor-fixture.ts";
 import { synthesizeAnchors } from "./fixture-synthesis.ts";
-import type { GlanceBlock, SnapshotAnchor } from "../projection/contract.ts";
+import type { DcaBlock, GlanceBlock, SnapshotAnchor } from "../projection/contract.ts";
 import {
+  buildDcaForAnchor,
   buildGlanceForAnchor,
   deriveSnapshot,
   loadCurrentFold,
@@ -199,6 +200,7 @@ export interface BackfillOptions {
 export async function foldAnchor(asOf: string): Promise<{
   report: CompositionReport;
   glance: GlanceBlock;
+  dca: DcaBlock;
 }> {
   const fold = await loadCurrentFold(asOf);
   const folded = fold.report.dashboard.summary.asOf;
@@ -208,7 +210,14 @@ export async function foldAnchor(asOf: string): Promise<{
         `write a row keyed to a date that was not requested.`,
     );
   }
-  return { report: fold.report, glance: await buildGlanceForAnchor(fold) };
+  return {
+    report: fold.report,
+    glance: await buildGlanceForAnchor(fold),
+    // As-of, per anchor, exactly like the floor beside it: an anchor that predates a
+    // plan's `effectiveAt` resolves `none` and lands an honestly empty branch. No
+    // special-casing, and no historical row claiming a strategy that did not exist yet.
+    dca: await buildDcaForAnchor(fold),
+  };
 }
 
 /**
@@ -227,14 +236,14 @@ export async function runBackfill(
   const anchors = await enumerateAnchors(options.paths);
   const results: BackfilledAnchor[] = [];
   for (const [index, asOf] of anchors.entries()) {
-    const { report, glance } = await foldAnchor(asOf);
+    const { report, glance, dca } = await foldAnchor(asOf);
     // One derivation either way: with a pool `upsertSnapshot` derives and writes
     // and hands the derivation back; without one `deriveSnapshot` is that same
     // pure call with the write removed. The payload captured in `results` — and
     // therefore in the fixture — is byte-for-byte what a write would have stored.
     const derived = options.pool
-      ? await upsertSnapshot(options.pool, report, glance)
-      : deriveSnapshot(report, glance);
+      ? await upsertSnapshot(options.pool, report, glance, dca)
+      : deriveSnapshot(report, glance, dca);
     const anchor: BackfilledAnchor = { ...derived, written: !!options.pool };
     results.push(anchor);
     options.onAnchor?.(anchor, index, anchors.length);

@@ -28,7 +28,10 @@
  *  - the full STRUCTURAL shape: section ids/titles/order, row ids/kinds/labels/order,
  *    row counts, which rows carry `costBasisUsd`/`unrealizedPnlUsd` and which
  *    genuinely lack them (spec open question 3 — slice 5's per-row cost-basis
- *    rendering depends on the absences being real), `dataSafety`, schema version.
+ *    rendering depends on the absences being real), `dataSafety`, schema version;
+ *  - the `dca` branch's SHAPE ENTIRELY: `source`, every `positionId`, every `state`
+ *    and `kind`, the rung COUNT per position, and the `unattributable` count. Those
+ *    are states and counts, the same class as `feedGap`, and the card renders them.
  *
  * ── WHAT IS INVENTED, AND WHY IT MUST BE ────────────────────────────────────────
  * Everything no trigger reads. Preserving these would leak the fund's composition
@@ -42,7 +45,12 @@
  *    signal, at a glance, that nothing in this file is a real position;
  *  - the fund ID, which is re-derived as the slug of that synthetic name rather than
  *    carried over. It is not a magnitude, but it WAS the real fund's identifier, and
- *    it appeared on every anchor of a file this public repository checks in.
+ *    it appeared on every anchor of a file this public repository checks in;
+ *  - every rung `priceUsd` in the `dca` branch. A declared rung price is the operator's
+ *    intended entry level — a magnitude, and one ADR-006 explicitly notes is the same
+ *    shape as a stop level — so it falls under the magnitudes rule with everything
+ *    else. The COUNT and the ORDER survive because the card is a rung table; the
+ *    LEVELS are invented from {@link SYNTHETIC_RUNG_TOP} down.
  *
  * ── WHAT THIS IS NOT ────────────────────────────────────────────────────────────
  * This is not de-identification, and the committed fixture is not identity-clean.
@@ -119,7 +127,7 @@ import type {
   DashboardFocus,
   DashboardSection,
 } from "@numisma/engine";
-import type { SnapshotAnchor } from "../projection/contract.ts";
+import type { DcaBlock, SnapshotAnchor } from "../projection/contract.ts";
 import { fundIdOf } from "../projection/contract.ts";
 import { NAV_MOVE_THRESHOLD_PCT } from "../glance/verdict.ts";
 
@@ -185,6 +193,52 @@ function fundIdOfName(fundName: string): string {
  * would produce if it were re-run.
  */
 export const SYNTHETIC_FUND_ID = fundIdOfName(SYNTHETIC_FUND_NAME);
+
+/**
+ * The round, obviously fictional price the synthetic rung ladder starts at, and the
+ * fraction each rung steps down by. A DCA ladder's shape is "a descending sequence of
+ * limits", so the synthetic one is generated as exactly that and nothing more: the
+ * count and the ordering are real, the levels are not.
+ *
+ * A deterministic per-rung wobble (drawn from {@link hashUnit} on the anchor date and
+ * the position id, like every other invented number here) keeps the values from
+ * reading as an arithmetic sequence, and is far smaller than the step, so it can never
+ * reorder two rungs.
+ */
+const SYNTHETIC_RUNG_TOP = 10_000;
+const RUNG_STEP = 0.06;
+const RUNG_WOBBLE = 0.01;
+
+/**
+ * Synthesize the DCA branch: every state, count and identifier VERBATIM, every rung
+ * price invented.
+ *
+ * `source`, `positionId`, `state`, `kind` and `unattributable` are copied because they
+ * are conclusions with no magnitude in them — the same reasoning that copies the
+ * `glance` block whole. Only `priceUsd` is replaced, and it is replaced positionally
+ * so that a ladder of eight rungs stays a ladder of eight rungs: the card under test
+ * renders a row per rung, and a synthesis that changed the count would change what the
+ * fixture proves.
+ *
+ * The rung ORDER is left where it was found. This module never sorts; the view does.
+ */
+function synthesizeDca(dca: DcaBlock, asOf: string): DcaBlock {
+  return {
+    source: dca.source,
+    unattributable: dca.unattributable,
+    positions: dca.positions.map((position) => {
+      const synthetic = { ...position };
+      if (position.rungs !== undefined) {
+        synthetic.rungs = position.rungs.map((_rung, index) => {
+          const wobble = RUNG_WOBBLE * (2 * hashUnit(asOf, position.positionId, `rung-${index}`) - 1);
+          const level = SYNTHETIC_RUNG_TOP * (1 - RUNG_STEP * index) * (1 + wobble);
+          return { priceUsd: Math.round(level * 100) / 100 };
+        });
+      }
+      return synthetic;
+    }),
+  };
+}
 
 /** Each rank holds this fraction of the one above it, before the wobble. */
 const RANK_DECAY = 0.72;
@@ -515,7 +569,7 @@ function assertDescending(sectionId: string, rows: CompositionRow[]): void {
 
 /** Synthesize ONE anchor onto a given synthetic NAV. */
 function synthesizeAnchor(anchor: SnapshotAnchor, nav: number): SnapshotAnchor {
-  const { dashboard, totals, glance } = anchor.report;
+  const { dashboard, totals, glance, dca } = anchor.report;
   const asOf = anchor.asOf;
 
   // The one preserved percentage, taken from the summary's own Reserve reference so
@@ -585,6 +639,8 @@ function synthesizeAnchor(anchor: SnapshotAnchor, nav: number): SnapshotAnchor {
       // Copied, never recomputed: `feedGap` and `suppressed` ARE the triggers slice 4
       // replays, and they carry no magnitude to sanitize (D14 already forbids dates).
       glance: structuredClone(glance),
+      // States and counts verbatim, rung LEVELS invented — see `synthesizeDca`.
+      dca: synthesizeDca(dca, asOf),
     },
   };
 }

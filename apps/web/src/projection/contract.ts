@@ -245,6 +245,13 @@ export const SUPPRESSION_KEYS = {
  */
 export type ProjectionReport = Pick<CompositionReport, "totals" | "dashboard"> & {
   glance: GlanceBlock;
+  /**
+   * The DCA branch (spec #277) — the plans sidecar's as-of roster, narrowed by
+   * `push/dca-block.ts`. Projection-authored for the same reason `glance` is: the
+   * engine stays at ZERO contract change, and deleting this key deletes the feature
+   * and nothing else.
+   */
+  dca: DcaBlock;
 };
 
 /** Resolves to `T` only when `T` is `true`; otherwise the alias itself errors. */
@@ -311,6 +318,21 @@ type ProjectionRow = ElementOf<ProjectionSection["rows"]>;
  * no runtime value and is erased at build.
  */
 export type ProjectionKeyAllowList = {
+  /**
+   * THE TOP-LEVEL LATCH — the branch set itself, closed at compile time.
+   *
+   * It did not exist until spec #277 went looking for it, and its absence was a real
+   * hole: every entry below latches the INSIDE of a branch, so a FIFTH top-level
+   * branch could be added to {@link ProjectionReport} and construct cleanly in
+   * {@link toProjectionReport} without one compile-time assert firing. Only the
+   * runtime latches would have caught it, and only if somebody ran the push tests.
+   * A new branch is the single most expensive thing that can happen to this payload
+   * — it is what makes a version bump unavoidable — so it is now the one thing that
+   * cannot happen quietly.
+   */
+  report: Assert<
+    KeysAreExactly<ProjectionReport, "totals" | "dashboard" | "glance" | "dca">
+  >;
   totals: Assert<
     KeysAreExactly<
       ProjectionReport["totals"],
@@ -384,6 +406,19 @@ export type ProjectionKeyAllowList = {
     KeysAreExactly<GlanceBlock["feedGap"], "expected" | "arrived" | "missing">
   >;
   glanceMissing: Assert<KeysAreExactly<GlanceMissingMark, "rowId" | "label">>;
+  /**
+   * The DCA branch. Projection-owned like the glance block above, with the same
+   * compile-time weakness and the same runtime backstop — `push/projection-payload
+   * .test.ts` walks the derived payload and allow-lists every path it finds. What
+   * these three lines buy is the reviewer's-eye declaration that the block is CLOSED:
+   * an `effectiveAt`, a `sizeUsd` or an `endedBy` added to any of the three shapes
+   * fails HERE, named, before anyone has to notice it in a fixture diff.
+   */
+  dca: Assert<KeysAreExactly<DcaBlock, "source" | "positions" | "unattributable">>;
+  dcaPosition: Assert<
+    KeysAreExactly<DcaPositionRow, "positionId" | "state" | "kind" | "rungs">
+  >;
+  dcaRung: Assert<KeysAreExactly<DcaWireRung, "priceUsd">>;
 };
 
 /**
@@ -399,15 +434,23 @@ export type ProjectionKeyAllowList = {
  * honest empty glance: an all-zero `feedGap` asserts "nothing was expected and
  * nothing is missing", which on a real Tuesday outage is the false *no* a triage
  * surface cannot have. A caller that has no glance to give must not push.
+ *
+ * `dca` IS REQUIRED FOR THE SAME REASON, one step sharper: the block's own `source`
+ * field is what separates "the sidecar names no plans" from "the file could not be
+ * read", so a defaulted empty block would manufacture the first answer out of the
+ * absence of any answer at all. There is no honest default; a caller that cannot read
+ * the plans sidecar must not push.
  */
 export function toProjectionReport(
   report: CompositionReport,
   glance: GlanceBlock,
+  dca: DcaBlock,
 ): ProjectionReport {
   return {
     totals: report.totals,
     dashboard: report.dashboard,
     glance,
+    dca,
   };
 }
 
@@ -432,11 +475,26 @@ export function toProjectionReport(
  *    immediately, and leftover v2 rows are simply unresolvable as references until
  *    the backfill upgrades them.
  *
- * C5: a two-sided Reserve range, if it ever ships, arrives as an additive optional
- * `reserveCeilingPct?` — and `suppressed` absorbs new numbers without a shape
- * change. Neither is a v4.
+ *  - v4 — the fourth top-level `dca` branch (spec #277): the plans sidecar's as-of
+ *    roster, narrowed to `{ source, positions, unattributable }` with `priceUsd`-only
+ *    rungs. The engine's contract is again UNCHANGED (C1) — the block is authored
+ *    here, from the engine's pure `listPlansAsOf` selector. A v3 row read by a v4
+ *    reader is `status: "stale"`, and both routes REFUSE to render on the mismatch,
+ *    so the cutover is deliberately hard: deploy, then backfill immediately. The
+ *    backfill is upsert-only, so every existing row is rewritten in place at v4 and
+ *    the row count does not move.
+ *
+ * WHY THIS IS A v4 AND THE GLANCE'S OWN GROWTH WAS NOT. C5 carves out exactly two
+ * additive shapes — an optional `reserveCeilingPct?` beside the floor, and new
+ * strings inside `suppressed` — and both live INSIDE an existing branch whose reader
+ * already walks it. That is why `suppressed` absorbing row ids stayed v3. A NEW
+ * TOP-LEVEL BRANCH is outside those carve-outs by construction: a v3 reader handed
+ * this payload has no code that looks at `dca` at all, so "additive" would describe
+ * the bytes while the reader silently rendered a fund with no visible strategy. The
+ * carve-outs are about fields a stale reader can safely ignore; a branch nobody can
+ * ignore is what the version number is for.
  */
-export const COMPOSITION_SNAPSHOT_SCHEMA_VERSION = 3;
+export const COMPOSITION_SNAPSHOT_SCHEMA_VERSION = 4;
 
 /**
  * Deterministic fund id: slug of the fund name — lowercased, every run of

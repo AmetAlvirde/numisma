@@ -32,6 +32,29 @@ import {
   SYNTHETIC_START_NAV,
 } from "./fixture-synthesis.ts";
 
+/**
+ * The DCA branch of the constructed input. Deliberately recognisable rung prices —
+ * 1000 / 900 / 800, the same trick the row magnitudes use — so a price that survived
+ * synthesis is VISIBLE in the assertion rather than inferred from a distribution. One
+ * row of every arm, so the sweep covers a ladder, a rungless `dcaTime` plan and the
+ * two conclusion-only arms.
+ */
+const DCA = {
+  source: "loaded" as const,
+  positions: [
+    {
+      positionId: "capital-x-btc",
+      state: "pending" as const,
+      kind: "dcaLadder" as const,
+      rungs: [{ priceUsd: 1000 }, { priceUsd: 900 }, { priceUsd: 800 }],
+    },
+    { positionId: "capital-x-eth", state: "active" as const, kind: "dcaTime" as const },
+    { positionId: "capital-x-old", state: "ended" as const },
+    { positionId: "capital-x-bad", state: "unreadable" as const },
+  ],
+  unattributable: 2,
+};
+
 const GLANCE = {
   reserveTargetPct: 10,
   feedGap: {
@@ -139,6 +162,7 @@ function constructedAnchor(asOf: string, nav: number): SnapshotAnchor {
         ],
       },
       glance: structuredClone(GLANCE),
+      dca: structuredClone(DCA),
     },
   } as SnapshotAnchor;
 }
@@ -243,6 +267,43 @@ describe("what survives — the projections slice 4 replays", () => {
     const tiers = out[0]!.report.dashboard.sections.find((s) => s.id === "tiers")!;
     expect(tiers.rows[1]).not.toHaveProperty("unrealizedPnlUsd");
     expect(tiers.rows[1]).toHaveProperty("costBasisUsd");
+  });
+
+  it("keeps the dca branch's STATES and COUNTS verbatim — the card renders them", () => {
+    // Same reasoning that copies the glance block: a `state`, a `kind` and a count of
+    // unreadable lines carry no magnitude, and they are exactly what the card shows.
+    for (const anchor of out) {
+      const dca = anchor.report.dca;
+      expect(dca.source).toBe(DCA.source);
+      expect(dca.unattributable).toBe(DCA.unattributable);
+      expect(dca.positions.map((p) => `${p.positionId}:${p.state}:${p.kind}`)).toEqual(
+        DCA.positions.map((p) => `${p.positionId}:${p.state}:${"kind" in p ? p.kind : undefined}`),
+      );
+      // The rung COUNT is shape, not magnitude: an eight-rung ladder must stay one.
+      expect(dca.positions.map((p) => p.rungs?.length)).toEqual([3, undefined, undefined, undefined]);
+      // …and a rungless plan keeps NO rungs key, rather than gaining an empty array.
+      expect("rungs" in dca.positions[1]!).toBe(false);
+    }
+    // A copy, not the same object — the derived payload the DB write holds must not
+    // be reachable through the fixture.
+    out[0]!.report.dca.positions.push({ positionId: "mutated", state: "ended" });
+    expect(REAL[0]!.report.dca.positions).toHaveLength(DCA.positions.length);
+  });
+
+  it("INVENTS every rung price — a declared entry level is a magnitude", () => {
+    // ADR-006 already observes that a rung price is the same shape as a stop level.
+    // The public repo's bar is magnitudes-never, so the levels are generated and only
+    // the ladder's count and descending ordering survive.
+    const real = new Set(DCA.positions[0]!.rungs!.map((rung) => rung.priceUsd));
+    for (const anchor of out) {
+      const rungs = anchor.report.dca.positions[0]!.rungs!;
+      for (const rung of rungs) {
+        expect(real.has(rung.priceUsd), `rung ${rung.priceUsd} survived`).toBe(false);
+      }
+      expect(rungs.map((rung) => rung.priceUsd)).toEqual(
+        [...rungs.map((rung) => rung.priceUsd)].sort((a, b) => b - a),
+      );
+    }
   });
 
   it("keeps dataSafety and the FX rate — neither is a fund magnitude", () => {
@@ -403,7 +464,10 @@ describe("what does NOT survive — every magnitude, and the fund's identity", (
   it("carries over NO input magnitude anywhere in the payload", () => {
     // The sweep, not a spot check: every number in the input that is a magnitude
     // (rather than a preserved ratio) must be absent from every output payload.
-    const preserved = new Set([20, 100, 17.5, 13, 9, 10, 0]);
+    // Preserved by design, and each one is a ratio, a count or the FX rate — never a
+    // fund magnitude. `2` joins them as the dca branch's `unattributable` COUNT, which
+    // is the same class of value as `feedGap`'s 13 and 9 beside it.
+    const preserved = new Set([20, 100, 17.5, 13, 9, 10, 2, 0]);
     const inputs = new Set(
       numbersIn(REAL).filter((n) => n !== 0 && !preserved.has(n)),
     );
