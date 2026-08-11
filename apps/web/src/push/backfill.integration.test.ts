@@ -181,10 +181,11 @@ describe.skipIf(!runIntegration)("backfill → the projection DB", () => {
     expect(first.map((r) => r.as_of)).toContain("2026-07-25");
   });
 
-  it("every stored payload is exactly `{ totals, dashboard, glance }` (D8)", () => {
+  it("every stored payload is exactly `{ totals, dashboard, glance, dca }` (D8)", () => {
     for (const row of first) {
       expect(Object.keys(row.report).sort(), row.as_of).toEqual([
         "dashboard",
+        "dca",
         "glance",
         "totals",
       ]);
