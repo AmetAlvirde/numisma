@@ -30,9 +30,10 @@
  *    genuinely lack them (spec open question 3 — slice 5's per-row cost-basis
  *    rendering depends on the absences being real), `dataSafety`, schema version;
  *  - the `dca` branch's SHAPE: `source`, every `state` and `kind`, the position COUNT,
- *    the rung COUNT per position, and the `unattributable` count. Those are states and
- *    counts, the same class as `feedGap`, and the card renders them. The `positionId`
- *    itself is NOT among them — see below;
+ *    the rung COUNT per position, and the `unattributable` and `tornActs` counts. Those
+ *    are states and counts, the same class as `feedGap`, and the card renders them — the
+ *    torn-act count in particular is the fund's own bookkeeping state, with no magnitude
+ *    and no identifier in it. The `positionId` itself is NOT among them — see below;
  *  - the v5 FILL STATE's conclusions: every `venueAxis`, `bookAxis`, `label`,
  *    `joinProvenance`, `declaredPriceMismatch` and `resting`, the `orphanLots` count,
  *    the PRESENCE of each measured figure, and `venueFilledFraction` — a ratio, which
@@ -67,8 +68,12 @@
  *  - every fill QUANTITY and the mismatched `orderPriceUsd` — `placedQuantity`,
  *    `venueConsumedQuantity`, `bookedQuantity`, `deployedUsd`, `unitsAcquired`,
  *    `avgEntryUsd` and both waiting totals. They are amounts of a real asset at a real
- *    venue, and the waiting totals in particular are sums of the declared `sizeUsd` the
- *    wire deliberately does not ship — carrying them would publish it in aggregate;
+ *    venue;
+ *  - every rung's declared `sizeUsd`, which the wire started carrying at v5. It is the
+ *    operator's own capital allocation per level — a magnitude by any reading — and it is
+ *    replaced by a flat {@link SYNTHETIC_RUNG_SIZE_USD}, which is also what the two
+ *    waiting totals beside it are rebuilt from, so the committed file's sums and its
+ *    per-rung sizes agree the way a real payload's do;
  *  - every `positionId`, which becomes `synthetic-position-N` by first appearance
  *    across the series. It is not a magnitude, but the operator's naming convention
  *    spells out a live position's VENUE, INSTRUMENT and STRATEGY, and the string is
@@ -274,9 +279,17 @@ export const SYNTHETIC_POSITION_PREFIX = "synthetic-position";
 
 /**
  * The invented per-rung declared size, and the invented quantity a synthetic order is
- * placed for. Both are MAGNITUDES the wire started carrying at v5 (the waiting figures
- * are sums of the first; the placed/consumed/booked quantities are the second), so both
- * fall under the magnitudes rule with everything else here.
+ * placed for. Both are MAGNITUDES the wire carries at v5 — the first as the rung's own
+ * `sizeUsd` AND as the two waiting figures that sum it, the second behind the
+ * placed/consumed/booked quantities — so both fall under the magnitudes rule with
+ * everything else here.
+ *
+ * FLAT ACROSS THE LADDER, and that is a disclosure decision rather than laziness. The
+ * per-rung sizes are now on the wire individually, so their RATIOS would be the real
+ * ladder's convexity if they were carried over — which is precisely the fact slice 4's
+ * caption renders and therefore precisely the fact the fixture must not publish. A flat
+ * size keeps every committed rung's declared capital identical, keeps the waiting sums
+ * consistent with it, and says nothing about how the operator shaped their ladder.
  *
  * Round and fictional on purpose, like {@link SYNTHETIC_START_NAV} and
  * {@link SYNTHETIC_RUNG_TOP} above: a reader who opens the file must not have to reason
@@ -408,7 +421,15 @@ function synthesizePlanIds(anchors: readonly SnapshotAnchor[]): Map<string, stri
  * manufacturing a state for it would make the fixture claim a history the fund never had.
  */
 function synthesizeRung(rung: DcaWireRung, index: number): DcaWireRung {
-  const synthetic: DcaWireRung = { id: syntheticRungId(index), priceUsd: rung.priceUsd };
+  const synthetic: DcaWireRung = {
+    id: syntheticRungId(index),
+    priceUsd: rung.priceUsd,
+    // PRESENCE PRESERVED, VALUE INVENTED. `sizeUsd` is the operator's declared capital
+    // for this rung — a magnitude, so it is replaced with the flat synthetic size the
+    // waiting figures are already rebuilt from. Preserving presence rather than always
+    // emitting it is what lets a v4-era row regenerate as the v4-shaped rung it is.
+    ...(rung.sizeUsd === undefined ? {} : { sizeUsd: SYNTHETIC_RUNG_SIZE_USD }),
+  };
   if (rung.venueAxis === undefined) {
     return synthetic;
   }
@@ -460,9 +481,12 @@ function synthesizeRung(rung: DcaWireRung, index: number): DcaWireRung {
  * figures in would make slice 4 green against a shape the push never emits on day zero,
  * which is the state the live fund is actually in.
  *
- * The waiting figures are rebuilt as COUNTS × an invented rung size rather than carried
- * over: they are sums of `sizeUsd`, which is the one declared quantity the wire
- * deliberately does not ship, and carrying them would publish it in aggregate.
+ * The waiting figures are rebuilt as COUNTS × the invented rung size rather than carried
+ * over: they are sums of the real declared `sizeUsd`, and carrying them would publish the
+ * ladder's capital in aggregate. Rebuilding them from the SAME constant
+ * {@link synthesizeRung} stamps on each rung is what keeps the committed file internally
+ * consistent — a sum that disagreed with the rungs it claims to sum would be a shape no
+ * real payload has.
  */
 function synthesizeFigures(
   figures: DcaWireFillFigures,
@@ -527,6 +551,11 @@ function synthesizeDca(
   return {
     source: dca.source,
     unattributable: dca.unattributable,
+    // COPIED VERBATIM, exactly as `unattributable` beside it is, and for the same reason:
+    // it is a COUNT of the fund's own bookkeeping state with no magnitude and no
+    // identifier in it. Presence is preserved too — an absent count means "this row could
+    // not check", which is a fact about the row and not a value to invent.
+    ...(dca.tornActs === undefined ? {} : { tornActs: dca.tornActs }),
     positions: dca.positions.map((position) => {
       const positionId = ids.get(position.positionId);
       if (positionId === undefined) {

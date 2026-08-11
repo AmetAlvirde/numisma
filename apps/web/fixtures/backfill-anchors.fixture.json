@@ -424,6 +424,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -815,6 +816,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -1269,6 +1271,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -1697,6 +1700,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -2125,6 +2129,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -2553,6 +2558,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -2926,6 +2932,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -3299,6 +3306,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -3672,6 +3680,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -4045,6 +4054,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -4418,6 +4428,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -4791,6 +4802,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -5164,6 +5176,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -5537,6 +5550,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -5910,6 +5924,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -6283,6 +6298,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -6656,6 +6672,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -7029,6 +7046,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -7402,6 +7420,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -7775,6 +7794,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -8148,6 +8168,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -8521,6 +8542,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -8894,6 +8916,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -9267,6 +9290,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -9640,6 +9664,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -10013,6 +10038,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -10386,6 +10412,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -10759,6 +10786,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -11132,6 +11160,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -11505,6 +11534,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -11878,6 +11908,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -12251,6 +12282,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -12624,6 +12656,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -12997,6 +13030,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -13370,6 +13404,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -13743,6 +13778,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -14116,6 +14152,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -14489,6 +14526,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -14862,6 +14900,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -15235,6 +15274,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -15608,6 +15648,7 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": []
         }
       }
@@ -15981,46 +16022,139 @@
         "dca": {
           "source": "loaded",
           "unattributable": 0,
+          "tornActs": 0,
           "positions": [
             {
               "positionId": "synthetic-position-1",
               "state": "pending",
               "kind": "dcaLadder",
+              "planId": "00000000-0000-4000-8000-000000000001",
               "rungs": [
                 {
                   "id": "rung-1",
-                  "priceUsd": 9962.55
+                  "priceUsd": 9962.55,
+                  "sizeUsd": 250,
+                  "venueAxis": "resting",
+                  "bookAxis": "not-recorded",
+                  "label": "waiting",
+                  "joinProvenance": "price-matched",
+                  "declaredPriceMismatch": false,
+                  "placedQuantity": 2,
+                  "venueConsumedQuantity": 0,
+                  "bookedQuantity": 0,
+                  "venueFilledFraction": 0,
+                  "resting": true
                 },
                 {
                   "id": "rung-2",
-                  "priceUsd": 9365.53
+                  "priceUsd": 9365.53,
+                  "sizeUsd": 250,
+                  "venueAxis": "resting",
+                  "bookAxis": "not-recorded",
+                  "label": "waiting",
+                  "joinProvenance": "price-matched",
+                  "declaredPriceMismatch": false,
+                  "placedQuantity": 2,
+                  "venueConsumedQuantity": 0,
+                  "bookedQuantity": 0,
+                  "venueFilledFraction": 0,
+                  "resting": true
                 },
                 {
                   "id": "rung-3",
-                  "priceUsd": 8801.52
+                  "priceUsd": 8801.52,
+                  "sizeUsd": 250,
+                  "venueAxis": "resting",
+                  "bookAxis": "not-recorded",
+                  "label": "waiting",
+                  "joinProvenance": "price-matched",
+                  "declaredPriceMismatch": false,
+                  "placedQuantity": 2,
+                  "venueConsumedQuantity": 0,
+                  "bookedQuantity": 0,
+                  "venueFilledFraction": 0,
+                  "resting": true
                 },
                 {
                   "id": "rung-4",
-                  "priceUsd": 8274.08
+                  "priceUsd": 8274.08,
+                  "sizeUsd": 250,
+                  "venueAxis": "resting",
+                  "bookAxis": "not-recorded",
+                  "label": "waiting",
+                  "joinProvenance": "price-matched",
+                  "declaredPriceMismatch": false,
+                  "placedQuantity": 2,
+                  "venueConsumedQuantity": 0,
+                  "bookedQuantity": 0,
+                  "venueFilledFraction": 0,
+                  "resting": true
                 },
                 {
                   "id": "rung-5",
-                  "priceUsd": 7775.81
+                  "priceUsd": 7775.81,
+                  "sizeUsd": 250,
+                  "venueAxis": "resting",
+                  "bookAxis": "not-recorded",
+                  "label": "waiting",
+                  "joinProvenance": "price-matched",
+                  "declaredPriceMismatch": false,
+                  "placedQuantity": 2,
+                  "venueConsumedQuantity": 0,
+                  "bookedQuantity": 0,
+                  "venueFilledFraction": 0,
+                  "resting": true
                 },
                 {
                   "id": "rung-6",
-                  "priceUsd": 7309.83
+                  "priceUsd": 7309.83,
+                  "sizeUsd": 250,
+                  "venueAxis": "resting",
+                  "bookAxis": "not-recorded",
+                  "label": "waiting",
+                  "joinProvenance": "price-matched",
+                  "declaredPriceMismatch": false,
+                  "placedQuantity": 2,
+                  "venueConsumedQuantity": 0,
+                  "bookedQuantity": 0,
+                  "venueFilledFraction": 0,
+                  "resting": true
                 },
                 {
                   "id": "rung-7",
-                  "priceUsd": 6869.63
+                  "priceUsd": 6869.63,
+                  "sizeUsd": 250,
+                  "venueAxis": "resting",
+                  "bookAxis": "not-recorded",
+                  "label": "waiting",
+                  "joinProvenance": "price-matched",
+                  "declaredPriceMismatch": false,
+                  "placedQuantity": 2,
+                  "venueConsumedQuantity": 0,
+                  "bookedQuantity": 0,
+                  "venueFilledFraction": 0,
+                  "resting": true
                 },
                 {
                   "id": "rung-8",
-                  "priceUsd": 6457.95
+                  "priceUsd": 6457.95,
+                  "sizeUsd": 250,
+                  "venueAxis": "resting",
+                  "bookAxis": "not-recorded",
+                  "label": "waiting",
+                  "joinProvenance": "price-matched",
+                  "declaredPriceMismatch": false,
+                  "placedQuantity": 2,
+                  "venueConsumedQuantity": 0,
+                  "bookedQuantity": 0,
+                  "venueFilledFraction": 0,
+                  "resting": true
                 }
               ],
-              "planId": "00000000-0000-4000-8000-000000000001"
+              "figures": {
+                "waitingDeclaredUsd": 2000,
+                "waitingRestingUsd": 2000
+              }
             }
           ]
         }
