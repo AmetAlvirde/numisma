@@ -152,10 +152,18 @@ export interface FillPathView {
   tornActs: readonly TornFillAct[];
 }
 
-function label(axis: FillVenueAxis, book: FillBookAxis, fraction: number): string {
+function label(
+  axis: FillVenueAxis,
+  book: FillBookAxis,
+  fraction: number,
+  cancelled = false,
+): string {
   switch (axis) {
     case "not-placed":
-      return "declared — not placed";
+      // A CANCELLED RUNG THE FUND BOOKED AGAINST IS NOT AN UNPLACED ONE. Both have no
+      // claim on the book now, and saying so with one word would let the rung table read
+      // `declared — not placed` for capital the same card counts as deployed.
+      return cancelled ? "cancelled — fills recorded against it" : "declared — not placed";
     case "resting":
       return "waiting";
     case "partly-filled":
@@ -180,30 +188,47 @@ function label(axis: FillVenueAxis, book: FillBookAxis, fraction: number): strin
  * `proposeRungByPrice` is the SAME price matcher the import's pick-list proposes with — one
  * matcher, so a rung the import declined to propose is not one this module quietly picks.
  * Its silence on an ambiguous price is carried through unchanged.
+ *
+ * A DECLARATION THAT CANNOT BE HONORED IS STILL A DECLARATION, and this is the sharper
+ * half of the same rule. A line naming another ladder, a rung this plan does not have, or
+ * a rung a earlier line already took, joins to NOTHING here — and it is claimed anyway, so
+ * the price matcher is never offered it. Letting it fall through would seat an order the
+ * operator declared for one rung onto whichever rung happened to share its price, which
+ * is not a weaker join than the declaration: it is a different one.
  */
+interface JoinedEntry {
+  placed: OrderPlacedRecord;
+  consumed: number;
+  provenance: RungJoinProvenance;
+  /**
+   * The claim LEFT THE BOOK (cancelled), and the fund had already booked fills against
+   * it. Joined only in that case — see {@link retiredPlacements}.
+   */
+  retired?: true;
+}
+
 function joinOrdersToRungs(
   plan: DcaLadderPlanRecord,
   orders: readonly OrderRecord[],
-): Map<string, { placed: OrderPlacedRecord; consumed: number; provenance: RungJoinProvenance }> {
+): Map<string, JoinedEntry> {
   const folded = foldOrderStream(orders);
   const rungIds = new Set(plan.rungs.map((rung) => rung.id));
-  const joined = new Map<
-    string,
-    { placed: OrderPlacedRecord; consumed: number; provenance: RungJoinProvenance }
-  >();
+  const joined = new Map<string, JoinedEntry>();
   const claimed = new Set<string>();
 
   for (const entry of folded.values()) {
     const { planId, rungId } = entry.placed;
-    // A line naming ANOTHER ladder, or a rung this one does not declare, is not a join —
-    // it is a line about something else, and forcing it onto the nearest rung would be the
-    // inference the declared join exists to remove.
+    if (planId === undefined && rungId === undefined) {
+      continue;
+    }
+    // CLAIMED WHETHER OR NOT IT JOINS. Everything below this line is a declared order;
+    // the ones this plan cannot seat are unjoinable, never price-matchable.
+    claimed.add(entry.placed.id);
     if (planId !== plan.id || rungId === undefined || !rungIds.has(rungId)) {
       continue;
     }
     if (!joined.has(rungId)) {
       joined.set(rungId, { ...entry, provenance: "declared" });
-      claimed.add(entry.placed.id);
     }
   }
 
@@ -224,7 +249,57 @@ function joinOrdersToRungs(
     joined.set(pick.rungId, { ...entry, provenance: "price-matched" });
     claimed.add(entry.placed.id);
   }
+
+  // THE THIRD PASS: rungs whose order was cancelled AFTER the fund booked against it.
+  for (const placed of retiredPlacements(orders, folded)) {
+    if (bookedFills(orders, placed.id) <= 0) {
+      continue;
+    }
+    const declaresSomething = placed.planId !== undefined || placed.rungId !== undefined;
+    const rungId = declaresSomething
+      ? placed.planId === plan.id && placed.rungId !== undefined && rungIds.has(placed.rungId)
+        ? placed.rungId
+        : undefined
+      : proposeRungByPrice([ladder], placed.price)?.rungId;
+    if (rungId === undefined || joined.has(rungId)) {
+      continue;
+    }
+    joined.set(rungId, {
+      placed,
+      consumed: 0,
+      provenance: declaresSomething ? "declared" : "price-matched",
+      retired: true,
+    });
+  }
   return joined;
+}
+
+/**
+ * The placement lines the fold DELETED — cancelled, and not re-placed afterwards.
+ *
+ * `foldOrderStream` drops a cancelled rung outright, which is right for it: a cancelled
+ * claim is not resting and must not encumber capital. But the fund's BOOKED fills against
+ * that rung do not un-happen when the remainder is pulled, and a consumer reading only
+ * the fold sees the rung as never placed while the same lot is counted as deployed.
+ * Recovered here, from the raw stream, and nowhere else.
+ */
+function retiredPlacements(
+  orders: readonly OrderRecord[],
+  folded: ReadonlyMap<string, unknown>,
+): OrderPlacedRecord[] {
+  const placements = new Map<string, OrderPlacedRecord>();
+  const cancelled = new Set<string>();
+  for (const record of orders) {
+    if (record.kind === "orderPlaced" && !placements.has(record.id)) {
+      placements.set(record.id, record);
+    }
+    if (record.kind === "orderCancelled") {
+      cancelled.add(record.id);
+    }
+  }
+  return [...placements.values()].filter(
+    (placed) => cancelled.has(placed.id) && !folded.has(placed.id),
+  );
 }
 
 /**
@@ -259,6 +334,50 @@ function measure(
 }
 
 /**
+ * THE ORPHANS: recorded lots that no order this ladder accounts for stands behind.
+ *
+ * IT JOINS ON THE ORDER, NOT ON A PRICE, and that is the whole correction. `PositionLot.
+ * cost` is `fundingAmount / filledQuantity` (`orders/fill.ts`) — a quotient of the cash
+ * that really left the reserve, deliberately NOT the rung's limit — so testing it against
+ * a set of declared prices asks IEEE-754 whether two numbers computed different ways are
+ * identical. They usually are not: even on the accept-the-default path, `(price × q) / q`
+ * fails to round-trip often enough to manufacture an orphan on a correctly joined,
+ * correctly recorded fill. A fee, a venue rounding, or a fill at better than limit makes
+ * that the normal case rather than the unlucky one.
+ *
+ * `quantity` IS THE EXACT CORRESPONDENCE, and the only one available: `buildFillAct`
+ * writes the lot's quantity and the `orderFilled` line's `filledQuantity` from ONE value
+ * with no arithmetic between them, so they are the same float by construction. A lot
+ * carries no order id to key on — adding one is a change to the event log's shape, not to
+ * this module.
+ *
+ * MATCHED AS A MULTISET, each booked fill spending itself once: two lots of one quantity
+ * against a single fill of it leaves one orphan, which is the honest count.
+ */
+function orphansOf(
+  lots: readonly PositionLot[],
+  orders: readonly OrderRecord[],
+  explainedOrderIds: ReadonlySet<string>,
+): FillPathOrphan[] {
+  const unspent: number[] = [];
+  for (const record of orders) {
+    if (record.kind === "orderFilled" && explainedOrderIds.has(record.id)) {
+      unspent.push(record.filledQuantity);
+    }
+  }
+  const orphans: FillPathOrphan[] = [];
+  for (const lot of lots) {
+    const index = unspent.indexOf(lot.quantity);
+    if (index === -1) {
+      orphans.push({ lot, label: ORPHAN_LABEL });
+      continue;
+    }
+    unspent.splice(index, 1);
+  }
+  return orphans;
+}
+
+/**
  * Reconcile ONE declared ladder against the order stream and the recorded lots.
  *
  * Rungs come back in the ladder's own declared order — the order the operator authored them
@@ -271,10 +390,9 @@ export function reconcileFillPath(input: FillPathInput): FillPathView {
   const rungs: FillPathRung[] = [];
   let waitingDeclaredUsd = 0;
   let waitingRestingUsd = 0;
-  // The prices a lot may have been acquired at and still be explained: what each rung
-  // DECLARED, and what its order was actually PLACED at — which differ exactly when a
-  // declared join was honored over a price mismatch.
-  const explainedPrices = new Set<number>();
+  // The ORDERS this ladder accounts for. A lot is explained by the fills booked against
+  // one of them — see `orphansOf` for why that is the join and a price is not.
+  const explainedOrderIds = new Set<string>();
 
   for (const rung of plan.rungs) {
     const entry = joined.get(rung.id);
@@ -290,12 +408,36 @@ export function reconcileFillPath(input: FillPathInput): FillPathView {
         resting: false,
       });
       waitingDeclaredUsd += rung.sizeUsd;
-      explainedPrices.add(rung.priceUsd);
       continue;
     }
 
     const { placed, consumed, provenance } = entry;
     const booked = bookedFills(orders, placed.id);
+    explainedOrderIds.add(placed.id);
+
+    if (entry.retired === true) {
+      // CANCELLED, WITH FILLS BOOKED AGAINST IT. `not-placed` on the venue axis is exactly
+      // true — the claim left the book — and the book axis carries what the fund actually
+      // bought, so the rung table can no longer contradict the deployed figure beside it.
+      // `venueConsumedQuantity` stays 0: the fold retired the baseline with the claim, and
+      // restating the booked quantity as a venue observation would invent a reading.
+      rungs.push({
+        rung,
+        venueAxis: "not-placed",
+        bookAxis: "recorded",
+        label: label("not-placed", "recorded", 0, true),
+        joinProvenance: provenance,
+        orderId: placed.id,
+        orderPriceUsd: placed.price,
+        declaredPriceMismatch: provenance === "declared" && placed.price !== rung.priceUsd,
+        placedQuantity: placed.quantity,
+        venueConsumedQuantity: 0,
+        bookedQuantity: booked,
+        resting: false,
+      });
+      waitingDeclaredUsd += rung.sizeUsd;
+      continue;
+    }
     const venueAxis: FillVenueAxis =
       consumed <= 0 ? "resting" : consumed >= placed.quantity ? "filled" : "partly-filled";
     const bookAxis: FillBookAxis =
@@ -324,13 +466,9 @@ export function reconcileFillPath(input: FillPathInput): FillPathView {
     if (resting) {
       waitingRestingUsd += rung.sizeUsd;
     }
-    explainedPrices.add(rung.priceUsd);
-    explainedPrices.add(placed.price);
   }
 
-  const orphans: FillPathOrphan[] = lots
-    .filter((lot) => !explainedPrices.has(lot.cost))
-    .map((lot) => ({ lot, label: ORPHAN_LABEL }));
+  const orphans = orphansOf(lots, orders, explainedOrderIds);
 
   return {
     planId: plan.id,
