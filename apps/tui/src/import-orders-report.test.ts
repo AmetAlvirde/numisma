@@ -57,6 +57,7 @@ function input(overrides: Partial<OrdersImportReportInput> = {}): OrdersImportRe
     written: [],
     placements: [],
     knownFigures: new Map(),
+    pickedDifferences: new Map(),
     skips: [],
     csvPath: CSV,
     ...overrides,

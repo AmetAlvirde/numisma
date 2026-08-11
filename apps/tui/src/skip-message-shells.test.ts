@@ -223,6 +223,13 @@ const SHELLS: Shell[] = [
             throw new Error("must not write");
           },
           fundReview: async () => syntheticFund(),
+          // Never reached either: the refusal lands before any rung is proposed for.
+          plansPath: "/nowhere/plans.jsonl",
+          loadPlans: async (path) => ({
+            load: { status: "loaded", sourcePath: path },
+            plans: [],
+            skipped: [],
+          }),
           ask: async () => "",
           out: () => {},
           err: () => {},

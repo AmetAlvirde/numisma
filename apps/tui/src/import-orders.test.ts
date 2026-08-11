@@ -20,6 +20,9 @@ import {
   parseFundReview,
   pickRestingOrdersAsOf,
   type FundReviewData,
+  type IsoDate,
+  type LoadedPlanRecord,
+  type LoadedPlans,
   type OrderRecord,
 } from "@numisma/engine";
 import { afterEach, describe, expect, it } from "vitest";
@@ -165,6 +168,12 @@ interface HarnessOptions {
    * guard a reserve list the rendered report would reject.
    */
   reserves?: SyntheticReserve[];
+  /**
+   * The `plans.jsonl` the import proposes rung picks against (#286). DEFAULT EMPTY, which
+   * is the pre-#286 world exactly: no ladder in force means no proposal, no prompt, and
+   * every existing case in this file drives an unchanged flow.
+   */
+  plans?: LoadedPlanRecord[];
 }
 
 /**
@@ -237,6 +246,12 @@ async function harness(options: HarnessOptions = {}): Promise<Harness> {
       loadOrders: (path) => loadOrders(path, { warn: () => {} }),
       appendOrders,
       fundReview: async () => syntheticFund(options.reserves ?? [{ id: "reserve-a", amount: 1000 }]),
+      plansPath: join(dir, "data", "plans.jsonl"),
+      loadPlans: async (path): Promise<LoadedPlans> => ({
+        load: { status: "loaded", sourcePath: path },
+        plans: options.plans ?? [],
+        skipped: [],
+      }),
       ask: async (question) => {
         asked.push(question);
         if (answers.length === 0) {
@@ -1934,5 +1949,111 @@ describe("a failed sidecar write is a refusal, not a thrown error", () => {
     if (outcome.status !== "rejected") throw new Error("expected a rejection");
     expect(outcome.message).toContain("synthetic sidecar write failure");
     expect(errors.some((message) => message.startsWith("REFUSED —"))).toBe(true);
+  });
+});
+
+/**
+ * THE DECLARED RUNG JOIN, END TO END (#286) — what no unit test over a stubbed prompt can
+ * hold: that the ratified pick actually LANDS on the written record as `planId`/`rungId`,
+ * that an unpicked order's line is unchanged, and that a picked rung whose declared price
+ * differs from the order's is ACCEPTED and flagged in the report the operator reads.
+ *
+ * The ladder is SYNTHESIZED to the shape of a real one — round prices matching the
+ * harness's own two-rung export, a counted obviously-fake UUID — and never copied from
+ * anything the fund holds.
+ *
+ * MUTATION-CHECKED: dropping the `rungPicks` from the attribution the flow builds leaves
+ * the first case's record with no `planId`, and dropping the mismatch join in the report
+ * leaves the flagging case's message with no `PICKED —` notice.
+ */
+const LADDER_PLAN_ID = "00000000-0000-4000-8000-00000000000a";
+
+/** A ladder whose two rungs are declared at the harness export's own prices. */
+function planLadder(prices: readonly number[] = [1000, 900]): LoadedPlanRecord {
+  return {
+    kind: "dcaLadder",
+    id: LADDER_PLAN_ID,
+    positionId: "pos-synthetic",
+    effectiveAt: "2020-01-01" as IsoDate,
+    line: 1,
+    tierOrder: ["c1"],
+    rungs: prices.map((priceUsd, index) => ({
+      id: `rung-${index + 1}`,
+      priceUsd,
+      sizeUsd: 100,
+    })),
+  };
+}
+
+async function placedOnDisk(path: string): Promise<OrderRecord[]> {
+  const load = await loadOrders(path, { warn: () => {} });
+  return load.status === "loaded" ? load.records : [];
+}
+
+describe("importBitgetOpenOrders — the declared rung join", () => {
+  it("writes the accepted proposal onto every matched line, on one Enter", async () => {
+    // `reserve-a` funds the batch, `n` declines the funding override, and the blank line
+    // accepts the whole rung batch: the happy path costs one keystroke.
+    const setup = await harness({ answers: ["reserve-a", "n", ""], plans: [planLadder()] });
+    const outcome = await importBitgetOpenOrders({ csvPath: setup.csvPath, io: setup.io });
+    expect(outcome).toMatchObject({ status: "imported", appended: 2 });
+
+    const records = await placedOnDisk(setup.ordersPath);
+    expect(
+      records.map((record) =>
+        record.kind === "orderPlaced" ? [record.price, record.planId, record.rungId] : [],
+      ),
+    ).toEqual([
+      [1000, LADDER_PLAN_ID, "rung-1"],
+      [900, LADDER_PLAN_ID, "rung-2"],
+    ]);
+    // The operator was never shown the id it just wrote.
+    for (const question of setup.asked) {
+      expect(question).not.toContain(LADDER_PLAN_ID);
+    }
+  });
+
+  it("writes NEITHER field when no ladder is in force — every existing line's shape", async () => {
+    const setup = await harness({ answers: ["reserve-a", "n"] });
+    await importBitgetOpenOrders({ csvPath: setup.csvPath, io: setup.io });
+    const records = await placedOnDisk(setup.ordersPath);
+    expect(records).toHaveLength(2);
+    for (const record of records) {
+      expect("planId" in record).toBe(false);
+      expect("rungId" in record).toBe(false);
+    }
+    // And nothing was asked about rungs at all: two prompts, the funding pair.
+    expect(setup.asked).toHaveLength(2);
+  });
+
+  it("ACCEPTS a pick whose declared price differs, and flags it in the report", async () => {
+    // The ladder declares 1000 and 800; the export's second rung is at 900. Overriding it
+    // onto the 800 rung is a pick the price match would never have made — allowed,
+    // because the operator may know something the match does not, and flagged so the
+    // difference is on the record rather than in someone's memory.
+    const setup = await harness({
+      answers: ["reserve-a", "n", "n", "", "2"],
+      plans: [planLadder([1000, 800])],
+    });
+    const outcome = await importBitgetOpenOrders({ csvPath: setup.csvPath, io: setup.io });
+    expect(outcome).toMatchObject({ status: "imported", appended: 2 });
+
+    const records = await placedOnDisk(setup.ordersPath);
+    const picked = records.filter(
+      (record) => record.kind === "orderPlaced" && record.rungId === "rung-2",
+    );
+    expect(picked).toHaveLength(1);
+
+    const message = setup.outputs.join("");
+    expect(message).toContain("PICKED —");
+    // Both figures, so the operator can see WHICH way the difference goes.
+    expect(message).toContain("900");
+    expect(message).toContain("800");
+  });
+
+  it("says nothing about picks when every one of them agrees with its rung", async () => {
+    const setup = await harness({ answers: ["reserve-a", "n", ""], plans: [planLadder()] });
+    await importBitgetOpenOrders({ csvPath: setup.csvPath, io: setup.io });
+    expect(setup.outputs.join("")).not.toContain("PICKED —");
   });
 });
