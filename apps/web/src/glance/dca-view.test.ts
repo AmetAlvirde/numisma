@@ -112,3 +112,113 @@ describe("composeDcaView — the wire's dca branch, shaped for the card", () => 
     expect(view.unattributable).toBe(3);
   });
 });
+
+/**
+ * THE ALERT PROMOTION (spec #285 G-D13, slice #289) — the card becomes the answer to
+ * "does anything need me?" and the tap target for the answer to "where am I?".
+ *
+ * ── MUTATION CHECK (performed 2026-08-11) ───────────────────────────────────────────
+ *  - counted `bookAxis !== "recorded"` WITHOUT the `consumed > 0` conjunct → "counts
+ *    only rungs the venue has actually filled as needing recording" red at 8 where 1
+ *    was expected. Right reason: every resting day-zero rung is `not-recorded`, and
+ *    calling that a call to action would put a permanent warning on the phone.
+ *  - returned `alert` unconditionally instead of only when the row reconciled → "gives
+ *    a v4 row no alert line rather than a fabricated all-clear" red. Right reason: an
+ *    unreconciled row's `0 filled` is not a measurement.
+ */
+describe("composeDcaView — the alert line and the tap target", () => {
+  /** A synthesized four-rung ladder: one filled and recorded, one filled and NOT. */
+  const WALKED: DcaBlock = {
+    source: "loaded",
+    unattributable: 0,
+    tornActs: 0,
+    positions: [
+      {
+        positionId: "capital-x-btc",
+        state: "active",
+        kind: "dcaLadder",
+        planId: "11111111-2222-4333-8444-555555555555",
+        rungs: [
+          {
+            priceUsd: 60_000,
+            venueAxis: "filled",
+            bookAxis: "recorded",
+            venueConsumedQuantity: 1,
+          },
+          {
+            priceUsd: 58_000,
+            venueAxis: "filled",
+            bookAxis: "not-recorded",
+            venueConsumedQuantity: 1,
+          },
+          { priceUsd: 56_000, venueAxis: "resting", bookAxis: "not-recorded", resting: true },
+          { priceUsd: 54_000 },
+        ],
+        figures: { waitingDeclaredUsd: 500, waitingRestingUsd: 250 },
+      },
+    ],
+  };
+
+  it("carries the plan id so the card can link to the ladder route", () => {
+    const view = composeDcaView(anchorWith(WALKED));
+    expect(view.positions[0]!.planId).toBe("11111111-2222-4333-8444-555555555555");
+  });
+
+  it("counts rungs and the ones the venue has filled", () => {
+    const alert = composeDcaView(anchorWith(WALKED)).positions[0]!.alert!;
+    expect(alert.rungs).toBe(4);
+    expect(alert.filled).toBe(2);
+  });
+
+  it("counts only rungs the venue has actually filled as needing recording", () => {
+    // A resting rung is `not-recorded` too, and always will be — there is nothing to
+    // record. Counting it would pin a permanent warning to the phone on day zero.
+    const alert = composeDcaView(anchorWith(WALKED)).positions[0]!.alert!;
+    expect(alert.needsRecording).toBe(1);
+  });
+
+  it("gives day zero an alert with nothing to do — counts, and no warning", () => {
+    const alert = composeDcaView(
+      anchorWith({
+        source: "loaded",
+        unattributable: 0,
+        tornActs: 0,
+        positions: [
+          {
+            positionId: "p",
+            state: "pending",
+            kind: "dcaLadder",
+            planId: "11111111-2222-4333-8444-555555555555",
+            rungs: [
+              { priceUsd: 60_000, venueAxis: "resting", bookAxis: "not-recorded" },
+              { priceUsd: 50_000, venueAxis: "resting", bookAxis: "not-recorded" },
+            ],
+            figures: { waitingDeclaredUsd: 500, waitingRestingUsd: 500 },
+          },
+        ],
+      }),
+    ).positions[0]!.alert!;
+    expect(alert).toEqual({ rungs: 2, filled: 0, needsRecording: 0 });
+  });
+
+  it("gives a v4 row no alert line rather than a fabricated all-clear", () => {
+    // No `figures` means no reconciliation ran. "0 filled" would be a measurement
+    // nobody took, and the card renders the plan without an alert instead.
+    const view = composeDcaView(
+      anchorWith({
+        source: "loaded",
+        unattributable: 0,
+        positions: [
+          {
+            positionId: "p",
+            state: "pending",
+            kind: "dcaLadder",
+            rungs: [{ priceUsd: 60_000 }, { priceUsd: 50_000 }],
+          },
+        ],
+      }),
+    );
+    expect(view.positions[0]!.alert).toBeUndefined();
+    expect(view.positions[0]!.planId).toBeUndefined();
+  });
+});

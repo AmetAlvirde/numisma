@@ -33,6 +33,23 @@
  * the component decides wording.
  */
 import type { DcaPositionRow, SnapshotAnchor } from "../projection/contract.ts";
+import { needsRecording } from "../ladder/fill-path-view.ts";
+
+/**
+ * THE ALERT LINE'S THREE COUNTS (spec #285 G-D13, slice #289) — what the card says
+ * before the operator taps it: `8 rungs · 4 filled · ⚠ 1 needs recording`.
+ *
+ * COUNTS, NOT AMOUNTS. The card still shows no capital figure of any kind, for the
+ * reason its own header gives: day zero must render `pending`, never `$0`. A count of
+ * rungs is a cardinality and carries no such trap.
+ */
+export interface DcaAlertView {
+  rungs: number;
+  /** Rungs the VENUE reports filled — the walk so far, as the venue sees it. */
+  filled: number;
+  /** Filled at the venue with no lot recorded. The only thing here that needs action. */
+  needsRecording: number;
+}
 
 /** One rung, ready to render — the price axis and nothing else, as it arrives. */
 export interface DcaRungView {
@@ -52,6 +69,22 @@ export interface DcaPositionView {
    * card should read them there rather than inferring them from a missing key.
    */
   rungs: readonly DcaRungView[];
+  /**
+   * THE LADDER'S DURABLE IDENTITY, carried so the card can be the TAP TARGET for
+   * `/ladder/$planId`. Absent on a v4 row, which is exactly why the card branches on it
+   * rather than assuming a link is always available.
+   *
+   * A JOIN KEY, NEVER A LABEL. It goes into the `to`/`params` of a link and nowhere
+   * else; nothing renders it as a name.
+   */
+  planId?: string;
+  /**
+   * The alert counts, PRESENT ONLY WHEN THE ROW RECONCILED. An unreconciled row (a v4
+   * anchor, an unreadable orders sidecar) has no `figures`, and rendering `0 filled`
+   * for it would state a measurement nobody took — the same absent-not-zero discipline
+   * the rest of this increment runs on. The card renders the plan without an alert.
+   */
+  alert?: DcaAlertView;
 }
 
 export interface DcaView {
@@ -85,6 +118,28 @@ export function composeDcaView(latest: SnapshotAnchor): DcaView {
       ...(position.kind === undefined ? {} : { kind: position.kind }),
       // Copy, then sort. See this module's header for why the copy is load-bearing.
       rungs: [...(position.rungs ?? [])].sort((a, b) => b.priceUsd - a.priceUsd),
+      ...(position.planId === undefined ? {} : { planId: position.planId }),
+      ...alertFor(position),
     })),
+  };
+}
+
+/**
+ * The alert counts for one row, or nothing at all.
+ *
+ * `figures` IS THE GATE, not `rungs`. Its presence is the wire's statement that a
+ * reconciliation ran for this ladder (see `projection/contract.ts`); without it the
+ * per-rung axes are absent too, and every count would come back zero for a reason that
+ * has nothing to do with the ladder's actual state.
+ */
+function alertFor(position: DcaPositionRow): { alert?: DcaAlertView } {
+  if (position.figures === undefined || position.rungs === undefined) return {};
+  const rungs = position.rungs;
+  return {
+    alert: {
+      rungs: rungs.length,
+      filled: rungs.filter((rung) => rung.venueAxis === "filled").length,
+      needsRecording: rungs.filter(needsRecording).length,
+    },
   };
 }
