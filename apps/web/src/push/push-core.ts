@@ -11,7 +11,12 @@
 import type { Pool } from "pg";
 import type { CompositionReport, FundReviewData } from "@numisma/engine";
 import { buildCompositionReport, pickPolicyAsOf } from "@numisma/engine";
-import { loadFoldedReview, resolveEventStorePaths } from "@numisma/event-store";
+import {
+  assertLogFullyLoaded,
+  loadEventLog,
+  loadFoldedReview,
+  resolveEventStorePaths,
+} from "@numisma/event-store";
 import {
   loadOrders,
   loadPlans,
@@ -241,6 +246,18 @@ export async function buildDcaForAnchor(fold: FoldedAnchor): Promise<DcaBlock> {
  *
  * An `absent` file is NOT one of them: no sidecar means no orders, which reconciles
  * perfectly well to a ladder with nothing placed. That is a fact, not a gap.
+ *
+ * THE RAW EVENT LIST IS READ HERE TOO, and it is PLUMBING RATHER THAN A NEW CROSSING:
+ * this module already folds genesis + `events.jsonl` on the line above, so the durable
+ * log is an input the push has always had. What it did not have is the log's own EVENTS —
+ * `loadFoldedReview` returns the folded read model, which by design carries no event list
+ * — and the torn-act detector pairs raw events against sidecar lines by a derived id, so
+ * the fold cannot answer it. A second read of a file already read this second is the
+ * whole cost; the alternative is re-implementing `loadFoldedReview`'s three calls in web
+ * source, which would fork the "refuse a partial log" policy into two places. The same
+ * `assertLogFullyLoaded` runs on it, so a quarantined line fails loud here as well: a
+ * dropped line could be the very lot whose `orderFilled` half exists, which would publish
+ * a torn act that is really a read gap.
  */
 async function loadFillInputs(fold: FoldedAnchor): Promise<DcaFillInputs | undefined> {
   const load = await loadOrders(resolveOrdersPath());
@@ -251,8 +268,15 @@ async function loadFillInputs(fold: FoldedAnchor): Promise<DcaFillInputs | undef
   if (load.status === "loaded" && load.skips.length > 0) {
     return undefined;
   }
+  const paths = resolveEventStorePaths();
+  const log = await loadEventLog(paths.log);
+  assertLogFullyLoaded(log, paths.log);
   return {
     orders,
+    // UNBOUNDED, deliberately: `buildDcaBlock` applies the anchor to this stream and to
+    // the order stream in one place, so the two halves of an act can never be bounded by
+    // two different rules.
+    events: log.events,
     positions: new Map(
       fold.data.positions.map((position) => [
         position.id,

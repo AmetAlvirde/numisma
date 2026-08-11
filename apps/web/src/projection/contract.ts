@@ -173,6 +173,30 @@ export interface DcaBlock {
    * the glance block's conclusions: ship the conclusion, not the inputs.
    */
   unattributable: number;
+  /**
+   * THE COUNT OF OUTSTANDING TORN FILL ACTS (spec #285 / G-D7) — halves of a fill act
+   * found on one file without their other half, which block recording until repaired.
+   *
+   * ON THE BRANCH ROOT BECAUSE THE FACT IS FUND-LEVEL. `reconcileFillActs` pairs the
+   * WHOLE durable log against the WHOLE orders sidecar by a derived id; the result
+   * belongs to no ladder in particular, so a per-row copy would either repeat one
+   * number on every row or imply an attribution the detector never computed. G-D7
+   * calls it a fund-level banner, and this is where a fund-level banner reads from.
+   *
+   * A COUNT, NEVER THE ACTS. Each `TornFillAct` carries an order id and a second-
+   * granular `observedAt` — the two classes `push/dca-block.ts` exists to stop, and
+   * the second of which would put a stamp on a branch that must stay DATE-FREE. The
+   * surface needs to know THAT recording is blocked; the repair happens at the desk.
+   *
+   * PRESENT AT ZERO, unlike {@link DcaPositionRow.orphanLots}. That count sits beside
+   * `figures`, whose presence already says a reconciliation ran, so its absence reads
+   * unambiguously as "none". Here there is no such neighbour, so absence has to carry
+   * the other meaning — this row could not check, which is a v4 row or an unreadable
+   * orders sidecar — and "checked, none outstanding" must be a visible `0`.
+   *
+   * Optional for the version-range reason spelled on {@link DcaPositionRow.planId}.
+   */
+  tornActs?: number;
 }
 
 /**
@@ -260,10 +284,24 @@ export interface DcaPositionRow {
  * A rung: the declared PRICE AXIS, plus what the venue and the book have since said
  * about it (spec #285).
  *
- * `sizeUsd` STAYS OFF THE WIRE. It is a per-rung capital figure with no phone-glance
- * use, and the ladder's capital question is answered by
- * {@link DcaWireFillFigures}'s two waiting totals — conclusions rather than the
- * per-rung amounts they were summed from.
+ * `sizeUsd` CROSSES, AND IT USED NOT TO. The contract said it stayed off on the grounds
+ * that it was "a per-rung capital figure with no phone-glance use" and that the ladder's
+ * capital question was answered by {@link DcaWireFillFigures}'s two waiting totals —
+ * conclusions, it said, rather than the per-rung amounts they were summed out of. That
+ * reasoning expired with slice 4's chart: the chart is `aria-hidden` (it is presentation,
+ * and every per-rung fact it plots is already in the rung list), and its one irreplaceable
+ * content — THE SHAPE OF THE CAPITAL CURVE, spec §6.3's caption "the deepest rung is 3.7×
+ * the first" — is generated from per-rung declared size and from nothing else. A sum
+ * cannot reconstruct the ladder it was summed from, so the accessible substitute for the
+ * chart has no data source without this field.
+ *
+ * THE MARGINAL DISCLOSURE IS THE LADDER'S SHAPE, and that is the whole of it: every rung's
+ * PRICE already crosses, and `waitingDeclaredUsd` is already the sum of these sizes, so
+ * neither the levels nor the total is new. What becomes visible is how the operator
+ * distributed capital across their own declared levels — the fund's intention, rendered
+ * back to the operator who authored it, which G-D2 puts squarely under the authentication
+ * ceiling. It remains a DECLARED figure: nothing about it is a fill, so it is present on
+ * every rung of a v5 row including one with no order joined.
  *
  * EVERY FILL FIELD IS OPTIONAL AND OMITTED, never defaulted. A rung with nothing
  * recorded serializes to exactly what v4 shipped, which is what makes the version
@@ -282,6 +320,12 @@ export interface DcaWireRung {
    */
   id?: string;
   priceUsd: number;
+  /**
+   * The capital the operator DECLARED for this rung — see the header for why it crosses
+   * and what it discloses. Optional for the version-range reason spelled on
+   * {@link DcaPositionRow.planId}: a v4 row carries none. Present on every v5 rung.
+   */
+  sizeUsd?: number;
   venueAxis?: DcaWireVenueAxis;
   bookAxis?: DcaWireBookAxis;
   /**
@@ -524,7 +568,18 @@ export type ProjectionKeyAllowList = {
    * an `effectiveAt`, a `sizeUsd` or an `endedBy` added to any of the three shapes
    * fails HERE, named, before anyone has to notice it in a fixture diff.
    */
-  dca: Assert<KeysAreExactly<DcaBlock, "source" | "positions" | "unattributable">>;
+  dca: Assert<
+    KeysAreExactly<
+      DcaBlock,
+      | "source"
+      | "positions"
+      | "unattributable"
+      // The fund-level count, enumerated beside the file-level one it shares its
+      // discipline with. A second block-root field is the most expensive kind of
+      // addition this branch can take, which is why it is spelled out here.
+      | "tornActs"
+    >
+  >;
   dcaPosition: Assert<
     KeysAreExactly<
       DcaPositionRow,
@@ -545,9 +600,12 @@ export type ProjectionKeyAllowList = {
       DcaWireRung,
       | "id"
       | "priceUsd"
-      // The fill state, enumerated. `sizeUsd` is still absent from this list and that
-      // absence is a decision, not an oversight: adding it here is what admitting a
-      // per-rung capital figure to the wire would look like.
+      // The declared per-rung capital figure, admitted by name. Its absence from this
+      // list WAS the decision that kept it off the wire; this line is what admitting it
+      // looks like, and the reasoning is on {@link DcaWireRung}'s header rather than
+      // here so it sits beside the field it governs.
+      | "sizeUsd"
+      // The fill state, enumerated.
       | "venueAxis"
       | "bookAxis"
       | "label"
@@ -646,10 +704,11 @@ export function toProjectionReport(
  * carve-outs are about fields a stale reader can safely ignore; a branch nobody can
  * ignore is what the version number is for.
  *
- *  - v5 — the Fill Path (spec #285): optional per-rung fill state, the ladder's
- *    `planId`, the reconciled {@link DcaWireFillFigures} and the orphan-lot count, all
- *    INSIDE the existing `dca` branch. No new top-level branch, so the deletion test
- *    still passes cleanly: delete the fill path and the branch reverts to its v4 shape.
+ *  - v5 — the Fill Path (spec #285): optional per-rung fill state, the rung's declared
+ *    `sizeUsd`, the ladder's `planId`, the reconciled {@link DcaWireFillFigures}, the
+ *    orphan-lot count and the fund-level {@link DcaBlock.tornActs} count, all INSIDE the
+ *    existing `dca` branch. No new top-level branch, so the deletion test still passes
+ *    cleanly: delete the fill path and the branch reverts to its v4 shape.
  *
  * WHY THIS IS A BUMP AT ALL, GIVEN EVERY NEW FIELD IS OPTIONAL. It is not the reader's
  * safety that forces it — a v4 reader handed a v5 row would simply not look at the new

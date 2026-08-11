@@ -19,6 +19,7 @@ import type {
   OrderFilledRecord,
   OrderPlacedRecord,
   OrderRecord,
+  PortfolioEvent,
   PositionLot,
   SkippedPlanLine,
 } from "@numisma/engine";
@@ -138,13 +139,35 @@ function lot(quantity: number, cost: number): PositionLot {
   return { quantity, cost, tier: "c1" };
 }
 
+/**
+ * A synthesized log half of a fill act — the lot side, carrying the DERIVED event id
+ * (`fill:<orderId>@<observedAt>`) that `reconcileFillActs` pairs the two halves by. Built
+ * literally rather than through `buildFillAct` so a test can author exactly one half.
+ */
+function fillEvent(
+  orderId: string,
+  observedAt = "2026-08-02T10:00:00",
+  asOf = "2026-08-02",
+): PortfolioEvent {
+  return {
+    id: `fill:${orderId}@${observedAt}`,
+    asOf: asOf as IsoDate,
+    type: "PositionAddedTo",
+    positionId: "cap-btc",
+    lot: { quantity: 2, cost: 11_000, tier: "c1" },
+    funding: { reserveId: "reserve-synthetic", amount: 22_000 },
+  };
+}
+
 function fillInputs(
   orders: readonly OrderRecord[] = [],
   lots: readonly PositionLot[] = [],
   positionId = "cap-btc",
+  events: readonly PortfolioEvent[] = [],
 ): DcaFillInputs {
   return {
     orders,
+    events,
     positions: new Map([[positionId, { lots, currency: "USD" as const }]]),
   };
 }
@@ -178,9 +201,10 @@ describe("buildDcaBlock — the plans roster narrowed to the wire", () => {
   });
 
   it("ships a pending ladder with `kind`, its `planId`, and IDENTITY+PRICE rungs", () => {
-    // With no fill inputs the row is what v4 shipped PLUS the two identity fields the
-    // Fill Path route resolves on: the ladder's own `planId` and each rung's `id`.
-    // Nothing else — a `sizeUsd`, an `effectiveAt` or a zeroed figure would fail here.
+    // With no fill inputs the row is what v4 shipped PLUS the identity fields the Fill
+    // Path route resolves on — the ladder's `planId` and each rung's `id` — and the
+    // rung's DECLARED `sizeUsd`. Nothing else: an `effectiveAt`, an `endedBy` or a zeroed
+    // figure would fail here, and so would any fill key on a row that reconciled nothing.
     const block = buildDcaBlock(
       loadedPlans({ plans: [ladder("cap-btc", 1)] }),
       ASOF,
@@ -199,7 +223,7 @@ describe("buildDcaBlock — the plans roster narrowed to the wire", () => {
     expect(row.kind).toBe("dcaLadder");
     expect(row.planId).toBe(planIdOf(1));
     for (const rung of row.rungs ?? []) {
-      expect(Object.keys(rung).sort()).toEqual(["id", "priceUsd"]);
+      expect(Object.keys(rung).sort()).toEqual(["id", "priceUsd", "sizeUsd"]);
     }
   });
 
@@ -345,7 +369,9 @@ describe("buildDcaBlock — the reconciled fill path, narrowed", () => {
     ).positions[0]!;
 
     for (const rung of row.rungs ?? []) {
-      expect(Object.keys(rung).sort()).toEqual(["id", "priceUsd"]);
+      // Identity, the declared price axis and the declared size — all three knowable
+      // with nothing placed. NO fill key: that is the day-zero shape.
+      expect(Object.keys(rung).sort()).toEqual(["id", "priceUsd", "sizeUsd"]);
     }
     // The two invented rung sizes of `ladder()`, summed. Nothing is resting because
     // nothing was placed — and that is the whole point of shipping both figures.
@@ -466,7 +492,11 @@ describe("buildDcaBlock — the reconciled fill path, narrowed", () => {
       loadedPlans({ plans: [timePlan("cap-eth", 1)] }),
       ASOF,
       new Set(["cap-eth"]),
-      { orders: [], positions: new Map([["cap-eth", { lots: [], currency: "USD" }]]) },
+      {
+        orders: [],
+        events: [],
+        positions: new Map([["cap-eth", { lots: [], currency: "USD" }]]),
+      },
     ).positions[0]!;
     expect(Object.keys(row).sort()).toEqual(["kind", "positionId", "state"]);
   });
@@ -489,7 +519,115 @@ describe("buildDcaBlock — the reconciled fill path, narrowed", () => {
       ]),
     ).positions[0]!;
 
-    expect(Object.keys(row.rungs![0]!).sort()).toEqual(["id", "priceUsd"]);
+    expect(Object.keys(row.rungs![0]!).sort()).toEqual(["id", "priceUsd", "sizeUsd"]);
     expect(row.figures).toEqual({ waitingDeclaredUsd: 500, waitingRestingUsd: 0 });
+  });
+});
+
+/**
+ * THE TORN-ACT COUNT AND THE PER-RUNG DECLARED SIZE (spec #285, slice 3 amendment) — the
+ * two facts slice 4 cannot render without, added to the wire deliberately.
+ *
+ * THE COUNT SITS AT THE BRANCH ROOT, not on a row, because a torn act IS FUND-LEVEL
+ * (`G-D7`: "torn acts are a fund-level banner"). It is a mismatch between the durable log
+ * and the orders sidecar as WHOLE FILES — `reconcileFillActs` takes both entire and pairs
+ * them by a derived id — so it belongs to no ladder in particular, and hanging it on
+ * `DcaPositionRow` would either duplicate one number across every row or invite a reader
+ * to believe a per-ladder attribution the detector never computed.
+ *
+ * A COUNT, NEVER THE ACTS. Every `TornFillAct` carries an `orderId`, an `observedAt` and
+ * the derived `eventId` that contains both — an order id and a second-granular stamp,
+ * which are exactly the two classes the wall at this module stops. The surface needs to
+ * know THAT recording is blocked, not which act blocked it; the repair happens at the
+ * desk, where the whole act is legitimately in hand.
+ *
+ * PRESENT AT ZERO, unlike `orphanLots` beside it, and the difference is which absence
+ * would be ambiguous. `orphanLots` sits next to `figures`, whose presence already says a
+ * reconciliation ran, so an omitted count reads unambiguously as "none". At the branch
+ * root there is no such neighbour: absent has to mean "this build could not check" — a v4
+ * row, or an unreadable orders sidecar — so "checked, none outstanding" must be a `0` the
+ * reader can see. A `0` here renders as the ABSENCE of a banner, which is the truth.
+ *
+ * MUTATION-CHECKED, twice. (1) The as-of filter on the event stream removed: the bounding
+ * test goes red with a June anchor reporting an August tear. (2) `tornActs` emitted as
+ * `?? undefined` at zero: the clean-books test goes red on the absent key it says must be
+ * a visible zero. Both restored.
+ *
+ * Synthetic throughout: invented ids, stamps, prices and quantities.
+ */
+describe("buildDcaBlock — the fund-level torn-act count and the declared rung size", () => {
+  it("ships the torn-act COUNT at the BRANCH ROOT, and never the acts themselves", () => {
+    // A lot on the log whose `orderFilled` line never landed: the crash window between
+    // the two renames, which is the state the fill flow refuses to record on top of.
+    const block = buildDcaBlock(
+      loadedPlans({ plans: [ladder("cap-btc", 1)] }),
+      ASOF,
+      new Set(["cap-btc"]),
+      fillInputs([], [lot(2, 11_000)], "cap-btc", [fillEvent("order-a")]),
+    );
+
+    expect(block.tornActs).toBe(1);
+    // The act's three fields are all identifiers or stamps. None of them crosses.
+    const wire = JSON.stringify(block);
+    expect(wire).not.toContain("order-a");
+    expect(wire).not.toContain("2026-08-02T10:00:00");
+    expect(wire).not.toContain("lot-without-fill");
+    // And no row grew one: it is fund-level, and one number lives in one place.
+    expect(block.positions.every((row) => !("tornActs" in row))).toBe(true);
+  });
+
+  it("reports a VISIBLE ZERO when the two files agree — checked is not unchecked", () => {
+    const block = buildDcaBlock(
+      loadedPlans({ plans: [ladder("cap-btc", 1)] }),
+      ASOF,
+      new Set(["cap-btc"]),
+      fillInputs(
+        [
+          placed("order-a", 11_000, 2, { planId: planIdOf(1), rungId: "r1" }),
+          filled("order-a", 2),
+        ],
+        [lot(2, 11_000)],
+        "cap-btc",
+        [fillEvent("order-a")],
+      ),
+    );
+    expect(block.tornActs).toBe(0);
+    expect("tornActs" in block).toBe(true);
+  });
+
+  it("omits the count entirely when no reconciliation was possible", () => {
+    // The same statement `figures`'s absence makes, one level up: absent means this row
+    // could not check, which is also exactly what a v4 row looks like to the reader.
+    const block = buildDcaBlock(loadedPlans({ plans: [ladder("cap-btc", 1)] }), ASOF, new Set());
+    expect("tornActs" in block).toBe(false);
+  });
+
+  it("bounds the EVENT stream to the anchor too — a June anchor cannot see an August tear", () => {
+    // The bound `selectOrdersThrough` puts on the order half, applied to the log half, in
+    // the same place and for the same reason: a historical anchor answers historically or
+    // the backfill republishes today's state under every date in the file.
+    const block = buildDcaBlock(
+      loadedPlans({ plans: [ladder("cap-btc", 1)] }),
+      "2026-06-15" as IsoDate,
+      new Set(["cap-btc"]),
+      fillInputs([], [lot(2, 11_000)], "cap-btc", [fillEvent("order-a")]),
+    );
+    expect(block.tornActs).toBe(0);
+  });
+
+  it("ships the DECLARED SIZE on every rung — the convexity caption's only source", () => {
+    // `sizeUsd` used to stay off the wire on the grounds that the ladder's capital
+    // question was answered by the two waiting totals. Slice 4's chart is `aria-hidden`
+    // and its accessible substitute is a GENERATED caption about the shape of the capital
+    // curve ("the deepest rung is 3.7× the first"), which no sum can reconstruct.
+    const rungs =
+      buildDcaBlock(loadedPlans({ plans: [ladder("cap-btc", 1)] }), ASOF, new Set()).positions[0]!
+        .rungs ?? [];
+    expect(rungs.map((rung) => rung.sizeUsd)).toEqual([250, 250]);
+    // On EVERY rung, including one with no order joined to it — it is a DECLARED figure,
+    // knowable on day zero, and not part of the fill state that comes and goes.
+    for (const rung of rungs) {
+      expect(Object.keys(rung).sort()).toEqual(["id", "priceUsd", "sizeUsd"]);
+    }
   });
 });
