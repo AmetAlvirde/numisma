@@ -53,8 +53,17 @@ async function writeRaw(path: string, image: string): Promise<void> {
   await writeFile(path, image, "utf8");
 }
 
+/**
+ * SYNTHESIZED UUIDs, obviously fake and STABLE across runs — never generated at test
+ * time, which would make a failure unreproducible. Every one of them is a canonical
+ * UUID by shape (36 characters, hex and hyphens) and visibly authored by counting.
+ */
+const LADDER_ID = "00000000-0000-4000-8000-000000000001";
+const OTHER_LADDER_ID = "00000000-0000-4000-8000-000000000002";
+
 const LADDER: DcaLadderPlanRecord = {
   kind: "dcaLadder",
+  id: LADDER_ID,
   positionId: "position-synthetic",
   effectiveAt: "2026-08-01",
   tierOrder: ["c2", "c1"],
@@ -307,6 +316,132 @@ describe("skips split by INSTRUCTION: `unsupported` = pull, `invalid` = fix the 
     expect(loaded.plans).toEqual([]);
     expect(loaded.skipped).toHaveLength(7);
     expect(loaded.skipped.every((skip) => skip.reason === "invalid")).toBe(true);
+  });
+});
+
+/**
+ * THE LADDER'S OWN IDENTITY, AND THE DEGENERATE DECLARATION (#286).
+ *
+ * A ladder is keyed for supersession by `positionId + effectiveAt`, which gives a
+ * superseded ladder no stable identity a later record can point at and leaves rung ids
+ * unique only WITHIN one plan. `id` is that identity — a UUID, a JOIN KEY and never a
+ * label — and the two guards below are what make it usable as one: a duplicated `id`
+ * makes two ladders indistinguishable to a fill that names one, and two rungs at the
+ * same price make the price-match FALLBACK ambiguous by construction.
+ *
+ * MUTATION-CHECKED, each guard against its own assertions (fix reverted, suite re-run,
+ * fix restored):
+ *
+ *   - `M-A` drop the `isRenderableId(value.id)` gate         → "an id that is empty …"
+ *   - `M-B` drop the cross-file uniqueness check             → "two lines sharing an id …"
+ *   - `M-C` name no id in the duplicate detail               → the `toContain(LADDER_ID)`
+ *   - `M-D` drop the duplicate-`priceUsd` check in `rungsProblem` → "two rungs at one price …"
+ *   - `M-E` name no price in that detail                     → the `toContain("90")`
+ *
+ * Each mutation made exactly the named assertion fail, and for the right reason: `M-A`
+ * loaded a ladder whose id nothing would render, `M-B` loaded both duplicate lines,
+ * `M-D` loaded the collided ladder, and `M-C`/`M-E` refused correctly while leaving the
+ * operator no way to find WHICH declaration to repair.
+ */
+describe("a ladder declares its own id, and no two rungs share a price", () => {
+  it("carries the id through the loader, and a canonical UUID passes every check", async () => {
+    const path = await tempPath();
+    await writeRaw(path, `${JSON.stringify(LADDER)}\n`);
+    const loaded = await loadPlans(path);
+    expect(loaded.skipped).toEqual([]);
+    expect(loaded.plans).toHaveLength(1);
+    expect(loaded.plans[0]).toMatchObject({ kind: "dcaLadder", id: LADDER_ID });
+    // 36 characters, hex and hyphens — the EXPECTED form, and it clears the same bound
+    // and control-character gates `positionId` is held to.
+    expect(LADDER_ID).toMatch(/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/);
+  });
+
+  it("an id that is empty, over-long or control-bearing is `invalid`", async () => {
+    const path = await tempPath();
+    await writeRaw(
+      path,
+      [
+        JSON.stringify({ ...LADDER, id: "" }),
+        JSON.stringify({ ...LADDER, id: "u".repeat(65) }),
+        JSON.stringify({ ...LADDER, id: "one\ntwo" }),
+        JSON.stringify({ ...LADDER, id: 42 }),
+      ].join("\n") + "\n",
+    );
+    const loaded = await loadPlans(path);
+    expect(loaded.plans).toEqual([]);
+    expect(loaded.skipped.map((skip) => skip.line)).toEqual([1, 2, 3, 4]);
+    expect(loaded.skipped.every((skip) => skip.reason === "invalid")).toBe(true);
+    // The line is still ATTRIBUTABLE: the envelope was read before the body, so the
+    // operator is told whose declaration is broken even though its id is not.
+    expect(loaded.skipped[0]?.positionId).toBe("position-synthetic");
+  });
+
+  it("two lines sharing an id are a degenerate declaration — the second is refused", async () => {
+    const path = await tempPath();
+    await writeRaw(
+      path,
+      [
+        JSON.stringify(LADDER),
+        JSON.stringify({ ...LADDER, effectiveAt: "2026-09-01" }),
+        JSON.stringify({ ...LADDER, id: OTHER_LADDER_ID, effectiveAt: "2026-10-01" }),
+      ].join("\n") + "\n",
+    );
+    const loaded = await loadPlans(path);
+    // FIRST WINS, and only the repeat is refused: an append-only file's earlier line is
+    // the one every existing reference already points at.
+    expect(loaded.plans.map((plan) => plan.line)).toEqual([1, 3]);
+    expect(loaded.skipped).toHaveLength(1);
+    expect(loaded.skipped[0]?.line).toBe(2);
+    expect(loaded.skipped[0]?.reason).toBe("invalid");
+    // NAMING THE ID IS THE POINT — a refusal the operator cannot locate is a refusal
+    // they cannot act on, and the id has already cleared the renderability gate.
+    expect(loaded.skipped[0]?.detail).toContain(LADDER_ID);
+  });
+
+  it("two rungs at one price are refused, and the detail names the duplicated price", async () => {
+    const path = await tempPath();
+    await writeRaw(
+      path,
+      `${JSON.stringify({
+        ...LADDER,
+        rungs: [
+          { id: "rung-1", priceUsd: 100, sizeUsd: 10 },
+          { id: "rung-2", priceUsd: 90, sizeUsd: 10 },
+          { id: "rung-3", priceUsd: 90, sizeUsd: 20 },
+        ],
+      })}\n`,
+    );
+    const loaded = await loadPlans(path);
+    expect(loaded.plans).toEqual([]);
+    expect(loaded.skipped[0]?.reason).toBe("invalid");
+    expect(loaded.skipped[0]?.detail).toContain("90");
+  });
+
+  it("a ladder of eight DISTINCT prices still loads, and `pnpm plans` still exits 0", async () => {
+    // The live fund's ladder is eight rungs at eight distinct prices. This one is
+    // SYNTHESIZED to that SHAPE — round invented figures, never the fund's — because
+    // what the guard must not do is refuse the declaration the operator actually holds.
+    const path = await tempPath();
+    await writeRaw(
+      path,
+      `${JSON.stringify({
+        ...LADDER,
+        rungs: [100, 90, 80, 70, 60, 50, 40, 30].map((priceUsd, index) => ({
+          id: `rung-${index + 1}`,
+          priceUsd,
+          sizeUsd: 10 * (index + 1),
+        })),
+      })}\n`,
+    );
+    const loaded = await loadPlans(path);
+    expect(loaded.skipped).toEqual([]);
+    expect(loaded.plans).toHaveLength(1);
+    expect(unattendedPlansVerdict(loaded)).toEqual({ exitCode: 0, messages: [] });
+  });
+
+  it("REFUSES to append a ladder whose id its own loader would not render", async () => {
+    const path = await tempPath();
+    await expect(appendPlan(path, { ...LADDER, id: "one\ntwo" })).rejects.toThrow(/id/);
   });
 });
 

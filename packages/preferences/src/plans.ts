@@ -187,12 +187,26 @@ function tierOrderProblem(value: unknown): string | undefined {
  * A rung at price `0` or size `NaN` is not a harmless blank — it flows into an
  * accumulation curve as a real point. A repeated `id` breaks the join key a later
  * fill will match on, which is the only reason `id` exists.
+ *
+ * A REPEATED `priceUsd` IS REFUSED FOR THE SAME REASON, ONE LEVEL DOWN (#286). The
+ * declared join (`planId` + `rungId` on the order) is optional forever, so PRICE MATCH
+ * is the permanent fallback for every line that carries neither — and that fallback can
+ * only ever be ambiguous if the DECLARATION was. Refusing here kills the collision
+ * structurally instead of handling it at every reader downstream.
+ *
+ * THE DETAIL NAMES THE PRICE, which is the one deliberate narrowing of this module's
+ * never-quote-the-line discipline. The remedy is to supersede the declaration with the
+ * collided rung repriced, and an operator cannot find which rung that is from a refusal
+ * that names none. The figure is a bounded parsed number the operator authored — not a
+ * fund position or a balance — and it rides in the same prose the rest of the taxonomy
+ * uses.
  */
 function rungsProblem(value: unknown): string | undefined {
   if (!Array.isArray(value) || value.length === 0) {
     return "rungs must be a non-empty array";
   }
   const seen = new Set<string>();
+  const seenPrices = new Set<number>();
   for (const rung of value) {
     if (!isRecordObject(rung)) {
       return "every rung must be a JSON object";
@@ -210,6 +224,14 @@ function rungsProblem(value: unknown): string | undefined {
     if (!isFinitePositive(rung.sizeUsd)) {
       return "every rung needs a finite, positive sizeUsd";
     }
+    // Compared on the PARSED NUMBER, so `90` and `90.0` are the one price they are.
+    if (seenPrices.has(rung.priceUsd)) {
+      return (
+        `two rungs are declared at ${rung.priceUsd}, so a fill at that price could not be ` +
+        "joined to one of them"
+      );
+    }
+    seenPrices.add(rung.priceUsd);
   }
   return undefined;
 }
@@ -239,8 +261,18 @@ function invalid(line: number, detail: string, scraped: Partial<SkippedPlanLine>
  * Shared by `loadPlans` and `appendPlan` — deliberately. The round-trip invariant is
  * only worth anything if the writer's idea of a writable line and the reader's idea of
  * a readable one are the SAME CODE rather than two lists someone keeps in sync.
+ *
+ * `claimedLadderIds` IS THE ONE PIECE OF CROSS-LINE STATE, and it is a PARAMETER rather
+ * than module scope so this stays a function of its arguments: `loadPlans` threads one
+ * set through one file, and `appendPlan`'s round-trip echo passes NONE — a single line
+ * cannot collide with itself, and the writer has not read the file it is appending to,
+ * so a uniqueness verdict there would be invented rather than checked.
  */
-function readPlanLine(value: unknown, line: number): PlanLineRead {
+function readPlanLine(
+  value: unknown,
+  line: number,
+  claimedLadderIds?: Set<string>,
+): PlanLineRead {
   if (!isRecordObject(value)) {
     return invalid(line, "line is not a JSON object");
   }
@@ -312,6 +344,30 @@ function readPlanLine(value: unknown, line: number): PlanLineRead {
       };
     }
     case "dcaLadder": {
+      // THE LADDER'S OWN IDENTITY (#286), held to the same renderability rule
+      // `positionId` is held to and for the same reasons — it is identity, it is
+      // operator-authored file content, and it travels. A canonical UUID clears it.
+      if (!isRenderableId(value.id)) {
+        return invalid(
+          line,
+          `a dcaLadder needs an id: a non-empty string of at most ${POSITION_ID_MAX_LENGTH} ` +
+            "characters, holding no control characters — a UUID is the expected form",
+          scraped,
+        );
+      }
+      // UNIQUE ACROSS THE WHOLE FILE. Two ladders sharing an id are indistinguishable to
+      // an order that names one, which is the entire purpose of the field; the FIRST line
+      // wins, because it is the one every reference already written points at. The id is
+      // named because the repair — supersede the repeat with a freshly generated UUID —
+      // is unfindable without it, and it has just cleared the renderability gate.
+      if (claimedLadderIds?.has(value.id) === true) {
+        return invalid(
+          line,
+          `two plan lines declare the ladder id ${value.id}, so nothing pointing at it could ` +
+            "say which ladder it means",
+          scraped,
+        );
+      }
       const tierProblem = tierOrderProblem(value.tierOrder);
       if (tierProblem !== undefined) {
         return invalid(line, tierProblem, scraped);
@@ -320,10 +376,14 @@ function readPlanLine(value: unknown, line: number): PlanLineRead {
       if (rungProblem !== undefined) {
         return invalid(line, rungProblem, scraped);
       }
+      // Claimed only by a line that READ — a skipped declaration is not a declaration,
+      // so it must not make a later, well-formed line carrying the same id collide.
+      claimedLadderIds?.add(value.id);
       return {
         status: "ok",
         record: {
           kind,
+          id: value.id,
           ...envelope,
           tierOrder: [...(value.tierOrder as CapitalTier[])],
           rungs: (value.rungs as DcaRung[]).map((rung) => ({
@@ -432,6 +492,8 @@ export async function loadPlans(path: string): Promise<LoadedPlans> {
 
   const plans: LoadedPlanRecord[] = [];
   const skipped: SkippedPlanLine[] = [];
+  /** Every ladder id this file has already declared — the cross-line state, built once. */
+  const claimedLadderIds = new Set<string>();
   const lines = (raw.startsWith(BOM) ? raw.slice(BOM.length) : raw).split("\n");
   for (let index = 0; index < lines.length; index += 1) {
     const trimmed = (lines[index] ?? "").trim();
@@ -446,7 +508,7 @@ export async function loadPlans(path: string): Promise<LoadedPlans> {
       skipped.push({ line: lineNumber, reason: "invalid", detail: "line is not JSON" });
       continue;
     }
-    const read = readPlanLine(value, lineNumber);
+    const read = readPlanLine(value, lineNumber, claimedLadderIds);
     if (read.status === "ok") {
       plans.push(read.record);
     } else {
@@ -480,6 +542,7 @@ function serializePlanRecord(record: PlanRecord): string {
     case "dcaLadder":
       return JSON.stringify({
         kind: record.kind,
+        id: record.id,
         positionId: record.positionId,
         effectiveAt: record.effectiveAt,
         tierOrder: record.tierOrder,

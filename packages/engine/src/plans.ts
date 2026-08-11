@@ -143,6 +143,26 @@ export interface DcaRung {
 export interface DcaLadderPlanRecord extends PlanRecordBase {
   kind: "dcaLadder";
   /**
+   * THE LADDER'S OWN DURABLE IDENTITY — **a UUID**, and the field a later record points
+   * at when it says which ladder it means (#286).
+   *
+   * WHY IT IS NEEDED AT ALL. Supersession is by `positionId + effectiveAt` and stays
+   * that way, which leaves a superseded ladder with no stable identity, and rung ids
+   * unique only WITHIN one plan. An order carrying `rungId: "r3"` cannot say which `r3`
+   * it means without this.
+   *
+   * WHY A UUID AND NOT AN AUTHORED SLUG. It is a JOIN KEY, not a label. A
+   * human-readable name would invite meaning to be encoded in it — venue, tier, date —
+   * that then goes stale the way every embedded fact does, and would make two ladders'
+   * identities collide-able by hand. **Nothing renders it as a name**: every surface
+   * shows the position and the ladder's declared content.
+   *
+   * The loader validates it as identity rather than as prose — non-empty, at most 64
+   * characters, no control characters, and UNIQUE across the whole file — and a
+   * canonical UUID (36 characters, hex and hyphens) satisfies every one of those.
+   */
+  id: string;
+  /**
    * The order capital is drawn down in. CLOSED and strict: `tierOrder` is consumed
    * to route capital, so an unrecognized tier is unusable rather than merely
    * unreadable, and a repeated tier makes consumption order ambiguous at the repeat.

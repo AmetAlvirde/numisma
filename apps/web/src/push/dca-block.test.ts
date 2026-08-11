@@ -40,6 +40,9 @@ function ladder(
 ): LoadedPlanRecord {
   const record: DcaLadderPlanRecord = {
     kind: "dcaLadder",
+    // Synthesized, obviously fake, and STABLE — it counts the fixture's own line rather
+    // than being generated. Nothing on the wire or the card carries it.
+    id: `00000000-0000-4000-8000-${String(line).padStart(12, "0")}`,
     positionId,
     effectiveAt: effectiveAt as IsoDate,
     tierOrder: ["c1"],

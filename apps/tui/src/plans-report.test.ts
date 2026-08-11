@@ -52,6 +52,10 @@ function fiveStateFixture(): LoadedPlans {
     plans: [
       {
         kind: "dcaLadder",
+        // A synthesized, obviously-fake ladder id: stable across runs, never generated
+        // here, and never rendered by the report — the surface shows the position and
+        // the ladder's declared content, never the join key.
+        id: "00000000-0000-4000-8000-000000000001",
         positionId: "pos-pending",
         effectiveAt: "2026-08-09",
         tierOrder: ["c1", "c2"],
@@ -76,6 +80,7 @@ function fiveStateFixture(): LoadedPlans {
       { kind: "noPlan", positionId: "pos-ended", effectiveAt: "2026-07-15", line: 3 },
       {
         kind: "dcaLadder",
+        id: "00000000-0000-4000-8000-000000000002",
         positionId: "pos-future",
         effectiveAt: "2026-09-01",
         tierOrder: ["c1"],

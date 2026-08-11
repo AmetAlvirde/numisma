@@ -36,12 +36,23 @@ function ladder(
 ): LoadedPlanRecord {
   return {
     kind: "dcaLadder",
+    id: ladderId(line),
     positionId,
     effectiveAt,
     line,
     tierOrder: ["c1"],
     rungs: [{ id: "r1", priceUsd: 100, sizeUsd: 25 }],
   };
+}
+
+/**
+ * A SYNTHESIZED ladder id — obviously fake, canonical-UUID-shaped, and STABLE across
+ * runs: it counts the fixture's own line rather than being generated, so a failure here
+ * reproduces. The selector never reads the field; it carries it, which is what the
+ * exhaustive `toEqual` below locks.
+ */
+function ladderId(line: number): string {
+  return `00000000-0000-4000-8000-${String(line).padStart(12, "0")}`;
 }
 
 function timePlan(
@@ -98,6 +109,7 @@ describe("pickPlanAsOf — the five arms", () => {
       status: "active",
       plan: {
         kind: "dcaLadder",
+        id: ladderId(2),
         positionId: "pos-a",
         effectiveAt: "2026-07-01",
         line: 2,
@@ -340,6 +352,7 @@ describe("pickPlanAsOf — plan bodies survive selection intact", () => {
   it("carries a `dcaLadder` body through unchanged", () => {
     const plan: LoadedPlanRecord = {
       kind: "dcaLadder",
+      id: ladderId(1),
       positionId: "pos-a",
       effectiveAt: "2026-07-01",
       line: 1,
