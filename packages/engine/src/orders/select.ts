@@ -93,6 +93,39 @@ function upperBound(asOf: string): string {
  * is ignored; it cannot invent a resting claim.
  */
 export function pickRestingOrdersAsOf(records: OrderRecord[], asOf?: string): RestingOrder[] {
+  const resting: RestingOrder[] = [];
+  for (const { placed, consumed } of foldOrderStream(records, asOf).values()) {
+    const remaining = placed.quantity - consumed;
+    if (remaining > 0) {
+      resting.push({ placed, remainingQuantity: remaining });
+    }
+  }
+  return resting;
+}
+
+/** One rung as the four-verb fold left it: the placement line and its running baseline. */
+export interface FoldedRung {
+  placed: OrderPlacedRecord;
+  consumed: number;
+}
+
+/**
+ * THE FOUR-VERB FOLD ITSELF, with NOTHING dropped — every rung the stream ever placed and
+ * did not cancel, exhausted ones included, keyed by order id in first-placement order.
+ *
+ * PACKAGE-INTERNAL and deliberately not on the barrel: it is the shared body of
+ * {@link pickRestingOrdersAsOf} (which filters it down to the still-claimed rungs) and of
+ * the fill-path reconciliation (which needs the exhausted ones, because "filled at venue"
+ * is unreachable from a resting-orders view). Every invariant documented on
+ * `pickRestingOrdersAsOf` above — the replay order, the order-sensitivity, the
+ * non-monotonic baseline — is a property of THIS function, and lives there because that
+ * is the name callers reach for. Two copies of an order-sensitive rule that drift apart is
+ * the defect class this extraction exists to prevent.
+ */
+export function foldOrderStream(
+  records: readonly OrderRecord[],
+  asOf?: string,
+): Map<string, FoldedRung> {
   const bound = asOf === undefined ? undefined : upperBound(asOf);
   const eligible = records
     .filter((record) => bound === undefined || record.observedAt <= bound)
@@ -103,7 +136,7 @@ export function pickRestingOrdersAsOf(records: OrderRecord[], asOf?: string): Re
   // has met. A rung stays here once exhausted rather than being deleted, which is what
   // lets a later line move the baseline in either direction; only `orderCancelled`
   // removes an entry, because only a cancellation says the claim LEFT THE BOOK.
-  const rungs = new Map<string, { placed: OrderPlacedRecord; consumed: number }>();
+  const rungs = new Map<string, FoldedRung>();
 
   for (const record of eligible) {
     switch (record.kind) {
@@ -165,14 +198,7 @@ export function pickRestingOrdersAsOf(records: OrderRecord[], asOf?: string): Re
     }
   }
 
-  const resting: RestingOrder[] = [];
-  for (const { placed, consumed } of rungs.values()) {
-    const remaining = placed.quantity - consumed;
-    if (remaining > 0) {
-      resting.push({ placed, remainingQuantity: remaining });
-    }
-  }
-  return resting;
+  return rungs;
 }
 
 /**
