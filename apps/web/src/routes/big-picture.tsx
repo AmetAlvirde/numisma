@@ -48,9 +48,12 @@ function BigPicturePage() {
           <h1>Schema version mismatch — refusing to render</h1>
           <p>
             The stored snapshot is schema version{" "}
-            <strong>{result.storedVersion}</strong> but this app expects version{" "}
-            <strong>{result.expectedVersion}</strong>. Re-run the push shell with
-            a matching engine build before viewing.
+            <strong>{result.storedVersion}</strong>, which is outside the versions
+            this app supports (
+            <strong>
+              {result.expectedVersions.min}–{result.expectedVersions.max}
+            </strong>
+            ). Re-run the push shell with a matching engine build before viewing.
           </p>
         </div>
       </Shell>

@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { formatUsd } from "@numisma/engine/format";
 import type { DcaPositionView, DcaView } from "../glance/dca-view.ts";
 
@@ -16,10 +17,24 @@ import type { DcaPositionView, DcaView } from "../glance/dca-view.ts";
  * meaning the second. The wire carries no rung SIZES either, deliberately, so the
  * mistake is unavailable rather than merely avoided.
  *
- * THE TABLE IS THE PLOT. A price-axis chart of the ladder is hot-set item 11 and is
- * gated on node 7.10 (#145): no chart library, no `styles.css` rewrite. The rungs
- * price-sorted descending — the sort lives in `glance/dca-view.ts`, never here — read
- * top-down as the ladder itself, at zero substrate cost.
+ * ── THE CHART GATE IS RETIRED (spec #285 §6.2, slice #289) ──────────────────────────
+ * This header used to say a price-axis chart was "gated on node 7.10 (#145)" — the
+ * sign-in design issue. THAT WAS TRUE AND IS NOT ANY MORE, and a false constraint left
+ * standing is worse than none: the next reader takes it as a live rule and does not
+ * build the thing. The chart shipped in slice #289 as hand-rolled SVG on
+ * `/ladder/$planId` — no chart library, and `styles.css` gained an appended block with
+ * nothing above it changed, so the constraints the gate was protecting held anyway.
+ * #145 stays independent (G-D10a); this card inherits the theme when it lands.
+ *
+ * THE TABLE IS STILL THE PLOT HERE. The rungs price-sorted descending — the sort lives
+ * in `glance/dca-view.ts`, never here — read top-down as the ladder itself, at zero
+ * substrate cost. The chart is one tap down, where there is room for it.
+ *
+ * ── THE CARD IS THE ALERT AND THE TAP TARGET (G-D13) ────────────────────────────────
+ * It answers *does anything need me?* — rung counts, and a warning when a venue fill has
+ * no recorded lot — and links to the ladder, which answers *where am I?*. The counts are
+ * computed in `glance/dca-view.ts`; the link needs `planId`, which a v4 row does not
+ * carry, so both are rendered only where the wire actually supplies them.
  *
  * ABSENCES ARE RENDERED AND NAMED, the same invariant as `GlanceCard`'s and
  * `SectionTable`'s, sharing their em dash: a plan with no ladder to show says WHY,
@@ -101,8 +116,47 @@ function Plan({ position }: { position: DcaPositionView }) {
           <span className="muted">{KIND_COPY[position.kind]}</span>
         ) : null}
       </p>
+      <Alert position={position} />
       <Rungs position={position} />
     </div>
+  );
+}
+
+/**
+ * The alert line, and the tap through to the Fill Path.
+ *
+ * NOTHING IS RENDERED WHERE THE WIRE SAYS NOTHING. `alert` is absent on a row no
+ * reconciliation ran for, and `planId` is absent on a v4 row; either absence removes its
+ * half and the card degrades to exactly what it was before this slice. A `0 filled` for
+ * an unreconciled row would be a measurement nobody took.
+ *
+ * THE PLAN ID IS NEVER RENDERED. It goes into the link's params and nowhere else — the
+ * text the operator reads is the ladder's own words.
+ */
+function Alert({ position }: { position: DcaPositionView }) {
+  const { alert, planId } = position;
+  if (alert === undefined) return null;
+
+  const line = (
+    <>
+      {alert.rungs} {alert.rungs === 1 ? "rung" : "rungs"} · {alert.filled} filled
+      {alert.needsRecording > 0 ? (
+        <span className="dca-alert-warn">
+          {" "}
+          · <span aria-hidden="true">⚠ </span>
+          {alert.needsRecording} needs recording
+        </span>
+      ) : null}
+    </>
+  );
+
+  if (planId === undefined) return <p className="dca-alert">{line}</p>;
+  return (
+    <p className="dca-alert">
+      <Link to="/ladder/$planId" params={{ planId }}>
+        {line} <span aria-hidden="true">→</span>
+      </Link>
+    </p>
   );
 }
 

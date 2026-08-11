@@ -254,9 +254,16 @@ thead th {
    ONE BLOCK, APPENDED — nothing above this line changed. The card is built out
    of classes that already exist (`.card`, `.table-scroll`, `table`, `th.num`,
    `.absent`, `.muted`), because the price-sorted rung table IS hot-set item 11's
-   plot and it costs no new substrate: the chart, and any rewrite of this file,
-   are gated on node 7.10 (#145). What is genuinely new is only the plan header —
-   an id, a state word and a kind, on one line that wraps on a phone. */
+   plot and it costs no new substrate. What is genuinely new is only the plan
+   header — an id, a state word and a kind, on one line that wraps on a phone.
+
+   THE CHART GATE IS RETIRED (spec #285 §6.2, slice #289). This comment used to
+   say the chart "and any rewrite of this file" were gated on node 7.10 (#145),
+   the sign-in design issue. The chart shipped in slice #289 and this file was
+   NOT rewritten — the Fill Path block below is appended, nothing above it
+   changed, which is the constraint the gate was really protecting. Leaving the
+   sentence standing would read as a live rule to the next person and stop them
+   building something already built. #145 stays independent. */
 .dca-plan {
   margin-top: 14px;
 }
@@ -287,4 +294,352 @@ thead th {
 
 .dca-state-unreadable {
   color: var(--warn);
+}
+
+/* ── the DCA card's alert line (spec #285 G-D13) ────────────────────────────
+   The card became the tap target, so its one new line is a link. Sized to be
+   hit with a thumb without turning the card into a button. */
+.dca-alert {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+}
+
+.dca-alert a {
+  color: var(--text);
+  text-decoration: none;
+  display: inline-block;
+  padding: 4px 0;
+}
+
+.dca-alert a:hover,
+.dca-alert a:focus-visible {
+  text-decoration: underline;
+}
+
+.dca-alert-warn {
+  color: var(--neg);
+}
+
+/* ── the Fill Path (spec #285, slice #289) ──────────────────────────────────
+   ONE BLOCK, APPENDED — nothing above this line changed, which is the promise
+   the retired chart gate above was really making. Plain hand-written CSS: no
+   styling library, no chart library, no rewrite.
+
+   PHONE FIRST, against U's 320px rework. Every width here is fluid and every
+   fixed number is a type size or a gap, so the four cards stack the same at
+   320px and at desk width; `.dashboard` already caps the line length. */
+.fp-header h1 {
+  margin: 0;
+  font-size: 1.15rem;
+  overflow-wrap: anywhere;
+}
+
+.fp-sub {
+  margin: 2px 0 12px;
+  font-size: 0.8rem;
+}
+
+/* The three measured tiles. `auto-fit` rather than three columns: at 320px they
+   stack, and each tile's absence state is a wrapping em dash plus a cause, which
+   needs the room more than the alignment. */
+.fp-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.fp-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fp-tile-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.fp-tile-value {
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A BAR AT ZERO READS AS ABSENCE, which is the truth on day zero — so the track
+   is always drawn and the fill is allowed to be 0 wide. */
+.fp-progress {
+  margin: 0 0 14px;
+}
+
+.fp-progress-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.fp-progress-fill {
+  height: 100%;
+  background: var(--pos);
+}
+
+.fp-progress p {
+  margin: 6px 0 0;
+  font-size: 0.78rem;
+}
+
+.fp-waiting {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fp-waiting-sub {
+  margin: 4px 0 0;
+  font-size: 0.78rem;
+}
+
+/* THE TORN-ACT BANNER — above everything, and the only red block on the page
+   that claims a hard stop, because it is the only one that is one. */
+.fp-torn {
+  border-color: var(--neg);
+  color: var(--neg);
+}
+
+.fp-torn p {
+  margin: 6px 0 0;
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.fp-unchecked {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+/* THE TWO UNRECORDED-FILL WARNINGS, VISUALLY DISTINCT because their certainties
+   differ. The certain one is a fact from the venue and carries a solid left
+   edge in the negative colour; the inferred one is derived from spot and carries
+   a dashed edge in the warning colour. The difference is deliberate and load-
+   bearing: rendering them alike would teach the operator to treat a venue fact
+   like a guess. */
+.fp-warn {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.fp-warn-certain {
+  border-left: 4px solid var(--neg);
+}
+
+.fp-warn-inferred {
+  border-left: 4px dashed var(--warn);
+  color: var(--muted);
+}
+
+.fp-chart-card h2,
+.fp-list h2,
+.fp-selected h2 {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+}
+
+/* The SVG is aria-hidden presentation; it scales to the card and never sets the
+   card's height. */
+.fp-chart {
+  display: block;
+  width: 100%;
+  height: 120px;
+}
+
+.fp-chart-line {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.5;
+}
+
+.fp-chart-now {
+  stroke: var(--pos);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.fp-chart-dot {
+  fill: var(--muted);
+}
+
+.fp-chart-dot.is-filled {
+  fill: var(--pos);
+}
+
+.fp-chart-dot.is-next {
+  fill: var(--text);
+}
+
+.fp-chart-dot.is-selected {
+  stroke: var(--text);
+  stroke-width: 1.5;
+}
+
+/* The chart's accessible substitute. Sized as prose, not as a caption footnote:
+   for a screen-reader user this sentence IS the chart. */
+.fp-caption {
+  margin: 10px 0 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.fp-inspect {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.fp-inspect input {
+  width: 100%;
+}
+
+.fp-selected-price {
+  margin: 0 0 8px;
+  font-size: 1.3rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.fp-detail {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 10px 0 0;
+  font-size: 0.85rem;
+}
+
+.fp-detail dt {
+  color: var(--muted);
+}
+
+.fp-detail dd {
+  margin: 0;
+}
+
+.fp-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+.fp-pill {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+}
+
+/* Greyed, per G-D12: a declared rung with no order is not a state the ladder is
+   in, it is one it never entered. */
+.fp-pill-unplaced {
+  opacity: 0.55;
+  border-style: dashed;
+}
+
+/* Dashed, matching the inferred warning above — the same certainty, the same
+   visual language. */
+.fp-pill-inferred {
+  border-style: dashed;
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.fp-pill-next {
+  border-color: var(--pos);
+  color: var(--pos);
+}
+
+/* The join caption is not a pill: it is the surface annotating its own
+   confidence about a pill, and it should not read as a state of its own. */
+.fp-pill-caption {
+  font-size: 0.7rem;
+  font-style: italic;
+}
+
+.fp-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* EVERY ROW IS A BUTTON so the inspect panel is keyboard- and screen-reader-
+   reachable without the chart. Reset to look like a row, but keep a real focus
+   ring — this is the accessible path and it has to be visible. */
+.fp-row {
+  display: grid;
+  grid-template-columns: 1.5rem auto 1fr;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 6px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fp-row.is-selected {
+  background: var(--line);
+}
+
+.fp-row.is-unplaced .fp-row-price {
+  color: var(--muted);
+}
+
+.fp-row:focus-visible {
+  outline: 2px solid var(--pos);
+  outline-offset: -2px;
+}
+
+.fp-row-index {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.fp-row-price {
+  font-variant-numeric: tabular-nums;
+}
+
+.fp-orphans {
+  margin: 12px 0 0;
+  font-size: 0.8rem;
+}
+
+/* Precision and completeness are separate <p>s because they are separate claims,
+   and a reader should be able to disbelieve one without the other. */
+.fp-provenance p {
+  margin: 0 0 8px;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.fp-provenance p:last-child {
+  margin-bottom: 0;
+}
+
+.fp-spot strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
 }

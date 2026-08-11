@@ -150,7 +150,11 @@ export {
   formatObservedAt,
 } from "./orders/records.js";
 export type { RestingOrder } from "./orders/select.js";
-export { bookedFills, pickRestingOrdersAsOf } from "./orders/select.js";
+export {
+  bookedFills,
+  pickRestingOrdersAsOf,
+  selectOrdersThrough,
+} from "./orders/select.js";
 // Ingest: the PURE Bitget open-orders parse and the venue-neutral join to the one
 // declared field. The IO shell — reading the export, prompting, appending — is the
 // TUI's, per ADR-001.
@@ -183,6 +187,34 @@ export type {
   NumericClaimField,
   TextClaimField,
 } from "./orders/ingest.js";
+// THE DECLARED RUNG JOIN (#286) — the pure half: which `dcaLadder` plans are in force at
+// an import's stamp, what a price match PROPOSES over them, and what a ratified pick
+// declares. The pick-list itself (prompting, ratifying) is the TUI's, per ADR-001. This
+// is a MANUAL block like every other in this file: a function added to the module is
+// nameable outside the package only if it is added here too.
+export type { InForceLadder, RungPick } from "./orders/rung-picks.js";
+export {
+  inForceLadders,
+  proposeRungByPrice,
+  matchRungsByPrice,
+  declaredRungPrice,
+} from "./orders/rung-picks.js";
+// THE FILL PATH RECONCILIATION (#287) — every spot-independent conclusion the Fill Path
+// surface renders, from one pure function over a declared ladder, the whole order stream and
+// the recorded lots. Spot is deliberately NOT an input; the two spot-dependent decorations
+// are computed at render. A MANUAL block: nothing here is nameable outside the package
+// unless it is added here too.
+export type {
+  FillVenueAxis,
+  FillBookAxis,
+  RungJoinProvenance,
+  FillPathRung,
+  FillPathOrphan,
+  FillPathFigures,
+  FillPathInput,
+  FillPathView,
+} from "./fill-path.js";
+export { reconcileFillPath, ORPHAN_LABEL } from "./fill-path.js";
 // The `O1` funding-coverage guard, split from ingest because it changes with
 // reserve-admission policy rather than with the venue's row shape (#172, #179, #183).
 export type { FundingShortfall, FundingCoverage } from "./orders/coverage.js";

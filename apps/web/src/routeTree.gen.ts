@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as BigPictureRouteImport } from './routes/big-picture'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as LadderPlanIdRouteImport } from './routes/ladder.$planId'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 
 const LoginRoute = LoginRouteImport.update({
@@ -29,6 +30,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LadderPlanIdRoute = LadderPlanIdRouteImport.update({
+  id: '/ladder/$planId',
+  path: '/ladder/$planId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -39,12 +45,14 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/big-picture': typeof BigPictureRoute
   '/login': typeof LoginRoute
+  '/ladder/$planId': typeof LadderPlanIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/big-picture': typeof BigPictureRoute
   '/login': typeof LoginRoute
+  '/ladder/$planId': typeof LadderPlanIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesById {
@@ -52,20 +60,28 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/big-picture': typeof BigPictureRoute
   '/login': typeof LoginRoute
+  '/ladder/$planId': typeof LadderPlanIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/big-picture' | '/login' | '/api/auth/$'
+  fullPaths: '/' | '/big-picture' | '/login' | '/ladder/$planId' | '/api/auth/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/big-picture' | '/login' | '/api/auth/$'
-  id: '__root__' | '/' | '/big-picture' | '/login' | '/api/auth/$'
+  to: '/' | '/big-picture' | '/login' | '/ladder/$planId' | '/api/auth/$'
+  id:
+    | '__root__'
+    | '/'
+    | '/big-picture'
+    | '/login'
+    | '/ladder/$planId'
+    | '/api/auth/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   BigPictureRoute: typeof BigPictureRoute
   LoginRoute: typeof LoginRoute
+  LadderPlanIdRoute: typeof LadderPlanIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
 }
 
@@ -92,6 +108,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/ladder/$planId': {
+      id: '/ladder/$planId'
+      path: '/ladder/$planId'
+      fullPath: '/ladder/$planId'
+      preLoaderRoute: typeof LadderPlanIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
@@ -106,6 +129,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   BigPictureRoute: BigPictureRoute,
   LoginRoute: LoginRoute,
+  LadderPlanIdRoute: LadderPlanIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
 }
 export const routeTree = rootRouteImport

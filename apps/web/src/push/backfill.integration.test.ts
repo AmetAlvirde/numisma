@@ -151,11 +151,17 @@ describe.skipIf(!runIntegration)("backfill → the projection DB", () => {
     expect(first.map((r) => r.as_of)).toEqual(anchors);
   });
 
-  it("stamps every row at schema_version = 4", () => {
+  it("stamps every row at the CURRENT schema version — the writer never writes the floor", () => {
     expect(new Set(first.map((r) => r.schema_version))).toEqual(
       new Set([COMPOSITION_SNAPSHOT_SCHEMA_VERSION]),
     );
-    expect(COMPOSITION_SNAPSHOT_SCHEMA_VERSION).toBe(4);
+    // THE WRITER'S HALF OF THE RANGE (spec #285). The READER accepts
+    // `MIN_SUPPORTED ≤ stored ≤ CURRENT`; the writer has no such latitude and stamps
+    // `CURRENT`, always. Pinning the literal here is what makes that a decision rather
+    // than a coincidence — and this file being DB-gated is exactly why the pin has to
+    // be found deliberately at bump time: it SKIPS on every machine without a database,
+    // so a stale literal here goes unnoticed until the one run that has one.
+    expect(COMPOSITION_SNAPSHOT_SCHEMA_VERSION).toBe(5);
   });
 
   it("reproduces the known-good NAVs exactly, Saturday included", async () => {
