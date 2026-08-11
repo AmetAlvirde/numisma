@@ -19,8 +19,11 @@
  *     that there is none.
  *  2. DECORATE WITH SPOT — the `next` marker and `waiting · price passed, unconfirmed`.
  *     These are the ONLY two facts on the page that move with price (spec §3), which is
- *     why they compute on the web side: the browser bundle gains no engine import, and
- *     the existing `client-bundle.integration.test.ts` guard stays green.
+ *     why they compute on the web side: the browser bundle gains no engine import.
+ *     `routes/route-move.test.ts` is the guard that holds that — it walks this module's
+ *     reachable import graph. `client-bundle.integration.test.ts` does NOT: it scans the
+ *     built bundle for credential literals, and would stay green with the engine
+ *     imported right here.
  *  3. SHAPE — the descending price sort, the chart's coordinates, the caption, and the
  *     absence causes. Presentation decisions, made where a test can reach them rather
  *     than inside JSX.
@@ -133,6 +136,15 @@ export interface ChartGeometry {
   nowX?: number;
 }
 
+/**
+ * WHICH OF THREE THINGS IS TRUE about the waiting capital, decided HERE rather than in
+ * JSX. `nothing-waiting` is a fully walked ladder; `all-resting` is every waiting dollar
+ * encumbered at the venue; `partly-unplaced` is the split that makes hidden encumbrance
+ * visible. Two arms cannot say this: an `else` on `neverPlacedUsd > 0` prints "all of it
+ * is resting at the venue" for a ladder with nothing resting at all.
+ */
+export type WaitingSplit = "nothing-waiting" | "all-resting" | "partly-unplaced";
+
 export interface FillPathFigures {
   waitingDeclaredUsd: number;
   waitingRestingUsd: number;
@@ -141,6 +153,7 @@ export interface FillPathFigures {
    * about. See this module's header for why it is not an unfilled-vs-open split.
    */
   neverPlacedUsd: number;
+  split: WaitingSplit;
 }
 
 export interface FillPathView {
@@ -154,10 +167,21 @@ export interface FillPathView {
   deployed: MeasuredFigure;
   unitsAcquired: MeasuredFigure;
   avgEntry: MeasuredFigure;
-  figures: FillPathFigures;
+  /**
+   * ABSENT WHEN NO RECONCILIATION RAN — absence rule 2, held all the way to the render.
+   * These two totals are present at zero (zero waiting capital is a real answer) but
+   * only when there was something to measure them from; reading an absent `figures` as
+   * `0` would print a capital figure and an all-clear off a row that could not check.
+   */
+  figures?: FillPathFigures;
   rungs: readonly FillPathRungView[];
-  /** Recorded lots no declared rung explains. Absent-at-zero on the wire (rule 5). */
-  orphanLots: number;
+  /**
+   * Recorded lots no declared rung explains. Absent-at-zero ON THE WIRE (rule 5) — but
+   * absent HERE means the same thing `figures` absent means, because rule 5's
+   * unambiguity comes entirely from `figures` sitting beside it saying a reconciliation
+   * ran. Without that neighbour, `0` would state "none unexplained" from an absence.
+   */
+  orphanLots?: number;
   tornActs: TornActReading;
   /** The two unrecorded-fill warnings, counted APART: their certainties differ. */
   warnings: { filledNotRecorded: number; pricePassedNoFill: number };
@@ -331,8 +355,7 @@ export function composeFillPathPage(
     };
   });
 
-  const waitingDeclaredUsd = row.figures?.waitingDeclaredUsd ?? 0;
-  const waitingRestingUsd = row.figures?.waitingRestingUsd ?? 0;
+  const waitingDeclaredUsd = row.figures?.waitingDeclaredUsd;
   const filledRungs = rungs.filter((rung) => rung.venueAxis === "filled").length;
 
   return {
@@ -347,14 +370,10 @@ export function composeFillPathPage(
       deployed: measured(row.figures?.deployedUsd, reconciled),
       unitsAcquired: measured(row.figures?.unitsAcquired, reconciled),
       avgEntry: measured(row.figures?.avgEntryUsd, reconciled),
-      figures: {
-        waitingDeclaredUsd,
-        waitingRestingUsd,
-        neverPlacedUsd: waitingDeclaredUsd - waitingRestingUsd,
-      },
+      ...(row.figures === undefined ? {} : { figures: waitingFigures(row.figures) }),
       rungs,
-      // Absence rule 5: absent IS zero here, unambiguously.
-      orphanLots: row.orphanLots ?? 0,
+      // Absence rule 5: absent IS zero — but ONLY beside a present `figures`.
+      ...(row.figures === undefined ? {} : { orphanLots: row.orphanLots ?? 0 }),
       tornActs: readTornActs(latest.report.dca.tornActs),
       warnings: {
         filledNotRecorded: rungs.filter((rung) => rung.filledAtVenueNotRecorded).length,
@@ -381,13 +400,37 @@ export function composeFillPathPage(
             ...(rung.sizeUsd === undefined ? {} : { sizeUsd: rung.sizeUsd }),
             waiting: rung.waiting,
           })),
-          ...(row.figures === undefined ? {} : { waitingDeclaredUsd }),
+          ...(waitingDeclaredUsd === undefined ? {} : { waitingDeclaredUsd }),
         });
         return caption === undefined ? {} : { caption };
       })(),
       ...spotFields(spot),
       recordedThrough: latest.asOf,
     },
+  };
+}
+
+/**
+ * The waiting half, with the three-way split decided once. Called ONLY where the wire's
+ * own `figures` is present — the absence is handled by its caller, so nothing in here
+ * has to defend against a missing block.
+ */
+function waitingFigures(figures: {
+  waitingDeclaredUsd: number;
+  waitingRestingUsd: number;
+}): FillPathFigures {
+  const { waitingDeclaredUsd, waitingRestingUsd } = figures;
+  const neverPlacedUsd = waitingDeclaredUsd - waitingRestingUsd;
+  return {
+    waitingDeclaredUsd,
+    waitingRestingUsd,
+    neverPlacedUsd,
+    split:
+      waitingDeclaredUsd <= 0
+        ? "nothing-waiting"
+        : neverPlacedUsd > 0
+          ? "partly-unplaced"
+          : "all-resting",
   };
 }
 
