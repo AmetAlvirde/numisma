@@ -94,15 +94,68 @@ function resolveSpecifier(specifier: string, fromFile: string): string | undefin
  * seeing is exactly the edge the prototype hid. A comment cannot contain an import,
  * so the comments go and the matcher stays as greedy as it was.
  *
+ * THE THREE THINGS A `/` CAN MEAN are all handled, because getting one wrong is how
+ * this loses code rather than prose. `//` and `/*` open comments — neither can open a
+ * regex, since an empty regex is unwritable and `*` cannot begin one, so those two
+ * are read first and a literal's interior never reaches them. Otherwise a `/` in
+ * EXPRESSION POSITION opens a regex literal, consumed to its unescaped closing slash:
+ * without that state `/^\/*$/` opens a block comment that runs to EOF and the file
+ * yields NO imports at all, and `/https:\/\//` eats the rest of its line. A `/` after
+ * a value is division and is left alone, so a line comment after `a / b` is still a
+ * comment. Misjudging that last call is deliberately survivable in one direction
+ * only: a literal is emitted VERBATIM either way, so the cost is a comment left
+ * standing (loud — #273 returns), never a statement deleted (silent).
+ *
  * STRING LITERALS ARE KEPT VERBATIM, since the specifier itself is one — and that is
  * why `//` inside a string cannot start a comment here. Newlines survive so a removed
  * comment cannot splice two statements together. A `'`/`"` string also ends at the
  * newline: unterminated ones do not exist in source that compiles, and the bound
  * keeps a stray quote inside a regex literal (`/["']/`) from swallowing the file.
  */
+/** The words after which a `/` still opens a regex, not a division. */
+const REGEX_MAY_FOLLOW = new Set([
+  "await",
+  "case",
+  "delete",
+  "do",
+  "else",
+  "in",
+  "instanceof",
+  "new",
+  "of",
+  "return",
+  "throw",
+  "typeof",
+  "void",
+  "yield",
+]);
+
+/** Could a `/` arriving after `code` start a regex literal rather than divide? */
+function regexMayFollow(code: string): boolean {
+  const trimmed = code.replace(/\s+$/, "");
+  const last = trimmed.at(-1);
+  if (last === undefined) {
+    return true; // a file opening on a regex
+  }
+  if (last === ")" || last === "]") {
+    return false; // `(a + b) / 2`, `sizes[0] / 2`
+  }
+  if (/[\w$]/.test(last)) {
+    // An identifier or a number divides; a keyword does not.
+    return REGEX_MAY_FOLLOW.has(/[\w$]+$/.exec(trimmed)?.[0] ?? "");
+  }
+  return true; // `=`, `(`, `,`, `:`, `[`, `{`, `;`, `&&`, `!`, `?` …
+}
+
 function stripComments(source: string): string {
   let out = "";
+  // The last 32 characters of CODE (comments excluded), for `regexMayFollow`.
+  let tail = "";
   let index = 0;
+  const emit = (text: string): void => {
+    out += text;
+    tail = (tail + text).slice(-32);
+  };
   while (index < source.length) {
     const char = source[index] as string;
     const next = source[index + 1];
@@ -116,24 +169,47 @@ function stripComments(source: string): string {
       index += 2;
       while (index < source.length && !(source[index] === "*" && source[index + 1] === "/")) {
         if (source[index] === "\n") {
-          out += "\n";
+          out += "\n"; // a line the comment occupied, not code — `tail` is untouched
         }
         index += 1;
       }
       index += 2;
       continue;
     }
+    if (char === "/" && regexMayFollow(tail)) {
+      emit(char);
+      index += 1;
+      let inClass = false;
+      while (index < source.length) {
+        const inner = source[index] as string;
+        if (inner === "\\") {
+          emit(source.slice(index, index + 2));
+          index += 2;
+          continue;
+        }
+        emit(inner);
+        index += 1;
+        if (inner === "[") {
+          inClass = true; // an unescaped `/` inside `[…]` does not close the literal
+        } else if (inner === "]") {
+          inClass = false;
+        } else if ((inner === "/" && !inClass) || inner === "\n") {
+          break; // a literal cannot span a line: if one did, this was division
+        }
+      }
+      continue;
+    }
     if (char === '"' || char === "'" || char === "`") {
-      out += char;
+      emit(char);
       index += 1;
       while (index < source.length) {
         const inner = source[index] as string;
         if (inner === "\\") {
-          out += source.slice(index, index + 2);
+          emit(source.slice(index, index + 2));
           index += 2;
           continue;
         }
-        out += inner;
+        emit(inner);
         index += 1;
         if (inner === char || (inner === "\n" && char !== "`")) {
           break;
@@ -141,7 +217,7 @@ function stripComments(source: string): string {
       }
       continue;
     }
-    out += char;
+    emit(char);
     index += 1;
   }
   return out;
@@ -385,14 +461,52 @@ describe("the walker's input — what counts as an import specifier", () => {
   it("a `//` inside a string literal does not start a comment", () => {
     // The cheap version of this fix — delete from `//` to end of line — eats the
     // rest of any line holding a URL, and an import on that line goes with it.
+    // The import SHARES THE URL'S LINE deliberately: on its own line it survives a
+    // stripper with no string handling at all, and this test would lock nothing.
     const graph = walkFixture({
       "entry.ts": [
-        'export const docs = "https://example.com/a//b";',
-        '/* A URL in a block comment: https://example.com/x */ import { thing } from "./thing.js";',
+        'export const docs = "https://example.com/a//b"; import { thing } from "./thing.js";',
+        '/* A URL in a block comment: https://example.com/x */ export const used = [docs, thing];',
+      ].join("\n"),
+      "thing.ts": "export const thing = 1;\n",
+    });
+    expect(graph.unresolved).toEqual([]);
+    expect(reachedNames(graph)).toEqual(["entry.ts", "thing.ts"]);
+  });
+
+  it("a slash inside a regex literal does not open a comment", () => {
+    // The scanner's third state, and the one whose absence DELETES code rather
+    // than merely retaining it. `/^\/*$/` puts `/` next to `*` and would open a
+    // block comment that runs to EOF — the file yields no specifiers at all and
+    // its whole subtree drops out of the graph, which is a `pg` edge passing
+    // silently. `/https:\/\//` is the line-comment half of the same hole, so the
+    // import shares its line: everything after it would go.
+    const graph = walkFixture({
+      "entry.ts": [
+        "export const leading = /^\\/*$/;",
+        'export const https = /https:\\/\\//; import { thing } from "./thing.js";',
+        "export const used = [leading, https, thing];",
+      ].join("\n"),
+      "thing.ts": "export const thing = 1;\n",
+    });
+    expect(graph.unresolved).toEqual([]);
+    expect(reachedNames(graph)).toEqual(["entry.ts", "thing.ts"]);
+  });
+
+  it("division is not a regex literal — the third state cannot swallow a comment whole", () => {
+    // The other direction of the same judgement. Reading `/` after a value as the
+    // start of a regex would consume to the NEXT slash — here the `//` of a line
+    // comment — and hand the walk the prose inside it, putting #273 straight back.
+    const graph = walkFixture({
+      "entry.ts": [
+        "export const half = 10 / 2;",
+        'export const ratio = half / 5; // a ratio read from "prose", not a package',
+        'import { thing } from "./thing.js";',
         "export const used = thing;",
       ].join("\n"),
       "thing.ts": "export const thing = 1;\n",
     });
+    expect([...graph.externals]).toEqual([]);
     expect(graph.unresolved).toEqual([]);
     expect(reachedNames(graph)).toEqual(["entry.ts", "thing.ts"]);
   });
