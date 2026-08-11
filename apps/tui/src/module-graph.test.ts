@@ -15,10 +15,11 @@
  * a computed specifier that this walker cannot resolve shows up as an unresolved
  * import and fails the last assertion rather than passing silently.
  */
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { readFileSync, readdirSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // HERE = apps/tui/src → the repo root is three levels up.
@@ -81,6 +82,84 @@ function resolveSpecifier(specifier: string, fromFile: string): string | undefin
   return resolve(pkg.dir, target);
 }
 
+/**
+ * The same source with every comment removed — the walker's real input.
+ *
+ * WHY THE INPUT AND NOT THE MATCHER. The matcher below reads `from "…"` ANYWHERE in
+ * the text, so an ordinary English sentence in a doc comment — `a load failure is a
+ * different fact from "this position has no plan."` — was walked as an import of a
+ * package by that name and failed the graph as an unresolvable external (#273). The
+ * other candidate fix, anchoring the matcher to statement position, buys the same
+ * quiet by narrowing what counts as an import — and an import this walker stops
+ * seeing is exactly the edge the prototype hid. A comment cannot contain an import,
+ * so the comments go and the matcher stays as greedy as it was.
+ *
+ * STRING LITERALS ARE KEPT VERBATIM, since the specifier itself is one — and that is
+ * why `//` inside a string cannot start a comment here. Newlines survive so a removed
+ * comment cannot splice two statements together. A `'`/`"` string also ends at the
+ * newline: unterminated ones do not exist in source that compiles, and the bound
+ * keeps a stray quote inside a regex literal (`/["']/`) from swallowing the file.
+ */
+function stripComments(source: string): string {
+  let out = "";
+  let index = 0;
+  while (index < source.length) {
+    const char = source[index] as string;
+    const next = source[index + 1];
+    if (char === "/" && next === "/") {
+      while (index < source.length && source[index] !== "\n") {
+        index += 1;
+      }
+      continue;
+    }
+    if (char === "/" && next === "*") {
+      index += 2;
+      while (index < source.length && !(source[index] === "*" && source[index + 1] === "/")) {
+        if (source[index] === "\n") {
+          out += "\n";
+        }
+        index += 1;
+      }
+      index += 2;
+      continue;
+    }
+    if (char === '"' || char === "'" || char === "`") {
+      out += char;
+      index += 1;
+      while (index < source.length) {
+        const inner = source[index] as string;
+        if (inner === "\\") {
+          out += source.slice(index, index + 2);
+          index += 2;
+          continue;
+        }
+        out += inner;
+        index += 1;
+        if (inner === char || (inner === "\n" && char !== "`")) {
+          break;
+        }
+      }
+      continue;
+    }
+    out += char;
+    index += 1;
+  }
+  return out;
+}
+
+const STRIPPED = new Map<string, string>();
+
+/** A file's code with its comments gone — read once, stripped once. */
+function codeOf(file: string): string {
+  const cached = STRIPPED.get(file);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const code = stripComments(readFileSync(file, "utf8"));
+  STRIPPED.set(file, code);
+  return code;
+}
+
 interface Graph {
   files: Set<string>;
   externals: Set<string>;
@@ -103,7 +182,7 @@ function walkGraph(entries: readonly string[]): Graph {
       continue;
     }
     graph.files.add(file);
-    const source = readFileSync(file, "utf8");
+    const source = codeOf(file);
     const specifiers = [
       ...[...source.matchAll(/from\s*["']([^"']+)["']/g)].map((m) => m[1] as string),
       ...[...source.matchAll(/import\s*\(\s*["']([^"']+)["']\s*\)/g)].map((m) => m[1] as string),
@@ -148,7 +227,9 @@ describe("the TUI's module graph", () => {
     // The assertion that would have failed on the prototype's bridge.
     expect([...GRAPH.externals].filter((name) => /^pg($|-)/.test(name))).toEqual([]);
     for (const file of GRAPH.files) {
-      expect(readFileSync(file, "utf8")).not.toMatch(/from\s*["']pg["']/);
+      // Stripped, like the walk: a comment PROMISING there is no `pg` import must
+      // not read as one (#273).
+      expect(codeOf(file)).not.toMatch(/from\s*["']pg["']/);
     }
   });
 
@@ -202,5 +283,117 @@ describe("the TUI's module graph", () => {
     expect(reached).toContain("packages/event-store/src/heartbeat.ts");
     expect(reached).toContain("packages/event-store/src/gap-report-io.ts");
     expect(GRAPH.files.size).toBeGreaterThan(20);
+  });
+});
+
+const fixtureDirs: string[] = [];
+
+afterEach(() => {
+  for (const dir of fixtureDirs) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  fixtureDirs.length = 0;
+});
+
+/** A throwaway module tree — `entry.ts` is the walk's entry point. */
+function walkFixture(files: Record<string, string>): Graph {
+  const dir = mkdtempSync(resolve(tmpdir(), "numisma-module-graph-"));
+  fixtureDirs.push(dir);
+  for (const [name, source] of Object.entries(files)) {
+    writeFileSync(join(dir, name), source, "utf8");
+  }
+  return walkGraph([join(dir, "entry.ts")]);
+}
+
+/** Just the file names the walk reached, so a temp directory does not leak in. */
+function reachedNames(graph: Graph): string[] {
+  return [...graph.files].map((file) => basename(file)).sort();
+}
+
+describe("the walker's input — what counts as an import specifier", () => {
+  it("reads no import out of a comment — English that says `from \"…\"` is English", () => {
+    // #273: a doc comment reading `… a different fact from "this position has no
+    // plan."` was walked as an import of a package by that name, and failed the
+    // graph as an unresolvable external. Twice in one increment, in files whose
+    // source was correct. Prose is prose in all three comment forms.
+    const graph = walkFixture({
+      "entry.ts": [
+        "/**",
+        ' * A load failure is a different fact from "this position has no plan."',
+        " */",
+        '// The TUI reads its rows from "the fold", never from "pg".',
+        '/* And a block comment, quoting a sentence from "somewhere else". */',
+        'import { thing } from "./thing.js";',
+        "export const used = thing;",
+      ].join("\n"),
+      "thing.ts": "export const thing = 1;\n",
+    });
+    expect([...graph.externals]).toEqual([]);
+    expect(graph.unresolved).toEqual([]);
+    // And the real import beside the prose was still followed.
+    expect(reachedNames(graph)).toEqual(["entry.ts", "thing.ts"]);
+  });
+
+  it("does not read `pg` out of a comment either — the same prose, the same file", () => {
+    // The other half of the `pg` assertion is a raw per-file match, so it carried
+    // the same false positive: a comment PROMISING there is no `pg` import read as
+    // one. It reads the same stripped source the walk does.
+    const graph = walkFixture({
+      "entry.ts": ['// Nothing in the TUI imports from "pg".', "export const ok = true;"].join("\n"),
+    });
+    const [entry] = [...graph.files];
+    expect(codeOf(entry as string)).not.toMatch(/from\s*["']pg["']/);
+  });
+
+  it("still fails on an import it cannot resolve — the guard is not merely quieter", () => {
+    // The fix must not buy silence with blindness. A missing relative file and a
+    // real external are both still seen, exactly as before.
+    const graph = walkFixture({
+      "entry.ts": ['import { gone } from "./missing.js";', 'import pg from "pg";', "export const x = [gone, pg];"].join(
+        "\n",
+      ),
+    });
+    expect(graph.unresolved).toEqual([expect.stringContaining("→ ./missing.js")]);
+    expect([...graph.externals]).toEqual(["pg"]);
+  });
+
+  it("follows imports that no statement-position matcher would find", () => {
+    // The other candidate fix — anchor the matcher to `^\s*import … from` — would
+    // pass the prose tests above while quietly dropping these three edges, and a
+    // dropped edge is how the prototype hid `pg` in the first place. So they are
+    // locked here: the walk's INPUT was narrowed, never its reach.
+    const graph = walkFixture({
+      "entry.ts": [
+        "import {",
+        "  a,",
+        "  b,",
+        '} from "./multi-line.js";',
+        'export { c } from "./re-exported.js";',
+        "export async function lazy() {",
+        '  return await import("./dynamic.js");',
+        "}",
+        "export const pair = [a, b];",
+      ].join("\n"),
+      "multi-line.ts": "export const a = 1;\nexport const b = 2;\n",
+      "re-exported.ts": "export const c = 3;\n",
+      "dynamic.ts": "export const d = 4;\n",
+    });
+    expect(graph.unresolved).toEqual([]);
+    expect(reachedNames(graph)).toEqual(["dynamic.ts", "entry.ts", "multi-line.ts", "re-exported.ts"]);
+  });
+
+  it("a `//` inside a string literal does not start a comment", () => {
+    // The cheap version of this fix — delete from `//` to end of line — eats the
+    // rest of any line holding a URL, and an import on that line goes with it.
+    const graph = walkFixture({
+      "entry.ts": [
+        'export const docs = "https://example.com/a//b";',
+        '/* A URL in a block comment: https://example.com/x */ import { thing } from "./thing.js";',
+        "export const used = thing;",
+      ].join("\n"),
+      "thing.ts": "export const thing = 1;\n",
+    });
+    expect(graph.unresolved).toEqual([]);
+    expect(reachedNames(graph)).toEqual(["entry.ts", "thing.ts"]);
   });
 });
