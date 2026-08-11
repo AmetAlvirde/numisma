@@ -21,7 +21,7 @@ export type RowDependencies = ReadonlyMap<string, readonly string[]>;
  * WHY IT HAS TO EXIST. A `CompositionRow` id names either a grouping
  * (`portfolio:core`, `tempo:Wealth`, `account:t1-usd`, `tier:c1`) or an instrument
  * (`instrument:btc`). Only the last kind carries an instrument in its id — 19 of the
- * real fund's rows do not, on every one of the 28 anchors — so a consumer asking *which rows does this
+ * real fund's rows do not, on every measured anchor — so a consumer asking *which rows does this
  * instrument's absent mark poison* can either parse the id, which is structurally
  * impossible for the aggregates and actively WRONG for an account someone named after
  * a coin it does not hold, or be handed this map. There is no third option, and a

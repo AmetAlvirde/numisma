@@ -95,7 +95,7 @@ export function setReaderPoolForTests(pool?: Pool): void {
  * SELECT below is byte-identical to the one the single-day reader ran: no WHERE, no
  * LIMIT. It has ALWAYS pulled full history into memory and thrown all but the newest
  * away. The AAR's "apps/web can only ever show a single day" was true of the return
- * TYPE, never of the query. Measured cost: 3,093 bytes/row — 28 anchors ≈ 87 KB, a
+ * TYPE, never of the query. Measured cost: 3,093 bytes/row — 28 anchors was ≈ 87 KB, a
  * year ≈ 1.1 MB.
  *
  * `anchors` is filtered to {@link COMPOSITION_SNAPSHOT_SCHEMA_VERSION} and ordered

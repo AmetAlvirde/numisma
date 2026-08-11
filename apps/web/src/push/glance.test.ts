@@ -219,7 +219,7 @@ describe("the quiet Sunday (the case V1 exists to protect)", () => {
     // WHY THE EXACTNESS WAS TRADED AWAY, so nobody "tightens" this back and silently
     // re-opens the leak: a day-over-day series preserved EXACTLY is the real NAV
     // series up to one unknown factor, and issues #146/#149 publish three real NAVs,
-    // so dividing recovers the factor and unscales all 28 days. `NAV_JITTER_PP`
+    // so dividing recovers the factor and unscales every day of it. `NAV_JITTER_PP`
     // displaces every move by up to ±0.05 PERCENTAGE POINTS to close that, which
     // moves this ratio by at most `NAV_JITTER_PP / 100`. A tighter bound here would
     // fail; a looser one would stop catching the drift this case exists to catch.

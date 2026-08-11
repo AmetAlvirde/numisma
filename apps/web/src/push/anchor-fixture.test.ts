@@ -107,8 +107,8 @@ describe("the committed anchor fixture", () => {
 
   it("is one fund, and every anchor names it — by its SYNTHETIC id", async () => {
     // On the COMMITTED BYTES, not on the generator's output: the file is what this
-    // public repository publishes, and the real `fund_id` used to be in it on all 28
-    // anchors. A regeneration that bypassed synthesis would put it back, and a
+    // public repository publishes, and the real `fund_id` used to be in it on every
+    // anchor. A regeneration that bypassed synthesis would put it back, and a
     // generator-side test would not notice.
     const anchors = await loadAnchorFixture();
     expect(new Set(anchors.map((a) => a.fundId))).toEqual(

@@ -86,7 +86,8 @@ function GlanceView({
 }) {
   // The wall clock is READ HERE and injected, never taken inside the module: freshness
   // is a render-time derivation (D6) over `latest.asOf`, and `computeVerdict` stays
-  // pure — which is what lets the same call be replayed over 28 anchors in a test.
+  // pure — which is what lets the same call be replayed over the whole committed
+  // anchor history in a test.
   const verdict = computeVerdict(latest, anchors, new Date());
   // Composed, never handed raw to JSX — the price sort and the wire's optionality are
   // decided in the pure module, where a test can reach them.

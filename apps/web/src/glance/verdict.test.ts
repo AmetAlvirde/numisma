@@ -1,7 +1,8 @@
 /**
  * The verdict module's unit surface (PRD #146 slice #150).
  *
- * The load-bearing test — all 28 anchors replayed against the measured history —
+ * The load-bearing test — every committed anchor replayed against the measured
+ * history —
  * lives in `verdict-replay.test.ts`. THIS file covers the cases the replay cannot
  * reach, and every one of them is a case real history does not contain:
  *
