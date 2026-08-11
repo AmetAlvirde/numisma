@@ -300,7 +300,7 @@ export type LoadedNoPlanRecord = NoPlanRecord & { line: number };
  *     `endedBy` so the caller can name the date and the operator's reason.
  *   - **`unreadable`** — the newest in-window line for this position was SKIPPED, or
  *     the whole file failed to load. Never collapsed into `none`: "the file could not
- *     be read" is not the same fact as "this position has no plan."
+ *     be read" is a different fact from "this position has no plan."
  *
  * `skipped` carries the position's own in-window skips — the ones that were INPUTS
  * to this selection, in FILE ORDER. `unattributable` is FILE-GLOBAL: see
