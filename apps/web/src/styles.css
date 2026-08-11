@@ -450,41 +450,23 @@ thead th {
   font-size: 0.95rem;
 }
 
-/* The SVG is aria-hidden presentation; it scales to the card and never sets the
-   card's height. */
+/* The aria-hidden wrapper around the TanStack chart. It measures the card and the
+   library owns everything inside it.
+
+   NO `preserveAspectRatio: none` ANYWHERE. The hand-rolled predecessor stretched a
+   fixed viewBox to the card's width, which squashed every dot into an ellipse and
+   made the same ladder a different shape on every screen. The library re-lays the
+   scene out at the measured width instead, so a circle is a circle.
+
+   `color` IS THE CHART'S THEME. TanStack Charts uses `currentColor` for its axes,
+   tick labels, grid and titles rather than shipping a palette, so setting it here is
+   what makes the guides legible in the dark theme. Per-mark paint comes from the same
+   variables, named in `PriceDropPathChart`. */
 .fp-chart {
   display: block;
   width: 100%;
-  height: 120px;
-}
-
-.fp-chart-line {
-  fill: none;
-  stroke: var(--muted);
-  stroke-width: 1.5;
-}
-
-.fp-chart-now {
-  stroke: var(--pos);
-  stroke-width: 1;
-  stroke-dasharray: 3 3;
-}
-
-.fp-chart-dot {
-  fill: var(--muted);
-}
-
-.fp-chart-dot.is-filled {
-  fill: var(--pos);
-}
-
-.fp-chart-dot.is-next {
-  fill: var(--text);
-}
-
-.fp-chart-dot.is-selected {
-  stroke: var(--text);
-  stroke-width: 1.5;
+  color: var(--muted);
+  font-size: 10px;
 }
 
 /* The chart's accessible substitute. Sized as prose, not as a caption footnote:

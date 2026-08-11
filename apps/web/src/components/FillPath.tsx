@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { formatUsd } from "@numisma/engine/format";
 import type {
-  ChartGeometry,
   FillPathRungView,
   FillPathView,
   MeasuredFigure,
 } from "../ladder/fill-path-view.ts";
+import { PriceDropPathChart } from "./PriceDropPathChart.tsx";
 
 /**
  * THE FILL PATH, ON THE PHONE (spec #285 §5.6–5.13 / G-D10b, slice #289) — the declared
@@ -29,10 +29,14 @@ import type {
  * truth — while a zero DOLLAR figure would read as a measurement.
  *
  * ── THE CHART IS PRESENTATION, NOT THE RECORD (§6.3) ────────────────────────────────
- * The `<svg>` is `aria-hidden`. Every per-rung fact it plots is in the rung list below
+ * The chart is `aria-hidden`. Every per-rung fact it plots is in the rung list below
  * it, and the one thing only the picture carries — the shape of the capital curve — is
  * the generated caption beside it, from `ladder/convexity-caption.ts`. There is no
  * hand-maintained chart description here and there must never be one.
+ *
+ * It is drawn by `@tanstack/charts` as of the charts spike; `PriceDropPathChart` holds
+ * the whole of that decision, including the four things that keep a library chart out
+ * of the accessibility tree. This surface is unchanged by the swap.
  *
  * The inspect slider is NOT the only path to the selected-rung panel: every rung row is
  * a `<button>` that selects on click AND on focus, so tabbing down the ladder walks the
@@ -265,7 +269,7 @@ function UnrecordedWarnings({ view }: { view: FillPathView }) {
   );
 }
 
-/** Card 2 — the hand-rolled chart, its generated caption, and the inspect slider. */
+/** Card 2 — the chart, its generated caption, and the inspect slider. */
 function ChartCard({
   view,
   selectedIndex,
@@ -279,7 +283,14 @@ function ChartCard({
     <section className="card fp-chart-card">
       <h2>Price Drop Path</h2>
       {view.chart ? (
-        <Chart chart={view.chart} selectedKey={view.rungs[selectedIndex]?.key} />
+        <PriceDropPathChart
+          rungs={view.rungs}
+          selectedKey={view.rungs[selectedIndex]?.key}
+          // A LAST CLOSE IS NOT "NOW". `chart.nowX` is present only when the view
+          // module saw a LIVE reading, so it — not `spotUsd`, which may be a close —
+          // is what decides whether a now-rule is drawn at all.
+          spotUsd={view.chart.nowX === undefined ? undefined : view.spotUsd}
+        />
       ) : (
         <p>
           <Absent why="this ladder ships no rung sizes — there is no capital curve to plot" />
@@ -309,56 +320,6 @@ function ChartCard({
         </label>
       ) : null}
     </section>
-  );
-}
-
-/**
- * HAND-ROLLED SVG (§6.2) — a polyline, one circle per rung, and a "now" line. No chart
- * library: the repo has none and adds none, and at this fidelity one would buy nothing.
- *
- * `aria-hidden` PER §6.3a. It is presentation. Every fact it draws is in the rung list,
- * and the shape it alone conveys is in the caption above.
- */
-function Chart({
-  chart,
-  selectedKey,
-}: {
-  chart: ChartGeometry;
-  selectedKey: string | undefined;
-}) {
-  return (
-    <svg
-      className="fp-chart"
-      viewBox={`0 0 ${chart.width} ${chart.height}`}
-      preserveAspectRatio="none"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <polyline className="fp-chart-line" points={chart.points} />
-      {chart.nowX === undefined ? null : (
-        <line
-          className="fp-chart-now"
-          x1={chart.nowX}
-          x2={chart.nowX}
-          y1={0}
-          y2={chart.height}
-        />
-      )}
-      {chart.circles.map((circle) => (
-        <circle
-          key={circle.key}
-          cx={circle.cx}
-          cy={circle.cy}
-          r={circle.key === selectedKey ? 5 : 3.5}
-          className={
-            "fp-chart-dot" +
-            (circle.filled ? " is-filled" : "") +
-            (circle.next ? " is-next" : "") +
-            (circle.key === selectedKey ? " is-selected" : "")
-          }
-        />
-      ))}
-    </svg>
   );
 }
 
