@@ -306,6 +306,43 @@ describe("what survives — the projections slice 4 replays", () => {
     }
   });
 
+  it("keeps every synthetic rung POSITIVE, however deep the ladder", () => {
+    // THE ASSERTION WHOSE ABSENCE LET A REAL BUG SHIP. The step used to be LINEAR
+    // (`1 - RUNG_STEP * index`), which reaches zero at rung 17 and goes negative after
+    // it — so an 18-rung ladder would have published negative limit prices into a
+    // PUBLIC fixture and the card would have rendered `-$200.14`. Neither of the two
+    // assertions beside this one could see it: a negative tail is still strictly
+    // descending, and it still carries over no real value. A price is a POSITIVE
+    // magnitude and nothing said so.
+    //
+    // Twenty-four rungs is well past the depth the real sidecar declares today (8),
+    // deliberately: the whole failure was that the generator was only ever exercised
+    // at a depth where the bug is invisible.
+    const deep = constructedAnchor("2026-06-26", 19447.71);
+    deep.report.dca = {
+      source: "loaded",
+      unattributable: 0,
+      positions: [
+        {
+          positionId: "capital-x-deep",
+          state: "pending",
+          kind: "dcaLadder",
+          rungs: Array.from({ length: 24 }, (_unused, index) => ({ priceUsd: 500 - index })),
+        },
+      ],
+    };
+    const rungs = synthesizeAnchors([deep])[0]!.report.dca.positions[0]!.rungs!;
+    expect(rungs).toHaveLength(24);
+    for (const [index, rung] of rungs.entries()) {
+      expect(rung.priceUsd, `rung ${index}`).toBeGreaterThan(0);
+    }
+    // …and still strictly descending all the way down, which is the property the
+    // shallow case already had and the fix must not have bought positivity with.
+    expect(rungs.map((rung) => rung.priceUsd)).toEqual(
+      [...rungs.map((rung) => rung.priceUsd)].sort((a, b) => b - a),
+    );
+  });
+
   it("keeps dataSafety and the FX rate — neither is a fund magnitude", () => {
     expect(out[0]!.report.dashboard.summary.dataSafety).toEqual(
       REAL[0]!.report.dashboard.summary.dataSafety,
@@ -342,7 +379,7 @@ describe("the NAV jitter — closing the last recoverable series", () => {
   it("displaces every day-over-day change, by no more than the declared band", () => {
     // THE EXPOSURE THIS CLOSES. Exact percent preservation publishes the real NAV
     // series up to one factor, and issues #146/#149 publish three real NAVs, so the
-    // factor divides out and the whole 28-day series unscales. Every change has to
+    // factor divides out and the whole series unscales. Every change has to
     // MOVE, and by a bounded amount so no trigger changes its mind.
     const real = [0.4, -1.1, 2.3, -0.2, 0.9, -3.4];
     const out = movesOf(synthesizeAnchors(seriesWithMoves(real)));
@@ -424,7 +461,7 @@ describe("the NAV jitter — closing the last recoverable series", () => {
 
   it("leaves the guard silent on an ordinary series — regeneration is not blocked", () => {
     // The statement of sufficiency, and it is a CONSTRUCTED series, not the fund's:
-    // nothing in this file can read the real 28 anchors (that is the whole point of
+    // nothing in this file can read the real anchors (that is the whole point of
     // the sanitizer). The real series' sufficiency is asserted where the generator
     // actually holds it — `assertThresholdSideHolds` at regeneration time, which stops
     // with the date named if a future day's move lands inside the band.
@@ -438,7 +475,7 @@ describe("what does NOT survive — every magnitude, and the fund's identity", (
   it("replaces the fund id — the real one never reaches the committed file", () => {
     // `fundName` has been fictional since slice #149, but every anchor still carried
     // the production `fund_id`, which named the fund in a PUBLIC repository just as
-    // plainly as the name would have — and it did so 28 times over, once per anchor.
+    // plainly as the name would have — and it did so once per anchor, every time.
     // Row ids and labels are a separate matter: those stay verbatim on purpose, so
     // this is the fund's IDENTITY being replaced, not the file being de-identified.
     for (const anchor of out) {

@@ -12,7 +12,7 @@
  * construction rather than by remembering to.
  *
  * ── WHAT IS PRESERVED, AND WHY EACH ONE ─────────────────────────────────────────
- * Everything slice 4's 28-anchor replay reads. These are COUNTS, RATIOS and SHAPES,
+ * Everything the anchor replay reads. These are COUNTS, RATIOS and SHAPES,
  * none of which discloses a magnitude:
  *
  *  - every anchor DATE, in order, and the anchor count;
@@ -66,7 +66,7 @@
  * Preserving every day-over-day NAV change EXACTLY would be mathematically the same
  * as publishing the real NAV series up to a single unknown factor — and any single
  * real NAV that ever becomes public makes that factor recoverable by division, which
- * unscales the whole 28-day series. Composition, cost basis and P&L are SYNTHESIZED
+ * unscales the whole series. Composition, cost basis and P&L are SYNTHESIZED
  * HERE FROM INVENTED PARAMETERS rather than scaled, so recovering the factor recovers
  * nothing about them (a uniform scale of the whole payload — the cheap alternative —
  * would have handed all of it back). The NAV series was the last thing it still
@@ -76,7 +76,7 @@
  *
  * WHAT THE JITTER MUST NOT DO is move a verdict. `navMove` is a THRESHOLD test at
  * {@link NAV_MOVE_THRESHOLD_PCT}, and slice 4's replay asserts a measured 6 *yes* /
- * 22 *no* across the 28 anchors. The headroom is sufficient by construction — the
+ * 22 *no* across the anchors it was measured on. The headroom is sufficient by construction — the
  * gap between the smallest firing move and the largest non-firing one is wider than
  * the jitter band by more than an order of magnitude — but sufficiency is ASSERTED,
  * not trusted: {@link assertThresholdSideHolds} runs on every regeneration, has the
@@ -200,10 +200,21 @@ export const SYNTHETIC_FUND_ID = fundIdOfName(SYNTHETIC_FUND_NAME);
  * limits", so the synthetic one is generated as exactly that and nothing more: the
  * count and the ordering are real, the levels are not.
  *
+ * THE STEP IS GEOMETRIC — `(1 - RUNG_STEP) ** index`, each rung a fixed FRACTION of
+ * the one above — and that is a correctness requirement, not a taste. The linear form
+ * this started as (`1 - RUNG_STEP * index`) reaches zero at rung 17 and goes NEGATIVE
+ * after it, so a ladder deeper than sixteen rungs would have published negative limit
+ * prices into a public fixture and rendered `-$200.14` on the card. Neither existing
+ * assertion could see it: a negative tail is still strictly descending, and it still
+ * carries over no real value. A price is a POSITIVE magnitude, and the geometric form
+ * is the one that says so at every depth. `synthesizeDca`'s own test pins a
+ * twenty-four-rung ladder against exactly that.
+ *
  * A deterministic per-rung wobble (drawn from {@link hashUnit} on the anchor date and
  * the position id, like every other invented number here) keeps the values from
- * reading as an arithmetic sequence, and is far smaller than the step, so it can never
- * reorder two rungs.
+ * reading as a clean decay curve. At ±1% against a 6% step it can never reorder two
+ * rungs — worst case the ratio between neighbours is 0.94 × 1.01 / 0.99 < 1 — and,
+ * being multiplicative like the step itself, it cannot change a price's sign either.
  */
 const SYNTHETIC_RUNG_TOP = 10_000;
 const RUNG_STEP = 0.06;
@@ -213,9 +224,21 @@ const RUNG_WOBBLE = 0.01;
  * Synthesize the DCA branch: every state, count and identifier VERBATIM, every rung
  * price invented.
  *
- * `source`, `positionId`, `state`, `kind` and `unattributable` are copied because they
- * are conclusions with no magnitude in them — the same reasoning that copies the
- * `glance` block whole. Only `priceUsd` is replaced, and it is replaced positionally
+ * `source`, `state`, `kind` and `unattributable` are copied because they are
+ * CONCLUSIONS with no magnitude in them — the same reasoning that copies the `glance`
+ * block whole.
+ *
+ * `positionId` IS PRESERVED FOR A DIFFERENT REASON, and the difference matters: it is
+ * not a conclusion, it is an operator-authored string lifted verbatim out of the
+ * private sidecar. It survives under the same REPO POLICY that keeps every row id and
+ * row label in this file — code identifiers keep their literal names
+ * (`docs/local-data.md`) — the policy this module's own header restates when it
+ * explains why `portfolio:accumulus` stays put. Do not generalize the conclusions
+ * sentence onto it: by that logic the fund NAME would survive too, and this module
+ * deliberately replaces it. Identifiers stay because policy says so; magnitudes and
+ * the fund's identity go because the public bar says so.
+ *
+ * Only `priceUsd` is replaced, and it is replaced positionally
  * so that a ladder of eight rungs stays a ladder of eight rungs: the card under test
  * renders a row per rung, and a synthesis that changed the count would change what the
  * fixture proves.
@@ -231,7 +254,8 @@ function synthesizeDca(dca: DcaBlock, asOf: string): DcaBlock {
       if (position.rungs !== undefined) {
         synthetic.rungs = position.rungs.map((_rung, index) => {
           const wobble = RUNG_WOBBLE * (2 * hashUnit(asOf, position.positionId, `rung-${index}`) - 1);
-          const level = SYNTHETIC_RUNG_TOP * (1 - RUNG_STEP * index) * (1 + wobble);
+          const level =
+            SYNTHETIC_RUNG_TOP * Math.pow(1 - RUNG_STEP, index) * (1 + wobble);
           return { priceUsd: Math.round(level * 100) / 100 };
         });
       }
