@@ -22,6 +22,8 @@ import { Pool } from "pg";
 import { asOfSortKey } from "./as-of.ts";
 import {
   COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
+  isSupportedSchemaVersion,
+  MIN_SUPPORTED_SNAPSHOT_SCHEMA_VERSION,
   type ProjectionReport,
   type SnapshotAnchor,
   type SnapshotHistory,
@@ -73,7 +75,7 @@ export function setReaderPoolForTests(pool?: Pool): void {
  * Read the projection's ANCHOR HISTORY. Returns a refusal result rather than throwing
  * for the two "expected" bad states:
  *  - no rows yet            -> { status: "empty" }
- *  - stored schema mismatch -> { status: "stale", storedVersion, expectedVersion }
+ *  - version outside the supported RANGE -> { status: "stale", storedVersion, expectedVersions }
  * Only an actual DB/query failure — or an `as_of` we cannot order (see
  * {@link asOfSortKey}) — rejects.
  *
@@ -98,12 +100,14 @@ export function setReaderPoolForTests(pool?: Pool): void {
  * TYPE, never of the query. Measured cost: 3,093 bytes/row — 28 anchors was ≈ 87 KB, a
  * year ≈ 1.1 MB.
  *
- * `anchors` is filtered to {@link COMPOSITION_SNAPSHOT_SCHEMA_VERSION} and ordered
- * ASCENDING through {@link asOfSortKey}. The version filter is not defensive
- * decoration — it is what makes the v2→v3 cutover graceful: leftover v2 rows stay in
- * the table (no credential in this system can DELETE one, V6) and are simply
- * unresolvable as references until the backfill upgrades them, instead of being
- * handed to a v3 reader that would mis-render them.
+ * `anchors` is filtered to the SUPPORTED RANGE (see
+ * {@link MIN_SUPPORTED_SNAPSHOT_SCHEMA_VERSION}) and ordered ASCENDING through
+ * {@link asOfSortKey}. The version filter is not defensive decoration — it is what
+ * keeps an unrenderable row out of the history: a v2 row stays in the table (no
+ * credential in this system can DELETE one, V6) and is simply unresolvable as a
+ * reference, instead of being handed to a reader that would mis-render it. Rows INSIDE
+ * the range are kept whole and whatever the newer shape added arrives absent on them,
+ * which is a true statement about that day rather than a gap to paper over.
  */
 export async function getSnapshotHistory(pool: Pool): Promise<SnapshotHistory> {
   const { rows } = await pool.query<SnapshotRow>(
@@ -128,16 +132,26 @@ export async function getSnapshotHistory(pool: Pool): Promise<SnapshotHistory> {
   // Staleness is judged on the LATEST row, not on an older ok one: if the newest
   // thing the projection holds is a version this build does not understand, the
   // honest answer is a refusal, not a render of some older row that happens to fit.
-  if (latest.schema_version !== COMPOSITION_SNAPSHOT_SCHEMA_VERSION) {
+  //
+  // A RANGE, NOT AN EQUALITY, since spec #285 — and the two comparisons below are the
+  // two places that had to move together. See
+  // `MIN_SUPPORTED_SNAPSHOT_SCHEMA_VERSION` for why the reader deploys first.
+  if (!isSupportedSchemaVersion(latest.schema_version)) {
     return {
       status: "stale",
       storedVersion: latest.schema_version,
-      expectedVersion: COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
+      expectedVersions: {
+        min: MIN_SUPPORTED_SNAPSHOT_SCHEMA_VERSION,
+        max: COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
+      },
     };
   }
 
   const anchors = rows
-    .filter((row) => row.schema_version === COMPOSITION_SNAPSHOT_SCHEMA_VERSION)
+    // The SECOND of the two comparisons. Left at equality it would have dropped every
+    // in-range older anchor from the history while the latest row rendered — the delta
+    // feature silently reading one day again.
+    .filter((row) => isSupportedSchemaVersion(row.schema_version))
     .map((row) => ({ key: asOfSortKey(row.as_of), row }))
     .sort((a, b) => a.key - b.key)
     .map(({ row }) => toAnchor(row));

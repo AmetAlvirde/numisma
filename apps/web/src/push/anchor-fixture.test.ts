@@ -29,6 +29,10 @@
  * stayed faithful to the real one is checked at REGENERATION, by
  * `assertThresholdSideHolds`, which legitimately has the real series in hand and never
  * commits it.
+ *
+ * MUTATION-CHECKED (spec #285, slice 3): the committed file's `planId` replaced with a
+ * real-shaped UUID and one rung `id` with an operator-shaped `r3`. The synthetic-id
+ * guard goes red naming the offending value and the anchor it sits on. Restored after.
  */
 import { describe, expect, it } from "vitest";
 import { COMPOSITION_SNAPSHOT_SCHEMA_VERSION } from "../projection/contract.ts";
@@ -36,9 +40,11 @@ import { anchorAt, loadAnchorFixture } from "./anchor-fixture.ts";
 import {
   NAV_MOVE_THRESHOLD_PCT,
   SYNTHETIC_FUND_ID,
+  SYNTHETIC_PLAN_ID_PREFIX,
   SYNTHETIC_POSITION_PREFIX,
   SYNTHETIC_FUND_NAME,
   SYNTHETIC_START_NAV,
+  syntheticRungId,
 } from "./fixture-synthesis.ts";
 
 /**
@@ -138,6 +144,49 @@ describe("the committed anchor fixture", () => {
     expect([...seen].sort()).toEqual(
       Array.from({ length: seen.size }, (_unused, i) => `${SYNTHETIC_POSITION_PREFIX}-${i + 1}`).sort(),
     );
+  });
+
+  it("names every LADDER and every RUNG by its synthetic id — v5's two identifiers", async () => {
+    // The same claim the `positionId` guard above makes, extended to the two identifiers
+    // v5 put on the wire, and on the COMMITTED BYTES for the same reason: a `planId` is
+    // a UUID minted into the operator's private sidecar and a rung `id` is authored
+    // beside it, so neither is a string this repository wrote. The authorship test — not
+    // the is-it-a-magnitude test — is what puts both on the synthesized side.
+    const anchors = await loadAnchorFixture();
+    const planShape = new RegExp(`^${SYNTHETIC_PLAN_ID_PREFIX}\\d{12}$`);
+    let ladders = 0;
+    for (const anchor of anchors) {
+      for (const position of anchor.report.dca.positions) {
+        if (position.kind === "dcaLadder") {
+          ladders += 1;
+          expect(position.planId, `${anchor.asOf} ${position.positionId}`).toMatch(planShape);
+        }
+        // A rung on a v5 file always carries an id: a ladder row without one is a v4 row
+        // wearing a v5 label, and the route resolves rungs by this key.
+        (position.rungs ?? []).forEach((rung, index) => {
+          expect(rung.id, `${anchor.asOf} rung ${index}`).toBe(syntheticRungId(index));
+        });
+      }
+    }
+    // False-pass guard: with no ladder in the file the loop above asserts nothing, which
+    // is the failure mode a shape scan over real data is most prone to.
+    expect(ladders).toBeGreaterThan(0);
+  });
+
+  it("records NO FILL STATE — history has none, and absence is the right answer", async () => {
+    // AC/`G-D9`: a June anchor cannot carry fill data. Every fill field is optional and
+    // every one of them is ABSENT here, which is the same shape a v4 row has and exactly
+    // what the surface renders as day zero. A synthesizer that invented a fill history
+    // would make slice 4 green against a state the fund has never been in.
+    for (const anchor of await loadAnchorFixture()) {
+      for (const position of anchor.report.dca.positions) {
+        expect(position.figures, anchor.asOf).toBeUndefined();
+        expect(position.orphanLots, anchor.asOf).toBeUndefined();
+        for (const rung of position.rungs ?? []) {
+          expect(Object.keys(rung).sort(), anchor.asOf).toEqual(["id", "priceUsd"]);
+        }
+      }
+    }
   });
 
   it("is anchored at a round fictional NAV and names an obviously fictional fund", async () => {
@@ -309,7 +358,7 @@ describe("the committed anchor fixture", () => {
     expect([...found].sort()).toEqual(anchors.map((a) => a.asOf));
   });
 
-  it("every anchor carries a well-formed v4 glance block", async () => {
+  it("every anchor carries a well-formed glance block", async () => {
     for (const anchor of await loadAnchorFixture()) {
       const { glance } = anchor.report;
       expect(Object.keys(glance.feedGap).sort(), anchor.asOf).toEqual([
@@ -337,10 +386,16 @@ describe("the committed anchor fixture", () => {
 
   it("is stamped at the version this build expects", async () => {
     // The loader throws on a mismatch; this asserts the committed file is the one
-    // this build understands, so a v5 that ships without regenerating fails loudly
+    // this build understands, so a version that ships without regenerating fails loudly
     // here rather than replaying a stale shape in the verdict replay.
+    //
+    // PINNED TO `CURRENT`, NOT TO THE READER'S SUPPORTED RANGE, and the difference is
+    // deliberate. The reader accepts an older stored row because it cannot choose what
+    // the projection already holds; this file is a COMMITTED ARTIFACT this repository
+    // does choose, and letting it sit at the floor would let a stale fixture replay
+    // forever under a range that was widened for a different reason.
     await expect(loadAnchorFixture()).resolves.toBeDefined();
-    expect(COMPOSITION_SNAPSHOT_SCHEMA_VERSION).toBe(4);
+    expect(COMPOSITION_SNAPSHOT_SCHEMA_VERSION).toBe(5);
   });
 
   it("anchorAt refuses a date the fixture does not hold", async () => {

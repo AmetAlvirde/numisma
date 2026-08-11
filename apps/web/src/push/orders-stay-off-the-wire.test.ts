@@ -39,6 +39,62 @@
  * of the has-teeth guards this repo already uses: the plans symbols DO appear in push
  * source, and `dca` IS a payload key. Without those, "nothing from ORDERS reached the
  * phone" and "nothing reached the phone" are indistinguishable failures.
+ *
+ * ── THE SECOND AMENDMENT (spec #285, slice 3): THIS ONE GOES THROUGH THE WALL ────
+ * The pin's own header says it "does not care which way the number moves, only that no
+ * bump happens without this docstring being read". It has now been read, twice, and the
+ * two crossings are different in kind. The first amendment could truthfully say the DCA
+ * branch "walked around the wall, it did not go through it", because plans are
+ * declarations of intent and the orders sidecar was never opened. THAT IS NO LONGER
+ * TRUE. This slice goes through it, deliberately, and here is exactly what changed.
+ *
+ * 1. THE PUSH NOW READS `orders.jsonl`. It has to: the Fill Path's conclusions are a
+ *    reconciliation of a declared ladder AGAINST THE ORDER STREAM, and no amount of
+ *    care makes that computable without the stream. `loadOrders` and `resolveOrdersPath`
+ *    therefore move from {@link ORDERS_SYMBOLS} to {@link ADMITTED_ORDER_SYMBOLS} — a
+ *    NARROWING of the marker set, which is this file's own precedent (the rung marker
+ *    was narrowed rather than deleted when plan-declared ladders arrived). Nothing is
+ *    deleted; everything not named stays refused.
+ *
+ * 2. THE CONCLUSIONS ADMITTED, BY NAME, and only these: per-rung `venueAxis` /
+ *    `bookAxis` / `label` / `joinProvenance` / `declaredPriceMismatch` / `resting`, the
+ *    quantities behind them (`placedQuantity`, `venueConsumedQuantity`,
+ *    `bookedQuantity`, `venueFilledFraction`, `orderPriceUsd`), the measured figures
+ *    (`deployedUsd`, `unitsAcquired`, `avgEntryUsd`, `waitingDeclaredUsd`,
+ *    `waitingRestingUsd`), the `orphanLots` count and the ladder's `planId`. Each is a
+ *    statement about ONE DECLARED LADDER, which is the fund's own intention, rendered
+ *    back to the operator who authored it (G-D2: authentication is the disclosure
+ *    ceiling).
+ *
+ * 3. WHAT STAYS BANNED, AND WHY IT IS NOT ARBITRARY. Every DERIVED-CAPITAL marker:
+ *    `availableCapital`, `committedRungs`, `committedByReserve`, `formatAvailableCapital`,
+ *    `fundingReserveId`, and `pickRestingOrdersAsOf` — the whole-fund encumbrance view.
+ *    Those answer "how much of the FUND is spoken for", which is a statement about the
+ *    fund's total capital position rather than about one ladder's progress, and it is
+ *    the class ADR-007's blast radius was computed without. The literal `orders.jsonl`
+ *    stays banned too: resolving that filename is `resolveOrdersPath`'s job, so the
+ *    string appearing in push source would mean someone bypassed the resolver.
+ *
+ * 4. SO THE WALL MOVED RATHER THAN FELL. It used to separate the orders sidecar from
+ *    the push entirely. It now separates RAW ORDER ROWS from CONCLUSIONS, and it stands
+ *    at `push/dca-block.ts`: orders and lots go in, per-rung states and figures come
+ *    out, and no order id, order stamp or lot crosses. That is a boundary these tests
+ *    can state and the old one could not have expressed.
+ *
+ * 5. THE POSITIVE LIST GREW WITH IT. {@link ADMITTED_ORDER_SYMBOLS} is asserted to be
+ *    PRESENT in push source, exactly as `PLANS_SYMBOLS` is. Without that, a wire that
+ *    silently stopped reconciling — the reconciliation deleted, the fields quietly gone
+ *    — would satisfy every negative assertion in this file and read as a clean pass.
+ *
+ * WHAT DOES NOT NEED A NEW GUARD: confinement of the orders read to `src/push/`. Both
+ * IO symbols live in `@numisma/preferences`, which `preferences-import-guard.test.ts`
+ * already confines to that directory at package level.
+ *
+ * MUTATION-CHECKED: (1) `loadOrders` moved back into `ORDERS_SYMBOLS` — the negative
+ * scan goes red naming `push-core.ts`, proving the scan really sees the new read.
+ * (2) The reconciliation import deleted from `dca-block.ts` — the positive assertion
+ * goes red naming the missing symbol rather than passing on a wire with no fill state.
+ * Both restored.
  * ────────────────────────────────────────────────────────────────────────────────
  */
 import { readFileSync, readdirSync } from "node:fs";
@@ -49,12 +105,15 @@ import { loadFixture, TEST_DCA, TEST_GLANCE } from "./push-core.fixtures.ts";
 
 /**
  * The version, and the fact that moving it is an ACT. It was 3 while the orders
- * increment's contract was "nothing changes"; it is 4 because spec #277 paid for the
- * fourth branch in full. Editing this line is still the visible price of a new field
- * on the wire — the pin does not care which way the number moves, only that no bump
- * happens without this docstring being read.
+ * increment's contract was "nothing changes"; 4 when spec #277 paid for the fourth
+ * branch; 5 because spec #285 paid for the Fill Path in full — the bump at every site,
+ * both allow-lists by enumeration, the fixture regeneration, the supported RANGE that
+ * makes this the first bump with no cutover window, and this amendment. Editing this
+ * line is still the visible price of a new field on the wire — the pin does not care
+ * which way the number moves, only that no bump happens without this docstring being
+ * read.
  */
-const PINNED_SCHEMA_VERSION = 4;
+const PINNED_SCHEMA_VERSION = 5;
 
 /**
  * The plans symbols the DCA branch legitimately brought into push source. Their
@@ -65,8 +124,29 @@ const PINNED_SCHEMA_VERSION = 4;
 const PLANS_SYMBOLS = ["loadPlans", "listPlansAsOf"];
 
 /**
- * Symbols that exist only because the orders sidecar exists. If any of them appears in
- * the projection or push source, the sidecar has reached the wire path.
+ * THE ADMITTED CROSSING (spec #285) — the symbols that legitimately entered push source
+ * when the push started reading the orders sidecar, plus the reconciliation they exist
+ * to feed. Asserted PRESENT, for the reason `PLANS_SYMBOLS` is: their disappearance
+ * would mean the wire's fill fields lost their source while the version still claims
+ * v5, and every negative assertion in this file would keep passing.
+ *
+ * `selectOrdersThrough` is here because it is what bounds the stream to the anchor. A
+ * push that lost it would answer every historical anchor with today's fills — data-
+ * shaped, wrong, and invisible to a scan that only checked the reconciliation ran.
+ */
+const ADMITTED_ORDER_SYMBOLS = [
+  "loadOrders",
+  "resolveOrdersPath",
+  "reconcileFillPath",
+  "selectOrdersThrough",
+];
+
+/**
+ * Symbols that exist only because the orders sidecar exists, MINUS the ones the Fill
+ * Path admitted by name above. Every one still here answers a whole-fund capital
+ * question — how much is committed, how much is available — rather than a question
+ * about one declared ladder's progress, and that is the line the amendment drew. If any
+ * appears in projection or push source, derived capital has reached the wire path.
  */
 const ORDERS_SYMBOLS = [
   "composeAvailableCapital",
@@ -75,8 +155,6 @@ const ORDERS_SYMBOLS = [
   "pickRestingOrdersAsOf",
   "formatAvailableCapital",
   "orders.jsonl",
-  "loadOrders",
-  "resolveOrdersPath",
 ];
 
 /**
@@ -126,10 +204,11 @@ describe("`Q7` — nothing from the ORDERS increment reaches the phone", () => {
     );
     expect(
       hits,
-      `the orders sidecar reached the projection/push path. This increment's phone-side ` +
-        `contract is that NOTHING changes: no schema bump, no allow-list edit, no ` +
-        `ADR-007 amendment, no backfill. Anything on the phone rides the hosted-` +
-        `projection amendment in increment two.\n${hits.join("\n")}`,
+      `DERIVED CAPITAL reached the projection/push path. The Fill Path amendment ` +
+        `admitted the orders READ and the per-ladder conclusions by name (see this ` +
+        `file's header); it admitted nothing that answers "how much of the FUND is ` +
+        `spoken for". That is a different disclosure and it costs its own decision, ` +
+        `not a paste into this list.\n${hits.join("\n")}`,
     ).toEqual([]);
   });
 
@@ -170,5 +249,35 @@ describe("`Q7` — nothing from the ORDERS increment reaches the phone", () => {
   it("`dca` IS a payload key — the bump bought a fourth branch", async () => {
     const payload = toProjectionReport(await loadFixture(), TEST_GLANCE, TEST_DCA);
     expect(Object.keys(payload).sort()).toEqual(["dashboard", "dca", "glance", "totals"]);
+  });
+
+  // ── The admitted crossing (spec #285, slice 3). The negative scan above can only
+  // ever say what did NOT happen; these say the thing that was PAID FOR did.
+  it("the orders sidecar DOES reach push source — the crossing was admitted, not smuggled", () => {
+    const sources = projectionSources();
+    const found = new Set(
+      sources.flatMap((file) =>
+        ADMITTED_ORDER_SYMBOLS.filter((symbol) => file.source.includes(symbol)),
+      ),
+    );
+    expect(
+      [...found].sort(),
+      `the Fill Path's inputs are gone from push source. The wire says v5 and the ` +
+        `payload's rungs claim reconciled fill state; if nothing reads the orders ` +
+        `sidecar and nothing reconciles it, one of those is a lie — and every negative ` +
+        `assertion in this file would still be green, which is exactly why this one ` +
+        `exists.`,
+    ).toEqual([...ADMITTED_ORDER_SYMBOLS].sort());
+  });
+
+  it("the wall stands at `dca-block.ts` — the conclusions cross, the rows do not", () => {
+    // Where the amendment says the wall now is, asserted rather than described. The
+    // reconciliation is called in exactly one place; if a second module started calling
+    // it, "the conclusions are narrowed in one file" would have quietly stopped being
+    // true and there would be two places for a raw order row to leak from.
+    const callers = projectionSources()
+      .filter((file) => file.source.includes("reconcileFillPath("))
+      .map((file) => file.path);
+    expect(callers).toEqual(["src/push/dca-block.ts"]);
   });
 });

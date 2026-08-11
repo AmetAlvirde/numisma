@@ -93,7 +93,7 @@ export async function makeTempStore(
 }
 
 /**
- * A representative v4 `DcaBlock`, on the same principle as {@link TEST_GLANCE} below:
+ * A representative v5 `DcaBlock`, on the same principle as {@link TEST_GLANCE} below:
  * a fixture for tests that need a well-formed payload but are not testing the DCA
  * derivation itself, and deliberately NOT an empty block. It carries one row of EVERY
  * arm the wire has, so a key-path allow-list walking it sees every optional key —
@@ -110,12 +110,56 @@ export const TEST_DCA: DcaBlock = {
   source: "loaded",
   positions: [
     // A pending ladder — the day-zero case the card exists for, and the only arm that
-    // carries rungs. Two of them, so the key-path walk reaches inside the array.
+    // carries rungs. Three of them, so the key-path walk reaches inside the array AND
+    // sees every optional the v5 fill state can put there: one rung fully reconciled
+    // with a price mismatch (the only case that carries `orderPriceUsd`), one
+    // reconciled cleanly, and one never placed — which carries NO fill key at all, and
+    // is the shape that proves an absent optional is distinguishable from an unused one.
     {
       positionId: "capital-fixture-btc",
       state: "pending",
       kind: "dcaLadder",
-      rungs: [{ priceUsd: 9_800 }, { priceUsd: 9_200 }],
+      planId: "00000000-0000-4000-8000-000000000042",
+      rungs: [
+        {
+          id: "rung-1",
+          priceUsd: 9_800,
+          venueAxis: "partly-filled",
+          bookAxis: "partly-recorded",
+          label: "partly filled · 50%",
+          joinProvenance: "declared",
+          orderPriceUsd: 9_760,
+          declaredPriceMismatch: true,
+          placedQuantity: 4,
+          venueConsumedQuantity: 2,
+          bookedQuantity: 1,
+          venueFilledFraction: 0.5,
+          resting: true,
+        },
+        {
+          id: "rung-2",
+          priceUsd: 9_400,
+          venueAxis: "resting",
+          bookAxis: "not-recorded",
+          label: "waiting",
+          joinProvenance: "price-matched",
+          declaredPriceMismatch: false,
+          placedQuantity: 3,
+          venueConsumedQuantity: 0,
+          bookedQuantity: 0,
+          venueFilledFraction: 0,
+          resting: true,
+        },
+        { id: "rung-3", priceUsd: 9_200 },
+      ],
+      figures: {
+        deployedUsd: 19_600,
+        unitsAcquired: 2,
+        avgEntryUsd: 9_800,
+        waitingDeclaredUsd: 750,
+        waitingRestingUsd: 500,
+      },
+      orphanLots: 1,
     },
     // A `dcaTime` plan: `kind` present, `rungs` genuinely ABSENT. Without it the
     // key-path allow-list could not tell an absent optional apart from an unused one.
@@ -128,7 +172,7 @@ export const TEST_DCA: DcaBlock = {
 };
 
 /**
- * A representative v4 `GlanceBlock` for tests that need a well-formed payload but
+ * A representative `GlanceBlock` for tests that need a well-formed payload but
  * are not testing the glance derivation itself (the upsert path, the D8 key-path
  * contract). Deliberately NOT an empty block: it carries a floor, a real shortfall
  * and the resulting suppression, so a key-path allow-list walking it sees every

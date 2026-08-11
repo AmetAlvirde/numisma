@@ -13,8 +13,10 @@ import type { CompositionReport, FundReviewData } from "@numisma/engine";
 import { buildCompositionReport, pickPolicyAsOf } from "@numisma/engine";
 import { loadFoldedReview, resolveEventStorePaths } from "@numisma/event-store";
 import {
+  loadOrders,
   loadPlans,
   loadPreferences,
+  resolveOrdersPath,
   resolvePlansPath,
   resolvePreferencesPath,
 } from "@numisma/preferences";
@@ -24,7 +26,7 @@ import {
   fundIdOf,
   toProjectionReport,
 } from "../projection/contract.ts";
-import { buildDcaBlock } from "./dca-block.ts";
+import { buildDcaBlock, type DcaFillInputs } from "./dca-block.ts";
 import { buildGlanceBlock } from "./glance.ts";
 
 /** What the push shell's two flags decide, once argv has been read. */
@@ -207,7 +209,61 @@ export async function buildDcaForAnchor(fold: FoldedAnchor): Promise<DcaBlock> {
     ...fold.data.positions.map((position) => position.id),
     ...(fold.data.closedPositions ?? []).map((closed) => closed.positionId),
   ]);
-  return buildDcaBlock(await loadPlans(resolvePlansPath()), asOf, existingPositionIds);
+  return buildDcaBlock(
+    await loadPlans(resolvePlansPath()),
+    asOf,
+    existingPositionIds,
+    await loadFillInputs(fold),
+  );
+}
+
+/**
+ * THE PUSH'S FOURTH PRIVILEGED INPUT — the orders sidecar (spec #285, slice 3), and the
+ * first time the push has read it at all.
+ *
+ * WHY IT IS READ NOW, having been kept off this path deliberately until today. The wall
+ * `orders-stay-off-the-wire.test.ts` holds was never "orders are untouchable"; it was
+ * that ORDERS-DERIVED CAPITAL — committed, available, encumbered — must not reach the
+ * phone under any name. That is unchanged and still asserted. What crosses now is the
+ * fill path's CONCLUSIONS about a declared ladder, and they cannot be computed without
+ * the stream that produced them. The wall therefore moved from "no orders in the push"
+ * to "no raw order rows past `dca-block.ts`", which is a boundary the tests can state.
+ *
+ * `undefined` MEANS NO RECONCILIATION WAS POSSIBLE, and the two cases that produce it
+ * are both "the stream I have is not the stream that exists":
+ *
+ *  - `unreadable` — a real read error. Reconciling over nothing would publish
+ *    "declared, nothing placed" for a ladder that may be fully filled.
+ *  - a `loaded` file with SKIPPED LINES. A skipped line may be the very fill that
+ *    explains a lot, so a partial stream understates what the venue did — the direction
+ *    that costs money, and the same reason the loader reports skips rather than
+ *    swallowing them. Absence is the honest answer; a warned skip is not a licence.
+ *
+ * An `absent` file is NOT one of them: no sidecar means no orders, which reconciles
+ * perfectly well to a ladder with nothing placed. That is a fact, not a gap.
+ */
+async function loadFillInputs(fold: FoldedAnchor): Promise<DcaFillInputs | undefined> {
+  const load = await loadOrders(resolveOrdersPath());
+  if (load.status === "unreadable") {
+    return undefined;
+  }
+  const orders = load.status === "absent" ? [] : load.records;
+  if (load.status === "loaded" && load.skips.length > 0) {
+    return undefined;
+  }
+  return {
+    orders,
+    positions: new Map(
+      fold.data.positions.map((position) => [
+        position.id,
+        { lots: position.lots, currency: position.currency },
+      ]),
+    ),
+    // The fold's own review rate, PASSED rather than fetched — the reconciliation is
+    // pure and a rate looked up inside it would make a historical answer depend on when
+    // it was asked. It is only ever the fallback: a lot's own `entryFx` wins.
+    reviewFx: fold.data.review.usdMxn,
+  };
 }
 
 /** The three projected identity/versioning columns derived from a report. */
