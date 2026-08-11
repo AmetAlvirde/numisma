@@ -29,6 +29,7 @@ import {
   synthesizeAnchors,
   SYNTHETIC_FUND_ID,
   SYNTHETIC_FUND_NAME,
+  SYNTHETIC_POSITION_PREFIX,
   SYNTHETIC_START_NAV,
 } from "./fixture-synthesis.ts";
 
@@ -167,10 +168,30 @@ function constructedAnchor(asOf: string, nav: number): SnapshotAnchor {
   } as SnapshotAnchor;
 }
 
+/**
+ * The NAV every constructed input anchor starts at. ROUND AND OBVIOUSLY FICTIONAL, on
+ * purpose: this literal used to be the fund's actual NAV on its first anchor, paired
+ * in the same call with that anchor's actual date, in a file this PUBLIC repository
+ * checks in. A magnitude is the one thing `fixture-synthesis.ts` exists to withhold,
+ * and it does not stop being one because a TEST is what holds it — the module header
+ * makes exactly this point about naming the firing moves in a comment.
+ *
+ * Nothing here reads the absolute value: the synthesizer re-anchors at
+ * {@link SYNTHETIC_START_NAV} and carries the series forward on RATIOS, so the tests
+ * assert over the moves between anchors and never over this number.
+ *
+ * It is 12345.67 rather than a rounder stand-in because the sweep below asserts that
+ * NO input magnitude appears anywhere in the output, and a round input collides with
+ * the synthetic side by construction: 20000 is also the pinned Reserve row's value at
+ * 20% of {@link SYNTHETIC_START_NAV}, which fails the sweep on a coincidence rather
+ * than on a leak. Fictional AND collision-free is the requirement, not just fictional.
+ */
+const CONSTRUCTED_NAV = 12_345.67;
+
 /** Two anchors, the second 5% below the first — a day-over-day move to preserve. */
 const REAL: SnapshotAnchor[] = [
-  constructedAnchor("2026-06-26", 19447.71),
-  constructedAnchor("2026-06-28", 19447.71 * 0.95),
+  constructedAnchor("2026-06-26", CONSTRUCTED_NAV),
+  constructedAnchor("2026-06-28", CONSTRUCTED_NAV * 0.95),
 ];
 
 /** Every number reachable in a payload, for the "no magnitude survived" sweep. */
@@ -272,22 +293,87 @@ describe("what survives — the projections slice 4 replays", () => {
   it("keeps the dca branch's STATES and COUNTS verbatim — the card renders them", () => {
     // Same reasoning that copies the glance block: a `state`, a `kind` and a count of
     // unreadable lines carry no magnitude, and they are exactly what the card shows.
+    // The `positionId` is NOT in this set — it is asserted replaced, just below.
     for (const anchor of out) {
       const dca = anchor.report.dca;
       expect(dca.source).toBe(DCA.source);
       expect(dca.unattributable).toBe(DCA.unattributable);
-      expect(dca.positions.map((p) => `${p.positionId}:${p.state}:${p.kind}`)).toEqual(
-        DCA.positions.map((p) => `${p.positionId}:${p.state}:${"kind" in p ? p.kind : undefined}`),
+      expect(dca.positions.map((p) => `${p.state}:${p.kind}`)).toEqual(
+        DCA.positions.map((p) => `${p.state}:${"kind" in p ? p.kind : undefined}`),
       );
+      // The position COUNT is shape: four plans in, four plans out.
+      expect(dca.positions).toHaveLength(DCA.positions.length);
       // The rung COUNT is shape, not magnitude: an eight-rung ladder must stay one.
       expect(dca.positions.map((p) => p.rungs?.length)).toEqual([3, undefined, undefined, undefined]);
       // …and a rungless plan keeps NO rungs key, rather than gaining an empty array.
       expect("rungs" in dca.positions[1]!).toBe(false);
     }
     // A copy, not the same object — the derived payload the DB write holds must not
-    // be reachable through the fixture.
-    out[0]!.report.dca.positions.push({ positionId: "mutated", state: "ended" });
+    // be reachable through the fixture. Mutated on its OWN synthesis, not on the
+    // shared `out`: this used to push onto the array every later test reads, so the
+    // pollution was invisible only because nothing downstream counted positions.
+    const isolated = synthesizeAnchors(REAL);
+    isolated[0]!.report.dca.positions.push({ positionId: "mutated", state: "ended" });
     expect(REAL[0]!.report.dca.positions).toHaveLength(DCA.positions.length);
+  });
+
+  it("REPLACES every positionId — an operator-authored id is not a code identifier", () => {
+    // THE ASSERTION WHOSE ABSENCE LET A REAL ID SHIP. `positionId` was kept verbatim
+    // under the repo's "code identifiers keep their literal names" policy, but that
+    // policy is about names this REPOSITORY authors; a plan id is read out of the
+    // private sidecar and its convention spells out venue, instrument and strategy.
+    // One real id reached the public fixture that way (PR #282).
+    const real = new Set(DCA.positions.map((position) => position.positionId));
+    for (const anchor of out) {
+      for (const position of anchor.report.dca.positions) {
+        expect(real.has(position.positionId), `${position.positionId} survived`).toBe(false);
+        expect(position.positionId).toMatch(
+          new RegExp(`^${SYNTHETIC_POSITION_PREFIX}-\\d+$`),
+        );
+      }
+      // Distinct plans stay distinct: the count is shape, and collapsing two ids
+      // would silently change what the card renders.
+      const ids = anchor.report.dca.positions.map((position) => position.positionId);
+      expect(new Set(ids).size).toBe(ids.length);
+    }
+  });
+
+  it("assigns positionIds over the SERIES, so one plan keeps one id across anchors", () => {
+    // Per-anchor numbering would be deterministic too, and wrong: a plan that appears
+    // on every anchor is ONE plan, and the card groups by id. This is the property
+    // that makes the fixture still describe a history rather than N unrelated days.
+    const perAnchor = out.map((anchor) =>
+      anchor.report.dca.positions.map((position) => position.positionId).join(","),
+    );
+    expect(new Set(perAnchor).size).toBe(1);
+    // …and the mapping follows first appearance, so it is readable rather than hashed.
+    expect(out[0]!.report.dca.positions.map((position) => position.positionId)).toEqual([
+      `${SYNTHETIC_POSITION_PREFIX}-1`,
+      `${SYNTHETIC_POSITION_PREFIX}-2`,
+      `${SYNTHETIC_POSITION_PREFIX}-3`,
+      `${SYNTHETIC_POSITION_PREFIX}-4`,
+    ]);
+  });
+
+  it("seeds the rung wobble from the SYNTHETIC id, not the real one", () => {
+    // Otherwise the disclosure survives the rename: every committed rung price would
+    // be a hash commitment to the private string, testable by anyone who guesses it,
+    // and in a form no grep for the id would ever surface. Two series identical except
+    // for their real ids must therefore produce identical rung prices.
+    const rungsFor = (positionId: string): number[] => {
+      const anchor = constructedAnchor("2026-06-26", CONSTRUCTED_NAV);
+      anchor.report.dca = {
+        source: "loaded",
+        unattributable: 0,
+        positions: [
+          { positionId, state: "pending", kind: "dcaLadder", rungs: [{ priceUsd: 1000 }, { priceUsd: 900 }] },
+        ],
+      };
+      return synthesizeAnchors([anchor])[0]!.report.dca.positions[0]!.rungs!.map(
+        (rung) => rung.priceUsd,
+      );
+    };
+    expect(rungsFor("dca-one-real-name")).toEqual(rungsFor("a-totally-different-id"));
   });
 
   it("INVENTS every rung price — a declared entry level is a magnitude", () => {
@@ -318,7 +404,7 @@ describe("what survives — the projections slice 4 replays", () => {
     // Twenty-four rungs is well past the depth the real sidecar declares today (8),
     // deliberately: the whole failure was that the generator was only ever exercised
     // at a depth where the bug is invisible.
-    const deep = constructedAnchor("2026-06-26", 19447.71);
+    const deep = constructedAnchor("2026-06-26", CONSTRUCTED_NAV);
     deep.report.dca = {
       source: "loaded",
       unattributable: 0,
@@ -354,8 +440,8 @@ describe("what survives — the projections slice 4 replays", () => {
 describe("the NAV jitter — closing the last recoverable series", () => {
   /** A synthetic history whose day-over-day percent changes are exactly `pcts`. */
   function seriesWithMoves(pcts: readonly number[]): SnapshotAnchor[] {
-    const anchors = [constructedAnchor("2026-06-26", 19447.71)];
-    let nav = 19447.71;
+    const anchors = [constructedAnchor("2026-06-26", CONSTRUCTED_NAV)];
+    let nav = CONSTRUCTED_NAV;
     for (const [i, pct] of pcts.entries()) {
       nav *= 1 + pct / 100;
       const date = new Date("2026-06-26T00:00:00Z");

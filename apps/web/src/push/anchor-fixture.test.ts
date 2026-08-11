@@ -36,6 +36,7 @@ import { anchorAt, loadAnchorFixture } from "./anchor-fixture.ts";
 import {
   NAV_MOVE_THRESHOLD_PCT,
   SYNTHETIC_FUND_ID,
+  SYNTHETIC_POSITION_PREFIX,
   SYNTHETIC_FUND_NAME,
   SYNTHETIC_START_NAV,
 } from "./fixture-synthesis.ts";
@@ -113,6 +114,29 @@ describe("the committed anchor fixture", () => {
     const anchors = await loadAnchorFixture();
     expect(new Set(anchors.map((a) => a.fundId))).toEqual(
       new Set([SYNTHETIC_FUND_ID]),
+    );
+  });
+
+  it("names every DCA plan by its SYNTHETIC id — no operator-authored string", async () => {
+    // Also on the COMMITTED BYTES, and for the reason the fund-id guard exists: this
+    // is the assertion whose absence let one real `positionId` ship into a public
+    // repository (PR #282). A plan id comes from the private sidecar and its
+    // convention names a live position's venue, instrument and strategy, so the file
+    // must carry nothing but `synthetic-position-N` — checked against what is on
+    // disk, not against what the generator would emit if re-run.
+    const anchors = await loadAnchorFixture();
+    const shape = new RegExp(`^${SYNTHETIC_POSITION_PREFIX}-\\d+$`);
+    const seen = new Set<string>();
+    for (const anchor of anchors) {
+      for (const position of anchor.report.dca.positions) {
+        expect(position.positionId, anchor.asOf).toMatch(shape);
+        seen.add(position.positionId);
+      }
+    }
+    // Numbered from 1 with no gaps, which is what `synthesizePositionIds` promises and
+    // the only way the ordinals disclose nothing beyond the count.
+    expect([...seen].sort()).toEqual(
+      Array.from({ length: seen.size }, (_unused, i) => `${SYNTHETIC_POSITION_PREFIX}-${i + 1}`).sort(),
     );
   });
 
