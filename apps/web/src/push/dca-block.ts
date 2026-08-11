@@ -20,7 +20,8 @@
  *    "the sidecar mentions this id and says nothing about it".
  *  - `endedBy`, `skipped` and the per-row `unattributable` arrays never ship. They are
  *    a conclusion's INPUTS, and the glance doctrine ships the conclusion.
- *  - Rungs carry `id` and `priceUsd`; `sizeUsd` stays off the wire.
+ *  - Rungs carry `id`, `priceUsd` and the declared `sizeUsd` (the last admitted by the
+ *    slice 3 amendment — see {@link DcaWireRung}'s header for what it discloses).
  *  - `unattributable` ships as a count, never a line.
  *  - Nothing date-shaped is emitted at all. `asOf` is an input to the selection, never
  *    an output of it.
@@ -35,8 +36,9 @@
  * neither crosses the wire, and this file is where they stop.
  *
  * WHAT CROSSES: per-rung two-axis state and the join that produced it, the measured
- * figures, and a COUNT of the lots no rung explains. What does not: the orders
- * themselves, the order ids, the lots, and every stamp on any of them.
+ * figures, a COUNT of the lots no rung explains, and a COUNT of the outstanding torn
+ * fill acts. What does not: the orders themselves, the order ids, the lots, the torn
+ * acts, and every stamp on any of them.
  *
  * `fills` IS OPTIONAL, AND ITS ABSENCE IS A STATEMENT. Absent means NO RECONCILIATION
  * WAS POSSIBLE — the orders sidecar could not be read — and the row then carries no
@@ -59,9 +61,16 @@ import type {
   IsoDate,
   LoadedPlans,
   OrderRecord,
+  PortfolioEvent,
   PositionLot,
+  TornFillAct,
 } from "@numisma/engine";
-import { listPlansAsOf, reconcileFillPath, selectOrdersThrough } from "@numisma/engine";
+import {
+  listPlansAsOf,
+  reconcileFillActs,
+  reconcileFillPath,
+  selectOrdersThrough,
+} from "@numisma/engine";
 import type {
   DcaBlock,
   DcaPositionRow,
@@ -87,6 +96,16 @@ export interface DcaFillInputs {
    * caller, so the as-of discipline is applied in one place for every caller.
    */
   orders: readonly OrderRecord[];
+  /**
+   * THE WHOLE DURABLE LOG as loaded — the OTHER half of every fill act, and the only
+   * input the torn-act detector cannot be run without. Bounded to the anchor HERE, with
+   * the order stream beside it, so one place decides what a historical anchor knew.
+   *
+   * The push holds the FOLD, which does not carry these; `push-core.ts` reads the log
+   * for them. That is why they are passed as a VALUE — the read belongs to the wiring
+   * one level up, exactly as `orders` and `LoadedPlans` do.
+   */
+  events: readonly PortfolioEvent[];
   /** The fold's positions by id — only the ones a plan could name are ever read. */
   positions: ReadonlyMap<string, DcaFillPosition>;
   /** The review's rate, as the per-lot `entryFx` fallback. Passed, never fetched. */
@@ -105,6 +124,18 @@ export function buildDcaBlock(
   // is the only way a historical anchor answers historically.
   const orders =
     fills === undefined ? undefined : selectOrdersThrough(fills.orders, asOf);
+  // THE FUND-LEVEL FACT, computed ONCE for the whole branch: both files entire, both
+  // bounded to the anchor. The event bound is a bare `asOf <=` rather than a selector
+  // because the envelope's `asOf` IS the event's calendar date (`events/parse.ts` gates
+  // it to `YYYY-MM-DD`), where an order line carries a second-granular venue stamp that
+  // `selectOrdersThrough` has to reduce first.
+  const torn =
+    orders === undefined || fills === undefined
+      ? undefined
+      : reconcileFillActs(
+          fills.events.filter((event) => event.asOf <= asOf),
+          orders,
+        );
 
   const positions: DcaPositionRow[] = [];
   for (const row of roster.positions) {
@@ -127,7 +158,7 @@ export function buildDcaBlock(
         const view =
           orders === undefined
             ? undefined
-            : reconcile(plan, orders, fills!, row.positionId);
+            : reconcile(plan, orders, torn ?? [], fills!, row.positionId);
         const byRungId = new Map(
           (view?.rungs ?? []).map((filled) => [filled.rung.id, filled]),
         );
@@ -165,22 +196,32 @@ export function buildDcaBlock(
     source: loaded.load.status === "load-failed" ? "unreadable" : "loaded",
     positions,
     unattributable: roster.unattributable.length,
+    // THE COUNT, AND A VISIBLE ZERO WHEN THE BOOKS AGREE. Spread rather than assigned so
+    // "could not check" is a genuinely absent key — the same distinction `figures` makes
+    // one level down, and the reason the two absences must not be spelled alike.
+    ...(torn === undefined ? {} : { tornActs: torn.length }),
   };
 }
 
 /**
  * Run the engine's reconciliation for one ladder.
  *
- * `tornActs` IS PASSED EMPTY, AND THAT IS NOT A CLAIM THAT NONE EXIST. Detecting a torn
- * act needs the raw `PortfolioEvent` list (`reconcileFillActs` pairs log events against
- * sidecar lines by a derived id), and the push holds the FOLD, which does not carry
- * them. Nothing on the wire asserts anything about torn acts, so the push says nothing
- * rather than saying "none" — the field the surface's red banner will need is a
- * separate read, and a separate decision.
+ * `tornActs` IS THE REAL LIST, DETECTED ONCE AND PASSED IN. This docstring used to say it
+ * was "passed empty, and that is not a claim that none exist", because detecting a torn
+ * act needs the raw `PortfolioEvent` list and the push held only the fold. The push now
+ * reads the log for exactly this (`DcaFillInputs.events`), so the caveat is retired
+ * rather than left standing beside code that contradicts it — the failure mode this repo
+ * has actually been bitten by.
+ *
+ * DETECTED ABOVE, NOT HERE, because the fact is FUND-LEVEL: one detection for the whole
+ * branch, handed to every ladder, so N ladders cannot disagree about the state of two
+ * files neither of them owns. The engine's `FillPathView` reports the list straight
+ * through and decides nothing about it; only the COUNT leaves this module.
  */
 function reconcile(
   plan: DcaLadderPlanRecord,
   orders: readonly OrderRecord[],
+  tornActs: readonly TornFillAct[],
   fills: DcaFillInputs,
   positionId: string,
 ): FillPathView {
@@ -189,7 +230,7 @@ function reconcile(
     plan,
     orders,
     lots: position?.lots ?? [],
-    tornActs: [],
+    tornActs,
     // Spread rather than assigned, so an unknown position leaves `currency` genuinely
     // ABSENT (the engine reads that as USD) instead of present-and-undefined.
     ...(position === undefined ? {} : { currency: position.currency }),
@@ -198,8 +239,12 @@ function reconcile(
 }
 
 /**
- * One rung, narrowed. Identity and price always; the fill state ONLY when an order
- * actually joined to this rung.
+ * One rung, narrowed. Identity, price and declared size always; the fill state ONLY when
+ * an order actually joined to this rung.
+ *
+ * `sizeUsd` IS IN THE BASE, WITH THE DECLARED FACTS, not among the fill keys below. It is
+ * what the operator wrote in the plans sidecar — knowable with nothing placed and unmoved
+ * by anything the venue does — so a rung that has never been placed still carries it.
  *
  * THE `joinProvenance` TEST IS THE GATE, and it is the same question as "is there an
  * order": the engine assigns provenance exactly when one joined. A never-placed rung
@@ -211,7 +256,11 @@ function reconcile(
  * eventually being wrong.
  */
 function toWireRung(rung: DcaRung, filled: FillPathRung | undefined): DcaWireRung {
-  const base: DcaWireRung = { id: rung.id, priceUsd: rung.priceUsd };
+  const base: DcaWireRung = {
+    id: rung.id,
+    priceUsd: rung.priceUsd,
+    sizeUsd: rung.sizeUsd,
+  };
   if (filled === undefined || filled.joinProvenance === undefined) {
     return base;
   }

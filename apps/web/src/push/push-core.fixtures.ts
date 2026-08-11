@@ -124,6 +124,7 @@ export const TEST_DCA: DcaBlock = {
         {
           id: "rung-1",
           priceUsd: 9_800,
+          sizeUsd: 250,
           venueAxis: "partly-filled",
           bookAxis: "partly-recorded",
           label: "partly filled · 50%",
@@ -139,6 +140,7 @@ export const TEST_DCA: DcaBlock = {
         {
           id: "rung-2",
           priceUsd: 9_400,
+          sizeUsd: 250,
           venueAxis: "resting",
           bookAxis: "not-recorded",
           label: "waiting",
@@ -150,7 +152,8 @@ export const TEST_DCA: DcaBlock = {
           venueFilledFraction: 0,
           resting: true,
         },
-        { id: "rung-3", priceUsd: 9_200 },
+        // Never placed: identity, price and DECLARED size, and no fill key at all.
+        { id: "rung-3", priceUsd: 9_200, sizeUsd: 250 },
       ],
       figures: {
         deployedUsd: 19_600,
@@ -169,6 +172,10 @@ export const TEST_DCA: DcaBlock = {
     { positionId: "capital-fixture-bad", state: "unreadable" },
   ],
   unattributable: 1,
+  // The fund-level count, present so the key-path walk reaches the branch ROOT's own
+  // optional. Non-zero on purpose: a `0` is indistinguishable from an unset counter, and
+  // this fixture's job is to carry every arm the wire has.
+  tornActs: 1,
 };
 
 /**

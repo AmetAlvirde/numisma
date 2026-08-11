@@ -61,10 +61,20 @@
  *    quantities behind them (`placedQuantity`, `venueConsumedQuantity`,
  *    `bookedQuantity`, `venueFilledFraction`, `orderPriceUsd`), the measured figures
  *    (`deployedUsd`, `unitsAcquired`, `avgEntryUsd`, `waitingDeclaredUsd`,
- *    `waitingRestingUsd`), the `orphanLots` count and the ladder's `planId`. Each is a
- *    statement about ONE DECLARED LADDER, which is the fund's own intention, rendered
- *    back to the operator who authored it (G-D2: authentication is the disclosure
- *    ceiling).
+ *    `waitingRestingUsd`), the `orphanLots` count, the ladder's `planId`, the rung's
+ *    DECLARED `sizeUsd`, and the fund-level `tornActs` COUNT. Each is a statement about
+ *    ONE DECLARED LADDER — or, for the torn-act count, about the two files that record
+ *    it — which is the fund's own intention rendered back to the operator who authored
+ *    it (G-D2: authentication is the disclosure ceiling).
+ *
+ *    THE TWO LATE ADDITIONS ARE NOT ORDERS-DERIVED CAPITAL, and the distinction is the
+ *    one this file's whole ban rests on. `sizeUsd` is a DECLARED figure out of the plans
+ *    sidecar, whose sum (`waitingDeclaredUsd`) already crossed; what it adds is the
+ *    ladder's SHAPE, which is what slice 4's `aria-hidden` chart needs an accessible
+ *    substitute for. `tornActs` is a COUNT of halves-without-halves — a repair state of
+ *    the fund's own records, carrying neither an amount nor an id — and it is emphatically
+ *    not "how much of the fund is spoken for". Neither answers the whole-fund encumbrance
+ *    question, which is the question that stays refused.
  *
  * 3. WHAT STAYS BANNED, AND WHY IT IS NOT ARBITRARY. Every DERIVED-CAPITAL marker:
  *    `availableCapital`, `committedRungs`, `committedByReserve`, `formatAvailableCapital`,
@@ -94,7 +104,13 @@
  * scan goes red naming `push-core.ts`, proving the scan really sees the new read.
  * (2) The reconciliation import deleted from `dca-block.ts` — the positive assertion
  * goes red naming the missing symbol rather than passing on a wire with no fill state.
- * Both restored.
+ * (3) `reconcileFillActs` DELETED from `dca-block.ts` and its call replaced by an inline
+ * `() => []` — the positive assertion goes red on the missing symbol, which is the
+ * regression it exists for: the torn-act count would have silently gone absent on every
+ * row while every negative assertion here stayed green. Note that ALIASING the import
+ * (`reconcileFillActs as detectTorn`) does NOT trip it — the scan is a substring scan
+ * over source, and the symbol is still named at the import site, which is the crossing
+ * this file is about. All restored.
  * ────────────────────────────────────────────────────────────────────────────────
  */
 import { readFileSync, readdirSync } from "node:fs";
@@ -133,10 +149,25 @@ const PLANS_SYMBOLS = ["loadPlans", "listPlansAsOf"];
  * `selectOrdersThrough` is here because it is what bounds the stream to the anchor. A
  * push that lost it would answer every historical anchor with today's fills — data-
  * shaped, wrong, and invisible to a scan that only checked the reconciliation ran.
+ *
+ * `reconcileFillActs` JOINED THEM WHEN THE TORN-ACT COUNT CROSSED, and it is worth saying
+ * why it belongs on a list about ORDERS. The detector reads BOTH files — the durable log
+ * and the orders sidecar — and pairs them by a derived id, so half of what it consumes is
+ * the very sidecar this wall is about. It is admitted on the same terms as the rest: what
+ * it produces here is a COUNT, and the acts themselves (an order id and a second-granular
+ * stamp apiece) stop at `dca-block.ts` with the raw rows. Asserted PRESENT because its
+ * disappearance would leave the wire's `tornActs` silently absent on every row while the
+ * surface's red banner — the one that says recording is blocked — simply never rendered,
+ * which is a false *no* and the failure this positive list exists to catch.
+ *
+ * The raw event list the detector's other half needs is NOT an orders symbol and is not
+ * listed here: `@numisma/event-store` is the push's own long-standing input, confined to
+ * `src/push/` by `../event-store-import-guard.test.ts`.
  */
 const ADMITTED_ORDER_SYMBOLS = [
   "loadOrders",
   "resolveOrdersPath",
+  "reconcileFillActs",
   "reconcileFillPath",
   "selectOrdersThrough",
 ];

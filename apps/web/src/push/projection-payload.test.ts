@@ -210,9 +210,10 @@ const ALLOWED_KEY_PATHS = [
   // path: a STATE per position, a COUNT of unattributable lines, the loader's whole-
   // file outcome, and the rung PRICE AXIS the card is. What is deliberately absent is
   // as load-bearing as what is here — no `effectiveAt` (the date invariant below), no
-  // rung `sizeUsd`, no `endedBy`, no `skipped`: those are a conclusion's inputs, and
-  // `push/dca-block.ts` is where they stop. (The rung `id` was on that list until v5,
-  // which is when the fill export it was a join key for came to exist.)
+  // `endedBy`, no `skipped`: those are a conclusion's inputs, and `push/dca-block.ts` is
+  // where they stop. (The rung `id` was on that list until v5, which is when the fill
+  // export it was a join key for came to exist; the rung `sizeUsd` was on it until the
+  // slice 3 amendment, which is when the chart's accessible substitute came to need it.)
   "$.dca",
   "$.dca.positions",
   "$.dca.positions[].kind",
@@ -227,10 +228,14 @@ const ALLOWED_KEY_PATHS = [
   // field on a rung fails here by name even though its neighbours are allowed.
   //
   // Each is a CONCLUSION about one declared ladder — the two axes and the join that
-  // produced them, the quantities they were measured from, the figures, and two counts.
-  // What is deliberately still absent is as load-bearing as what is here: no order ID,
-  // no `observedAt`, no lot, and no rung `sizeUsd`. Orders and lots stop at
-  // `push/dca-block.ts`, and the date invariant below is what holds the stamps back.
+  // produced them, the quantities they were measured from, the figures, and two counts —
+  // plus the rung's DECLARED size and a THIRD count that is fund-level rather than
+  // per-ladder (`$.dca.tornActs`, which sits on the branch root because the two files it
+  // compares belong to no ladder). What is deliberately still absent is as load-bearing
+  // as what is here: no order ID, no `observedAt`, no lot, and no torn act — a torn act
+  // carries both an id and a stamp, which is why only its COUNT is on this list. Orders,
+  // lots and acts stop at `push/dca-block.ts`, and the date invariant below is what holds
+  // the stamps back.
   "$.dca.positions[].figures",
   "$.dca.positions[].figures.avgEntryUsd",
   "$.dca.positions[].figures.deployedUsd",
@@ -248,9 +253,11 @@ const ALLOWED_KEY_PATHS = [
   "$.dca.positions[].rungs[].orderPriceUsd",
   "$.dca.positions[].rungs[].placedQuantity",
   "$.dca.positions[].rungs[].resting",
+  "$.dca.positions[].rungs[].sizeUsd",
   "$.dca.positions[].rungs[].venueAxis",
   "$.dca.positions[].rungs[].venueConsumedQuantity",
   "$.dca.positions[].rungs[].venueFilledFraction",
+  "$.dca.tornActs",
   "$.totals",
   "$.totals.baseCurrency",
   "$.totals.fundValueUsd",
