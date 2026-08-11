@@ -177,27 +177,60 @@ function HeaderCard({ view }: { view: FillPathView }) {
         </div>
       ) : null}
 
+      <Waiting figures={view.figures} />
+    </section>
+  );
+}
+
+/**
+ * THE WAITING CAPITAL — a figure and the one sentence that is true beside it.
+ *
+ * ABSENT `figures` IS NOT `$0`. It means the orders sidecar could not be read, so there
+ * is no waiting total to state and no all-clear to give; the em-dash and its cause are
+ * the same treatment the three measured figures get one card up. This used to render
+ * `Waiting $0.00 — all of it is resting at the venue` on the one row that says it could
+ * not check.
+ *
+ * THREE SENTENCES FOR THREE STATES, chosen by the view module's `split` rather than by an
+ * `else` here: a fully walked ladder has nothing waiting AND nothing resting, and the
+ * two-armed version claimed the second from the first.
+ */
+function Waiting({ figures }: { figures: FillPathView["figures"] }) {
+  if (figures === undefined) {
+    return (
       <div className="fp-waiting">
         <span className="fp-tile-label">Waiting</span>
-        <strong className="fp-tile-value">
-          {formatUsd(view.figures.waitingDeclaredUsd)}
-        </strong>
-        {/* THE SPLIT IS "DECLARED BUT NEVER PLACED", and the copy says exactly that.
-            For any rung that HAS an order, resting and unfilled are the same predicate
-            by construction, so calling this "unfilled vs. still-open" would assert a
-            distinction that does not exist. */}
-        {view.figures.neverPlacedUsd > 0 ? (
-          <p className="muted fp-waiting-sub">
-            {formatUsd(view.figures.waitingRestingUsd)} is resting at the venue;{" "}
-            {formatUsd(view.figures.neverPlacedUsd)} is declared but never placed.
-          </p>
-        ) : (
-          <p className="muted fp-waiting-sub">
-            All of it is resting at the venue — nothing declared is unplaced.
-          </p>
-        )}
+        <strong className="fp-tile-value">—</strong>
+        <p className="muted fp-waiting-sub">
+          The orders sidecar could not be read for this ladder, so nothing here is a
+          measurement — this is NOT "nothing is waiting".
+        </p>
       </div>
-    </section>
+    );
+  }
+  return (
+    <div className="fp-waiting">
+      <span className="fp-tile-label">Waiting</span>
+      <strong className="fp-tile-value">{formatUsd(figures.waitingDeclaredUsd)}</strong>
+      {/* THE SPLIT IS "DECLARED BUT NEVER PLACED", and the copy says exactly that.
+          For any rung that HAS an order, resting and unfilled are the same predicate
+          by construction, so calling this "unfilled vs. still-open" would assert a
+          distinction that does not exist. */}
+      {figures.split === "partly-unplaced" ? (
+        <p className="muted fp-waiting-sub">
+          {formatUsd(figures.waitingRestingUsd)} is resting at the venue;{" "}
+          {formatUsd(figures.neverPlacedUsd)} is declared but never placed.
+        </p>
+      ) : figures.split === "all-resting" ? (
+        <p className="muted fp-waiting-sub">
+          All of it is resting at the venue — nothing declared is unplaced.
+        </p>
+      ) : (
+        <p className="muted fp-waiting-sub">
+          Nothing is waiting — every declared rung has filled.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -451,7 +484,7 @@ function RungListCard({
 
       {/* THE ORPHAN BUCKET — recorded lots no declared rung explains. A count, never
           the lots: the conclusion crosses the wire and the position data does not. */}
-      {view.orphanLots > 0 ? (
+      {view.orphanLots !== undefined && view.orphanLots > 0 ? (
         <p className="muted fp-orphans">
           {view.orphanLots} recorded {view.orphanLots === 1 ? "lot" : "lots"} that no
           declared rung explains.

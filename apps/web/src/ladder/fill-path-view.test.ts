@@ -30,12 +30,23 @@
  *  - stopped passing `orphanLots` through → "an absent orphan count is zero, not
  *    unknown" red on the present-and-nonzero half. Right reason: absence rule 5, the
  *    deliberate opposite convention to `tornActs`.
+ *  - restored the `?? 0` on the two waiting figures, so an unread sidecar reports `$0`
+ *    waiting again → "carries rule 2 all the way to the WAITING figures" red, and with
+ *    it the `orphanLots ?? 0` half. Right reason: absence rule 2 — `figures` absent is
+ *    "could not check", never "nothing is placed".
+ *  - collapsed the waiting split back to two arms → "says NOTHING IS WAITING when the
+ *    ladder is fully walked" red with `all-resting`. Right reason: a fully walked ladder
+ *    has nothing resting to say the all-clear about.
  *  - dropped `priceUsd < livePrice` from the `next` search → 2 red, the first marking a
  *    rung ABOVE spot and the second marking one after price had fallen past the whole
  *    ladder. Right reason: `next` is the first rung a FALLING price meets.
  *  - relaxed `price passed` from `resting` to any unfilled rung → "does not claim a
  *    never-placed rung was passed unconfirmed" red. Right reason: there is no order for
  *    the venue to be silent about.
+ *  - relaxed EITHER boundary comparison one notch — `priceUsd < livePrice` to `<=`, and
+ *    `priceUsd >= livePrice` to `>` — → "decides the rung sitting EXACTLY at spot" red,
+ *    each in its own half. Right reason: a rung at spot must be exactly one of the two
+ *    states, and until that fixture existed both operators were unobservable.
  */
 import { describe, expect, it } from "vitest";
 import type { DcaBlock, SnapshotAnchor } from "../projection/contract.ts";
@@ -217,6 +228,65 @@ describe("the five absence rules", () => {
     dca.positions[0]!.orphanLots = 3;
     expect(ok(dca).orphanLots).toBe(3);
   });
+
+  it("carries rule 2 all the way to the WAITING figures, which are not zero either", () => {
+    // RULE 2 AGAIN, one field over, and the place it used to be inverted. `figures`
+    // absent means the sidecar could not be read. The two waiting totals used to read
+    // that as `0`, so the card printed `Waiting $0.00` beside an affirmative all-clear
+    // on the ONE row that says it could not check.
+    const dca = structuredClone(DAY_ZERO);
+    delete dca.positions[0]!.figures;
+    const view = ok(dca);
+
+    expect(view.reconciled).toBe(false);
+    expect(view.figures).toBeUndefined();
+    // And rule 5's coercion cannot outlive rule 2 either: absence there is unambiguous
+    // only BECAUSE `figures` is present to say a reconciliation ran.
+    expect(view.orphanLots).toBeUndefined();
+  });
+
+  it("keeps the waiting figures present at zero when a reconciliation DID run", () => {
+    // The mirror image, and the reason this is not a fourth "absent, never zero" field:
+    // zero waiting capital is a real, measured answer.
+    const dca = structuredClone(DAY_ZERO);
+    dca.positions[0]!.figures = { waitingDeclaredUsd: 0, waitingRestingUsd: 0 };
+    const view = ok(dca);
+
+    expect(view.figures).toEqual({
+      waitingDeclaredUsd: 0,
+      waitingRestingUsd: 0,
+      neverPlacedUsd: 0,
+      split: "nothing-waiting",
+    });
+    expect(view.orphanLots).toBe(0);
+  });
+});
+
+/**
+ * THREE STATES NEED THREE SENTENCES. The component used to have two: `neverPlacedUsd > 0`
+ * and an `else` reading "All of it is resting at the venue" — which a fully-walked ladder,
+ * with nothing waiting and nothing resting, printed beside `$0.00`.
+ */
+describe("the waiting split says which of three things is true", () => {
+  function withWaiting(waitingDeclaredUsd: number, waitingRestingUsd: number) {
+    const dca = structuredClone(DAY_ZERO);
+    dca.positions[0]!.figures = { waitingDeclaredUsd, waitingRestingUsd };
+    return ok(dca).figures;
+  }
+
+  it("says NOTHING IS WAITING when the ladder is fully walked", () => {
+    expect(withWaiting(0, 0)?.split).toBe("nothing-waiting");
+  });
+
+  it("says ALL RESTING only when there is something resting to say it about", () => {
+    expect(withWaiting(2_000, 2_000)?.split).toBe("all-resting");
+  });
+
+  it("says PARTLY UNPLACED when the two totals disagree — the hidden encumbrance", () => {
+    const figures = withWaiting(2_000, 750);
+    expect(figures?.split).toBe("partly-unplaced");
+    expect(figures?.neverPlacedUsd).toBe(1_250);
+  });
 });
 
 describe("the two spot-dependent decorations — and nothing else moves with price", () => {
@@ -227,6 +297,22 @@ describe("the two spot-dependent decorations — and nothing else moves with pri
     // Spot at 55,000: the rungs at 60/58/56k are already above it; 54,000 is the first
     // one a falling price meets.
     expect(next[0]!.priceUsd).toBe(54_000);
+  });
+
+  it("decides the rung sitting EXACTLY at spot: passed, and not next", () => {
+    // BOTH COMPARISONS ARE STRICT AT THE BOUNDARY, and nothing else in this suite puts
+    // a rung there — every other reading sits between rungs, so `<` relaxed to `<=` and
+    // `>=` relaxed to `>` were both unobservable. A rung at spot must be exactly one of
+    // the two states, and this is the fixture that says which.
+    const view = ok(DAY_ZERO, LIVE(54_000));
+    const atSpot = view.rungs.find((rung) => rung.priceUsd === 54_000)!;
+
+    expect(atSpot.pricePassedUnconfirmed).toBe(true);
+    expect(atSpot.isNext).toBe(false);
+    // The next rung a FALLING price meets is the first one strictly below it.
+    expect(view.rungs.filter((rung) => rung.isNext).map((rung) => rung.priceUsd)).toEqual([
+      50_000,
+    ]);
   });
 
   it("marks NO next rung when price has fallen past the whole ladder", () => {
@@ -260,7 +346,7 @@ describe("the two spot-dependent decorations — and nothing else moves with pri
     expect(view.rungs.some((rung) => rung.pricePassedUnconfirmed)).toBe(false);
     expect(view.spotUnavailable).toBe(true);
     expect(view.rungs).toHaveLength(8);
-    expect(view.figures.waitingDeclaredUsd).toBe(2_000);
+    expect(view.figures?.waitingDeclaredUsd).toBe(2_000);
   });
 
   it("degrades to the last close it was given, still labeled unavailable", () => {
@@ -331,8 +417,8 @@ describe("the pills, the warnings and the banners", () => {
     const dca = structuredClone(DAY_ZERO);
     dca.positions[0]!.figures = { waitingDeclaredUsd: 2_000, waitingRestingUsd: 1_750 };
     const view = ok(dca);
-    expect(view.figures.neverPlacedUsd).toBe(250);
-    expect(view.figures.waitingRestingUsd).toBe(1_750);
+    expect(view.figures?.neverPlacedUsd).toBe(250);
+    expect(view.figures?.waitingRestingUsd).toBe(1_750);
   });
 });
 
