@@ -71,9 +71,10 @@
  *    venue;
  *  - every rung's declared `sizeUsd`, which the wire started carrying at v5. It is the
  *    operator's own capital allocation per level — a magnitude by any reading — and it is
- *    replaced by a flat {@link SYNTHETIC_RUNG_SIZE_USD}, which is also what the two
- *    waiting totals beside it are rebuilt from, so the committed file's sums and its
- *    per-rung sizes agree the way a real payload's do;
+ *    replaced by a flat {@link SYNTHETIC_RUNG_SIZE_USD}, which the two waiting totals
+ *    beside it are then SUMMED from — over the synthetic rungs themselves, so the
+ *    committed file's sums and its per-rung sizes agree the way a real payload's do even
+ *    where a rung carries no size at all;
  *  - every `positionId`, which becomes `synthetic-position-N` by first appearance
  *    across the series. It is not a magnitude, but the operator's naming convention
  *    spells out a live position's VENUE, INSTRUMENT and STRATEGY, and the string is
@@ -481,19 +482,23 @@ function synthesizeRung(rung: DcaWireRung, index: number): DcaWireRung {
  * figures in would make slice 4 green against a shape the push never emits on day zero,
  * which is the state the live fund is actually in.
  *
- * The waiting figures are rebuilt as COUNTS × the invented rung size rather than carried
- * over: they are sums of the real declared `sizeUsd`, and carrying them would publish the
- * ladder's capital in aggregate. Rebuilding them from the SAME constant
- * {@link synthesizeRung} stamps on each rung is what keeps the committed file internally
- * consistent — a sum that disagreed with the rungs it claims to sum would be a shape no
- * real payload has.
+ * The waiting figures are rebuilt rather than carried over: they are sums of the real
+ * declared `sizeUsd`, and carrying them would publish the ladder's capital in aggregate.
+ *
+ * REBUILT AS AN ACTUAL SUM OVER THE SYNTHETIC RUNGS, not as a count times the constant
+ * {@link synthesizeRung} stamps. The two agree only while every rung carries a size — and
+ * a v4-shaped rung deliberately carries none, so the count form published a total twice
+ * the sizes beside it. A sum that disagrees with the rungs it claims to sum is a shape no
+ * real payload has, which is exactly what this synthesizer must not invent.
  */
 function synthesizeFigures(
   figures: DcaWireFillFigures,
   rungs: readonly DcaWireRung[],
 ): DcaWireFillFigures {
-  const unfilled = rungs.filter((rung) => rung.venueAxis !== "filled").length;
-  const resting = rungs.filter((rung) => rung.resting === true).length;
+  const sizeOf = (subset: readonly DcaWireRung[]) =>
+    subset.reduce((total, rung) => total + (rung.sizeUsd ?? 0), 0);
+  const unfilled = sizeOf(rungs.filter((rung) => rung.venueAxis !== "filled"));
+  const resting = sizeOf(rungs.filter((rung) => rung.resting === true));
   const units = rungs.reduce((sum, rung) => sum + (rung.bookedQuantity ?? 0), 0);
   const deployed = rungs.reduce(
     (sum, rung) => sum + (rung.bookedQuantity ?? 0) * rung.priceUsd,
@@ -505,8 +510,8 @@ function synthesizeFigures(
     ...(figures.avgEntryUsd === undefined
       ? {}
       : { avgEntryUsd: units > 0 ? deployed / units : 0 }),
-    waitingDeclaredUsd: unfilled * SYNTHETIC_RUNG_SIZE_USD,
-    waitingRestingUsd: resting * SYNTHETIC_RUNG_SIZE_USD,
+    waitingDeclaredUsd: unfilled,
+    waitingRestingUsd: resting,
   };
 }
 

@@ -221,6 +221,11 @@ describe("getSnapshotHistory — the supported version RANGE", () => {
     expect(position.planId).toBeUndefined();
     expect(position.figures).toBeUndefined();
     expect(position.orphanLots).toBeUndefined();
+    // The claim is that a v4 row reads back as DAY-ZERO ABSENCE rather than as a
+    // mis-render, and a loop over an empty array asserts neither. Any future
+    // normalization in `getSnapshotHistory`/`toAnchor` that dropped rungs lacking a v5
+    // `id` would silence every assertion below without this line.
+    expect(position.rungs).toHaveLength(2);
     for (const rung of position.rungs ?? []) {
       expect(rung.id).toBeUndefined();
       expect(rung.venueAxis).toBeUndefined();

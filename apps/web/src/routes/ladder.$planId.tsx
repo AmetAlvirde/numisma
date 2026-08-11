@@ -33,7 +33,11 @@ import type { SnapshotAnchor } from "../projection/contract.ts";
  * ── THE BROWSER BUNDLE GAINS NO ENGINE IMPORT ───────────────────────────────────────
  * The two spot-dependent decorations — the `next` marker and `waiting · price passed,
  * unconfirmed` — compute in `ladder/fill-path-view.ts`, a pure WEB-side module, in the
- * pattern `glance/dca-view.ts` set. `client-bundle.integration.test.ts` stays green.
+ * pattern `glance/dca-view.ts` set. The guard that HOLDS that claim is
+ * `routes/route-move.test.ts`, which scans this module's whole reachable import graph
+ * for an engine value import in any form. Not `client-bundle.integration.test.ts`: that
+ * one scans the built bundle for credential literals and would stay green with the
+ * engine imported here (and it skips entirely on an unbuilt tree).
  */
 export const Route = createFileRoute("/ladder/$planId")({
   component: LadderPage,

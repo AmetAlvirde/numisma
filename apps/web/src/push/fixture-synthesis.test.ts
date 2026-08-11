@@ -553,10 +553,17 @@ describe("what survives — the projections slice 4 replays", () => {
       // would publish the shape of a real ladder into a public file.
       expect(walked.rungs![0]!.sizeUsd).toBeDefined();
       expect(walked.rungs![0]!.sizeUsd).not.toBe(real.rungs![0]!.sizeUsd);
-      // …and the waiting totals beside it are rebuilt from the SAME synthetic size, so
-      // the committed file's sums cannot disagree with the rungs they claim to sum.
-      const declared = walked.rungs!.filter((rung) => rung.venueAxis !== "filled").length;
-      expect(walked.figures!.waitingDeclaredUsd).toBe(declared * walked.rungs![0]!.sizeUsd!);
+      // …and the waiting totals beside it are rebuilt from the rungs THEMSELVES, so the
+      // committed file's sums cannot disagree with the rungs they claim to sum.
+      //
+      // SUMMED, NOT COUNTED × A CONSTANT. The count form restated `synthesizeFigures`'
+      // own formula back at it, so it could not see the one drift it exists to catch: the
+      // day-zero rung two tests up carries NO `sizeUsd`, which is worth nothing to a sum
+      // and a full share to a count — and the file read 500 against an actual 250.
+      const declared = walked
+        .rungs!.filter((rung) => rung.venueAxis !== "filled")
+        .reduce((total, rung) => total + (rung.sizeUsd ?? 0), 0);
+      expect(walked.figures!.waitingDeclaredUsd).toBe(declared);
     });
 
     it("carries the TORN-ACT count verbatim — a count, like `unattributable`", () => {
