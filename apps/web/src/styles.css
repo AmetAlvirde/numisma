@@ -469,6 +469,51 @@ thead th {
   font-size: 10px;
 }
 
+/* THE KEY TO THE PICTURE, IN HTML. TanStack Charts' own legend is bound to a colour
+   scale and draws colour chips; it cannot show a dashed stroke or a rule, which is
+   most of what there is to explain here. Each swatch is drawn with the SAME variable
+   and dash pattern as the mark it stands for.
+
+   It lives inside the `aria-hidden` wrapper on purpose — see `PriceDropPathChart`. */
+.fp-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.fp-legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fp-legend-swatch {
+  width: 18px;
+  border-top: 2px solid var(--muted);
+}
+
+.fp-legend-swatch.is-filled {
+  border-top-color: var(--pos);
+}
+
+.fp-legend-swatch.is-waiting {
+  border-top-style: dashed;
+}
+
+/* The now rule is vertical in the chart, so its swatch is too — a horizontal dash
+   here would be a second waiting swatch in a different colour. */
+.fp-legend-swatch.is-now {
+  width: 0;
+  height: 11px;
+  border-top: 0;
+  border-left: 1px dashed var(--text);
+}
+
 /* The chart's accessible substitute. Sized as prose, not as a caption footnote:
    for a screen-reader user this sentence IS the chart. */
 .fp-caption {
