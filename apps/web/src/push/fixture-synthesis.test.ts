@@ -439,6 +439,11 @@ describe("what survives — the projections slice 4 replays", () => {
   // input said nothing about. And `synthesizeFigures`' `waitingDeclaredUsd` carried
   // over from the input instead of rebuilt — the magnitude case goes red naming the
   // real total. Both restored.
+  //
+  // MUTATION-CHECKED (the slice 3 amendment): `sizeUsd` carried over from the input
+  // instead of replaced — red naming the operator's real declared size; and `tornActs`
+  // defaulted to `0` instead of preserved-or-absent — red on the anchor that could not
+  // check acquiring a count it never had. Both restored.
   describe("the v5 fill state", () => {
     /** An anchor whose one ladder is mid-walk: filled, partly filled, and untouched. */
     function walkedLadder(): SnapshotAnchor {
@@ -446,6 +451,8 @@ describe("what survives — the projections slice 4 replays", () => {
       anchor.report.dca = {
         source: "loaded",
         unattributable: 0,
+        // A COUNT of the fund's own bookkeeping state, carried like `unattributable`.
+        tornActs: 2,
         positions: [
           {
             positionId: "capital-x-btc",
@@ -456,6 +463,8 @@ describe("what survives — the projections slice 4 replays", () => {
               {
                 id: "operator-rung-a",
                 priceUsd: 1000,
+                // The operator's real declared capital for this level — invented away.
+                sizeUsd: 1_850,
                 venueAxis: "partly-filled",
                 bookAxis: "recorded",
                 label: "partly filled · 25%",
@@ -468,6 +477,8 @@ describe("what survives — the projections slice 4 replays", () => {
                 venueFilledFraction: 0.25,
                 resting: true,
               },
+              // NO `sizeUsd` and no fill key: the shape a v4-ERA anchor regenerates
+              // from, which the file still holds for every anchor older than the bump.
               { id: "operator-rung-b", priceUsd: 900 },
             ],
             figures: {
@@ -531,7 +542,31 @@ describe("what survives — the projections slice 4 replays", () => {
       // The load-bearing half. A synthesizer that manufactured a state here would make
       // the fixture claim a history the fund never had, and slice 4 would go green
       // against a shape the push does not emit on the day that actually matters.
+      // Absence is preserved KEY BY KEY, `sizeUsd` included: a v4-era anchor regenerates
+      // as a v4-shaped rung rather than acquiring a field its own push never wrote.
       expect(Object.keys(walked.rungs![1]!).sort()).toEqual(["id", "priceUsd"]);
+    });
+
+    it("INVENTS the declared rung size while keeping the ladder's rung COUNT", () => {
+      // `sizeUsd` is the operator's own capital allocation per level. Its RATIOS across
+      // the ladder are the convexity slice 4's caption states, so carrying them over
+      // would publish the shape of a real ladder into a public file.
+      expect(walked.rungs![0]!.sizeUsd).toBeDefined();
+      expect(walked.rungs![0]!.sizeUsd).not.toBe(real.rungs![0]!.sizeUsd);
+      // …and the waiting totals beside it are rebuilt from the SAME synthetic size, so
+      // the committed file's sums cannot disagree with the rungs they claim to sum.
+      const declared = walked.rungs!.filter((rung) => rung.venueAxis !== "filled").length;
+      expect(walked.figures!.waitingDeclaredUsd).toBe(declared * walked.rungs![0]!.sizeUsd!);
+    });
+
+    it("carries the TORN-ACT count verbatim — a count, like `unattributable`", () => {
+      const branch = synthesizeAnchors([walkedLadder()])[0]!.report.dca;
+      expect(branch.tornActs).toBe(2);
+      // And an absent count stays absent: absence means "this anchor could not check",
+      // which is a fact about the row and not a value to invent.
+      const unchecked = walkedLadder();
+      delete unchecked.report.dca.tornActs;
+      expect("tornActs" in synthesizeAnchors([unchecked])[0]!.report.dca).toBe(false);
     });
 
     it("INVENTS the plan id and every rung id — both are minted in a private file", () => {

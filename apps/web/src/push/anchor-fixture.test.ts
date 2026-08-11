@@ -33,10 +33,25 @@
  * MUTATION-CHECKED (spec #285, slice 3): the committed file's `planId` replaced with a
  * real-shaped UUID and one rung `id` with an operator-shaped `r3`. The synthetic-id
  * guard goes red naming the offending value and the anchor it sits on. Restored after.
+ *
+ * MUTATION-CHECKED (the slice 3 amendment), on the STALENESS guard, in both directions
+ * it claims to bite: (1) `sizeUsd` deleted from one rung of the committed file — red,
+ * naming the anchor, the position, the rung and the missing key, and telling the reader
+ * to regenerate. (2) `tornActs` deleted from one anchor's branch root — red on the block
+ * key set. Both restored, and the guard green again after each.
  */
+import type {
+  DcaLadderPlanRecord,
+  IsoDate,
+  LoadedPlans,
+  OrderRecord,
+  PositionLot,
+} from "@numisma/engine";
 import { describe, expect, it } from "vitest";
+import type { DcaBlock } from "../projection/contract.ts";
 import { COMPOSITION_SNAPSHOT_SCHEMA_VERSION } from "../projection/contract.ts";
 import { anchorAt, loadAnchorFixture } from "./anchor-fixture.ts";
+import { buildDcaBlock, type DcaFillInputs } from "./dca-block.ts";
 import {
   NAV_MOVE_THRESHOLD_PCT,
   SYNTHETIC_FUND_ID,
@@ -44,6 +59,7 @@ import {
   SYNTHETIC_POSITION_PREFIX,
   SYNTHETIC_FUND_NAME,
   SYNTHETIC_START_NAV,
+  syntheticPlanId,
   syntheticRungId,
 } from "./fixture-synthesis.ts";
 
@@ -84,6 +100,111 @@ const NAMED_ANCHORS = [FIRST_ANCHOR, "2026-06-28"];
  * needs no real value to compare against, and cannot itself leak one.
  */
 const SYNTHETIC_BAND_FACTOR = 2;
+
+/** The anchor the shape probes below are built on. No relation to the fixture's dates. */
+const PROBE_ASOF = "2026-08-10" as IsoDate;
+
+/**
+ * A synthetic two-rung ladder for the shape probes. Every value invented, and every one
+ * of them irrelevant: only the KEYS the emitter produces from it are ever read.
+ */
+function probePlan(): DcaLadderPlanRecord {
+  return {
+    kind: "dcaLadder",
+    id: syntheticPlanId(1),
+    positionId: `${SYNTHETIC_POSITION_PREFIX}-1`,
+    effectiveAt: "2026-01-01" as IsoDate,
+    tierOrder: ["c1"],
+    rungs: [
+      { id: syntheticRungId(0), priceUsd: 1_000, sizeUsd: 250 },
+      { id: syntheticRungId(1), priceUsd: 900, sizeUsd: 250 },
+    ],
+  };
+}
+
+function probeBlock(orders: readonly OrderRecord[], lots: readonly PositionLot[]): DcaBlock {
+  const plan = probePlan();
+  const loaded: LoadedPlans = {
+    load: { status: "loaded" },
+    plans: [{ ...plan, line: 1 }],
+    skipped: [],
+  };
+  const fills: DcaFillInputs = {
+    orders,
+    events: [],
+    positions: new Map([[plan.positionId, { lots, currency: "USD" as const }]]),
+  };
+  return buildDcaBlock(loaded, PROBE_ASOF, new Set([plan.positionId]), fills);
+}
+
+/** A synthetic `orderPlaced` line joined to the probe ladder's first rung, by DECLARATION. */
+function probeOrder(price: number): OrderRecord {
+  return {
+    id: "probe-order",
+    observedAt: "2026-08-01T10:00:00",
+    kind: "orderPlaced",
+    currency: "USD",
+    symbol: "TEST/USD",
+    side: "buy",
+    price,
+    quantity: 2,
+    fundingReserveId: "reserve-probe",
+    planId: syntheticPlanId(1),
+    rungId: syntheticRungId(0),
+  };
+}
+
+/**
+ * THE KEY SETS THE PRODUCTION EMITTER CAN PRODUCE, derived by running it — not by a list
+ * typed out here, which would drift from the code the moment the code moved and would
+ * turn this guard into a second contract to maintain.
+ *
+ * Three probes, because the emitter's shape is state-dependent: nothing placed (what
+ * EVERY rung carries), one order resting (what a JOINED rung carries), and a mismatched
+ * declared join over a recorded lot (the WIDEST rung and the widest row).
+ */
+function emittedShapes() {
+  const declared = probeBlock([], []);
+  const resting = probeBlock([probeOrder(1_000)], []);
+  // A price mismatch is the only case that adds `orderPriceUsd`; the lot is what makes
+  // the three measured figures and `orphanLots` appear.
+  const rich = probeBlock([probeOrder(998)], [{ quantity: 2, cost: 998, tier: "c1" }]);
+  const rowOf = (block: DcaBlock) => Object.keys(block.positions[0]!);
+  const rungsOf = (block: DcaBlock) =>
+    (block.positions[0]!.rungs ?? []).map((rung) => Object.keys(rung));
+  return {
+    blockKeys: Object.keys(declared).sort(),
+    ladderRowAlways: rowOf(declared),
+    rowMax: [...new Set([...rowOf(declared), ...rowOf(rich)])],
+    // The SECOND rung of every probe is never placed, so its keys are what the emitter
+    // puts on a rung unconditionally.
+    rungAlways: rungsOf(declared)[1]!,
+    rungJoined: rungsOf(resting)[0]!,
+    rungMax: [...new Set([...rungsOf(rich)[0]!, ...rungsOf(rich)[1]!, ...rungsOf(resting)[0]!])],
+    figuresAlways: Object.keys(declared.positions[0]!.figures!),
+    figuresMax: Object.keys(rich.positions[0]!.figures!),
+  };
+}
+
+/** Every key the emitter always writes is present. The STALE direction. */
+function expectKeysCover(actual: string[], required: string[], where: string): void {
+  const missing = required.filter((key) => !actual.includes(key));
+  expect(
+    missing,
+    `${where} is STALE against the emitter: it is missing ${missing.join(", ")}. ` +
+      `Regenerate with \`pnpm --filter @numisma/web backfill -- --fixture-only\`.`,
+  ).toEqual([]);
+}
+
+/** No key the emitter cannot produce. The INVENTED direction. */
+function expectKeysWithin(actual: string[], allowed: string[], where: string): void {
+  const extra = actual.filter((key) => !allowed.includes(key));
+  expect(
+    extra,
+    `${where} carries ${extra.join(", ")}, which the push emitter never writes. ` +
+      `A committed fixture may only hold shapes the production path produces.`,
+  ).toEqual([]);
+}
 
 describe("the committed anchor fixture", () => {
   it("loads with no database and no durable log", async () => {
@@ -173,17 +294,49 @@ describe("the committed anchor fixture", () => {
     expect(ladders).toBeGreaterThan(0);
   });
 
-  it("records NO FILL STATE — history has none, and absence is the right answer", async () => {
-    // AC/`G-D9`: a June anchor cannot carry fill data. Every fill field is optional and
-    // every one of them is ABSENT here, which is the same shape a v4 row has and exactly
-    // what the surface renders as day zero. A synthesizer that invented a fill history
-    // would make slice 4 green against a state the fund has never been in.
+  it("records NO INVENTED FILL — the day-zero shape is honest, a fill history is not", async () => {
+    // WHAT THIS ASSERTS, AND WHAT IT USED TO. The first form demanded that `figures` be
+    // undefined and that every rung's key set be exactly `["id", "priceUsd"]`. That was
+    // not the fixture's contract — it was the shape of a fixture hand-transformed rather
+    // than emitted, and it disagreed with the production synthesizer, which emits per-rung
+    // axes and figures. The two agreed with each other and RUNNING THE DOCUMENTED
+    // REGENERATION TURNED THE SUITE RED, which means the guard could never have caught
+    // drift: the one job a committed fixture has.
+    //
+    // The concern underneath it is correct and is kept whole: an INVENTED FILL HISTORY
+    // would make slice 4 green against a state the fund has never been in. So the three
+    // MEASURED figures stay absent, `orphanLots` stays absent, and no rung carries
+    // recorded-book state.
+    //
+    // WHAT IS NOT FILL HISTORY IS NOW PERMITTED, because it is the truth about today.
+    // Eight placed orders and zero fills is the state the live fund is in, so
+    // `venueAxis: "resting"`, a `not-recorded` book axis, zeroed venue/booked quantities
+    // and the two WAITING figures are the honest day-zero shape — and they are precisely
+    // what slice 4's AC-2 has to render. Forbidding them would force the fixture to lie
+    // in the opposite direction.
     for (const anchor of await loadAnchorFixture()) {
       for (const position of anchor.report.dca.positions) {
-        expect(position.figures, anchor.asOf).toBeUndefined();
-        expect(position.orphanLots, anchor.asOf).toBeUndefined();
+        const where = `${anchor.asOf} ${position.positionId}`;
+        // ABSENT, NEVER ZERO: a recorded fill has cost > 0 and quantity > 0, so any of
+        // these appearing at all means a fill was invented.
+        for (const measured of ["deployedUsd", "unitsAcquired", "avgEntryUsd"] as const) {
+          expect(position.figures?.[measured], `${where}.${measured}`).toBeUndefined();
+        }
+        // No lot is recorded, so no lot can be unexplained.
+        expect(position.orphanLots, where).toBeUndefined();
         for (const rung of position.rungs ?? []) {
-          expect(Object.keys(rung).sort(), anchor.asOf).toEqual(["id", "priceUsd"]);
+          // THE BOOK AXIS IS THE FILL-HISTORY TEST. `not-recorded` and a zero booked
+          // quantity are the fund's real state; anything else is a lot this repository
+          // wrote into a public file.
+          expect(rung.bookAxis ?? "not-recorded", `${where} ${rung.id}`).toBe("not-recorded");
+          expect(rung.bookedQuantity ?? 0, `${where} ${rung.id}`).toBe(0);
+          // And the venue has consumed nothing: `filled`/`partly-filled` would assert a
+          // fill the venue never showed.
+          expect(rung.venueConsumedQuantity ?? 0, `${where} ${rung.id}`).toBe(0);
+          expect(
+            ["not-placed", "resting"],
+            `${where} ${rung.id} venueAxis`,
+          ).toContain(rung.venueAxis ?? "not-placed");
         }
       }
     }
@@ -396,6 +549,57 @@ describe("the committed anchor fixture", () => {
     // forever under a range that was widened for a different reason.
     await expect(loadAnchorFixture()).resolves.toBeDefined();
     expect(COMPOSITION_SNAPSHOT_SCHEMA_VERSION).toBe(5);
+  });
+
+  it("is not STRUCTURALLY STALE against the emitter that is supposed to produce it", async () => {
+    // THE GUARD THAT WAS MISSING, and the reason this suite's fill assertion could sit
+    // in a closed loop with a hand-transformed file: nothing compared the committed bytes
+    // against what the PUSH actually emits. A fixture that has gone structurally stale —
+    // the wire grew a field, the file did not — is a fixture that proves the wrong shape,
+    // and slice 4 would go green against it.
+    //
+    // IT NEEDS NO REAL DATA, WHICH IS THE WHOLE DESIGN. It does not fold the log, read a
+    // sidecar or open a database; it runs the production emitter (`buildDcaBlock`) over
+    // IN-MEMORY SYNTHETIC inputs and compares KEY SETS — never values — with the file on
+    // disk. It therefore passes in a clone with no accumulus and no Postgres, on every
+    // machine, exactly as the rest of this suite does.
+    //
+    // WHY THE EMITTER AND NOT THE SYNTHESIZER is the authority here: `synthesizeRung`
+    // preserves PRESENCE key by key, so the set of keys a committed rung can carry is
+    // decided upstream, by `toWireRung`. Checking against the synthesizer would only ask
+    // whether it copied what it was given.
+    //
+    // BOUNDED FROM BOTH SIDES, so it fails on either kind of drift: a key the emitter
+    // produces on every rung and the file lacks (STALE), and a key in the file the
+    // emitter cannot produce at all (INVENTED). Between the two it deliberately allows
+    // the states this fixture's history does not happen to contain today.
+    const shapes = emittedShapes();
+    for (const anchor of await loadAnchorFixture()) {
+      const dca = anchor.report.dca;
+      // The branch ROOT, latched exactly: `tornActs` is the fund-level count, and its
+      // absence from a file the emitter always stamps it on is the staleness this whole
+      // test exists for.
+      expect(Object.keys(dca).sort(), `${anchor.asOf} dca`).toEqual(shapes.blockKeys);
+      for (const position of dca.positions) {
+        const where = `${anchor.asOf} ${position.positionId}`;
+        expectKeysWithin(Object.keys(position), shapes.rowMax, `${where} row`);
+        if (position.kind !== "dcaLadder") continue;
+        expectKeysCover(Object.keys(position), shapes.ladderRowAlways, `${where} row`);
+        for (const rung of position.rungs ?? []) {
+          const rungWhere = `${where} ${rung.id}`;
+          expectKeysCover(Object.keys(rung), shapes.rungAlways, rungWhere);
+          expectKeysWithin(Object.keys(rung), shapes.rungMax, rungWhere);
+          if (rung.venueAxis !== undefined) {
+            expectKeysCover(Object.keys(rung), shapes.rungJoined, `${rungWhere} joined`);
+          }
+        }
+        if (position.figures !== undefined) {
+          const keys = Object.keys(position.figures);
+          expectKeysCover(keys, shapes.figuresAlways, `${where} figures`);
+          expectKeysWithin(keys, shapes.figuresMax, `${where} figures`);
+        }
+      }
+    }
   });
 
   it("anchorAt refuses a date the fixture does not hold", async () => {
