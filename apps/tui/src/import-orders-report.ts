@@ -320,7 +320,10 @@ export function reportOrdersImport(input: OrdersImportReportInput): OrdersImport
     }
     const difference = pickedDifferences.get(record.id);
     if (difference !== undefined) {
-      differing.push(`${record.id} (rung declares ${difference.declared}, order at ${difference.order})`);
+      differing.push(
+        `${record.id} (rung declares ${difference.declared}, ` +
+          `order at ${difference.order})`,
+      );
     }
   }
   if (differing.length > 0) {

@@ -563,9 +563,27 @@ export interface OrderAttribution {
  * definition. The mechanism (a field, never a synthesized `orderFilled` line) is argued in
  * full on the field itself in `./records.ts`.
  */
-/** Both declared join fields, or neither — a pick is two facts and never half of one. */
+/**
+ * Both declared join fields, or neither — a pick is two facts and never half of one.
+ *
+ * ON THE READER'S OWN GATE, like its neighbours and unlike the version this replaces.
+ * `parseOrderRecord` refuses a `planId`/`rungId` that is not a non-empty string, so a
+ * blank one written here serializes cleanly and then makes every later load skip the
+ * whole line as `malformed` — on an append-only file, permanently. Today's TUI cannot
+ * produce one (picks originate from loader-validated plans), but `buildOrderPlacedRecords`
+ * is a public engine export and the whitelist tables exist precisely so a writer's
+ * assumption about its callers is not the guarantee.
+ */
 function pickFields(pick: RungPick | undefined): { planId?: string; rungId?: string } {
-  return pick === undefined ? {} : { planId: pick.planId, rungId: pick.rungId };
+  if (pick === undefined || !isJoinId(pick.planId) || !isJoinId(pick.rungId)) {
+    return {};
+  }
+  return { planId: pick.planId, rungId: pick.rungId };
+}
+
+/** An id the reader will accept coming back in: a string with something in it. */
+function isJoinId(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 export function buildOrderPlacedRecords(

@@ -37,6 +37,7 @@ import {
   type InForceLadder,
   type IsoDate,
   type LoadedPlans,
+  type RungPick,
 } from "@numisma/engine";
 import type { OrdersLoad } from "@numisma/preferences";
 import { appendKey, currentClaimKeys } from "./import-orders-append-filter.js";
@@ -322,6 +323,28 @@ async function loadInForceLadders(io: OrdersImportIo, asOf: IsoDate): Promise<In
 }
 
 /**
+ * The declared joins ALREADY ON FILE, so the pick-list does not propose a rung a line on
+ * disk has spoken for.
+ *
+ * EVERY PLACEMENT LINE COUNTS, cancelled ones included: this feeds a PROPOSAL, and the
+ * question a proposal answers is "would an inference here be unambiguous?" — which a
+ * retired claim on the same rung makes it not. The operator can still pick that rung by
+ * hand in the override pass, which is where re-placing it belongs.
+ */
+function declaredJoinsOnFile(records: readonly OrderRecord[]): RungPick[] {
+  const picks: RungPick[] = [];
+  for (const record of records) {
+    if (record.kind !== "orderPlaced") {
+      continue;
+    }
+    if (record.planId !== undefined && record.rungId !== undefined) {
+      picks.push({ planId: record.planId, rungId: record.rungId });
+    }
+  }
+  return picks;
+}
+
+/**
  * Import one open-orders export into the sidecar, or refuse and write nothing.
  *
  * Idempotent by construction, not by a special case: order ids are synthesized from
@@ -571,8 +594,14 @@ export async function importBitgetOpenOrders(
     // date because plan supersession is a date comparison. A ladder declared after this
     // import is not something the operator could have placed against.
     ladders = await loadInForceLadders(io, observedAt.slice(0, 10) as IsoDate);
-    // `io.ask` ALONE again: the pick-list reads the prompt channel and nothing else.
-    const rungPicks = await declareRungPicks(io.ask, admitted, ladders);
+    // `io.ask` ALONE again: the pick-list reads the prompt channel and nothing else —
+    // the book on file arrives as VALUES, read here where the file already is.
+    const rungPicks = await declareRungPicks(
+      io.ask,
+      admitted,
+      ladders,
+      declaredJoinsOnFile(existingRecords),
+    );
     records.push(...buildOrderPlacedRecords(admitted, { ...declaration, rungPicks }));
 
     // `O1`. Coverage is checked over the WHOLE resting book — what is already on file plus
@@ -659,7 +688,11 @@ export async function importBitgetOpenOrders(
   // own reason: a map is only joinable, so a decision with no line on disk is unreachable.
   const pickedDifferences = new Map<string, PickedPriceDifference>();
   for (const record of fresh) {
-    if (record.kind !== "orderPlaced" || record.planId === undefined || record.rungId === undefined) {
+    if (
+      record.kind !== "orderPlaced" ||
+      record.planId === undefined ||
+      record.rungId === undefined
+    ) {
       continue;
     }
     const declared = declaredRungPrice(ladders, { planId: record.planId, rungId: record.rungId });

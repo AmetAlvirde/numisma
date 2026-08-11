@@ -193,7 +193,12 @@ export type {
 // is a MANUAL block like every other in this file: a function added to the module is
 // nameable outside the package only if it is added here too.
 export type { InForceLadder, RungPick } from "./orders/rung-picks.js";
-export { inForceLadders, proposeRungByPrice, declaredRungPrice } from "./orders/rung-picks.js";
+export {
+  inForceLadders,
+  proposeRungByPrice,
+  matchRungsByPrice,
+  declaredRungPrice,
+} from "./orders/rung-picks.js";
 // THE FILL PATH RECONCILIATION (#287) — every spot-independent conclusion the Fill Path
 // surface renders, from one pure function over a declared ladder, the whole order stream and
 // the recorded lots. Spot is deliberately NOT an input; the two spot-dependent decorations

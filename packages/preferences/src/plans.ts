@@ -583,6 +583,13 @@ function serializePlanRecord(record: PlanRecord): string {
  */
 export async function appendPlan(path: string, record: PlanRecord): Promise<void> {
   const serialized = serializePlanRecord(record);
+  // THE ONE GUARD THIS ECHO CANNOT RUN IS THE ONE WHOSE VIOLATION IS PERMANENT. No
+  // `claimedLadderIds` is passed — the writer has not read the file, so a uniqueness
+  // verdict here would be invented — which means a `dcaLadder` line whose id collides
+  // with one already on disk appends cleanly and then makes EVERY later `loadPlans`
+  // refuse the file. Latent today: `appendNoPlan` is the sole wrapper and ladder lines
+  // are hand-authored. A caller that starts appending ladders must read the sidecar and
+  // check the id first; this function structurally cannot do it for them.
   const echo = readPlanLine(JSON.parse(serialized), 1);
   if (echo.status !== "ok") {
     throw new Error(

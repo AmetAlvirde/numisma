@@ -18,6 +18,13 @@
  *   - `M-S` write a pick for an order with no proposal on the batch path
  *                                                   → "an order with no proposal is written
  *                                                      with no pick"
+ *   - `M-T` drop the spoken-for check, so one rung is proposed to every order sharing its
+ *           price → both "a rung is proposed to at most one order" tests, the first with
+ *           two orders carrying the same pick and the second re-proposing a rung already
+ *           declared on file
+ *   - `M-U` report an AMBIGUOUS price as "no rung declared at this price" again
+ *                                                   → "distinguishes an AMBIGUOUS price
+ *                                                      from a price no rung declares"
  *
  * Every ladder, price and id here is SYNTHESIZED: invented round figures and a counted,
  * obviously-fake UUID that is stable across runs.
@@ -127,6 +134,61 @@ describe("the batch pass — the happy path is one Enter", () => {
   });
 });
 
+/**
+ * ONE RUNG STANDS FOR ONE ORDER. The proposal pass used to call `proposeRungByPrice` per
+ * order with no notion of a rung already spoken for, so two orders at one price both got
+ * the same pick and one Enter wrote the same declared join onto two durable lines — the
+ * second of which then joins to nothing at all, silently.
+ */
+describe("a rung is proposed to at most one order", () => {
+  it("does not propose one rung to two orders at the same price", async () => {
+    const { ask, asked } = scriptedAsk([""]);
+    const picks = await declareRungPicks(
+      ask,
+      [order(), order({ id: "order-2", price: 1000 })],
+      LADDERS,
+    );
+
+    expect(picks).toEqual({ "order-1": { planId: PLAN_A, rungId: "rung-1" } });
+    // And the second order is TOLD why, rather than silently losing its proposal.
+    expect(asked[0]).toContain("already proposed to another order in this batch");
+  });
+
+  it("does not re-propose a rung an order already on file has declared", async () => {
+    // Across imports, not just within one: the pick-list used to read no order book at
+    // all, so a rung declared by a line on disk was proposed again to a re-placed order.
+    const { ask, asked } = scriptedAsk([""]);
+    const picks = await declareRungPicks(ask, [order()], LADDERS, [
+      { planId: PLAN_A, rungId: "rung-1" },
+    ]);
+
+    expect(picks).toEqual({});
+    expect(asked[0]).toContain("already declared by an order on file");
+  });
+});
+
+describe("the prompt says WHICH silence it is reporting", () => {
+  it("distinguishes an AMBIGUOUS price from a price no rung declares", async () => {
+    // `proposeRungByPrice` answers `undefined` to both, correctly — but reporting an
+    // ambiguity as "no rung declared at this price" tells the operator there is nothing
+    // to override in the one case where they most need to.
+    const twoAt1000: InForceLadder[] = [
+      ...LADDERS,
+      {
+        planId: PLAN_B,
+        positionId: "pos-b",
+        effectiveAt: "2026-07-01",
+        rungs: [{ id: "rung-1", priceUsd: 1000, sizeUsd: 500 }],
+      },
+    ];
+    const { ask, asked } = scriptedAsk([""]);
+    await declareRungPicks(ask, [order(), order({ id: "order-2", price: 850 })], twoAt1000);
+
+    expect(asked[0]).toContain("2 ladders declare a rung at this price");
+    expect(asked[0]).toContain("no rung declared at this price");
+  });
+});
+
 describe("the override pass — any rung of any in-force ladder, or none", () => {
   const TWO_LADDERS: InForceLadder[] = [
     ...LADDERS,
@@ -200,6 +262,17 @@ describe("the override pass — any rung of any in-force ladder, or none", () =>
     expect(asked).toHaveLength(3);
     expect(asked[1]).toContain("BTCUSDT buy 0.5 @ 1000");
     expect(asked[2]).toContain("BTCUSDT buy 0.5 @ 900");
+  });
+
+  it("still lets an OVERRIDE take a rung the proposal pass would not offer", async () => {
+    // A claim on file is a reason not to INFER a join; it is not a reason to refuse the
+    // operator one. Re-placing a rung whose earlier order was cancelled is ordinary, and
+    // a permanent block on an append-only claim would make it unreachable forever.
+    const { ask } = scriptedAsk(["n", "1"]);
+    const picks = await declareRungPicks(ask, [order()], LADDERS, [
+      { planId: PLAN_A, rungId: "rung-1" },
+    ]);
+    expect(picks).toEqual({ "order-1": { planId: PLAN_A, rungId: "rung-1" } });
   });
 
   it("takes y/yes as acceptance, in any case and with any surrounding space", async () => {
