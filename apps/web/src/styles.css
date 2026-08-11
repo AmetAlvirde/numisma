@@ -9,6 +9,16 @@
   --warn: #8a5a12;
   --pos: #46c98b;
   --neg: #f0736a;
+  /* SPOT — "where price is now". A terracotta that collides with nothing else on the
+     Price Drop Path: not `--pos` green (the filled path), not `--muted` grey (the
+     waiting path), and deliberately NOT `--neg`, which would paint a neutral fact as a
+     loss. Its own token rather than a hex in the component, so the one place that
+     defines colour keeps defining it.
+
+     This palette is the app's ONLY one — there is no `prefers-color-scheme` or
+     `data-theme` block anywhere in this file, despite the `color-scheme` hint above.
+     A second theme adds its override here, beside the rest. */
+  --now: #e07a4f;
 }
 
 * {
@@ -506,12 +516,13 @@ thead th {
 }
 
 /* The now rule is vertical in the chart, so its swatch is too — a horizontal dash
-   here would be a second waiting swatch in a different colour. */
+   here would be a second waiting swatch in a different colour. Solid and `--now`,
+   matching the rule exactly: dashed is reserved for "waiting" on this card. */
 .fp-legend-swatch.is-now {
   width: 0;
   height: 11px;
   border-top: 0;
-  border-left: 1px dashed var(--text);
+  border-left: 2px solid var(--now);
 }
 
 /* The chart's accessible substitute. Sized as prose, not as a caption footnote:

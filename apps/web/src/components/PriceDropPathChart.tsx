@@ -118,6 +118,64 @@ function splitAt(points: readonly RungPoint[]): number {
   return last;
 }
 
+/**
+ * WHERE THE "NOW" RULE GOES, AND WHAT IT IS ALLOWED TO CLAIM.
+ *
+ * The axis is scaled to the ladder (see the domain comment in the component), so spot
+ * is frequently outside it — the fund normally sits above every rung it has declared.
+ * There are only two honest things to do with a price that is off the chart, and this
+ * does the second: PIN the rule to the edge and SAY SO in the label.
+ *
+ * A rule pinned to the edge while the label still reads like an ordinary plotted price
+ * is a lie — it invites the reader to measure a position that was clamped. So the two
+ * always travel together: whenever `x` is not the real price, the copy carries
+ * "above the ladder" / "below the ladder" and the reader knows the mark is a direction,
+ * not a coordinate.
+ *
+ * The alternative — padding the domain out to reach spot with a cap on how far — cannot
+ * work on its own: the moment the cap binds, spot is outside the domain again and needs
+ * this same treatment anyway. It would buy a second mechanism for the same case.
+ *
+ * THE AXIS IS REVERSED, so a HIGH price renders at the LEFT. That is why "above the
+ * ladder" pins to `xHigh` and anchors its label `start`.
+ */
+function spotMarkFor(
+  spotUsd: number | undefined,
+  bounds: { low: number; high: number; xLow: number; xHigh: number },
+): { x: number; label: string; anchor: "start" | "middle" | "end"; dx: number } | undefined {
+  if (spotUsd === undefined) return undefined;
+  const money = SPOT_USD.format(spotUsd);
+
+  if (spotUsd > bounds.high) {
+    return {
+      x: bounds.xHigh,
+      label: `spot ${money} — above the ladder`,
+      anchor: "start",
+      dx: 4,
+    };
+  }
+  if (spotUsd < bounds.low) {
+    return {
+      x: bounds.xLow,
+      label: `spot ${money} — below the ladder`,
+      anchor: "end",
+      dx: -4,
+    };
+  }
+
+  // In range: the rule is to scale, so the label is bare. It still keeps off the axis
+  // gutter — `anchor: "middle"` overhangs the plot when spot sits near an end of the
+  // ladder, so the anchor flips to whichever side has room.
+  const fromLeft = (bounds.xHigh - spotUsd) / (bounds.xHigh - bounds.xLow);
+  const anchor = fromLeft < 0.15 ? "start" : fromLeft > 0.85 ? "end" : "middle";
+  return {
+    x: spotUsd,
+    label: `spot ${money}`,
+    anchor,
+    dx: anchor === "start" ? 4 : anchor === "end" ? -4 : 0,
+  };
+}
+
 export function PriceDropPathChart({
   rungs,
   selectedKey,
@@ -145,13 +203,21 @@ export function PriceDropPathChart({
           ],
     );
 
+    // THE DOMAIN IS THE LADDER, AND ONLY THE LADDER.
+    //
+    // The hand-rolled chart folded spot INTO the price domain to keep the "now" line on
+    // canvas, and this component inherited that. It is why a quarter of the plot sat
+    // empty with a rule floating in it: the fund's spot normally sits well above the
+    // whole ladder, so the ladder — the actual subject — got squeezed into what was
+    // left. Stretching the axis to reach a price no rung occupies spends the reader's
+    // pixels on emptiness.
+    //
+    // So the axis is scaled to the rungs, and an out-of-range spot is handled by
+    // `spotMark` below, which PINS the rule to the edge and SAYS SO in the label.
+    // Whitespace is bounded by construction and nothing is silently clamped.
     const prices = points.map((point) => point.priceUsd);
-    // SPOT IS FOLDED INTO THE PRICE DOMAIN, as the hand-rolled chart also did: the fund
-    // sits above or below its whole ladder more often than inside it, and a "now" rule
-    // outside the domain is a rule drawn off the canvas.
-    const withSpot = spotUsd === undefined ? prices : [...prices, spotUsd];
-    const high = Math.max(...withSpot);
-    const low = Math.min(...withSpot);
+    const high = Math.max(...prices);
+    const low = Math.min(...prices);
 
     // Air at each end, so the outermost dots are not clipped in half by the plot edge.
     // Derived from the tightest rung spacing, so it holds for an even ladder and a
@@ -182,20 +248,8 @@ export function PriceDropPathChart({
     const dashed = split < 0 ? points : points.slice(split);
 
     const selected = points.filter((point) => point.key === selectedKey);
-    const spotRow = spotUsd === undefined ? [] : [{ priceUsd: spotUsd }];
-
-    // THE LABEL IS KEPT OFF THE GUTTER. `anchor: "middle"` overhangs the plot into the
-    // axis area whenever spot sits at an extreme of the domain — which is the fund's
-    // usual situation, since spot is normally above the whole ladder. The anchor flips
-    // to the side with room instead of the text being clipped.
-    //
-    // The axis is REVERSED, so a HIGH price renders at the LEFT. That is why this
-    // fraction counts down from `xHigh`.
-    const spotFromLeft =
-      spotUsd === undefined ? 0.5 : (xHigh - spotUsd) / (xHigh - xLow);
-    const spotAnchor =
-      spotFromLeft < 0.15 ? "start" : spotFromLeft > 0.85 ? "end" : "middle";
-    const spotNudge = spotAnchor === "start" ? 4 : spotAnchor === "end" ? -4 : 0;
+    const spotMark = spotMarkFor(spotUsd, { low, high, xLow, xHigh });
+    const spotRow = spotMark === undefined ? [] : [{ priceUsd: spotMark.x }];
 
     return defineChart({
       marks: [
@@ -216,23 +270,26 @@ export function PriceDropPathChart({
         // THE "NOW" RULE, AND THE LABEL THAT SAYS WHAT IT IS. `ruleX` carries no label
         // channel in 0.11.0, so the annotation is a composed `text` mark at the same
         // semantic x — which is the library's documented pattern, not a workaround.
+        //
+        // SOLID, AND IN ITS OWN COLOUR. It used to be a white DASHED rule standing next
+        // to a grey DASHED path, which is the worst pairing in the picture: the same
+        // stroke style meaning two unrelated things. Now the only dashed thing on the
+        // chart is "waiting", and `--now` belongs to nothing else.
         ruleX(spotRow, {
           x: "priceUsd",
-          stroke: "var(--text)",
-          strokeWidth: 1,
-          strokeOpacity: 0.9,
-          strokeDasharray: "3 3",
+          stroke: "var(--now)",
+          strokeWidth: 1.5,
         }),
         text(spotRow, {
           x: "priceUsd",
           // A CONSTANT HAS TO BE AN ACCESSOR HERE. `text.y` takes only a channel in
           // 0.11.0, unlike `barY.y1`/`y2`, which also accept a bare number.
           y: () => yTop,
-          text: () => `spot ${SPOT_USD.format(spotUsd!)}`,
-          fill: "var(--text)",
+          text: () => spotMark!.label,
+          fill: "var(--now)",
           fontSize: 10,
-          anchor: spotAnchor,
-          dx: spotNudge,
+          anchor: spotMark?.anchor ?? "middle",
+          dx: spotMark?.dx ?? 0,
           dy: -4,
         }),
         // HOLLOW DOTS, FILLED WITH THE CARD'S OWN BACKGROUND, so the line reads through
@@ -263,16 +320,32 @@ export function PriceDropPathChart({
             strokeWidth: 1.75,
           },
         ),
-        // SELECTION IS THE ONE SOLID DOT. It reads against a field of hollow ones
-        // without recolouring anything, so it cannot overwrite the one thing a ring's
-        // colour is for — whether that rung filled.
+        // SELECTION IS THE MOST LEGIBLE MARK ON THE CHART, because it is the only one
+        // tied to live UI state — it moves as the operator works the inspect slider, and
+        // a mark you have to hunt for cannot do that job. It was a small white disc
+        // among hollow white rings, which is nearly the same picture twice.
+        //
+        // TWO MARKS MAKE ONE TARGET. The halo is the card's own background, punching a
+        // clear hole in the line and the ring underneath so the disc lands on empty
+        // space instead of on top of stroke; the disc then reads as solid at a size no
+        // ring uses. Still a disc-versus-ring distinction, so it never recolours a rung
+        // and cannot overwrite whether that rung filled.
         dot(selected, {
           x: "priceUsd",
           y: "sizeUsd",
           key: "key",
-          r: 4,
+          r: 8,
+          fill: "var(--bg)",
+          stroke: "var(--bg)",
+          strokeWidth: 2,
+        }),
+        dot(selected, {
+          x: "priceUsd",
+          y: "sizeUsd",
+          key: "key",
+          r: 5.5,
           fill: "var(--text)",
-          stroke: "var(--card)",
+          stroke: "var(--bg)",
           strokeWidth: 1.5,
         }),
       ],
