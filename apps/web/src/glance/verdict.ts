@@ -5,7 +5,7 @@
  *
  * PURE, AND THAT IS LOAD-BEARING RATHER THAN STYLISTIC. No IO: no database, no
  * filesystem, no network, no `Date.now()` — the wall clock arrives as an argument.
- * That is what makes the 28-anchor replay in `verdict-replay.test.ts` possible at
+ * That is what makes the whole-history replay in `verdict-replay.test.ts` possible at
  * all, and it is achievable only because slice #148 put every push-side conclusion on
  * the wire. What it takes from `../projection/contract.ts` is the wire contract's
  * types plus ONE runtime value, `SUPPRESSION_KEYS` — safe only because that module is
@@ -83,8 +83,8 @@ export const RESERVE_FLOOR_WIRE_KEY = "glance.reserveTargetPct" as const;
  * the step is one day; the sparse stretch (06-26 → 06-30, and 07-03's three-day step
  * back to 06-30) is historical only.
  *
- * 1.5% picks the tails of the measured month honestly: it takes three of the 28
- * anchored days and leaves 25. The measured day-over-day range that justifies the
+ * 1.5% picks the tails of the measured month honestly: it took three of the 28
+ * anchored days it was chosen against and left 25. The measured day-over-day range that justifies the
  * choice is deliberately not quoted here — this repository is public, and the range
  * is the fund's best and worst days. It is recorded in the private notes vault.
  */
@@ -199,7 +199,7 @@ export interface Verdict {
   asOf: string;
   /** Whole days from that anchor to the wall clock — the freshness derivation. */
   staleDays: number;
-  /** D1's answer. `false` is the default and the common case: 22 of 28 anchors. */
+  /** D1's answer. `false` is the default and, as measured, the common case. */
   needsYou: boolean;
   /** The ONE line. `fired[0]`'s sentence, or the standing *no*. */
   sentence: string;
@@ -335,7 +335,7 @@ export function computeVerdict(
   // self-clearing, and if it turns out not to be rare, the floor is set wrong.
   //
   // IT SHIPS UNTESTED AGAINST REAL DATA. Reserve sits at 19.5–20.7% against a 10%
-  // floor on all 28 anchors — there is no breach anywhere in 34 days of log — so
+  // floor on every anchor measured — there is no breach anywhere in the log — so
   // every assertion behind this branch is against a SYNTHESIZED anchor. Say so rather
   // than leaning on a prototype for validation it cannot give.
   //

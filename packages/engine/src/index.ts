@@ -65,7 +65,7 @@ export { buildCompositionReport } from "./compose/report.js";
 export { buildDashboardDetail } from "./compose/detail.js";
 // PRD #146 C1: a NEW pure export, not a widening of any existing contract. Row id →
 // the instrument ids that row descends from — the fact 19 aggregate row ids do not
-// carry. (19 is invariant across all 28 anchors; the row TOTAL is not — it is 31 or 33
+// carry. (19 is invariant across every measured anchor; the row TOTAL is not — it is 31 or 33
 // depending on whether the late-opened instruments exist yet, which is exactly why the
 // linkage cannot be recovered from a count or a name.)
 export { composeRowDependencies } from "./compose/row-dependencies.js";

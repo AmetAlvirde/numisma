@@ -16,9 +16,11 @@
  * not a property of an anchor and cannot be replayed from one.
  *
  * NOTHING BELOW KEYS ON THE FIXTURE'S COUNT, and that is a hard rule, not a
- * preference. The prototype measured genesis 06-23 + 06-26…07-26; this fixture holds
- * 06-26…07-27 — two different sets that happen to be the same size, which is exactly
- * the coincidence a hard-coded count invites you to fuse. The count also GROWS BY ONE
+ * preference. The prototype measured genesis 06-23 + 06-26…07-26; the fixture at the
+ * time held 06-26…07-27 — two different sets that happened to be the same size, which
+ * is exactly the coincidence a hard-coded count invites you to fuse. (It has since
+ * grown to 06-26…08-10, as the paragraph below said it would — which is why this file
+ * still names no total.) The count also GROWS BY ONE
  * on every push (`pnpm backfill -- --fixture-only` is the supported regeneration
  * path), so a pinned total goes red on a day the fund had a perfectly normal one —
  * and a red test that means "another normal day" teaches regenerate-and-edit-the-
