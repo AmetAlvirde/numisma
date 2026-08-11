@@ -13,7 +13,7 @@ import { referenceLabel } from "../glance/verdict.ts";
  * numbers: fund value, change, Reserve %. Adding a fourth later costs a slot.
  *
  * It is judged on how fast and how confidently it delivers the *no* — the answer on
- * 22 of the fund's 28 recorded days — so the verdict is the only thing above 20px and
+ * 22 of the fund's first 28 recorded days — so the verdict is the only thing above 20px and
  * it lands before the eye reaches the numbers.
  *
  * ALL THREE SLOTS ALWAYS RENDER. An empty slot already means *suppressed* (V1/D7); it

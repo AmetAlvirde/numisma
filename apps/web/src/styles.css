@@ -249,3 +249,42 @@ thead th {
 .crumb a:hover {
   color: var(--text);
 }
+
+/* ── the DCA card (spec #277 D4/D6) ─────────────────────────────────────────
+   ONE BLOCK, APPENDED — nothing above this line changed. The card is built out
+   of classes that already exist (`.card`, `.table-scroll`, `table`, `th.num`,
+   `.absent`, `.muted`), because the price-sorted rung table IS hot-set item 11's
+   plot and it costs no new substrate: the chart, and any rewrite of this file,
+   are gated on node 7.10 (#145). What is genuinely new is only the plan header —
+   an id, a state word and a kind, on one line that wraps on a phone. */
+.dca-plan {
+  margin-top: 14px;
+}
+
+.dca-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 6px;
+}
+
+/* The state word is the card's whole answer on day zero, so it reads as a badge
+   rather than as prose — and `pending` is deliberately NOT an alarm colour: a
+   declared plan awaiting its first fill is the normal starting state, not a
+   problem. `unreadable` is the only one that wants the eye. */
+.dca-state {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.dca-state-active {
+  color: var(--pos);
+}
+
+.dca-state-unreadable {
+  color: var(--warn);
+}

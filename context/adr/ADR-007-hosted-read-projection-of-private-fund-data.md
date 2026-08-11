@@ -6,7 +6,7 @@ _Made during: MVI — web-app leg discovery / 2026-07-07 maps + grills
 yet; ratified as **the gate** that freezes the regime before any real fund data
 leaves the local machine and a tracer slice is sliced against it._
 _Scope: product_
-_Status: accepted (amended 2026-07-24 — see "Amendment: payload narrowed to restore the blast-radius paragraph"; amended again 2026-07-27 — see "Amendment: a third `glance` branch, and the payload stops being a bare `Pick`" — both below)_
+_Status: accepted (amended 2026-07-24 — see "Amendment: payload narrowed to restore the blast-radius paragraph"; amended again 2026-07-27 — see "Amendment: a third `glance` branch, and the payload stops being a bare `Pick`"; amended a third time 2026-08-10 — see "Third amendment: a fourth `dca` branch, and declared rung prices leave the machine deliberately" — all three below)_
 
 The web-app leg places a **read-only projection of private fund data** (positions,
 portfolio/fund USD values, realized/unrealized P&L) in an **internet-reachable,
@@ -282,3 +282,145 @@ preferences sidecar is a second *local disk read* by the push shell, which this
 ADR already sanctions as the privileged reader; a guard test confines
 `@numisma/preferences` to `apps/web/src/push/` so no render surface can reach it.
 ADR-011's posture is untouched.
+
+## Third amendment: a fourth `dca` branch, and declared rung prices leave the machine deliberately
+
+_Amended 2026-08-10, while building increment two of the DCA tracker — the `dca` wire and the
+web surface (spec #277; slices #278 the pure builder, #279 the atomic cutover, #280 the surface,
+#281 this amendment). Synthesis of `~/Dev/notes/numisma/2026-08-10-dca-web-surface-grill.md`
+(D1–D9). **Filed in the same PR that makes it necessary**, for the reason the amendment above
+gives for its own timing: that amendment names the pushed payload **literally**, and the sentence
+naming it goes stale the day this lands. Landing this in a later PR would leave `main` carrying an
+ADR that flatly misdescribes the wire — which is the failure mode the FIRST amendment exists to
+punish. This is also the first amendment to REOPEN a blast-radius call rather than narrow one, and
+the amendment above promised exactly that: "the blast-radius call is re-made at that moment,
+deliberately — not inherited silently the way it was this time." It is being kept here._
+
+**What changed.** The payload gains a fourth top-level branch. It is now:
+
+```ts
+Pick<CompositionReport, "totals" | "dashboard"> & { glance: GlanceBlock; dca: DcaBlock }
+```
+
+**The equation in the amendment above is superseded by this one** — the same way that amendment
+superseded the bare `Pick` before it. `DcaBlock` is authored by the projection, not the engine
+(the `glance` precedent, and the same deletion test: delete `dca` and the DCA feature dies,
+nothing else notices). It carries three things:
+
+- **`source`** — `"loaded" | "unreadable"`, the whole-file outcome of the sidecar read, mapped
+  1:1 out of `loadPlans`'s two-arm `load` result (its `"load-failed"` arm becomes `"unreadable"`;
+  the loader's own spelling stays off the wire). Without this field a read failure renders as
+  "no plans" — the exact lie the engine names at `packages/engine/src/plans.ts:254-258` —
+  because with zero rows enumerable there is no per-row discriminant left to carry it.
+- **`positions`** — a `DcaPositionRow[]`, one row per position the sidecar names, each carrying
+  `{ positionId, state }` with `kind` and `rungs` present only where they mean something. `state`
+  is `pending | active | ended | unreadable`, projected out of `listPlansAsOf`'s `PlanLookup`;
+  `kind` is `dcaLadder | dcaTime` and appears on `pending`/`active` rows only; `rungs` is a
+  `DcaWireRung[]` and appears on `pending`/`active` `dcaLadder` rows only. `DcaWireRung` is
+  deliberately NOT the engine's `DcaRung` (`{ id, priceUsd, sizeUsd }`) — that shape stays off
+  the wire whole; the wire rung carries `priceUsd` and nothing else.
+- **`unattributable`** — a count.
+
+**Rung prices leave the machine. This amendment owns that, and does not slip it past.** ADR-006
+saw the tension coming and wrote it down while arguing why `orders.jsonl` is tracked at all:
+
+> A resting ladder is at least as revealing as the log it sits beside (ADR-007 bars stop levels
+> from leaving the machine, and rung prices are that shape); it is tracked **anyway**, because
+> sensitivity governs *where* the history lives, and durability governs *whether* there is one.
+
+That observation is correct and this amendment resolves it on ADR-007's side, inside the
+blast-radius paragraph's own terms rather than around them:
+
+- **The declared intent IS the card's content.** The first amendment's `invalidationWatch` case
+  was a leak riding on a feature nobody asked for: stop levels shipped because the push serialized
+  a type that grew, and no surface rendered them. Here the price axis is not a passenger — a
+  ladder with its prices removed is a card that says "8 rungs" and answers nothing. The whole
+  question the surface exists to answer is *at what prices am I committed to buy*.
+- **It is INTENT, not a forced exit.** An invalidation level discloses the price at which the
+  operator is forced out, and the first amendment's argument is that positions plus that price are
+  a materially more useful pair than either alone — an adversary reading it learns where to push.
+  A DCA rung is the opposite side of the same axis: a standing declaration to ACQUIRE more, below
+  spot, which an adversary cannot turn against the operator by triggering it. The rungs are also
+  already resting at the venue, visible to it.
+- **The posture is single-tenant** (ADR-011): one account, one operator, genuine auth on a public
+  endpoint, no second tenant to leak across. The blast-radius paragraph's worst case is unchanged
+  in KIND — a read-model snapshot leaks derived values — and grows by one axis of declared
+  intent.
+- **No real rung price reaches the public repo.** `apps/web/src/push/fixture-synthesis.ts` gains a
+  rule putting rung `priceUsd` under the magnitudes treatment: values are SYNTHESIZED, structure
+  and states and counts stay verbatim. This repository is public; the committed fixture is the
+  only place payload shape is readable without a credential, and it now carries the shape without
+  the numbers.
+- **What still does not leave.** `sizeUsd` stays off the wire — a capital figure with no
+  phone-glance use, and omitting it halves the sanitization surface. So do the plan's prose
+  `reason`, its `effectiveAt`, the per-line skip detail, and every fold diagnostic. The rungs ship
+  as `priceUsd` alone.
+
+**This AMENDS the "not stop levels" sentence, and says so.** The first amendment closes with:
+*"the cloud again holds only derived dashboard values, not stop levels, strategy tags, or trade
+history."* Read as a claim about invalidation levels, strategy tags and the closed book, that
+sentence stands exactly as written and nothing here weakens it: `invalidationWatch`, `strategy`,
+`closedBook` and `priceJourneys` are still barred, still caught by both allow-lists, still absent.
+Read as a claim about *price levels as a class*, it is now amended: **declared DCA entry rungs
+ship, deliberately, as of this amendment.** Stating that here rather than quietly widening the
+wire is the whole point — the first amendment's lesson is that this ADR "became wrong through
+nobody being told," and an ADR whose body contradicts its own amendment reproduces that failure
+one document inward.
+
+**Both allow-lists grow again, and a third latch appears.** The enumeration in the amendment above
+(`ProjectionKeyAllowList` gains `glance`, `glanceFeedGap`, `glanceMissing`; the payload test gains
+nine key paths) is superseded by this one:
+
+- `ProjectionKeyAllowList` in `apps/web/src/projection/contract.ts` gains
+  `Assert<KeysAreExactly<…>>` entries for `DcaBlock`, `DcaPositionRow` and `DcaWireRung`.
+- `apps/web/src/push/projection-payload.test.ts` gains the `$.dca…` key paths, and its three
+  sorted-key latches become `["dashboard","dca","glance","totals"]`.
+- **New:** a top-level `Assert<KeysAreExactly<…>>` over `keyof ProjectionReport` itself. This is a
+  guard this ADR has never been able to name, because it did not exist — until this increment a
+  fourth top-level branch tripped no compile-time assert at all, only the runtime latches. Both
+  previous amendments grew the allow-lists *under* `totals`, `dashboard` and `glance` while the
+  branch set itself sat unguarded at compile time. It is guarded now.
+
+The closed world is still closed on both sides of the compile/runtime line, and a wider block
+fails the same way an engine growth fails.
+
+**`COMPOSITION_SNAPSHOT_SCHEMA_VERSION` bumps 3 → 4.** The pin in the amendment above ("bumps
+2 → 3") is superseded. The doctrine underneath is unchanged and is this ADR's own: *"a read-model
+schema change is a re-push, never a data migration"* — bump, re-fold, re-push, deploy. A v3 row
+read by a v4 reader is a clean `status: "stale"` refusal, and off-version rows are dropped out of
+the anchor history, so the cutover is the same graceful one v3 had. It is a v4 rather than
+additive growth because the version-history note's C5 carve-outs cover optional fields inside
+existing branches, not a new top-level branch. The window is deploy → `pnpm backfill`, upsert-only
+(every existing row overwritten in place at v4, row count unchanged), minutes long,
+operator-controlled, entered green.
+
+**Degrade the branch, never the anchor.** A sidecar that cannot be read must not cost the phone
+its NAV. `source: "unreadable"` and `state: "unreadable"` are how a broken read reaches the
+surface: the anchor still pushes, `totals`, `dashboard` and `glance` still render, and the DCA
+card alone says it cannot see. **The rejected alternative was refuse-to-publish** (grill D5) —
+fail the push when plans cannot be read, so no half-true anchor exists. Rejected: it makes an
+optional, additive card able to blank the fund view, which inverts this ADR's ordering of what
+matters, and it converts a corrupt line in a hand-authored file into a lost anchor that no later
+repair can recover. Degrading the branch keeps the failure proportional to what failed.
+
+**Three invariants restated, because this branch was the obvious place to break each.**
+
+- **`unattributable` is a COUNT, never the content.** The lines it counts are corrupt text out of
+  a hand-authored file and could contain anything; the number is the whole conclusion the phone
+  can act on. Same scalar discipline the amendment above records, and the same rule that places
+  `state` on the wire: ship the conclusion, not the inputs.
+- **`none` is ABSENT.** A position the sidecar does not cover produces no row at all — omission is
+  the encoding, and the `"none"` spelling never appears on the wire. A row's existence therefore
+  means "the file says something about this position," which is a fact the reader can use.
+- **The branch is DATE-FREE.** Not one date-shaped value enters it: `effectiveAt` stays a desk
+  fact, readable by `pnpm plans` and nowhere else. So the no-date invariant recorded above —
+  *no ISO-date-shaped value appears anywhere in the payload outside `dashboard.summary.asOf`* —
+  survives byte-intact, along with the two tests that pin it and the committed fixture's
+  anchor-dates-only rule.
+
+**No credential change, no write path, no second route out of the machine.** The plans sidecar is
+a third *local disk read* by the push shell — the privileged reader this ADR already sanctions —
+selected as-of each anchor's own date, so historical backfill resolves plans honestly rather than
+stamping today's ladder onto last month. A third import guard confines the plans symbols to
+`apps/web/src/push/`, the way the preferences guard confines its own. ADR-011's posture is
+untouched.

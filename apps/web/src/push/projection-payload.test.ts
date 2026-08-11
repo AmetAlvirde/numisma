@@ -49,7 +49,7 @@
 import { describe, expect, it } from "vitest";
 import type { CompositionReport } from "@numisma/engine";
 import { deriveSnapshot } from "./push-core.ts";
-import { loadFixture, TEST_GLANCE } from "./push-core.fixtures.ts";
+import { loadFixture, TEST_DCA, TEST_GLANCE } from "./push-core.fixtures.ts";
 import { toProjectionReport } from "../projection/contract.ts";
 
 /**
@@ -197,6 +197,21 @@ const ALLOWED_KEY_PATHS = [
   "$.glance.feedGap.missing[].rowId",
   "$.glance.reserveTargetPct",
   "$.glance.suppressed",
+  // The dca branch (v4, spec #277). Conclusions again, and the same rule placed every
+  // path: a STATE per position, a COUNT of unattributable lines, the loader's whole-
+  // file outcome, and the rung PRICE AXIS the card is. What is deliberately absent is
+  // as load-bearing as what is here — no `effectiveAt` (the date invariant below), no
+  // rung `id` or `sizeUsd`, no `endedBy`, no `skipped`: those are a conclusion's
+  // inputs, and `push/dca-block.ts` is where they stop.
+  "$.dca",
+  "$.dca.positions",
+  "$.dca.positions[].kind",
+  "$.dca.positions[].positionId",
+  "$.dca.positions[].rungs",
+  "$.dca.positions[].rungs[].priceUsd",
+  "$.dca.positions[].state",
+  "$.dca.source",
+  "$.dca.unattributable",
   "$.totals",
   "$.totals.baseCurrency",
   "$.totals.fundValueUsd",
@@ -319,7 +334,7 @@ describe("D8 forbidden-key contract (what may not reach the cloud)", () => {
     // nobody predicted — which is the entire drift class ADR-007's amendment
     // documents. See ALLOWED_KEY_PATHS before "fixing" a failure here.
     const wide = await loadWideReport();
-    const actual = [...keyPathsOf(deriveSnapshot(wide, TEST_GLANCE).report)].sort();
+    const actual = [...keyPathsOf(deriveSnapshot(wide, TEST_GLANCE, TEST_DCA).report)].sort();
     const allowed = [...ALLOWED_KEY_PATHS].sort();
 
     const unlisted = actual.filter((p) => !allowed.includes(p));
@@ -340,14 +355,15 @@ describe("D8 forbidden-key contract (what may not reach the cloud)", () => {
 
   it("pushes no forbidden key at any depth of the derived payload", async () => {
     const wide = await loadWideReport();
-    const leaks = scanForbiddenKeys(deriveSnapshot(wide, TEST_GLANCE).report);
+    const leaks = scanForbiddenKeys(deriveSnapshot(wide, TEST_GLANCE, TEST_DCA).report);
     expect(leaks, `pushed payload leaks:\n${leaks.join("\n")}`).toEqual([]);
   });
 
-  it("narrows the payload to exactly { totals, dashboard, glance }", async () => {
+  it("narrows the payload to exactly { totals, dashboard, glance, dca }", async () => {
     const wide = await loadWideReport();
-    expect(Object.keys(deriveSnapshot(wide, TEST_GLANCE).report).sort()).toEqual([
+    expect(Object.keys(deriveSnapshot(wide, TEST_GLANCE, TEST_DCA).report).sort()).toEqual([
       "dashboard",
+      "dca",
       "glance",
       "totals",
     ]);
@@ -355,7 +371,7 @@ describe("D8 forbidden-key contract (what may not reach the cloud)", () => {
 
   it("carries totals and dashboard through intact", async () => {
     const wide = await loadWideReport();
-    const { report } = deriveSnapshot(wide, TEST_GLANCE);
+    const { report } = deriveSnapshot(wide, TEST_GLANCE, TEST_DCA);
     expect(report.totals).toEqual(wide.totals);
     expect(report.dashboard).toEqual(wide.dashboard);
     // The narrowing must be by CONSTRUCTION, not a cast: a `report as
@@ -365,6 +381,7 @@ describe("D8 forbidden-key contract (what may not reach the cloud)", () => {
     expect(scanForbiddenKeys(serialized)).toEqual([]);
     expect(Object.keys(serialized as object).sort()).toEqual([
       "dashboard",
+      "dca",
       "glance",
       "totals",
     ]);
@@ -372,12 +389,13 @@ describe("D8 forbidden-key contract (what may not reach the cloud)", () => {
 
   it("narrows the shipped fixture the same way (a wide real-shaped report)", async () => {
     const fixture = await loadFixture();
-    expect(Object.keys(toProjectionReport(fixture, TEST_GLANCE)).sort()).toEqual([
+    expect(Object.keys(toProjectionReport(fixture, TEST_GLANCE, TEST_DCA)).sort()).toEqual([
       "dashboard",
+      "dca",
       "glance",
       "totals",
     ]);
-    expect(scanForbiddenKeys(toProjectionReport(fixture, TEST_GLANCE))).toEqual([]);
+    expect(scanForbiddenKeys(toProjectionReport(fixture, TEST_GLANCE, TEST_DCA))).toEqual([]);
   });
 });
 
@@ -426,7 +444,7 @@ describe("D14 date contract (no mark date reaches the cloud)", () => {
 
   it("finds NO date-shaped value in the payload outside summary.asOf", async () => {
     const wide = await loadWideReport();
-    const { report } = deriveSnapshot(wide, TEST_GLANCE);
+    const { report } = deriveSnapshot(wide, TEST_GLANCE, TEST_DCA);
     const hits = scanDateShapedValues(report);
 
     expect(
@@ -439,7 +457,19 @@ describe("D14 date contract (no mark date reaches the cloud)", () => {
 
   it("the glance block in particular carries no date at all", async () => {
     const wide = await loadWideReport();
-    const { report } = deriveSnapshot(wide, TEST_GLANCE);
+    const { report } = deriveSnapshot(wide, TEST_GLANCE, TEST_DCA);
     expect(scanDateShapedValues(report.glance, "$.glance")).toEqual([]);
+  });
+
+  it("the dca branch in particular carries no date at all", async () => {
+    // The plans sidecar is ENTIRELY date-driven — `effectiveAt` selects the winning
+    // line, `anchorAt` phases a cadence — so this branch had the easiest possible
+    // route to putting a second date on the wire, and the builder's answer is that
+    // `asOf` is an INPUT to the selection and never an output of it. Asserted on the
+    // branch directly, not only through the payload-wide scan above, because a date
+    // here would be a decision somebody made rather than a key that slipped.
+    const wide = await loadWideReport();
+    const { report } = deriveSnapshot(wide, TEST_GLANCE, TEST_DCA);
+    expect(scanDateShapedValues(report.dca, "$.dca")).toEqual([]);
   });
 });

@@ -12,13 +12,19 @@ import type { Pool } from "pg";
 import type { CompositionReport, FundReviewData } from "@numisma/engine";
 import { buildCompositionReport, pickPolicyAsOf } from "@numisma/engine";
 import { loadFoldedReview, resolveEventStorePaths } from "@numisma/event-store";
-import { loadPreferences, resolvePreferencesPath } from "@numisma/preferences";
-import type { GlanceBlock, ProjectionReport } from "../projection/contract.ts";
+import {
+  loadPlans,
+  loadPreferences,
+  resolvePlansPath,
+  resolvePreferencesPath,
+} from "@numisma/preferences";
+import type { DcaBlock, GlanceBlock, ProjectionReport } from "../projection/contract.ts";
 import {
   COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
   fundIdOf,
   toProjectionReport,
 } from "../projection/contract.ts";
+import { buildDcaBlock } from "./dca-block.ts";
 import { buildGlanceBlock } from "./glance.ts";
 
 /** What the push shell's two flags decide, once argv has been read. */
@@ -175,6 +181,35 @@ export async function buildGlanceForAnchor(
   return buildGlanceBlock(fold.data, fold.report, await loadReserveFloorAsOf(asOf));
 }
 
+/**
+ * The whole push-side DCA derivation for one folded anchor: read the plans sidecar,
+ * then narrow its as-of roster to the wire block. The push's THIRD privileged input,
+ * and — with `plans-import-guard.test.ts` — the only place in `apps/web` allowed to
+ * name it.
+ *
+ * PER-ANCHOR, NOT ONCE: the selection is as-of, so an anchor before a plan's
+ * `effectiveAt` resolves `none` and the branch is honestly empty on that date. The
+ * backfill gets that for free by calling this per anchor, with no special-casing, in
+ * exactly the way `loadReserveFloorAsOf` time-travels beside it.
+ *
+ * BORN-NESS COMES FROM THE FOLD — open positions AND the closed book, the same recipe
+ * `pnpm plans` uses at the desk. A position that has been closed WAS realized, so
+ * omitting the closed book would render a finished trade `pending` forever.
+ *
+ * THE READ IS NOT DEFENDED HERE and must not be: `loadPlans` is TOTAL. A missing file
+ * is `loaded`-with-empty, the normal starting state; a real read error is
+ * `load-failed`, which the block carries as `source: "unreadable"`. Wrapping this in a
+ * `try` that produced an empty block would erase precisely that distinction.
+ */
+export async function buildDcaForAnchor(fold: FoldedAnchor): Promise<DcaBlock> {
+  const asOf = fold.report.dashboard.summary.asOf;
+  const existingPositionIds = new Set<string>([
+    ...fold.data.positions.map((position) => position.id),
+    ...(fold.data.closedPositions ?? []).map((closed) => closed.positionId),
+  ]);
+  return buildDcaBlock(await loadPlans(resolvePlansPath()), asOf, existingPositionIds);
+}
+
 /** The three projected identity/versioning columns derived from a report. */
 export interface SnapshotDerivation {
   /** Deterministic fund id (slug of the fund name) — the conflict key's first half. */
@@ -186,7 +221,8 @@ export interface SnapshotDerivation {
   /**
    * The NARROWED payload written to the `report` JSONB column — built key-by-key
    * by `toProjectionReport`, never the wide `CompositionReport` (D8). Everything
-   * outside `{ totals, dashboard, glance }` stops here and never leaves the machine.
+   * outside `{ totals, dashboard, glance, dca }` stops here and never leaves the
+   * machine.
    */
   report: ProjectionReport;
 }
@@ -204,12 +240,13 @@ export interface SnapshotDerivation {
 export function deriveSnapshot(
   report: CompositionReport,
   glance: GlanceBlock,
+  dca: DcaBlock,
 ): SnapshotDerivation {
   return {
     fundId: fundIdOf(report),
     asOf: report.dashboard.summary.asOf,
     schemaVersion: COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
-    report: toProjectionReport(report, glance),
+    report: toProjectionReport(report, glance, dca),
   };
 }
 
@@ -227,8 +264,9 @@ export async function upsertSnapshot(
   pool: Pool,
   report: CompositionReport,
   glance: GlanceBlock,
+  dca: DcaBlock,
 ): Promise<SnapshotDerivation> {
-  const derived = deriveSnapshot(report, glance);
+  const derived = deriveSnapshot(report, glance, dca);
   await pool.query(
     `INSERT INTO composition_snapshot (fund_id, as_of, schema_version, report)
      VALUES ($1, $2, $3, $4::jsonb)

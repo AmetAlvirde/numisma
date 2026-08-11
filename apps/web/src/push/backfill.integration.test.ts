@@ -151,11 +151,11 @@ describe.skipIf(!runIntegration)("backfill → the projection DB", () => {
     expect(first.map((r) => r.as_of)).toEqual(anchors);
   });
 
-  it("stamps every row at schema_version = 3", () => {
+  it("stamps every row at schema_version = 4", () => {
     expect(new Set(first.map((r) => r.schema_version))).toEqual(
       new Set([COMPOSITION_SNAPSHOT_SCHEMA_VERSION]),
     );
-    expect(COMPOSITION_SNAPSHOT_SCHEMA_VERSION).toBe(3);
+    expect(COMPOSITION_SNAPSHOT_SCHEMA_VERSION).toBe(4);
   });
 
   it("reproduces the known-good NAVs exactly, Saturday included", async () => {
@@ -181,10 +181,11 @@ describe.skipIf(!runIntegration)("backfill → the projection DB", () => {
     expect(first.map((r) => r.as_of)).toContain("2026-07-25");
   });
 
-  it("every stored payload is exactly `{ totals, dashboard, glance }` (D8)", () => {
+  it("every stored payload is exactly `{ totals, dashboard, glance, dca }` (D8)", () => {
     for (const row of first) {
       expect(Object.keys(row.report).sort(), row.as_of).toEqual([
         "dashboard",
+        "dca",
         "glance",
         "totals",
       ]);
