@@ -21,6 +21,27 @@ source file may legitimately contain the real exchange name in its filename
 prose and the literal name in a path or link in the same document is
 deliberate, not an inconsistency.
 
+### The line is authorship, not syntax
+
+The exemption above covers identifiers **this repository authors** — source
+paths, doc filenames, section ids, row kinds, `portfolio:accumulus`. It does
+**not** cover identifier-shaped strings **read out of the private store**,
+however much they look like code. Those are data, and anything committed here
+that derives from them must be synthesized.
+
+The case that set this rule: a plan `positionId` such as
+`dca-<asset>-<strategy>-<n>-<exchange>` is authored by the operator in the
+private plans sidecar, and the convention spells out a live position's venue,
+instrument and strategy. It was treated as a code identifier and kept verbatim
+in the committed anchor fixture, which put one real id into this public repo
+(PR #282). `apps/web/src/push/fixture-synthesis.ts` now replaces every
+`positionId` with `synthetic-position-N`, and `anchor-fixture.test.ts` asserts
+it against the committed bytes.
+
+So when a new field reaches a committed fixture, the question is not "is it a
+magnitude" — it is **"did we write this string, or did the operator's private
+file?"** Only the first is kept.
+
 ## Where the store lives
 
 The durable store does **not** live inside this checkout. It lives in a
