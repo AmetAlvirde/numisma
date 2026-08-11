@@ -30,9 +30,17 @@
  *    genuinely lack them (spec open question 3 — slice 5's per-row cost-basis
  *    rendering depends on the absences being real), `dataSafety`, schema version;
  *  - the `dca` branch's SHAPE: `source`, every `state` and `kind`, the position COUNT,
- *    the rung COUNT per position, and the `unattributable` count. Those are states and
- *    counts, the same class as `feedGap`, and the card renders them. The `positionId`
- *    itself is NOT among them — see below.
+ *    the rung COUNT per position, and the `unattributable` and `tornActs` counts. Those
+ *    are states and counts, the same class as `feedGap`, and the card renders them — the
+ *    torn-act count in particular is the fund's own bookkeeping state, with no magnitude
+ *    and no identifier in it. The `positionId` itself is NOT among them — see below;
+ *  - the v5 FILL STATE's conclusions: every `venueAxis`, `bookAxis`, `label`,
+ *    `joinProvenance`, `declaredPriceMismatch` and `resting`, the `orphanLots` count,
+ *    the PRESENCE of each measured figure, and `venueFilledFraction` — a ratio, which
+ *    discloses no size and which the preserved `label` already renders as a percentage.
+ *    ABSENCE IS PRESERVED TOO, and it is the load-bearing half: a rung with no fill key
+ *    comes back with none, because that absence is the day-zero state the surface
+ *    renders and the state the live fund is actually in.
  *
  * ── WHAT IS INVENTED, AND WHY IT MUST BE ────────────────────────────────────────
  * Everything no trigger reads. Preserving these would leak the fund's composition
@@ -52,6 +60,21 @@
  *    shape as a stop level — so it falls under the magnitudes rule with everything
  *    else. The COUNT and the ORDER survive because the card is a rung table; the
  *    LEVELS are invented from {@link SYNTHETIC_RUNG_TOP} down;
+ *  - every `planId`, which becomes a counted {@link syntheticPlanId}. A plan id is a
+ *    UUID minted into the operator's PRIVATE sidecar: not a magnitude and not a
+ *    disclosure of strategy the way a `positionId` is, but not a string this repository
+ *    authored either, and the authorship test is the one that decides;
+ *  - every rung `id`, which becomes `rung-N` positionally, for the same reason;
+ *  - every fill QUANTITY and the mismatched `orderPriceUsd` — `placedQuantity`,
+ *    `venueConsumedQuantity`, `bookedQuantity`, `deployedUsd`, `unitsAcquired`,
+ *    `avgEntryUsd` and both waiting totals. They are amounts of a real asset at a real
+ *    venue;
+ *  - every rung's declared `sizeUsd`, which the wire started carrying at v5. It is the
+ *    operator's own capital allocation per level — a magnitude by any reading — and it is
+ *    replaced by a flat {@link SYNTHETIC_RUNG_SIZE_USD}, which the two waiting totals
+ *    beside it are then SUMMED from — over the synthetic rungs themselves, so the
+ *    committed file's sums and its per-rung sizes agree the way a real payload's do even
+ *    where a rung carries no size at all;
  *  - every `positionId`, which becomes `synthetic-position-N` by first appearance
  *    across the series. It is not a magnitude, but the operator's naming convention
  *    spells out a live position's VENUE, INSTRUMENT and STRATEGY, and the string is
@@ -76,9 +99,10 @@
  * arrives on this payload, the question is not "is it a magnitude" — it is "did we
  * write this string, or did the operator's private file". Only the first is kept.
  *
- * What synthesis withholds is therefore five things — MAGNITUDES, the NAV series'
- * scale, the fund NAME, the fund ID and every `positionId` — and nothing else should
- * be inferred from the fact that this module ran.
+ * What synthesis withholds is therefore six things — MAGNITUDES (the fill quantities
+ * among them, since v5), the NAV series' scale, the fund NAME, the fund ID, every
+ * `positionId`, and every durable IDENTIFIER minted into the private sidecars (`planId`,
+ * rung `id`) — and nothing else should be inferred from the fact that this module ran.
  *
  * ── THE NAV SERIES, AND WHY IT IS JITTERED ──────────────────────────────────────
  * Preserving every day-over-day NAV change EXACTLY would be mathematically the same
@@ -145,7 +169,12 @@ import type {
   DashboardFocus,
   DashboardSection,
 } from "@numisma/engine";
-import type { DcaBlock, SnapshotAnchor } from "../projection/contract.ts";
+import type {
+  DcaBlock,
+  DcaWireFillFigures,
+  DcaWireRung,
+  SnapshotAnchor,
+} from "../projection/contract.ts";
 import { fundIdOf } from "../projection/contract.ts";
 import { NAV_MOVE_THRESHOLD_PCT } from "../glance/verdict.ts";
 
@@ -250,6 +279,61 @@ const RUNG_WOBBLE = 0.01;
 export const SYNTHETIC_POSITION_PREFIX = "synthetic-position";
 
 /**
+ * The invented per-rung declared size, and the invented quantity a synthetic order is
+ * placed for. Both are MAGNITUDES the wire carries at v5 — the first as the rung's own
+ * `sizeUsd` AND as the two waiting figures that sum it, the second behind the
+ * placed/consumed/booked quantities — so both fall under the magnitudes rule with
+ * everything else here.
+ *
+ * FLAT ACROSS THE LADDER, and that is a disclosure decision rather than laziness. The
+ * per-rung sizes are now on the wire individually, so their RATIOS would be the real
+ * ladder's convexity if they were carried over — which is precisely the fact slice 4's
+ * caption renders and therefore precisely the fact the fixture must not publish. A flat
+ * size keeps every committed rung's declared capital identical, keeps the waiting sums
+ * consistent with it, and says nothing about how the operator shaped their ladder.
+ *
+ * Round and fictional on purpose, like {@link SYNTHETIC_START_NAV} and
+ * {@link SYNTHETIC_RUNG_TOP} above: a reader who opens the file must not have to reason
+ * about whether a figure is the desk's.
+ */
+const SYNTHETIC_RUNG_SIZE_USD = 250;
+const SYNTHETIC_PLACED_QUANTITY = 2;
+/** How far a mismatched order's invented price sits from its rung's, as a fraction. */
+const SYNTHETIC_MISMATCH_OFFSET = 0.004;
+
+/**
+ * The UUID shape every synthetic `planId` carries — the repo's counted-UUID fixture
+ * convention (`00000000-0000-4000-8000-<ordinal>`), which reads as obviously fake at a
+ * glance while still being a well-formed v4 UUID for anything that parses it.
+ *
+ * A REAL `planId` IS DATA, not a code identifier, and the distinction is the one this
+ * module's header draws: the id is a UUID minted into the operator's PRIVATE plans
+ * sidecar. It discloses no venue or strategy the way a `positionId` does, but it is a
+ * durable handle on a real ladder, and the authorship test — did this repository write
+ * this string, or did the operator's private file — puts it on the synthesized side
+ * without needing a second argument about how much it leaks.
+ *
+ * Exported for `anchor-fixture.test.ts`, which reads the COMMITTED BYTES.
+ */
+export const SYNTHETIC_PLAN_ID_PREFIX = "00000000-0000-4000-8000-";
+
+/** The synthetic plan id for an ordinal — counted from 1, zero-padded to 12 digits. */
+export function syntheticPlanId(ordinal: number): string {
+  return `${SYNTHETIC_PLAN_ID_PREFIX}${String(ordinal).padStart(12, "0")}`;
+}
+
+/**
+ * The synthetic rung id at one position in a ladder — counted from 1, as declared.
+ *
+ * Exported for `anchor-fixture.test.ts`, which reads the COMMITTED BYTES: every rung in
+ * the file on disk must carry this shape, not merely whatever the generator would emit
+ * if it were re-run.
+ */
+export function syntheticRungId(index: number): string {
+  return `rung-${index + 1}`;
+}
+
+/**
  * Map every distinct real `positionId` in a whole series to its synthetic stand-in,
  * numbered by FIRST APPEARANCE across the anchors in order.
  *
@@ -275,6 +359,160 @@ function synthesizePositionIds(
     }
   }
   return ids;
+}
+
+/**
+ * The key one LADDER is identified by across the series: its position and its own id
+ * together. Written `positionId\0planId` for the reason {@link hashUnit} joins on the
+ * escape — so `("ab", "c")` and `("a", "bc")` cannot collide on one entry.
+ */
+function ladderKey(positionId: string, planId: string | undefined): string {
+  return `${positionId}\0${planId ?? ""}`;
+}
+
+/**
+ * Map every distinct declared LADDER in a series to its synthetic plan id, numbered by
+ * first appearance — the same series-level discipline
+ * {@link synthesizePositionIds} follows, and for the same reason: one ladder appearing
+ * on twelve anchors is one ladder, and the route resolves on this key.
+ *
+ * KEYED BY `(positionId, planId)` RATHER THAN BY `planId` ALONE, which is what lets one
+ * rule serve two cases. A v5-era anchor carries a real plan id and it maps. An anchor
+ * REGENERATED FROM A v4-ERA SHAPE carries none — the field did not exist when the row
+ * was built — and it still needs an id, because the file is stamped v5 and a ladder row
+ * without one is a v4 row wearing a v5 label. Keying on the pair gives the idless case
+ * its own ordinal instead of collapsing every one of them onto a single shared id.
+ *
+ * SUPERSESSION IS THEREFORE PRESERVED: two ladders declared for one position across the
+ * series are two keys and get two ids, exactly as the real file has two.
+ */
+function synthesizePlanIds(anchors: readonly SnapshotAnchor[]): Map<string, string> {
+  const ids = new Map<string, string>();
+  for (const anchor of anchors) {
+    for (const position of anchor.report.dca.positions) {
+      if (position.kind !== "dcaLadder") continue;
+      const key = ladderKey(position.positionId, position.planId);
+      if (!ids.has(key)) {
+        ids.set(key, syntheticPlanId(ids.size + 1));
+      }
+    }
+  }
+  return ids;
+}
+
+/**
+ * Synthesize ONE rung's v5 fill state: every STATE and the measured FRACTION verbatim,
+ * every QUANTITY and PRICE invented.
+ *
+ * THE SPLIT IS THE SAME ONE THIS MODULE ALREADY DRAWS. `venueAxis`, `bookAxis`, `label`,
+ * `joinProvenance`, `declaredPriceMismatch` and `resting` are conclusions with no
+ * magnitude in them — the class copied whole, like `state` and the `glance` block.
+ * `placedQuantity`, `venueConsumedQuantity`, `bookedQuantity` and `orderPriceUsd` are
+ * amounts of a real asset at a real venue, and they are invented.
+ *
+ * `venueFilledFraction` IS PRESERVED, and it is the one number here that is neither
+ * copied-because-harmless nor invented-because-a-magnitude. It is a RATIO — it
+ * discloses no size — and the `label` beside it already renders it (`partly filled ·
+ * 50%`), so inventing it would make the fixture's own two fields disagree. The invented
+ * quantities are then derived FROM it, which is what keeps `consumed / placed` equal to
+ * the fraction the label states.
+ *
+ * ABSENCE IS PRESERVED EXACTLY. A rung with no order joined carries no fill key, and
+ * comes back carrying none: that absence is the day-zero state the surface renders, and
+ * manufacturing a state for it would make the fixture claim a history the fund never had.
+ */
+function synthesizeRung(rung: DcaWireRung, index: number): DcaWireRung {
+  const synthetic: DcaWireRung = {
+    id: syntheticRungId(index),
+    priceUsd: rung.priceUsd,
+    // PRESENCE PRESERVED, VALUE INVENTED. `sizeUsd` is the operator's declared capital
+    // for this rung — a magnitude, so it is replaced with the flat synthetic size the
+    // waiting figures are already rebuilt from. Preserving presence rather than always
+    // emitting it is what lets a v4-era row regenerate as the v4-shaped rung it is.
+    ...(rung.sizeUsd === undefined ? {} : { sizeUsd: SYNTHETIC_RUNG_SIZE_USD }),
+  };
+  if (rung.venueAxis === undefined) {
+    return synthetic;
+  }
+  const placed = SYNTHETIC_PLACED_QUANTITY;
+  const fraction =
+    rung.venueFilledFraction ??
+    (rung.venueAxis === "filled" ? 1 : rung.venueAxis === "resting" ? 0 : 0.5);
+  const consumed = placed * fraction;
+  const booked =
+    rung.bookAxis === "recorded"
+      ? consumed
+      : rung.bookAxis === "partly-recorded"
+        ? consumed / 2
+        : 0;
+  return {
+    ...synthetic,
+    venueAxis: rung.venueAxis,
+    ...(rung.bookAxis === undefined ? {} : { bookAxis: rung.bookAxis }),
+    ...(rung.label === undefined ? {} : { label: rung.label }),
+    ...(rung.joinProvenance === undefined ? {} : { joinProvenance: rung.joinProvenance }),
+    ...(rung.declaredPriceMismatch
+      ? {
+          // Invented, and derived from the rung's ALREADY-SYNTHETIC price so it carries
+          // nothing of the real one — while still landing off the declared level, which
+          // is the only fact the mismatch flag is making.
+          orderPriceUsd:
+            Math.round(rung.priceUsd * (1 - SYNTHETIC_MISMATCH_OFFSET) * 100) / 100,
+        }
+      : {}),
+    ...(rung.declaredPriceMismatch === undefined
+      ? {}
+      : { declaredPriceMismatch: rung.declaredPriceMismatch }),
+    placedQuantity: placed,
+    venueConsumedQuantity: consumed,
+    bookedQuantity: booked,
+    ...(rung.venueFilledFraction === undefined
+      ? {}
+      : { venueFilledFraction: rung.venueFilledFraction }),
+    ...(rung.resting === undefined ? {} : { resting: rung.resting }),
+  };
+}
+
+/**
+ * Synthesize a ladder's measured figures: PRESENCE preserved exactly, every value
+ * invented from the synthetic rungs beside them.
+ *
+ * PRESENCE IS THE LOAD-BEARING PART, because absence is what the surface renders as
+ * "no fill recorded" with a named cause. A synthesizer that filled the three measured
+ * figures in would make slice 4 green against a shape the push never emits on day zero,
+ * which is the state the live fund is actually in.
+ *
+ * The waiting figures are rebuilt rather than carried over: they are sums of the real
+ * declared `sizeUsd`, and carrying them would publish the ladder's capital in aggregate.
+ *
+ * REBUILT AS AN ACTUAL SUM OVER THE SYNTHETIC RUNGS, not as a count times the constant
+ * {@link synthesizeRung} stamps. The two agree only while every rung carries a size — and
+ * a v4-shaped rung deliberately carries none, so the count form published a total twice
+ * the sizes beside it. A sum that disagrees with the rungs it claims to sum is a shape no
+ * real payload has, which is exactly what this synthesizer must not invent.
+ */
+function synthesizeFigures(
+  figures: DcaWireFillFigures,
+  rungs: readonly DcaWireRung[],
+): DcaWireFillFigures {
+  const sizeOf = (subset: readonly DcaWireRung[]) =>
+    subset.reduce((total, rung) => total + (rung.sizeUsd ?? 0), 0);
+  const unfilled = sizeOf(rungs.filter((rung) => rung.venueAxis !== "filled"));
+  const resting = sizeOf(rungs.filter((rung) => rung.resting === true));
+  const units = rungs.reduce((sum, rung) => sum + (rung.bookedQuantity ?? 0), 0);
+  const deployed = rungs.reduce(
+    (sum, rung) => sum + (rung.bookedQuantity ?? 0) * rung.priceUsd,
+    0,
+  );
+  return {
+    ...(figures.deployedUsd === undefined ? {} : { deployedUsd: deployed }),
+    ...(figures.unitsAcquired === undefined ? {} : { unitsAcquired: units }),
+    ...(figures.avgEntryUsd === undefined
+      ? {}
+      : { avgEntryUsd: units > 0 ? deployed / units : 0 }),
+    waitingDeclaredUsd: unfilled,
+    waitingRestingUsd: resting,
+  };
 }
 
 /**
@@ -313,10 +551,16 @@ function synthesizeDca(
   dca: DcaBlock,
   asOf: string,
   ids: ReadonlyMap<string, string>,
+  planIds: ReadonlyMap<string, string>,
 ): DcaBlock {
   return {
     source: dca.source,
     unattributable: dca.unattributable,
+    // COPIED VERBATIM, exactly as `unattributable` beside it is, and for the same reason:
+    // it is a COUNT of the fund's own bookkeeping state with no magnitude and no
+    // identifier in it. Presence is preserved too — an absent count means "this row could
+    // not check", which is a fact about the row and not a value to invent.
+    ...(dca.tornActs === undefined ? {} : { tornActs: dca.tornActs }),
     positions: dca.positions.map((position) => {
       const positionId = ids.get(position.positionId);
       if (positionId === undefined) {
@@ -332,13 +576,32 @@ function synthesizeDca(
       // committed file's key order is asserted elsewhere, and a renamed key that
       // moved would read as a shape change.
       const synthetic = { ...position, positionId };
+      if (position.kind === "dcaLadder") {
+        const planId = planIds.get(ladderKey(position.positionId, position.planId));
+        if (planId === undefined) {
+          // Unreachable through `synthesizeAnchors`, which maps the whole series first.
+          // A throw rather than a fallback, for the reason the position-id lookup throws:
+          // the one outcome this function must never have is emitting the private value
+          // because a lookup missed.
+          throw new Error(
+            `fixture synthesis: no synthetic plan id was assigned for a ladder on ${asOf}.`,
+          );
+        }
+        synthetic.planId = planId;
+      }
       if (position.rungs !== undefined) {
-        synthetic.rungs = position.rungs.map((_rung, index) => {
+        synthetic.rungs = position.rungs.map((rung, index) => {
           const wobble = RUNG_WOBBLE * (2 * hashUnit(asOf, positionId, `rung-${index}`) - 1);
           const level =
             SYNTHETIC_RUNG_TOP * Math.pow(1 - RUNG_STEP, index) * (1 + wobble);
-          return { priceUsd: Math.round(level * 100) / 100 };
+          return synthesizeRung(
+            { ...rung, priceUsd: Math.round(level * 100) / 100 },
+            index,
+          );
         });
+      }
+      if (position.figures !== undefined) {
+        synthetic.figures = synthesizeFigures(position.figures, synthetic.rungs ?? []);
       }
       return synthetic;
     }),
@@ -683,6 +946,7 @@ function synthesizeAnchor(
   anchor: SnapshotAnchor,
   nav: number,
   positionIds: ReadonlyMap<string, string>,
+  planIds: ReadonlyMap<string, string>,
 ): SnapshotAnchor {
   const { dashboard, totals, glance, dca } = anchor.report;
   const asOf = anchor.asOf;
@@ -756,7 +1020,7 @@ function synthesizeAnchor(
       glance: structuredClone(glance),
       // States and counts verbatim, position IDS and rung LEVELS invented — see
       // `synthesizeDca`.
-      dca: synthesizeDca(dca, asOf, positionIds),
+      dca: synthesizeDca(dca, asOf, positionIds, planIds),
     },
   };
 }
@@ -816,6 +1080,7 @@ export function synthesizeAnchors(
   // Assigned over the WHOLE series before any anchor is synthesized, so one plan
   // keeps one id across every anchor it appears on.
   const positionIds = synthesizePositionIds(anchors);
+  const planIds = synthesizePlanIds(anchors);
   let nav = SYNTHETIC_START_NAV;
   for (const [index, anchor] of anchors.entries()) {
     if (index > 0) {
@@ -836,7 +1101,7 @@ export function synthesizeAnchors(
         nav = SYNTHETIC_START_NAV;
       }
     }
-    out.push(synthesizeAnchor(anchor, nav, positionIds));
+    out.push(synthesizeAnchor(anchor, nav, positionIds, planIds));
   }
   return out;
 }

@@ -19,6 +19,7 @@ import { QUANTITY_EPSILON } from "./monotonicity.js";
 // are one rule rather than two copies that can drift (#205).
 import { isDescriptorText, isTriggerPrice } from "./records.js";
 import type { OrderPlacedRecord, OrderRecord, OrderSide } from "./records.js";
+import type { RungPick } from "./rung-picks.js";
 
 /**
  * The observed half of one open order, after a venue parser has normalized it. The
@@ -531,6 +532,20 @@ export function detectChangedClaims(
 export interface OrderAttribution {
   fundingReserveId: string;
   overrides?: Record<string, string>;
+  /**
+   * THE DECLARED RUNG JOIN (#286), per order, keyed by the synthesized id — the operator's
+   * ratified pick of which ladder rung this claim was placed for.
+   *
+   * IT RIDES THE ATTRIBUTION VALUE THE IMPORT ALREADY THREADS, deliberately: one path
+   * into the record builder rather than a second parameter that a caller could supply on
+   * one code path and forget on another. Per ORDER rather than per batch, because a
+   * ladder's rungs are exactly what a batch does NOT share — the funding reserve is the
+   * homogeneous fact, the rung is the heterogeneous one.
+   *
+   * ABSENT FOR AN ORDER WITH NO PICK, and that is the legacy path rather than an error:
+   * the record then carries neither field and joins by price match forever.
+   */
+  rungPicks?: Record<string, RungPick>;
 }
 
 /**
@@ -548,6 +563,29 @@ export interface OrderAttribution {
  * definition. The mechanism (a field, never a synthesized `orderFilled` line) is argued in
  * full on the field itself in `./records.ts`.
  */
+/**
+ * Both declared join fields, or neither — a pick is two facts and never half of one.
+ *
+ * ON THE READER'S OWN GATE, like its neighbours and unlike the version this replaces.
+ * `parseOrderRecord` refuses a `planId`/`rungId` that is not a non-empty string, so a
+ * blank one written here serializes cleanly and then makes every later load skip the
+ * whole line as `malformed` — on an append-only file, permanently. Today's TUI cannot
+ * produce one (picks originate from loader-validated plans), but `buildOrderPlacedRecords`
+ * is a public engine export and the whitelist tables exist precisely so a writer's
+ * assumption about its callers is not the guarantee.
+ */
+function pickFields(pick: RungPick | undefined): { planId?: string; rungId?: string } {
+  if (pick === undefined || !isJoinId(pick.planId) || !isJoinId(pick.rungId)) {
+    return {};
+  }
+  return { planId: pick.planId, rungId: pick.rungId };
+}
+
+/** An id the reader will accept coming back in: a string with something in it. */
+function isJoinId(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
 export function buildOrderPlacedRecords(
   orders: readonly ObservedOpenOrder[],
   attribution: OrderAttribution,
@@ -581,5 +619,10 @@ export function buildOrderPlacedRecords(
     ...(isDescriptorText(order.timeInForce) ? { timeInForce: order.timeInForce } : {}),
     ...(isTriggerPrice(order.triggerPrice) ? { triggerPrice: order.triggerPrice } : {}),
     fundingReserveId: attribution.overrides?.[order.id] ?? attribution.fundingReserveId,
+    // THE PICK, ON THE SAME CONDITIONAL-SPREAD IDIOM as the descriptors above and on the
+    // same gate the reader applies coming back in. An order with no pick writes NO KEY:
+    // absence means *we were never told*, and a `""` here would read back as `malformed`
+    // on every later load of an append-only file.
+    ...pickFields(attribution.rungPicks?.[order.id]),
   }));
 }

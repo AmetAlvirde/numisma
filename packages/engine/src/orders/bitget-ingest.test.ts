@@ -224,6 +224,40 @@ describe("#173 — the venue's filled_quantity is carried, and the REMAINDER dec
     expect(pickRestingOrdersAsOf([parsed.record])[0]?.remainingQuantity).toBe(4);
   });
 
+  it("never writes a declared join the reader will refuse forever", () => {
+    // THE WRITE GATE AND THE READ GATE MUST NOT DRIFT (#205). `parseOrderRecord` skips a
+    // line whose `planId`/`rungId` is not a non-empty string as `malformed`, and on an
+    // append-only file that skip is permanent — the rung's placement, its size and its
+    // funding reserve all go with it. `buildOrderPlacedRecords` is a public export, so
+    // the gate lives on the writer rather than on the one caller that behaves today.
+    const orders = okOrders(csv(row({ price: "100", quantity: "10" })));
+    const id = orders[0]!.id;
+
+    for (const pick of [
+      { planId: "", rungId: "rung-1" },
+      { planId: "plan-1", rungId: "" },
+      { planId: "  ", rungId: "  " },
+    ]) {
+      const [record] = buildOrderPlacedRecords(orders, {
+        fundingReserveId: "reserve-a",
+        rungPicks: { [id]: pick },
+      });
+      if (!record) throw new Error("expected one record");
+      const line = serializeOrderRecord(record);
+      expect(line, JSON.stringify(pick)).not.toContain("planId");
+      expect(line, JSON.stringify(pick)).not.toContain("rungId");
+      expect(parseOrderRecord(JSON.parse(line)).status).toBe("ok");
+    }
+
+    // …and a well-formed pick still crosses whole. A gate that refused everything would
+    // pass the assertions above and lose the feature.
+    const [good] = buildOrderPlacedRecords(orders, {
+      fundingReserveId: "reserve-a",
+      rungPicks: { [id]: { planId: "plan-1", rungId: "rung-1" } },
+    });
+    expect(good).toMatchObject({ planId: "plan-1", rungId: "rung-1" });
+  });
+
   it("writes NO extra key when there is nothing filled, so existing lines are unchanged", () => {
     const [record] = buildOrderPlacedRecords(okOrders(csv(row({ filled_quantity: "0" }))), {
       fundingReserveId: "reserve-a",

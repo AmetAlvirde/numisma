@@ -23,8 +23,8 @@
  * adapter, no second shape to keep in sync.
  *
  * WHAT IT DOES NOT HOLD: anything D8 keeps off the wire. Every `report` here is the
- * output of `toProjectionReport`, key-by-key — `{ totals, dashboard, glance }` and
- * nothing else. `invalidationWatch`, `closedBook`, `priceJourneys`,
+ * output of `toProjectionReport`, key-by-key — `{ totals, dashboard, glance, dca }`
+ * and nothing else. `invalidationWatch`, `closedBook`, `priceJourneys`,
  * `reserveReconciliation`, `warnings`, `excluded` and `load` never enter it, and
  * `glance.feedGap.missing` carries `rowId` + `label` only, never a mark date (D14).
  * `anchor-fixture.test.ts` asserts that on the committed bytes rather than trusting
@@ -59,9 +59,14 @@ export const ANCHOR_FIXTURE_PATH = resolve(
 /**
  * The committed file's envelope. `schemaVersion` is not decoration: it is what
  * makes a STALE fixture fail loud instead of replaying a shape the reader no longer
- * understands. A v4 that ever ships must regenerate this file, and until it does
- * {@link loadAnchorFixture} throws rather than handing slice 4 a v3 payload dressed
+ * understands. Every bump must regenerate this file, and until it does
+ * {@link loadAnchorFixture} throws rather than handing slice 4 a stale payload dressed
  * as current.
+ *
+ * PINNED TO `CURRENT`, NOT TO THE READER'S SUPPORTED RANGE (spec #285). The reader
+ * accepts an older STORED row because it does not get to choose what the projection
+ * already holds; this file is a committed artifact this repository does choose, so
+ * "current or fail" stays the rule for it.
  */
 export interface AnchorFixture {
   schemaVersion: number;

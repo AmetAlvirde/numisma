@@ -173,6 +173,72 @@ export interface DcaBlock {
    * the glance block's conclusions: ship the conclusion, not the inputs.
    */
   unattributable: number;
+  /**
+   * THE COUNT OF OUTSTANDING TORN FILL ACTS (spec #285 / G-D7) — halves of a fill act
+   * found on one file without their other half, which block recording until repaired.
+   *
+   * ON THE BRANCH ROOT BECAUSE THE FACT IS FUND-LEVEL. `reconcileFillActs` pairs the
+   * WHOLE durable log against the WHOLE orders sidecar by a derived id; the result
+   * belongs to no ladder in particular, so a per-row copy would either repeat one
+   * number on every row or imply an attribution the detector never computed. G-D7
+   * calls it a fund-level banner, and this is where a fund-level banner reads from.
+   *
+   * A COUNT, NEVER THE ACTS. Each `TornFillAct` carries an order id and a second-
+   * granular `observedAt` — the two classes `push/dca-block.ts` exists to stop, and
+   * the second of which would put a stamp on a branch that must stay DATE-FREE. The
+   * surface needs to know THAT recording is blocked; the repair happens at the desk.
+   *
+   * PRESENT AT ZERO, unlike {@link DcaPositionRow.orphanLots}. That count sits beside
+   * `figures`, whose presence already says a reconciliation ran, so its absence reads
+   * unambiguously as "none". Here there is no such neighbour, so absence has to carry
+   * the other meaning — this row could not check, which is a v4 row or an unreadable
+   * orders sidecar — and "checked, none outstanding" must be a visible `0`.
+   *
+   * Optional for the version-range reason spelled on {@link DcaPositionRow.planId}.
+   */
+  tornActs?: number;
+}
+
+/**
+ * WHAT THE VENUE SHOWED about a declared rung, narrowed from the engine's
+ * `FillVenueAxis`. Spelled here rather than imported for the same reason `state` is:
+ * this branch is PROJECTION-OWNED, and the wire's vocabulary must be decidable in this
+ * file. `push/dca-block.ts` assigns the engine's union to this one, so an engine that
+ * grows a fifth arm fails to compile there — named, at the seam, rather than shipping
+ * a word the reader has no branch for.
+ */
+export type DcaWireVenueAxis = "not-placed" | "resting" | "partly-filled" | "filled";
+
+/** WHAT THE FUND RECORDED, narrowed from the engine's `FillBookAxis`. Never collapsed
+ * into the venue axis: the gap between the two IS the unrecorded-fill call to action. */
+export type DcaWireBookAxis = "not-recorded" | "partly-recorded" | "recorded";
+
+/** How the rung and its order found each other, so the card can show its confidence. */
+export type DcaWireJoinProvenance = "declared" | "price-matched";
+
+/**
+ * The measured figures for ONE ladder (spec #285 / G-D8) — CONCLUSIONS of the engine's
+ * reconciliation, never the lots and orders they were measured from.
+ *
+ * ABSENT, NEVER ZERO, for the three measured ones. A recorded fill has cost > 0 and
+ * quantity > 0 by construction, so a `0` would be a bug rather than a fact, and the
+ * surface renders an em-dash with a named cause where an absent figure sits. The block
+ * itself is absent when no ladder was reconciled at all.
+ *
+ * BOTH WAITING FIGURES ARE ALWAYS PRESENT, because zero waiting capital is a real
+ * answer. They differ ONLY on never-placed rungs: any rung with an order is resting
+ * exactly while it is unfilled, by construction. The split is therefore
+ * "declared but never placed" — capital the operator meant to encumber and has not —
+ * and it is not a filled-vs-open distinction.
+ */
+export interface DcaWireFillFigures {
+  deployedUsd?: number;
+  unitsAcquired?: number;
+  avgEntryUsd?: number;
+  /** Σ `sizeUsd` of every rung not filled at the venue. Knowable on day zero. */
+  waitingDeclaredUsd: number;
+  /** Σ `sizeUsd` of the rungs that actually have an order resting at the venue. */
+  waitingRestingUsd: number;
 }
 
 /** One position's plan status at one anchor — a conclusion, never the fold inputs. */
@@ -188,15 +254,103 @@ export interface DcaPositionRow {
   kind?: "dcaLadder" | "dcaTime";
   /** Present on `pending`/`active` `dcaLadder` rows only. Absent, never empty. */
   rungs?: DcaWireRung[];
+  /**
+   * THE LADDER'S OWN DURABLE IDENTITY (#286) — the plan record's `id`, a UUID, so a
+   * route can resolve ONE ladder out of the roster (`/ladder/$planId`).
+   *
+   * A JOIN KEY, NEVER A LABEL. Nothing renders it as a name; a UUID is chosen over an
+   * authored slug precisely so no meaning — venue, tier, date — can accrete in it.
+   *
+   * OPTIONAL BECAUSE THE READER ACCEPTS A RANGE, not because a v5 push may omit it: a
+   * v4 row is still readable by this build (see
+   * {@link MIN_SUPPORTED_SNAPSHOT_SCHEMA_VERSION}) and no v4 row carries one.
+   */
+  planId?: string;
+  /**
+   * The reconciled figures for this ladder. Absent when no reconciliation ran for the
+   * row at all — a `dcaTime` plan, an `ended` row, or a v4 anchor.
+   */
+  figures?: DcaWireFillFigures;
+  /**
+   * The COUNT of recorded lots no declared rung explains — the same discipline as
+   * `unattributable` beside it: the conclusion crosses, the lots do not. A lot is
+   * position data of exactly the class D8 keeps off the wire; how MANY of them the
+   * ladder cannot explain is a call to action the surface has to be able to make.
+   */
+  orphanLots?: number;
 }
 
 /**
- * A rung narrowed to its PRICE AXIS alone. The card IS the price axis; `sizeUsd` is a
- * capital figure with no phone-glance use, and `id` is a join key for a fill export
- * that does not exist yet. Omitting both also halves the fixture-sanitization surface.
+ * A rung: the declared PRICE AXIS, plus what the venue and the book have since said
+ * about it (spec #285).
+ *
+ * `sizeUsd` CROSSES, AND IT USED NOT TO. The contract said it stayed off on the grounds
+ * that it was "a per-rung capital figure with no phone-glance use" and that the ladder's
+ * capital question was answered by {@link DcaWireFillFigures}'s two waiting totals —
+ * conclusions, it said, rather than the per-rung amounts they were summed out of. That
+ * reasoning expired with slice 4's chart: the chart is `aria-hidden` (it is presentation,
+ * and every per-rung fact it plots is already in the rung list), and its one irreplaceable
+ * content — THE SHAPE OF THE CAPITAL CURVE, spec §6.3's caption "the deepest rung is 3.7×
+ * the first" — is generated from per-rung declared size and from nothing else. A sum
+ * cannot reconstruct the ladder it was summed from, so the accessible substitute for the
+ * chart has no data source without this field.
+ *
+ * THE MARGINAL DISCLOSURE IS THE LADDER'S SHAPE, and that is the whole of it: every rung's
+ * PRICE already crosses, and `waitingDeclaredUsd` is already the sum of these sizes, so
+ * neither the levels nor the total is new. What becomes visible is how the operator
+ * distributed capital across their own declared levels — the fund's intention, rendered
+ * back to the operator who authored it, which G-D2 puts squarely under the authentication
+ * ceiling. It remains a DECLARED figure: nothing about it is a fill, so it is present on
+ * every rung of a v5 row including one with no order joined.
+ *
+ * EVERY FILL FIELD IS OPTIONAL AND OMITTED, never defaulted. A rung with nothing
+ * recorded serializes to exactly what v4 shipped, which is what makes the version
+ * range honest: absence is the day-zero state, spelled the same way by a v4 row and by
+ * a v5 row for a ladder that has not moved.
  */
 export interface DcaWireRung {
+  /**
+   * The rung's identity WITHIN its plan — the stable key slice 4's inspect panel and
+   * keyboard rung rows select on.
+   *
+   * The contract used to call this "a join key for a fill export that does not exist
+   * yet" and omit it on those grounds. That export is this increment; the reasoning
+   * expired with it. Optional for the version-range reason spelled on
+   * {@link DcaPositionRow.planId}, not because a v5 push may leave it out.
+   */
+  id?: string;
   priceUsd: number;
+  /**
+   * The capital the operator DECLARED for this rung — see the header for why it crosses
+   * and what it discloses. Optional for the version-range reason spelled on
+   * {@link DcaPositionRow.planId}: a v4 row carries none. Present on every v5 rung.
+   */
+  sizeUsd?: number;
+  venueAxis?: DcaWireVenueAxis;
+  bookAxis?: DcaWireBookAxis;
+  /**
+   * The rendered word(s) for the two axes together, spelled ONCE — in the engine's
+   * reconciliation — so the phone and the desk cannot describe the same rung
+   * differently. A convenience over the two axes, never a replacement for them.
+   */
+  label?: string;
+  joinProvenance?: DcaWireJoinProvenance;
+  /**
+   * The price the joined order was actually PLACED at. Present only when it is a fact
+   * the rung's own `priceUsd` does not already carry — i.e. alongside
+   * {@link DcaWireRung.declaredPriceMismatch}, so the card can say what the operator
+   * placed instead of merely that it differed.
+   */
+  orderPriceUsd?: number;
+  /** A DECLARED join whose order price differs from the rung's. Honored, and flagged. */
+  declaredPriceMismatch?: boolean;
+  placedQuantity?: number;
+  venueConsumedQuantity?: number;
+  bookedQuantity?: number;
+  /** MEASURED as `consumed / placed`, never guessed — it decorates `partly-filled`. */
+  venueFilledFraction?: number;
+  /** Whether the order is still claiming capital at the venue. */
+  resting?: boolean;
 }
 
 /**
@@ -414,11 +568,67 @@ export type ProjectionKeyAllowList = {
    * an `effectiveAt`, a `sizeUsd` or an `endedBy` added to any of the three shapes
    * fails HERE, named, before anyone has to notice it in a fixture diff.
    */
-  dca: Assert<KeysAreExactly<DcaBlock, "source" | "positions" | "unattributable">>;
-  dcaPosition: Assert<
-    KeysAreExactly<DcaPositionRow, "positionId" | "state" | "kind" | "rungs">
+  dca: Assert<
+    KeysAreExactly<
+      DcaBlock,
+      | "source"
+      | "positions"
+      | "unattributable"
+      // The fund-level count, enumerated beside the file-level one it shares its
+      // discipline with. A second block-root field is the most expensive kind of
+      // addition this branch can take, which is why it is spelled out here.
+      | "tornActs"
+    >
   >;
-  dcaRung: Assert<KeysAreExactly<DcaWireRung, "priceUsd">>;
+  dcaPosition: Assert<
+    KeysAreExactly<
+      DcaPositionRow,
+      | "positionId"
+      | "state"
+      | "kind"
+      | "rungs"
+      // Spec #285 slice 3 — ENUMERATED, one line per field, never widened to a
+      // wildcard. Each of these was decided: a UUID join key, the reconciliation's
+      // figures, and a count of the lots no rung explains.
+      | "planId"
+      | "figures"
+      | "orphanLots"
+    >
+  >;
+  dcaRung: Assert<
+    KeysAreExactly<
+      DcaWireRung,
+      | "id"
+      | "priceUsd"
+      // The declared per-rung capital figure, admitted by name. Its absence from this
+      // list WAS the decision that kept it off the wire; this line is what admitting it
+      // looks like, and the reasoning is on {@link DcaWireRung}'s header rather than
+      // here so it sits beside the field it governs.
+      | "sizeUsd"
+      // The fill state, enumerated.
+      | "venueAxis"
+      | "bookAxis"
+      | "label"
+      | "joinProvenance"
+      | "orderPriceUsd"
+      | "declaredPriceMismatch"
+      | "placedQuantity"
+      | "venueConsumedQuantity"
+      | "bookedQuantity"
+      | "venueFilledFraction"
+      | "resting"
+    >
+  >;
+  dcaFigures: Assert<
+    KeysAreExactly<
+      DcaWireFillFigures,
+      | "deployedUsd"
+      | "unitsAcquired"
+      | "avgEntryUsd"
+      | "waitingDeclaredUsd"
+      | "waitingRestingUsd"
+    >
+  >;
 };
 
 /**
@@ -493,8 +703,61 @@ export function toProjectionReport(
  * the bytes while the reader silently rendered a fund with no visible strategy. The
  * carve-outs are about fields a stale reader can safely ignore; a branch nobody can
  * ignore is what the version number is for.
+ *
+ *  - v5 — the Fill Path (spec #285): optional per-rung fill state, the rung's declared
+ *    `sizeUsd`, the ladder's `planId`, the reconciled {@link DcaWireFillFigures}, the
+ *    orphan-lot count and the fund-level {@link DcaBlock.tornActs} count, all INSIDE the
+ *    existing `dca` branch. No new top-level branch, so the deletion test still passes
+ *    cleanly: delete the fill path and the branch reverts to its v4 shape.
+ *
+ * WHY THIS IS A BUMP AT ALL, GIVEN EVERY NEW FIELD IS OPTIONAL. It is not the reader's
+ * safety that forces it — a v4 reader handed a v5 row would simply not look at the new
+ * fields, which is the C5 carve-out exactly. It is the WRITER'S contract: the version
+ * is what tells a reader whether an absent `venueAxis` means "this build could not
+ * have written one" or "nothing is recorded on this rung". Both are absences; only the
+ * version tells them apart, and the surface says different things about them.
+ *
+ * AND THIS BUMP COSTS NO CUTOVER WINDOW, which every bump before it did. See
+ * {@link MIN_SUPPORTED_SNAPSHOT_SCHEMA_VERSION}.
  */
-export const COMPOSITION_SNAPSHOT_SCHEMA_VERSION = 4;
+export const COMPOSITION_SNAPSHOT_SCHEMA_VERSION = 5;
+
+/**
+ * THE OLDEST STORED VERSION THIS BUILD WILL RENDER (spec #285 / G-D9) — the decision
+ * that abolishes the cutover window permanently.
+ *
+ * Every earlier bump was an equality test against
+ * {@link COMPOSITION_SNAPSHOT_SCHEMA_VERSION}, so the instant the constant moved, every
+ * row already in the projection became unreadable and the phone refused until a
+ * backfill finished. That window was survivable when it was minutes and an outage when
+ * a hosted credential turned out to point somewhere else.
+ *
+ * The reader now accepts `MIN_SUPPORTED ≤ stored ≤ CURRENT`, WHICH REVERSES THE DEPLOY
+ * ORDER: the reader ships FIRST, understanding both shapes, and the first v5 row lands
+ * into a build that was already ready for it. There is never an instant when the phone
+ * reads a version it does not understand — not at this bump and not at the next one,
+ * provided the floor is raised only when a version genuinely stops being renderable.
+ *
+ * FOUR IS THE FLOOR BECAUSE V4 IS RENDERABLE, and that is the whole test. Everything v5
+ * added is optional, and its absence on a v4 row is a TRUE statement about that day:
+ * no fill was recorded, because the anchor predates the plumbing that could record one.
+ * A v3 row is a different case and is still REFUSED — it carries no `dca` branch at
+ * all, so rendering it would show a fund with no visible strategy rather than a fund
+ * whose strategy has not moved.
+ *
+ * RAISING THIS IS A DECISION, not bookkeeping that follows the bump above. Raise it
+ * only when a stored shape can no longer be rendered honestly, and expect the refusal
+ * card's copy to change with it.
+ */
+export const MIN_SUPPORTED_SNAPSHOT_SCHEMA_VERSION = 4;
+
+/** Is a stored `schema_version` one this build can render? The range, spelled once. */
+export function isSupportedSchemaVersion(storedVersion: number): boolean {
+  return (
+    storedVersion >= MIN_SUPPORTED_SNAPSHOT_SCHEMA_VERSION &&
+    storedVersion <= COMPOSITION_SNAPSHOT_SCHEMA_VERSION
+  );
+}
 
 /**
  * Deterministic fund id: slug of the fund name — lowercased, every run of
@@ -550,5 +813,16 @@ export interface SnapshotAnchor {
  */
 export type SnapshotHistory =
   | { status: "empty" }
-  | { status: "stale"; storedVersion: number; expectedVersion: number }
+  | {
+      status: "stale";
+      storedVersion: number;
+      /**
+       * THE SUPPORTED RANGE, not a single expected version (spec #285 / G-D9). It was
+       * `expectedVersion: number` while the reader tested equality; reshaped
+       * DELIBERATELY rather than left as the range's upper bound, because a refusal
+       * card that says "expects 5" while the reader happily renders 4 is a rendered
+       * lie — and the copy that reads it is the one place an operator meets this type.
+       */
+      expectedVersions: { min: number; max: number };
+    }
   | { status: "ok"; latest: SnapshotAnchor; anchors: SnapshotAnchor[] };

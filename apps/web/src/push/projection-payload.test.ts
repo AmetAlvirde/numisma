@@ -45,6 +45,15 @@
  *  - false-pass guards assert each scanner genuinely FINDS what it looks for in
  *    the wide INPUT report. A recursive scanner with a bug reports "clean" for
  *    everything; without those assertions this file would be decoration.
+ *
+ * MUTATION-CHECKED at the v5 growth (spec #285, slice 3):
+ * `$.dca.positions[].rungs[].venueFilledFraction` removed from `ALLOWED_KEY_PATHS` —
+ * the allow-list assertion goes red naming that exact path as unlisted, which is the
+ * proof the list grew by ENUMERATION and was not loosened to a prefix. The compile-time
+ * twin was checked the same way: dropping `venueFilledFraction` from
+ * `ProjectionKeyAllowList.dcaRung` fails `pnpm typecheck` with
+ * `ENGINE_GREW_A_KEY_THE_PROJECTION_ALLOW_LIST_DOES_NOT_NAME: "venueFilledFraction"`.
+ * Both restored.
  */
 import { describe, expect, it } from "vitest";
 import type { CompositionReport } from "@numisma/engine";
@@ -201,8 +210,10 @@ const ALLOWED_KEY_PATHS = [
   // path: a STATE per position, a COUNT of unattributable lines, the loader's whole-
   // file outcome, and the rung PRICE AXIS the card is. What is deliberately absent is
   // as load-bearing as what is here — no `effectiveAt` (the date invariant below), no
-  // rung `id` or `sizeUsd`, no `endedBy`, no `skipped`: those are a conclusion's
-  // inputs, and `push/dca-block.ts` is where they stop.
+  // `endedBy`, no `skipped`: those are a conclusion's inputs, and `push/dca-block.ts` is
+  // where they stop. (The rung `id` was on that list until v5, which is when the fill
+  // export it was a join key for came to exist; the rung `sizeUsd` was on it until the
+  // slice 3 amendment, which is when the chart's accessible substitute came to need it.)
   "$.dca",
   "$.dca.positions",
   "$.dca.positions[].kind",
@@ -212,6 +223,41 @@ const ALLOWED_KEY_PATHS = [
   "$.dca.positions[].state",
   "$.dca.source",
   "$.dca.unattributable",
+  // The Fill Path (v5, spec #285). ENUMERATED, one path per field, and the enumeration
+  // is the guard: this list was never loosened to `$.dca.positions[].**`, so the NEXT
+  // field on a rung fails here by name even though its neighbours are allowed.
+  //
+  // Each is a CONCLUSION about one declared ladder — the two axes and the join that
+  // produced them, the quantities they were measured from, the figures, and two counts —
+  // plus the rung's DECLARED size and a THIRD count that is fund-level rather than
+  // per-ladder (`$.dca.tornActs`, which sits on the branch root because the two files it
+  // compares belong to no ladder). What is deliberately still absent is as load-bearing
+  // as what is here: no order ID, no `observedAt`, no lot, and no torn act — a torn act
+  // carries both an id and a stamp, which is why only its COUNT is on this list. Orders,
+  // lots and acts stop at `push/dca-block.ts`, and the date invariant below is what holds
+  // the stamps back.
+  "$.dca.positions[].figures",
+  "$.dca.positions[].figures.avgEntryUsd",
+  "$.dca.positions[].figures.deployedUsd",
+  "$.dca.positions[].figures.unitsAcquired",
+  "$.dca.positions[].figures.waitingDeclaredUsd",
+  "$.dca.positions[].figures.waitingRestingUsd",
+  "$.dca.positions[].orphanLots",
+  "$.dca.positions[].planId",
+  "$.dca.positions[].rungs[].bookAxis",
+  "$.dca.positions[].rungs[].bookedQuantity",
+  "$.dca.positions[].rungs[].declaredPriceMismatch",
+  "$.dca.positions[].rungs[].id",
+  "$.dca.positions[].rungs[].joinProvenance",
+  "$.dca.positions[].rungs[].label",
+  "$.dca.positions[].rungs[].orderPriceUsd",
+  "$.dca.positions[].rungs[].placedQuantity",
+  "$.dca.positions[].rungs[].resting",
+  "$.dca.positions[].rungs[].sizeUsd",
+  "$.dca.positions[].rungs[].venueAxis",
+  "$.dca.positions[].rungs[].venueConsumedQuantity",
+  "$.dca.positions[].rungs[].venueFilledFraction",
+  "$.dca.tornActs",
   "$.totals",
   "$.totals.baseCurrency",
   "$.totals.fundValueUsd",

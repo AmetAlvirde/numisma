@@ -10,7 +10,11 @@ import { dirname, resolve } from "node:path";
 import { Pool } from "pg";
 import type { CompositionReport } from "@numisma/engine";
 import { afterEach, describe, expect, it } from "vitest";
-import { COMPOSITION_SNAPSHOT_SCHEMA_VERSION } from "./contract.ts";
+import {
+  COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
+  MIN_SUPPORTED_SNAPSHOT_SCHEMA_VERSION,
+  type ProjectionReport,
+} from "./contract.ts";
 import {
   getReaderPool,
   getSnapshotHistory,
@@ -56,7 +60,7 @@ describe("getSnapshotHistory", () => {
     expect(result).toEqual({ status: "empty" });
   });
 
-  it("returns stale when the stored schema_version differs from the expected version", async () => {
+  it("returns stale when the stored schema_version is ABOVE the supported range", async () => {
     const storedVersion = COMPOSITION_SNAPSHOT_SCHEMA_VERSION + 1;
     const result = await getSnapshotHistory(
       poolReturning([
@@ -71,7 +75,10 @@ describe("getSnapshotHistory", () => {
     expect(result).toEqual({
       status: "stale",
       storedVersion,
-      expectedVersion: COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
+      expectedVersions: {
+        min: MIN_SUPPORTED_SNAPSHOT_SCHEMA_VERSION,
+        max: COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
+      },
     });
   });
 
@@ -104,6 +111,135 @@ describe("getSnapshotHistory", () => {
   });
 
   it("rejects on an actual DB/query failure rather than returning a refusal", async () => {
+    const boom = new Error("connection refused");
+    await expect(getSnapshotHistory(poolRejecting(boom))).rejects.toThrow(
+      "connection refused",
+    );
+  });
+});
+
+/**
+ * THE SUPPORTED RANGE (spec #285, slice 3 / G-D9) — the decision that abolishes the
+ * cutover window permanently.
+ *
+ * Every earlier bump was an equality test, so the moment the constant moved the phone
+ * refused every row already in the table and stayed refusing until a backfill finished.
+ * The reader now accepts `MIN_SUPPORTED ≤ stored ≤ CURRENT`, which lets the READER
+ * DEPLOY FIRST: there is never an instant when the app reads a version it does not
+ * understand, because the version it will be handed next is one it already accepts.
+ *
+ * WHAT THE RANGE IS NOT is a relaxation. `MIN - 1` is still refused — a v3 row has no
+ * `dca` branch at all, and rendering it would show a fund with no visible strategy.
+ * The range names the versions whose ABSENCES this build can read honestly, and the
+ * only thing v5 added over v4 is optional fields whose absence is a real answer.
+ *
+ * MUTATION-CHECKED: both comparisons in `snapshot-reader.ts` reverted to the equality
+ * they replaced. Three cases went red for three different reasons — the floor row read
+ * `stale` instead of `ok`, the anchor list came back holding only the newest row, and
+ * the v4 payload never reached its absence assertions at all. Restored after.
+ */
+describe("getSnapshotHistory — the supported version RANGE", () => {
+  function rowAt(asOf: string, schemaVersion: number, report: unknown = fixtureReport) {
+    return {
+      fund_id: "sanitized-exploratory-fund",
+      as_of: asOf,
+      schema_version: schemaVersion,
+      report,
+    };
+  }
+
+  it("accepts the FLOOR of the range — a v4 row under the v5 reader is `ok`", async () => {
+    const result = await getSnapshotHistory(
+      poolReturning([rowAt("2026-05-29", MIN_SUPPORTED_SNAPSHOT_SCHEMA_VERSION)]),
+    );
+    expect(result.status).toBe("ok");
+  });
+
+  it("refuses BELOW the floor — a v3 row is still stale, not rendered", async () => {
+    const storedVersion = MIN_SUPPORTED_SNAPSHOT_SCHEMA_VERSION - 1;
+    const result = await getSnapshotHistory(
+      poolReturning([rowAt("2026-05-29", storedVersion)]),
+    );
+    expect(result).toEqual({
+      status: "stale",
+      storedVersion,
+      expectedVersions: {
+        min: MIN_SUPPORTED_SNAPSHOT_SCHEMA_VERSION,
+        max: COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
+      },
+    });
+  });
+
+  it("keeps BOTH in-range versions among the anchors, and drops only the unsupported", async () => {
+    // The anchor filter and the staleness verdict are two separate comparisons on two
+    // separate lines, and only one of them was ever exercised by the cutover tests. A
+    // range applied to one and equality left on the other would render the latest row
+    // while silently dropping every older in-range anchor from the history — the delta
+    // feature quietly reading one day again.
+    const result = await getSnapshotHistory(
+      poolReturning([
+        rowAt("2026-07-20", MIN_SUPPORTED_SNAPSHOT_SCHEMA_VERSION - 1),
+        rowAt("2026-07-24", MIN_SUPPORTED_SNAPSHOT_SCHEMA_VERSION),
+        rowAt("2026-07-26", COMPOSITION_SNAPSHOT_SCHEMA_VERSION),
+      ]),
+    );
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.anchors.map((a) => a.asOf)).toEqual(["2026-07-24", "2026-07-26"]);
+  });
+
+  it("a v4 row reads back as DAY-ZERO ABSENCE, not as a mis-render", async () => {
+    // AC3, and the claim is stronger than "does not crash". A v4 `dca` branch carries
+    // rungs with a price and NOTHING else: no rung id, no axis, no figures. Under the
+    // v5 reader every one of those has to arrive ABSENT — which is precisely the state
+    // the surface renders as "declared, nothing recorded". A reader that defaulted a
+    // missing `venueAxis` to `"not-placed"`, or a missing figure to `0`, would be
+    // asserting a measurement nobody made.
+    const v4Report = {
+      ...(fixtureReport as unknown as ProjectionReport),
+      dca: {
+        source: "loaded" as const,
+        unattributable: 0,
+        positions: [
+          {
+            positionId: "synthetic-position-1",
+            state: "pending" as const,
+            kind: "dcaLadder" as const,
+            rungs: [{ priceUsd: 9_400 }, { priceUsd: 8_800 }],
+          },
+        ],
+      },
+    };
+    const result = await getSnapshotHistory(
+      poolReturning([
+        rowAt("2026-05-29", MIN_SUPPORTED_SNAPSHOT_SCHEMA_VERSION, v4Report),
+      ]),
+    );
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const position = result.latest.report.dca.positions[0]!;
+    expect(position.planId).toBeUndefined();
+    expect(position.figures).toBeUndefined();
+    expect(position.orphanLots).toBeUndefined();
+    // The claim is that a v4 row reads back as DAY-ZERO ABSENCE rather than as a
+    // mis-render, and a loop over an empty array asserts neither. Any future
+    // normalization in `getSnapshotHistory`/`toAnchor` that dropped rungs lacking a v5
+    // `id` would silence every assertion below without this line.
+    expect(position.rungs).toHaveLength(2);
+    for (const rung of position.rungs ?? []) {
+      expect(rung.id).toBeUndefined();
+      expect(rung.venueAxis).toBeUndefined();
+      expect(rung.bookAxis).toBeUndefined();
+      expect(rung.label).toBeUndefined();
+      expect(rung.resting).toBeUndefined();
+      // The one thing a v4 rung DOES carry, still carried: the price axis the card is.
+      expect(rung.priceUsd).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("getSnapshotHistory (miscellany)", () => {
+  it("still rejects on an actual DB/query failure", async () => {
     const boom = new Error("connection refused");
     await expect(getSnapshotHistory(poolRejecting(boom))).rejects.toThrow(
       "connection refused",
@@ -184,7 +320,10 @@ describe("getSnapshotHistory multi-snapshot arbitration", () => {
     expect(result).toEqual({
       status: "stale",
       storedVersion: staleVersion,
-      expectedVersion: COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
+      expectedVersions: {
+        min: MIN_SUPPORTED_SNAPSHOT_SCHEMA_VERSION,
+        max: COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
+      },
     });
   });
 
@@ -249,11 +388,15 @@ describe("getSnapshotHistory anchors", () => {
     expect(["2026-10-01", "2026-9-1"].sort()).toEqual(["2026-10-01", "2026-9-1"]);
   });
 
-  it("DROPS rows at another schema version from anchors — the v2→v3 cutover", async () => {
+  it("DROPS rows BELOW the supported range from anchors — the v2→v3 cutover", async () => {
     // The graceful-cutover case. Leftover v2 rows stay in the table (no credential
     // in this system can DELETE one, V6) but must never be handed to a v3 reader as
     // a reference: they are simply unresolvable until the backfill upgrades them.
-    const stale = COMPOSITION_SNAPSHOT_SCHEMA_VERSION - 1;
+    //
+    // `MIN - 1`, not `CURRENT - 1`, since spec #285 slice 3: `CURRENT - 1` is v4, which
+    // the range READER now accepts, so the old spelling would have been asserting that
+    // the reader drops a version it is required to keep.
+    const stale = MIN_SUPPORTED_SNAPSHOT_SCHEMA_VERSION - 1;
     const result = await getSnapshotHistory(
       poolReturning([
         anchorRow("2026-07-20", stale),

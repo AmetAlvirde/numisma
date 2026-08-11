@@ -24,6 +24,7 @@ import { describe, expect, it } from "vitest";
 import type { CompositionRow } from "@numisma/engine";
 import type { SnapshotAnchor } from "../projection/contract.ts";
 import {
+  SYNTHETIC_PLAN_ID_PREFIX,
   NAV_JITTER_PP,
   NAV_MOVE_THRESHOLD_PCT,
   synthesizeAnchors,
@@ -427,6 +428,177 @@ describe("what survives — the projections slice 4 replays", () => {
     expect(rungs.map((rung) => rung.priceUsd)).toEqual(
       [...rungs.map((rung) => rung.priceUsd)].sort((a, b) => b - a),
     );
+  });
+
+  // ── The v5 fill state (spec #285, slice 3). The same two-bucket rule, applied to
+  // the fields the Fill Path added: CONCLUSIONS survive, MAGNITUDES and IDENTIFIERS do
+  // not, and absence survives as absence.
+  //
+  // MUTATION-CHECKED: `synthesizeRung`'s early return for a rung with no `venueAxis`
+  // removed — the absence case goes red on the fill keys that appeared on a rung the
+  // input said nothing about. And `synthesizeFigures`' `waitingDeclaredUsd` carried
+  // over from the input instead of rebuilt — the magnitude case goes red naming the
+  // real total. Both restored.
+  //
+  // MUTATION-CHECKED (the slice 3 amendment): `sizeUsd` carried over from the input
+  // instead of replaced — red naming the operator's real declared size; and `tornActs`
+  // defaulted to `0` instead of preserved-or-absent — red on the anchor that could not
+  // check acquiring a count it never had. Both restored.
+  describe("the v5 fill state", () => {
+    /** An anchor whose one ladder is mid-walk: filled, partly filled, and untouched. */
+    function walkedLadder(): SnapshotAnchor {
+      const anchor = constructedAnchor("2026-06-26", CONSTRUCTED_NAV);
+      anchor.report.dca = {
+        source: "loaded",
+        unattributable: 0,
+        // A COUNT of the fund's own bookkeeping state, carried like `unattributable`.
+        tornActs: 2,
+        positions: [
+          {
+            positionId: "capital-x-btc",
+            state: "active",
+            kind: "dcaLadder",
+            planId: "8ba4c1de-0f27-4a63-9c15-7e0d3b6a91cc",
+            rungs: [
+              {
+                id: "operator-rung-a",
+                priceUsd: 1000,
+                // The operator's real declared capital for this level — invented away.
+                sizeUsd: 1_850,
+                venueAxis: "partly-filled",
+                bookAxis: "recorded",
+                label: "partly filled · 25%",
+                joinProvenance: "declared",
+                orderPriceUsd: 998,
+                declaredPriceMismatch: true,
+                placedQuantity: 40,
+                venueConsumedQuantity: 10,
+                bookedQuantity: 10,
+                venueFilledFraction: 0.25,
+                resting: true,
+              },
+              // NO `sizeUsd` and no fill key: the shape a v4-ERA anchor regenerates
+              // from, which the file still holds for every anchor older than the bump.
+              { id: "operator-rung-b", priceUsd: 900 },
+            ],
+            figures: {
+              deployedUsd: 9_980,
+              unitsAcquired: 10,
+              avgEntryUsd: 998,
+              waitingDeclaredUsd: 3_700,
+              waitingRestingUsd: 1_850,
+            },
+            orphanLots: 3,
+          },
+        ],
+      };
+      return anchor;
+    }
+
+    const walked = synthesizeAnchors([walkedLadder()])[0]!.report.dca.positions[0]!;
+    const real = walkedLadder().report.dca.positions[0]!;
+
+    it("keeps every STATE and the measured FRACTION — the card renders them", () => {
+      const rung = walked.rungs![0]!;
+      expect(rung.venueAxis).toBe("partly-filled");
+      expect(rung.bookAxis).toBe("recorded");
+      expect(rung.label).toBe("partly filled · 25%");
+      expect(rung.joinProvenance).toBe("declared");
+      expect(rung.declaredPriceMismatch).toBe(true);
+      expect(rung.resting).toBe(true);
+      // A ratio discloses no size, and the preserved label already states it — an
+      // invented fraction would make the file's own two fields disagree.
+      expect(rung.venueFilledFraction).toBe(0.25);
+      // A count, like `unattributable` beside it.
+      expect(walked.orphanLots).toBe(3);
+    });
+
+    it("INVENTS every quantity, and keeps `consumed / placed` equal to the fraction", () => {
+      const rung = walked.rungs![0]!;
+      expect(rung.placedQuantity).not.toBe(real.rungs![0]!.placedQuantity);
+      expect(rung.venueConsumedQuantity).not.toBe(real.rungs![0]!.venueConsumedQuantity);
+      expect(rung.bookedQuantity).not.toBe(real.rungs![0]!.bookedQuantity);
+      expect(rung.venueConsumedQuantity! / rung.placedQuantity!).toBeCloseTo(0.25, 9);
+      // The mismatched order price is invented too, and derived from the ALREADY
+      // synthetic rung price — while still landing off the declared level, which is
+      // the only fact the mismatch flag makes.
+      expect(rung.orderPriceUsd).not.toBe(998);
+      expect(rung.orderPriceUsd).toBeLessThan(rung.priceUsd);
+    });
+
+    it("INVENTS every figure while preserving which ones are PRESENT", () => {
+      expect(Object.keys(walked.figures!).sort()).toEqual(
+        Object.keys(real.figures!).sort(),
+      );
+      for (const key of ["deployedUsd", "unitsAcquired", "avgEntryUsd", "waitingDeclaredUsd", "waitingRestingUsd"] as const) {
+        expect(walked.figures![key], key).not.toBe(real.figures![key]);
+      }
+      // The waiting totals are sums of the declared `sizeUsd` the wire deliberately
+      // never ships; carrying them over would publish it in aggregate.
+      expect(walked.figures!.waitingDeclaredUsd).toBeGreaterThan(0);
+    });
+
+    it("keeps an ABSENT fill state absent — the day-zero rung stays day-zero", () => {
+      // The load-bearing half. A synthesizer that manufactured a state here would make
+      // the fixture claim a history the fund never had, and slice 4 would go green
+      // against a shape the push does not emit on the day that actually matters.
+      // Absence is preserved KEY BY KEY, `sizeUsd` included: a v4-era anchor regenerates
+      // as a v4-shaped rung rather than acquiring a field its own push never wrote.
+      expect(Object.keys(walked.rungs![1]!).sort()).toEqual(["id", "priceUsd"]);
+    });
+
+    it("INVENTS the declared rung size while keeping the ladder's rung COUNT", () => {
+      // `sizeUsd` is the operator's own capital allocation per level. Its RATIOS across
+      // the ladder are the convexity slice 4's caption states, so carrying them over
+      // would publish the shape of a real ladder into a public file.
+      expect(walked.rungs![0]!.sizeUsd).toBeDefined();
+      expect(walked.rungs![0]!.sizeUsd).not.toBe(real.rungs![0]!.sizeUsd);
+      // …and the waiting totals beside it are rebuilt from the rungs THEMSELVES, so the
+      // committed file's sums cannot disagree with the rungs they claim to sum.
+      //
+      // SUMMED, NOT COUNTED × A CONSTANT. The count form restated `synthesizeFigures`'
+      // own formula back at it, so it could not see the one drift it exists to catch: the
+      // day-zero rung two tests up carries NO `sizeUsd`, which is worth nothing to a sum
+      // and a full share to a count — and the file read 500 against an actual 250.
+      const declared = walked
+        .rungs!.filter((rung) => rung.venueAxis !== "filled")
+        .reduce((total, rung) => total + (rung.sizeUsd ?? 0), 0);
+      expect(walked.figures!.waitingDeclaredUsd).toBe(declared);
+    });
+
+    it("carries the TORN-ACT count verbatim — a count, like `unattributable`", () => {
+      const branch = synthesizeAnchors([walkedLadder()])[0]!.report.dca;
+      expect(branch.tornActs).toBe(2);
+      // And an absent count stays absent: absence means "this anchor could not check",
+      // which is a fact about the row and not a value to invent.
+      const unchecked = walkedLadder();
+      delete unchecked.report.dca.tornActs;
+      expect("tornActs" in synthesizeAnchors([unchecked])[0]!.report.dca).toBe(false);
+    });
+
+    it("INVENTS the plan id and every rung id — both are minted in a private file", () => {
+      expect(walked.planId).toMatch(new RegExp(`^${SYNTHETIC_PLAN_ID_PREFIX}\\d{12}$`));
+      expect(walked.rungs!.map((rung) => rung.id)).toEqual(["rung-1", "rung-2"]);
+    });
+
+    it("gives one ladder ONE id across the series, and two ladders two", () => {
+      // The route resolves on this key: a per-anchor renaming would turn one ladder
+      // into twelve, and two superseding ladders sharing one id would resolve two
+      // different declarations to the same page.
+      const first = walkedLadder();
+      const second = walkedLadder();
+      second.asOf = "2026-06-28";
+      second.report.dashboard.summary.asOf = "2026-06-28";
+      const superseded = walkedLadder();
+      superseded.asOf = "2026-06-30";
+      superseded.report.dashboard.summary.asOf = "2026-06-30";
+      superseded.report.dca.positions[0]!.planId = "0d4e77a2-51bc-4e88-b0f9-2a6c5d41e733";
+
+      const series = synthesizeAnchors([first, second, superseded]);
+      const ids = series.map((a) => a.report.dca.positions[0]!.planId);
+      expect(ids[0]).toBe(ids[1]);
+      expect(ids[2]).not.toBe(ids[0]);
+    });
   });
 
   it("keeps dataSafety and the FX rate — neither is a fund magnitude", () => {
