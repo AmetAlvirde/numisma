@@ -19,7 +19,11 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import type { CompositionReport } from "@numisma/engine";
-import { SUPPRESSION_KEYS, type GlanceBlock } from "../projection/contract.ts";
+import {
+  SUPPRESSION_KEYS,
+  type DcaBlock,
+  type GlanceBlock,
+} from "../projection/contract.ts";
 import {
   resolveEventStorePaths,
   type EventStorePaths,
@@ -87,6 +91,39 @@ export async function makeTempStore(
   await writeFile(paths.log, log, "utf8");
   return { dir, paths };
 }
+
+/**
+ * A representative v4 `DcaBlock`, on the same principle as {@link TEST_GLANCE} below:
+ * a fixture for tests that need a well-formed payload but are not testing the DCA
+ * derivation itself, and deliberately NOT an empty block. It carries one row of EVERY
+ * arm the wire has, so a key-path allow-list walking it sees every optional key —
+ * `kind` and `rungs` on a ladder, `kind` alone on a `dcaTime` plan, and neither on the
+ * two conclusion-only arms. An empty block, or one with a single row, would let a leak
+ * inside a shape nobody walked go unnoticed.
+ *
+ * `buildDcaBlock` is what the PUSH uses; this is a fixture, and the two are asserted
+ * against each other in `dca-block.test.ts`.
+ */
+export const TEST_DCA: DcaBlock = {
+  source: "loaded",
+  positions: [
+    // A pending ladder — the day-zero case the card exists for, and the only arm that
+    // carries rungs. Two of them, so the key-path walk reaches inside the array.
+    {
+      positionId: "capital-fixture-btc",
+      state: "pending",
+      kind: "dcaLadder",
+      rungs: [{ priceUsd: 9_800 }, { priceUsd: 9_200 }],
+    },
+    // A `dcaTime` plan: `kind` present, `rungs` genuinely ABSENT. Without it the
+    // key-path allow-list could not tell an absent optional apart from an unused one.
+    { positionId: "capital-fixture-eth", state: "active", kind: "dcaTime" },
+    // The two conclusion-only arms, which must carry nothing else at all.
+    { positionId: "capital-fixture-old", state: "ended" },
+    { positionId: "capital-fixture-bad", state: "unreadable" },
+  ],
+  unattributable: 1,
+};
 
 /**
  * A representative v3 `GlanceBlock` for tests that need a well-formed payload but

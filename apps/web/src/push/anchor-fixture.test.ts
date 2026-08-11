@@ -248,10 +248,11 @@ describe("the committed anchor fixture", () => {
     expect(rows.some((r) => (r.unrealizedPnlUsd ?? 0) < 0)).toBe(true);
   });
 
-  it("D8: every payload is exactly `{ totals, dashboard, glance }`", async () => {
+  it("D8: every payload is exactly `{ totals, dashboard, glance, dca }`", async () => {
     for (const anchor of await loadAnchorFixture()) {
       expect(Object.keys(anchor.report).sort(), anchor.asOf).toEqual([
         "dashboard",
+        "dca",
         "glance",
         "totals",
       ]);
@@ -284,7 +285,7 @@ describe("the committed anchor fixture", () => {
     expect([...found].sort()).toEqual(anchors.map((a) => a.asOf));
   });
 
-  it("every anchor carries a well-formed v3 glance block", async () => {
+  it("every anchor carries a well-formed v4 glance block", async () => {
     for (const anchor of await loadAnchorFixture()) {
       const { glance } = anchor.report;
       expect(Object.keys(glance.feedGap).sort(), anchor.asOf).toEqual([
@@ -312,10 +313,10 @@ describe("the committed anchor fixture", () => {
 
   it("is stamped at the version this build expects", async () => {
     // The loader throws on a mismatch; this asserts the committed file is the one
-    // this build understands, so a v4 that ships without regenerating fails loudly
-    // here rather than replaying a stale shape in slice 4.
+    // this build understands, so a v5 that ships without regenerating fails loudly
+    // here rather than replaying a stale shape in the verdict replay.
     await expect(loadAnchorFixture()).resolves.toBeDefined();
-    expect(COMPOSITION_SNAPSHOT_SCHEMA_VERSION).toBe(3);
+    expect(COMPOSITION_SNAPSHOT_SCHEMA_VERSION).toBe(4);
   });
 
   it("anchorAt refuses a date the fixture does not hold", async () => {

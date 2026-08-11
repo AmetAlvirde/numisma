@@ -242,17 +242,24 @@ describe("runBackfill — a loop plus the existing upsert", () => {
     expect(current.dashboard.summary.asOf).toBe("2026-06-12");
   });
 
-  it("carries a v3 glance block on every anchor", async () => {
+  it("carries a v4 glance AND dca block on every anchor", async () => {
     await useStore(THREE_ANCHORS);
     const { pool } = fakePool();
     for (const anchor of await runBackfill({ pool })) {
       expect(Object.keys(anchor.report).sort()).toEqual([
         "dashboard",
+        "dca",
         "glance",
         "totals",
       ]);
       expect(typeof anchor.report.glance.feedGap.expected).toBe("number");
       expect(Array.isArray(anchor.report.glance.suppressed)).toBe(true);
+      // The DCA branch is derived PER ANCHOR, off the operator's real sidecar, so
+      // nothing here pins a roster: the claim is that every replayed anchor carries a
+      // well-formed block with the loader's own outcome on it, never a defaulted one.
+      expect(["loaded", "unreadable"]).toContain(anchor.report.dca.source);
+      expect(Array.isArray(anchor.report.dca.positions)).toBe(true);
+      expect(typeof anchor.report.dca.unattributable).toBe("number");
     }
   });
 
