@@ -29,7 +29,7 @@
  * so neither leaf imports the other.
  */
 import {
-  proposeRungByPrice,
+  matchRungsByPrice,
   type BitgetOpenOrder,
   type InForceLadder,
   type RungPick,
@@ -84,23 +84,59 @@ function labelOf(choices: readonly RungChoice[], pick: RungPick): string | undef
  * NOTHING IS ASKED WHEN NO LADDER IS IN FORCE. There is no proposal to ratify and no
  * choice to offer, so a prompt would be a question with no answer — and the honest empty
  * answer would then be indistinguishable from a deliberate decline.
+ *
+ * `declaredOnFile` SUPPRESSES A PROPOSAL, NEVER A PICK. A rung already declared by a line
+ * on disk is not one this pass may infer a second join for — but the OVERRIDE menu still
+ * offers it, because re-placing a rung whose earlier order was cancelled is ordinary and
+ * an append-only claim would otherwise lock that rung out forever. A proposal is an
+ * inference; a pick is something the operator said, and only the inference is blocked.
  */
 export async function declareRungPicks(
   ask: (question: string) => Promise<string>,
   orders: readonly BitgetOpenOrder[],
   ladders: readonly InForceLadder[],
+  declaredOnFile: readonly RungPick[] = [],
 ): Promise<Record<string, RungPick>> {
   const choices = offerRungs(ladders);
   if (choices.length === 0) {
     return {};
   }
 
+  // ONE RUNG STANDS FOR ONE ORDER, ACROSS THE BATCH **AND** ACROSS IMPORTS. Without this
+  // set the same rung is proposed to every order sharing its price, one Enter writes the
+  // same declared join onto several durable lines, and every line after the first joins
+  // to nothing — an operator-ratified field on an append-only file, silently inert.
+  const key = (pick: RungPick) => JSON.stringify([pick.planId, pick.rungId]);
+  const spokenFor = new Map<string, string>(
+    declaredOnFile.map((pick) => [key(pick), "already declared by an order on file"]),
+  );
+
   const proposals = new Map<string, RungPick>();
+  /** Why an order has no proposal — the three silences, told apart. */
+  const silences = new Map<string, string>();
   for (const order of orders) {
-    const proposed = proposeRungByPrice(ladders, order.price);
-    if (proposed !== undefined) {
-      proposals.set(order.id, proposed);
+    const matches = matchRungsByPrice(ladders, order.price);
+    if (matches.length === 0) {
+      silences.set(order.id, "no rung declared at this price");
+      continue;
     }
+    if (matches.length > 1) {
+      // THE AMBIGUITY IS NAMED, not rendered as absence. This is the case where the
+      // operator most needs to override, and the old copy told them there was nothing to.
+      silences.set(
+        order.id,
+        `${matches.length} ladders declare a rung at this price — decline the batch to pick one`,
+      );
+      continue;
+    }
+    const proposed = matches[0]!;
+    const taken = spokenFor.get(key(proposed));
+    if (taken !== undefined) {
+      silences.set(order.id, `that rung is ${taken}`);
+      continue;
+    }
+    spokenFor.set(key(proposed), "already proposed to another order in this batch");
+    proposals.set(order.id, proposed);
   }
 
   // THE BATCH QUESTION SHOWS ITS OWN WORK. An operator ratifying a proposal they cannot
@@ -111,7 +147,7 @@ export async function declareRungPicks(
       const proposed = proposals.get(order.id);
       const rendered =
         proposed === undefined
-          ? "no rung declared at this price"
+          ? (silences.get(order.id) ?? "no rung declared at this price")
           : (labelOf(choices, proposed) ?? "no rung declared at this price");
       return `  ${describeOrder(order)}\n    → ${rendered}`;
     })

@@ -94,16 +94,29 @@ export function proposeRungByPrice(
   ladders: readonly InForceLadder[],
   price: number,
 ): RungPick | undefined {
-  let found: RungPick | undefined;
+  const matches = matchRungsByPrice(ladders, price);
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+/**
+ * EVERY rung declared at this price, so a caller can tell the two silences apart.
+ *
+ * `proposeRungByPrice` answers `undefined` both when NOTHING declares the price and when
+ * TWO ladders do, and it is right to: neither is a proposal. But a prompt rendering both
+ * as "no rung declared at this price" tells the operator there is nothing to override in
+ * exactly the case where they most need to override — so the count is available here,
+ * from the one matcher, rather than by a second traversal that could disagree with it.
+ */
+export function matchRungsByPrice(
+  ladders: readonly InForceLadder[],
+  price: number,
+): RungPick[] {
+  const found: RungPick[] = [];
   for (const ladder of ladders) {
     for (const rung of ladder.rungs) {
-      if (rung.priceUsd !== price) {
-        continue;
+      if (rung.priceUsd === price) {
+        found.push({ planId: ladder.planId, rungId: rung.id });
       }
-      if (found !== undefined) {
-        return undefined;
-      }
-      found = { planId: ladder.planId, rungId: rung.id };
     }
   }
   return found;
