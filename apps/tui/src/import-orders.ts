@@ -20,8 +20,10 @@ import {
   buildOrderFillObserved,
   buildOrderPlacedRecords,
   checkFundingCoverage,
+  declaredRungPrice,
   detectChangedClaims,
   formatObservedAt,
+  inForceLadders,
   leavesRungUnweighed,
   mergeCollidingClaims,
   parseBitgetOpenOrdersCsv,
@@ -32,6 +34,9 @@ import {
   type OrderPlacedRecord,
   type OrderRecord,
   type FundReviewData,
+  type InForceLadder,
+  type IsoDate,
+  type LoadedPlans,
 } from "@numisma/engine";
 import type { OrdersLoad } from "@numisma/preferences";
 import { appendKey, currentClaimKeys } from "./import-orders-append-filter.js";
@@ -41,10 +46,12 @@ import {
   weighRemainders,
 } from "./import-orders-changed-claims.js";
 import { declareFunding } from "./import-orders-funding-declaration.js";
+import { declareRungPicks } from "./import-orders-rung-picks.js";
 import { describeMerge } from "./import-orders-merge-notice.js";
 import {
   reportOrdersImport,
   type OrdersImportRecorded,
+  type PickedPriceDifference,
   type RecordedObservation,
 } from "./import-orders-report.js";
 import { renderUnattributedRefusal } from "./import-orders-unattributed-refusal.js";
@@ -85,6 +92,21 @@ export interface OrdersImportIo {
    * whole and this shell derives nothing.
    */
   fundReview: () => Promise<FundReviewData>;
+  /**
+   * THE PLANS SIDECAR (#286) — read, never written, and only to PROPOSE a rung.
+   *
+   * The path is resolved by the caller, exactly as `ordersPath` is. The flow decides what
+   * "in force" means (`inForceLadders`, over its own import stamp); this pair is wiring,
+   * so a test can hand over a synthesized declaration with no file at all.
+   *
+   * A PLANS FAILURE NEVER REFUSES AN IMPORT, and that is the counter-rule the plans module
+   * itself states: an unreadable declaration is reported loudly and the import proceeds
+   * with no proposal to make. The orders sidecar's own unreadability is a refusal, because
+   * coverage would then be computed against a book we cannot see; a missing PROPOSAL costs
+   * the operator a keystroke and an inferred join, which is where this build already was.
+   */
+  plansPath: string;
+  loadPlans: (path: string) => Promise<LoadedPlans>;
   /** Ask the operator one question; the answer is returned trimmed by the caller. */
   ask: (question: string) => Promise<string>;
   out: (message: string) => void;
@@ -258,6 +280,45 @@ function reject(
   // be able to mistake a refusal for a quiet no-op.
   io.err(`REFUSED — ${message}\nNothing was written to ${io.ordersPath}.`);
   return { status: "rejected", reason, message };
+}
+
+/**
+ * The `dcaLadder` declarations in force at this import's stamp — or NONE, loudly.
+ *
+ * A PLANS PROBLEM IS REPORTED AND SURVIVED, never refused. `plans.jsonl` is a separate
+ * sidecar with its own unattended exit policy (`pnpm plans`), and an import that refused
+ * over it would let one unreadable declaration block every unrelated rung of an
+ * append-only book. What is lost is the PROPOSAL: the operator picks by hand, or takes the
+ * legacy price-matched join, which is where every line written before #286 already is. The
+ * warning names that consequence rather than merely reporting the failure, because an
+ * operator who does not know the proposal is missing will read its absence as "no ladder
+ * matches" — a statement about the ladder rather than about the file.
+ */
+async function loadInForceLadders(io: OrdersImportIo, asOf: IsoDate): Promise<InForceLadder[]> {
+  let loaded: LoadedPlans;
+  try {
+    loaded = await io.loadPlans(io.plansPath);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    io.err(
+      `could not read ${io.plansPath}: ${detail} — no rung will be proposed, and any order ` +
+        `imported now joins its rung by price match`,
+    );
+    return [];
+  }
+  if (loaded.load.status === "load-failed") {
+    io.err(
+      `could not read ${io.plansPath}: ${loaded.load.message} — no rung will be proposed, and ` +
+        `any order imported now joins its rung by price match`,
+    );
+    return [];
+  }
+  for (const skip of loaded.skipped) {
+    // PROSE-ONLY, and the line is never quoted — the plans module's own discipline, kept
+    // by passing its `detail` through rather than composing a new one out of the file.
+    io.err(`${io.plansPath}:${skip.line} skipped (${skip.reason}): ${skip.detail}`);
+  }
+  return inForceLadders(loaded, asOf);
 }
 
 /**
@@ -492,6 +553,10 @@ export async function importBitgetOpenOrders(
   // nothing but restated rungs now writes N observation lines — the most useful import
   // this flow can perform — so exiting early over it would skip the feature's best case.
   const records: OrderPlacedRecord[] = [];
+  // Held outside the branch because the REPORT reads them back: the flag on a pick whose
+  // declared price differs from the order's is joined off the lines that were written, so
+  // the declarations that produced it have to outlive the prompt.
+  let ladders: InForceLadder[] = [];
   if (admitted.length > 0) {
     // `io.ask` ALONE, not the bag: that module reads the prompt channel and nothing else,
     // and its signature says so — see its header.
@@ -499,7 +564,16 @@ export async function importBitgetOpenOrders(
     if (declaration === undefined) {
       return reject(io, "no-reserve-declared", "no funding reserve was declared for this batch");
     }
-    records.push(...buildOrderPlacedRecords(admitted, declaration));
+
+    // THE DECLARED RUNG JOIN (#286), prompted after the funding declaration and before
+    // anything is built. The ladders in force are read AS OF THIS IMPORT'S OWN STAMP —
+    // the same instant every observation line is stamped with, taken down to its calendar
+    // date because plan supersession is a date comparison. A ladder declared after this
+    // import is not something the operator could have placed against.
+    ladders = await loadInForceLadders(io, observedAt.slice(0, 10) as IsoDate);
+    // `io.ask` ALONE again: the pick-list reads the prompt channel and nothing else.
+    const rungPicks = await declareRungPicks(io.ask, admitted, ladders);
+    records.push(...buildOrderPlacedRecords(admitted, { ...declaration, rungPicks }));
 
     // `O1`. Coverage is checked over the WHOLE resting book — what is already on file plus
     // this batch — because a reserve funds every claim against it, not one import's slice.
@@ -578,10 +652,27 @@ export async function importBitgetOpenOrders(
   // pure function of what landed, so it returns the message rather than printing it, and
   // this — the one `io.out` of the whole flow, reached by the one exit that gets here —
   // is where it is spoken.
+  // THE FLAG, JOINED OFF THE DECLARATIONS AND THE LINES THAT WERE WRITTEN (#286). A pick
+  // whose declared rung price differs from the order's own price is ACCEPTED — the
+  // operator may know something the price match does not — and the difference is stated in
+  // the report rather than left in someone's memory. Built as a Map for `knownFigures`'
+  // own reason: a map is only joinable, so a decision with no line on disk is unreachable.
+  const pickedDifferences = new Map<string, PickedPriceDifference>();
+  for (const record of fresh) {
+    if (record.kind !== "orderPlaced" || record.planId === undefined || record.rungId === undefined) {
+      continue;
+    }
+    const declared = declaredRungPrice(ladders, { planId: record.planId, rungId: record.rungId });
+    if (declared !== undefined && declared !== record.price) {
+      pickedDifferences.set(record.id, { declared, order: record.price });
+    }
+  }
+
   const { outcome, message } = reportOrdersImport({
     written: fresh,
     placements: records,
     knownFigures,
+    pickedDifferences,
     skips: parsed.skips,
     csvPath,
   });

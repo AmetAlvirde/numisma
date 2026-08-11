@@ -71,6 +71,25 @@ export interface RecordedObservation {
 }
 
 /**
+ * A PICK WHOSE DECLARED RUNG PRICE DIFFERS FROM THE ORDER'S OWN (#286).
+ *
+ * ACCEPTED, NEVER REFUSED: the operator is allowed to know something the price match does
+ * not — a rung re-placed a tick away, a size re-entered at the venue — and refusing here
+ * would make the declared join weaker than the inference it replaces. What it owes the
+ * operator is VISIBILITY, so the difference is stated in the report with both figures and
+ * the direction readable off them.
+ *
+ * IT QUALIFIES NOTHING. The status stays `imported`: nothing was deferred, nothing was
+ * unread, and the line on disk says exactly what the operator declared.
+ */
+export interface PickedPriceDifference {
+  /** What the picked rung declares. */
+  declared: number;
+  /** What the order was actually placed at. */
+  order: number;
+}
+
+/**
  * What an import that REFUSED NOTHING reports, in the two shapes it can honestly take.
  *
  * Not "an import that WROTE" (#200 review): an export whose every readable rung was
@@ -199,6 +218,12 @@ export interface OrdersImportReportInput {
    * so the failure mode is unreachable by construction rather than by comment.
    */
   knownFigures: ReadonlyMap<string, number>;
+  /**
+   * The picks whose declared rung price differs from their order's price, per WRITTEN line
+   * (#286). A Map for the same reason {@link OrdersImportReportInput.knownFigures} is one:
+   * it is only joinable, so a difference with no line on disk cannot be reported.
+   */
+  pickedDifferences: ReadonlyMap<string, PickedPriceDifference>;
   /** The parser's skips, whole and unfiltered — the reporter discriminates, not the caller. */
   skips: BitgetRowSkip[];
   /** The export's path, as the operator named it. Interpolated into both notices. */
@@ -216,7 +241,7 @@ export interface OrdersImportReport {
 
 /** Count what landed, say what it means, and let the caller print it. */
 export function reportOrdersImport(input: OrdersImportReportInput): OrdersImportReport {
-  const { written, placements, knownFigures, skips, csvPath } = input;
+  const { written, placements, knownFigures, pickedDifferences, skips, csvPath } = input;
   const appended = written.filter((record) => record.kind === "orderPlaced").length;
   const alreadyKnown = placements.length - appended;
   const observed: RecordedObservation[] = [];
@@ -281,6 +306,30 @@ export function reportOrdersImport(input: OrdersImportReportInput): OrdersImport
         `RECORDED. Their remainders now read what the venue shows. This is NOT a ` +
         `qualification: the work is done, and the line does not reprint on the next ` +
         `import unless the venue moves again.`,
+    );
+  }
+
+  // THE PICK FLAG, LAST AMONG THE NOTICES: it is the one that reports something that WENT
+  // RIGHT — a deliberate declaration — rather than a gap. It renders only when there is a
+  // difference, unlike the observation clause, because a batch with no picks at all is the
+  // common case and a permanent `0 pick(s) differ` line would be noise on every import.
+  const differing: string[] = [];
+  for (const record of written) {
+    if (record.kind !== "orderPlaced") {
+      continue;
+    }
+    const difference = pickedDifferences.get(record.id);
+    if (difference !== undefined) {
+      differing.push(`${record.id} (rung declares ${difference.declared}, order at ${difference.order})`);
+    }
+  }
+  if (differing.length > 0) {
+    notices.push(
+      `PICKED — ${differing.length} order(s) were joined to a rung declared at a DIFFERENT ` +
+        `price — ${differing.join("; ")} — and the pick was recorded as declared. This is not ` +
+        `an error: a declared join beats a price match by design, and the operator may know ` +
+        `something the match does not. It is stated here because nothing downstream will ` +
+        `ever question it again.`,
     );
   }
 

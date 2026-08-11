@@ -10,7 +10,13 @@
  */
 import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
-import { appendOrders, loadOrders, resolveOrdersPath } from "@numisma/preferences";
+import {
+  appendOrders,
+  loadOrders,
+  loadPlans,
+  resolveOrdersPath,
+  resolvePlansPath,
+} from "@numisma/preferences";
 import { loadFoldedReview, resolveEventStorePaths } from "@numisma/event-store";
 import { importBitgetOpenOrders } from "./import-orders.js";
 
@@ -39,6 +45,12 @@ if (!csvPath) {
         // currency it needed to refuse a cross-currency rung (#172). Admission is the
         // engine's policy, not this wiring's.
         fundReview: () => loadFoldedReview(resolveEventStorePaths()),
+        // THE PLANS SIDECAR, READ-ONLY (#286): the import proposes a rung against the
+        // ladders in force and never writes a plan line. `loadPlans` is TOTAL — it reports
+        // an unreadable file rather than throwing — and the flow decides what an
+        // unreadable one costs, which is the proposal and nothing else.
+        plansPath: resolvePlansPath(),
+        loadPlans,
         ask: (question) => rl.question(question),
         out: (message) => process.stdout.write(message),
         err: (message) => process.stderr.write(`${message}\n`),
