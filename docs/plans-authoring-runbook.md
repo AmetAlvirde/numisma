@@ -74,19 +74,33 @@ authoring; the position is born later, when the first fill lands. Until then the
 renders that row `pending` — never `$0`. Zero is a measurement; pending is the absence of
 one.
 
-Identity is `positionId` + `effectiveAt`. There is no id field and no line number in the
-file: line numbers are read-side only, stamped by the loader so a diagnostic can tell you
-where to look.
+Identity for `dcaTime` and `noPlan` lines is `positionId` + `effectiveAt`; neither carries
+an `id` field, and there is no line number in the file for either — line numbers are
+read-side only, stamped by the loader so a diagnostic can tell you where to look.
+
+A `dcaLadder` line is the one exception: it also carries its own **required** `id`,
+covered in section 2.
 
 ## 2. The two kinds, worked
 
 **A ladder** — resting rungs declared as one plan, which is the fact the orders sidecar
-structurally cannot carry (it holds no `positionId` and no ladder id). `tierOrder` is the
-order capital is drawn down in; it is closed and strict (`c1`, `c2`, `c3`), non-empty, no
-repeats. Every rung needs a distinct `id` and a finite, positive `priceUsd` and `sizeUsd`.
+structurally cannot carry (it holds no `positionId` and no ladder id). Because that ladder
+id is what a fill later points back at, the line declaring the ladder must carry one
+itself: `id` is **required**, a UUID, non-empty, and unique across every `dcaLadder` line
+in the file — the loader refuses the line otherwise, and refuses a second line that
+repeats an id already claimed by an earlier, readable line. Generate one with `uuidgen`
+at the shell, or `crypto.randomUUID()` from a Node/Bun REPL — never author one by hand;
+it is a join key, not a label (see `packages/engine/src/plans.ts`'s note on why a UUID
+and not an authored slug). (Don't confuse this `id` with `planId`, which is the name of
+the *foreign* key that `OrderPlacedRecord` and `DcaPositionRow` use to point back at this
+ladder — the ladder's own identity field is `id`.)
+
+`tierOrder` is the order capital is drawn down in; it is closed and strict (`c1`, `c2`,
+`c3`), non-empty, no repeats. Every rung needs a distinct `id` and a finite, positive
+`priceUsd` and `sizeUsd`.
 
 ```json
-{"kind":"dcaLadder","positionId":"pos-demo-001","effectiveAt":"2026-08-10","tierOrder":["c1","c2"],"rungs":[{"id":"r1","priceUsd":90000,"sizeUsd":250},{"id":"r2","priceUsd":85000,"sizeUsd":250},{"id":"r3","priceUsd":80000,"sizeUsd":250},{"id":"r4","priceUsd":75000,"sizeUsd":250}]}
+{"kind":"dcaLadder","id":"3f1b7b9e-6c2a-4e3f-9d5a-2b7c8e1a4f60","positionId":"pos-demo-001","effectiveAt":"2026-08-10","tierOrder":["c1","c2"],"rungs":[{"id":"r1","priceUsd":90000,"sizeUsd":250},{"id":"r2","priceUsd":85000,"sizeUsd":250},{"id":"r3","priceUsd":80000,"sizeUsd":250},{"id":"r4","priceUsd":75000,"sizeUsd":250}]}
 ```
 
 **A time plan** — buy `amountUsd` every `cadence` (`daily`, `weekly`, `monthly`).

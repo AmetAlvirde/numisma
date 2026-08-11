@@ -508,7 +508,7 @@ all expected rather than faults:
 
 1. **Push-side (code half):** exit `0`, prints
    `[push] pushed snapshot fundId=<slug> asOf=<log's last event date>
-   schemaVersion=4 feedGap=<arrived>/<expected> reserveFloor=<pct|absent>
+   schemaVersion=5 feedGap=<arrived>/<expected> reserveFloor=<pct|absent>
    suppressed=[<keys>] dca=<loaded|unreadable>/<count>`; exactly one row for
    that `(fund_id, as_of)`; the `report` JSONB carries exactly `dashboard`,
    `dca`, `glance`, and `totals` — four keys, and the query sorts them, so
@@ -627,7 +627,7 @@ these connection strings rely on. On that upgrade, change them to
 | Seeded account password rotated — old rejected, new accepted | manual | PASS — both halves verified at the deployed URL | 2026-07-25 |
 | Rate-limit attack against the deployed URL (`auth:verify-limit`) | manual | PASS — 150 attempts, `403=14 429=136`, first 429 at #15, exit 0 | 2026-07-25 |
 | Rate-limit counter is DB-backed (D5), not per-instance memory | manual | PASS — 1 row, `has_signin_bucket=t`, `max_count=11` | 2026-07-25 |
-| First real push, push-side signal | manual | PASS — `fundId=<fund>-fund asOf=2026-07-24 schemaVersion=2` (v2 was current then; v4 today); 1 row; keys `{dashboard,totals}` | 2026-07-25 |
+| First real push, push-side signal | manual | PASS — `fundId=<fund>-fund asOf=2026-07-24 schemaVersion=2` (v2 was current then; v5 current now, reader accepts 4–5); 1 row; keys `{dashboard,totals}` | 2026-07-25 |
 | First real push, **gate-closing** signal (phone, away from desk) | manual | TODO | TODO |
 | Soak: one week spanning a weekend, four conditions hold | manual | TODO | TODO |
 
