@@ -150,13 +150,46 @@ export interface OrderPlacedRecord extends OrderRecordBase {
    */
   triggerPrice?: number;
   /**
-   * The one DECLARED field at placement (`Q9`): which reserve the claim encumbers. The
-   * venue has never heard of a Reserve, so this cannot be observed. Notably absent: a
-   * target `positionId` (the Position cannot exist until the first fill, so naming it
-   * here would be a dangling forward reference) and a ladder id (that join is parked on
-   * a fills header nobody has).
+   * The FIRST DECLARED field at placement (`Q9`): which reserve the claim encumbers. The
+   * venue has never heard of a Reserve, so this cannot be observed. Still notably absent:
+   * a target `positionId` — the Position cannot exist until the first fill, so naming it
+   * here would be a dangling forward reference, and that refusal is unchanged.
+   *
+   * THE LADDER JOIN IS NO LONGER PARKED (#286). This docstring said it was "parked on a
+   * fills header nobody has"; {@link OrderPlacedRecord.planId} and
+   * {@link OrderPlacedRecord.rungId} below are that join, declared here beside this
+   * field. A plan id names a DECLARATION the operator has already authored, which is
+   * exactly what a target `positionId` is not.
    */
   fundingReserveId: string;
+  /**
+   * THE DECLARED JOIN (#286) — which ladder, and which rung of it, this claim was placed
+   * for. The second and third declared fields at placement, and neither is observable:
+   * the venue has never heard of a plan.
+   *
+   * `planId` is the ladder's own `id` off `plans.jsonl`, carried through from the loaded
+   * plan — a UUID, and a key rather than a label. `rungId` is unique only WITHIN one
+   * plan, which is precisely why it cannot travel alone.
+   *
+   * **OPTIONAL, AND THAT IS THE WHOLE DESIGN** — the same rule the #205 descriptors ship
+   * under. The lines written before this widening carry neither, load exactly as they do
+   * today, and are never migrated; `serializeOrderRecord` drops an `undefined`, so an
+   * order with no picks serializes to exactly the bytes it always did. Because they are
+   * optional forever, the PRICE-MATCH fallback is permanent too — a reader that has
+   * neither field joins by price and says so, rather than pretending the join was
+   * declared.
+   *
+   * ABSENCE MEANS *"WE WERE NEVER TOLD"*, never `""`. A blank is refused at both gates,
+   * for the reason a blank descriptor is: it serializes cleanly and only reads back as
+   * `malformed` on every later load of an append-only file.
+   *
+   * THE OPERATOR NEVER TYPES ONE. `orders:import` presents ladders and rungs by their
+   * meaningful content — position, effective date, rung price and size — and writes the
+   * id it carried through. A prompt that asked for the id would make the UUID an
+   * operator-facing string, which is exactly what it is not.
+   */
+  planId?: string;
+  rungId?: string;
 }
 
 /** The claim left the book by cancellation — an OBSERVED cancellation, never inferred. */
@@ -378,6 +411,12 @@ const ORDER_PLACED_KEYS: Record<keyof OrderPlacedRecord, true> = {
   // equally true of the three descriptors above.
   observedFilledQuantity: true,
   fundingReserveId: true,
+  // THE DECLARED JOIN (#286), appended AFTER the declaration already here so the three
+  // fields nobody could observe read together at the end of the line. Appending rather
+  // than inserting also keeps every line written before this widening comparable to the
+  // ones written after it, key for key, up to where the old shape ended.
+  planId: true,
+  rungId: true,
 };
 
 const ORDER_CANCELLED_KEYS: Record<keyof OrderCancelledRecord, true> = {
@@ -629,6 +668,23 @@ export function parseOrderRecord(value: unknown): OrderRecordParse {
           message: "triggerPrice must be a positive number when present",
         };
       }
+      // THE DECLARED JOIN (#286) — optional, checked ONLY when present, on the same gate
+      // the writer passed. Each is checked on its own: they are two facts, and a line
+      // carrying one without the other is degraded rather than corrupt.
+      if (value.planId !== undefined && !isNonEmptyString(value.planId)) {
+        return {
+          status: "skip",
+          problem: "malformed",
+          message: "planId must be a non-empty string when present",
+        };
+      }
+      if (value.rungId !== undefined && !isNonEmptyString(value.rungId)) {
+        return {
+          status: "skip",
+          problem: "malformed",
+          message: "rungId must be a non-empty string when present",
+        };
+      }
       return {
         status: "ok",
         record: {
@@ -645,6 +701,8 @@ export function parseOrderRecord(value: unknown): OrderRecordParse {
             ? { observedFilledQuantity: value.observedFilledQuantity }
             : {}),
           fundingReserveId: value.fundingReserveId,
+          ...(isNonEmptyString(value.planId) ? { planId: value.planId } : {}),
+          ...(isNonEmptyString(value.rungId) ? { rungId: value.rungId } : {}),
         },
       };
     }

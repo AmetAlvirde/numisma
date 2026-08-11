@@ -179,6 +179,8 @@ describe("serializeOrderRecord emits the canonical key order", () => {
       triggerPrice: 95,
       observedFilledQuantity: 1,
       fundingReserveId: "reserve-synthetic",
+      planId: "00000000-0000-4000-8000-000000000001",
+      rungId: "rung-3",
     };
     expect(emittedKeys(serializeOrderRecord(placed))).toEqual([
       "id",
@@ -194,6 +196,10 @@ describe("serializeOrderRecord emits the canonical key order", () => {
       "triggerPrice",
       "observedFilledQuantity",
       "fundingReserveId",
+      // THE DECLARED JOIN (#286), appended after the declaration already here: the three
+      // fields nobody could observe sit together at the end of the line.
+      "planId",
+      "rungId",
     ]);
   });
 
@@ -265,5 +271,85 @@ describe("serializeOrderRecord emits the canonical key order", () => {
       "currency",
       "observedFilledQuantity",
     ]);
+  });
+});
+
+/**
+ * THE DECLARED JOIN (#286) — `planId` and `rungId`, the second and third fields at
+ * placement that no venue could observe.
+ *
+ * OPTIONAL, AND THAT IS THE WHOLE DESIGN — the same rule the #205 placement descriptors
+ * ship under. Every line written before this widening carries neither, reads back exactly
+ * as it always did, and is never migrated; a rung with no picks serializes to precisely
+ * the bytes it produced before, because `JSON.stringify` drops an `undefined`.
+ *
+ * MUTATION-CHECKED (fix reverted, whole suite re-run, fix restored):
+ *
+ *   - `M-F` drop `planId`/`rungId` from the emission table → the key-order pin above, and
+ *     "carries both fields back off a line that has them" (the fields vanish at write)
+ *   - `M-G` accept a blank `planId` / `rungId` at parse    → "refuses a blank …"
+ *   - `M-H` write `""` instead of omitting an absent pick  → "a line with no picks is
+ *     byte-identical to the one it wrote before this widening"
+ *
+ * Synthetic throughout, and the plan id is an obviously-fake, run-stable UUID.
+ */
+describe("planId and rungId — declared, optional, never inferred", () => {
+  const PLAN_ID = "00000000-0000-4000-8000-000000000001";
+
+  /** A placement line with no picks — exactly the shape the 8 legacy lines have. */
+  const bare: OrderPlacedRecord = {
+    id: "rung-synthetic",
+    observedAt: "2026-01-01T09:30:00",
+    kind: "orderPlaced",
+    currency: "USD",
+    symbol: "SYNTH/USD",
+    side: "buy",
+    price: 100,
+    quantity: 2,
+    fundingReserveId: "reserve-synthetic",
+  };
+
+  it("carries both fields back off a line that has them", () => {
+    const line = serializeOrderRecord({ ...bare, planId: PLAN_ID, rungId: "rung-3" });
+    const parsed = parseOrderRecord(JSON.parse(line));
+    expect(parsed).toEqual({
+      status: "ok",
+      record: { ...bare, planId: PLAN_ID, rungId: "rung-3" },
+    });
+  });
+
+  it("a line with no picks is byte-identical to the one it wrote before this widening", () => {
+    // The literal bytes, spelled out rather than round-tripped: a round trip through this
+    // module's own serializer would agree with itself whatever the widening did.
+    expect(serializeOrderRecord(bare)).toBe(
+      '{"id":"rung-synthetic","observedAt":"2026-01-01T09:30:00","kind":"orderPlaced",' +
+        '"currency":"USD","symbol":"SYNTH/USD","side":"buy","price":100,"quantity":2,' +
+        '"fundingReserveId":"reserve-synthetic"}',
+    );
+    // And it reads back carrying NEITHER field. Absence means *we were never told* — it
+    // is never `""`, and a reader that defaulted it would manufacture a join nobody
+    // declared.
+    const parsed = parseOrderRecord(JSON.parse(serializeOrderRecord(bare)));
+    expect(parsed.status === "ok" && parsed.record).toEqual(bare);
+    expect(parsed.status === "ok" && "planId" in parsed.record).toBe(false);
+    expect(parsed.status === "ok" && "rungId" in parsed.record).toBe(false);
+  });
+
+  it("one field without the other still reads back — a pick is two facts, not one", () => {
+    // Not a shape the pick-list writes, and deliberately not refused either: an
+    // append-only file's reader stays as permissive as the record contract allows, and a
+    // half-declared join degrades to the price-match fallback like any other.
+    const parsed = parseOrderRecord(JSON.parse(serializeOrderRecord({ ...bare, rungId: "r1" })));
+    expect(parsed.status === "ok" && parsed.record).toEqual({ ...bare, rungId: "r1" });
+  });
+
+  it("refuses a blank planId or rungId — a declared join is declared or it is absent", () => {
+    for (const field of ["planId", "rungId"] as const) {
+      expect(parseOrderRecord({ ...bare, [field]: "   " })).toEqual({
+        status: "skip",
+        problem: "malformed",
+        message: `${field} must be a non-empty string when present`,
+      });
+    }
   });
 });
