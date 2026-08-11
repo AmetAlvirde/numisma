@@ -5,6 +5,19 @@
  * used to live there becomes `/big-picture`, behavior-unchanged; the login route
  * keeps navigating to `/`, because the phone should land on triage.
  *
+ * ── THE POLARITY REVERSED ONCE, DELIBERATELY (spec #277, D6) ────────────────────
+ * D11 moved standing content OFF `/` so the verdict would land first. Spec #277 puts
+ * one piece of standing content BACK: the DCA card. That is not D11 eroding — it is
+ * D11's own rule applied to a different question. D11 moved the COMPOSITION TABLES,
+ * which answer "what do I hold", asked at desk frequency. The DCA card answers "is my
+ * accumulation plan still what I think it is", which is checked at exactly the
+ * frequency the verdict is, on the same phone, in the same queue. The tables stay on
+ * `/big-picture`; they are not coming back.
+ *
+ * So this file now asserts the move in BOTH directions: the tables are still gone
+ * from `/`, and the card is on `/` and NOT duplicated onto `/big-picture`. A
+ * one-directional assertion would have called the reversal a regression.
+ *
  * WHY A SOURCE-LEVEL TEST AND NOT A RENDER TEST. This repo has no RTL toolchain and
  * this increment deliberately does not add one (see docs/coverage-rationale.md §6 —
  * the `.tsx` render surfaces are outside instrumentation by decision). What is
@@ -28,6 +41,18 @@ describe("D11: the route move", () => {
     expect(index).toMatch(/glance\/verdict\.ts/);
     // The tables moved out; `/` must not still render them.
     expect(index).not.toMatch(/SectionTable/);
+  });
+
+  it("renders the DCA card on `/` — standing content, returned on purpose (D6)", () => {
+    const index = read("index.tsx");
+    expect(index).toMatch(/DcaCard/);
+    expect(index).toMatch(/components\/DcaCard\.tsx/);
+  });
+
+  it("does NOT duplicate the DCA card onto `/big-picture`", () => {
+    // The same rule the tables live under, pointed the other way: one home per piece
+    // of content. Two copies would drift, and the phone would show two answers.
+    expect(read("big-picture.tsx")).not.toMatch(/DcaCard/);
   });
 
   it("serves the previous composition page at `/big-picture`", () => {

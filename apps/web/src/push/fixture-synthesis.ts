@@ -12,7 +12,7 @@
  * construction rather than by remembering to.
  *
  * ── WHAT IS PRESERVED, AND WHY EACH ONE ─────────────────────────────────────────
- * Everything slice 4's 28-anchor replay reads. These are COUNTS, RATIOS and SHAPES,
+ * Everything the anchor replay reads. These are COUNTS, RATIOS and SHAPES,
  * none of which discloses a magnitude:
  *
  *  - every anchor DATE, in order, and the anchor count;
@@ -28,7 +28,10 @@
  *  - the full STRUCTURAL shape: section ids/titles/order, row ids/kinds/labels/order,
  *    row counts, which rows carry `costBasisUsd`/`unrealizedPnlUsd` and which
  *    genuinely lack them (spec open question 3 — slice 5's per-row cost-basis
- *    rendering depends on the absences being real), `dataSafety`, schema version.
+ *    rendering depends on the absences being real), `dataSafety`, schema version;
+ *  - the `dca` branch's SHAPE ENTIRELY: `source`, every `positionId`, every `state`
+ *    and `kind`, the rung COUNT per position, and the `unattributable` count. Those
+ *    are states and counts, the same class as `feedGap`, and the card renders them.
  *
  * ── WHAT IS INVENTED, AND WHY IT MUST BE ────────────────────────────────────────
  * Everything no trigger reads. Preserving these would leak the fund's composition
@@ -42,7 +45,12 @@
  *    signal, at a glance, that nothing in this file is a real position;
  *  - the fund ID, which is re-derived as the slug of that synthetic name rather than
  *    carried over. It is not a magnitude, but it WAS the real fund's identifier, and
- *    it appeared on every anchor of a file this public repository checks in.
+ *    it appeared on every anchor of a file this public repository checks in;
+ *  - every rung `priceUsd` in the `dca` branch. A declared rung price is the operator's
+ *    intended entry level — a magnitude, and one ADR-006 explicitly notes is the same
+ *    shape as a stop level — so it falls under the magnitudes rule with everything
+ *    else. The COUNT and the ORDER survive because the card is a rung table; the
+ *    LEVELS are invented from {@link SYNTHETIC_RUNG_TOP} down.
  *
  * ── WHAT THIS IS NOT ────────────────────────────────────────────────────────────
  * This is not de-identification, and the committed fixture is not identity-clean.
@@ -58,7 +66,7 @@
  * Preserving every day-over-day NAV change EXACTLY would be mathematically the same
  * as publishing the real NAV series up to a single unknown factor — and any single
  * real NAV that ever becomes public makes that factor recoverable by division, which
- * unscales the whole 28-day series. Composition, cost basis and P&L are SYNTHESIZED
+ * unscales the whole series. Composition, cost basis and P&L are SYNTHESIZED
  * HERE FROM INVENTED PARAMETERS rather than scaled, so recovering the factor recovers
  * nothing about them (a uniform scale of the whole payload — the cheap alternative —
  * would have handed all of it back). The NAV series was the last thing it still
@@ -68,7 +76,7 @@
  *
  * WHAT THE JITTER MUST NOT DO is move a verdict. `navMove` is a THRESHOLD test at
  * {@link NAV_MOVE_THRESHOLD_PCT}, and slice 4's replay asserts a measured 6 *yes* /
- * 22 *no* across the 28 anchors. The headroom is sufficient by construction — the
+ * 22 *no* across the anchors it was measured on. The headroom is sufficient by construction — the
  * gap between the smallest firing move and the largest non-firing one is wider than
  * the jitter band by more than an order of magnitude — but sufficiency is ASSERTED,
  * not trusted: {@link assertThresholdSideHolds} runs on every regeneration, has the
@@ -119,7 +127,7 @@ import type {
   DashboardFocus,
   DashboardSection,
 } from "@numisma/engine";
-import type { SnapshotAnchor } from "../projection/contract.ts";
+import type { DcaBlock, SnapshotAnchor } from "../projection/contract.ts";
 import { fundIdOf } from "../projection/contract.ts";
 import { NAV_MOVE_THRESHOLD_PCT } from "../glance/verdict.ts";
 
@@ -185,6 +193,76 @@ function fundIdOfName(fundName: string): string {
  * would produce if it were re-run.
  */
 export const SYNTHETIC_FUND_ID = fundIdOfName(SYNTHETIC_FUND_NAME);
+
+/**
+ * The round, obviously fictional price the synthetic rung ladder starts at, and the
+ * fraction each rung steps down by. A DCA ladder's shape is "a descending sequence of
+ * limits", so the synthetic one is generated as exactly that and nothing more: the
+ * count and the ordering are real, the levels are not.
+ *
+ * THE STEP IS GEOMETRIC — `(1 - RUNG_STEP) ** index`, each rung a fixed FRACTION of
+ * the one above — and that is a correctness requirement, not a taste. The linear form
+ * this started as (`1 - RUNG_STEP * index`) reaches zero at rung 17 and goes NEGATIVE
+ * after it, so a ladder deeper than sixteen rungs would have published negative limit
+ * prices into a public fixture and rendered `-$200.14` on the card. Neither existing
+ * assertion could see it: a negative tail is still strictly descending, and it still
+ * carries over no real value. A price is a POSITIVE magnitude, and the geometric form
+ * is the one that says so at every depth. `synthesizeDca`'s own test pins a
+ * twenty-four-rung ladder against exactly that.
+ *
+ * A deterministic per-rung wobble (drawn from {@link hashUnit} on the anchor date and
+ * the position id, like every other invented number here) keeps the values from
+ * reading as a clean decay curve. At ±1% against a 6% step it can never reorder two
+ * rungs — worst case the ratio between neighbours is 0.94 × 1.01 / 0.99 < 1 — and,
+ * being multiplicative like the step itself, it cannot change a price's sign either.
+ */
+const SYNTHETIC_RUNG_TOP = 10_000;
+const RUNG_STEP = 0.06;
+const RUNG_WOBBLE = 0.01;
+
+/**
+ * Synthesize the DCA branch: every state, count and identifier VERBATIM, every rung
+ * price invented.
+ *
+ * `source`, `state`, `kind` and `unattributable` are copied because they are
+ * CONCLUSIONS with no magnitude in them — the same reasoning that copies the `glance`
+ * block whole.
+ *
+ * `positionId` IS PRESERVED FOR A DIFFERENT REASON, and the difference matters: it is
+ * not a conclusion, it is an operator-authored string lifted verbatim out of the
+ * private sidecar. It survives under the same REPO POLICY that keeps every row id and
+ * row label in this file — code identifiers keep their literal names
+ * (`docs/local-data.md`) — the policy this module's own header restates when it
+ * explains why `portfolio:accumulus` stays put. Do not generalize the conclusions
+ * sentence onto it: by that logic the fund NAME would survive too, and this module
+ * deliberately replaces it. Identifiers stay because policy says so; magnitudes and
+ * the fund's identity go because the public bar says so.
+ *
+ * Only `priceUsd` is replaced, and it is replaced positionally
+ * so that a ladder of eight rungs stays a ladder of eight rungs: the card under test
+ * renders a row per rung, and a synthesis that changed the count would change what the
+ * fixture proves.
+ *
+ * The rung ORDER is left where it was found. This module never sorts; the view does.
+ */
+function synthesizeDca(dca: DcaBlock, asOf: string): DcaBlock {
+  return {
+    source: dca.source,
+    unattributable: dca.unattributable,
+    positions: dca.positions.map((position) => {
+      const synthetic = { ...position };
+      if (position.rungs !== undefined) {
+        synthetic.rungs = position.rungs.map((_rung, index) => {
+          const wobble = RUNG_WOBBLE * (2 * hashUnit(asOf, position.positionId, `rung-${index}`) - 1);
+          const level =
+            SYNTHETIC_RUNG_TOP * Math.pow(1 - RUNG_STEP, index) * (1 + wobble);
+          return { priceUsd: Math.round(level * 100) / 100 };
+        });
+      }
+      return synthetic;
+    }),
+  };
+}
 
 /** Each rank holds this fraction of the one above it, before the wobble. */
 const RANK_DECAY = 0.72;
@@ -515,7 +593,7 @@ function assertDescending(sectionId: string, rows: CompositionRow[]): void {
 
 /** Synthesize ONE anchor onto a given synthetic NAV. */
 function synthesizeAnchor(anchor: SnapshotAnchor, nav: number): SnapshotAnchor {
-  const { dashboard, totals, glance } = anchor.report;
+  const { dashboard, totals, glance, dca } = anchor.report;
   const asOf = anchor.asOf;
 
   // The one preserved percentage, taken from the summary's own Reserve reference so
@@ -585,6 +663,8 @@ function synthesizeAnchor(anchor: SnapshotAnchor, nav: number): SnapshotAnchor {
       // Copied, never recomputed: `feedGap` and `suppressed` ARE the triggers slice 4
       // replays, and they carry no magnitude to sanitize (D14 already forbids dates).
       glance: structuredClone(glance),
+      // States and counts verbatim, rung LEVELS invented — see `synthesizeDca`.
+      dca: synthesizeDca(dca, asOf),
     },
   };
 }

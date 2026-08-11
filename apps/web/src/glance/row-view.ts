@@ -232,7 +232,7 @@ function anchorDelta(
  * handled the way every other missing input is handled, per the spec's carried open
  * question.
  *
- * It is not a hypothetical: measured across all 28 anchors, six rows carry neither a
+ * It is not a hypothetical: measured across every anchor, six rows carry neither a
  * cost basis nor a P&L (`instrument:reserve`, `tempo:Reserve`, `tempo:Foresight` and
  * three cash accounts), because they hold nothing but cash and the engine omits a key
  * whose sum is exactly zero. One more (`tier:c3`) carries a cost basis with no P&L

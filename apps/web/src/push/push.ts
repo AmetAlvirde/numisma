@@ -29,6 +29,7 @@
 import { Pool } from "pg";
 import { readSchemaDdl } from "../projection/provision.ts";
 import {
+  buildDcaForAnchor,
   buildGlanceForAnchor,
   loadCurrentFold,
   parsePushArgs,
@@ -71,8 +72,14 @@ async function main(): Promise<void> {
   // input), and a disk failure must fail the process without having connected or
   // written. An ABSENT floor is not a failure — it is R1's answer, carried onto the
   // wire as an absent `reserveTargetPct`.
+  //
+  // The DCA block joins them on the same side of the Pool and for the third time the
+  // same reason: it reads the plans sidecar off local disk. An UNREADABLE sidecar is
+  // not a failure either — it is carried onto the wire as `source: "unreadable"`, the
+  // one answer an empty branch could never give.
   const fold = initOnly ? undefined : await loadCurrentFold();
   const glance = fold ? await buildGlanceForAnchor(fold) : undefined;
+  const dca = fold ? await buildDcaForAnchor(fold) : undefined;
 
   const pool = new Pool({ connectionString });
   try {
@@ -80,7 +87,7 @@ async function main(): Promise<void> {
       await initSchema(pool);
     }
 
-    if (!fold || !glance) {
+    if (!fold || !glance || !dca) {
       console.log("[push] --init-only: schema applied, no snapshot pushed");
       return;
     }
@@ -89,13 +96,15 @@ async function main(): Promise<void> {
       pool,
       fold.report,
       glance,
+      dca,
     );
 
     console.log(
       `[push] pushed snapshot fundId=${fundId} asOf=${asOf} schemaVersion=${schemaVersion} ` +
         `feedGap=${glance.feedGap.arrived}/${glance.feedGap.expected} ` +
         `reserveFloor=${glance.reserveTargetPct ?? "absent"} ` +
-        `suppressed=[${glance.suppressed.join(",")}]`,
+        `suppressed=[${glance.suppressed.join(",")}] ` +
+        `dca=${dca.source}/${dca.positions.length}`,
     );
   } finally {
     await pool.end();

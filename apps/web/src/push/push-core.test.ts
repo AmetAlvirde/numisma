@@ -14,6 +14,7 @@ import {
   makeTempStore,
   priceMarkedLine,
   TEMP_GENESIS_AS_OF,
+  TEST_DCA,
   TEST_GLANCE,
 } from "./push-core.fixtures.ts";
 
@@ -28,7 +29,7 @@ function reportWith(fundName: string, asOf: string): CompositionReport {
 describe("deriveSnapshot (pure fixture → derivation)", () => {
   it("derives fundId (name slug), asOf, and the contract schema version", () => {
     const report = reportWith("Sanitized Exploratory Fund", "2026-05-29");
-    const { fundId, asOf, schemaVersion } = deriveSnapshot(report, TEST_GLANCE);
+    const { fundId, asOf, schemaVersion } = deriveSnapshot(report, TEST_GLANCE, TEST_DCA);
     expect({ fundId, asOf, schemaVersion }).toEqual({
       fundId: "sanitized-exploratory-fund",
       asOf: "2026-05-29",
@@ -38,14 +39,14 @@ describe("deriveSnapshot (pure fixture → derivation)", () => {
 
   it("stamps the current contract version, whatever the report contents", () => {
     const report = reportWith("Another Fund", "2027-01-01");
-    expect(deriveSnapshot(report, TEST_GLANCE).schemaVersion).toBe(
+    expect(deriveSnapshot(report, TEST_GLANCE, TEST_DCA).schemaVersion).toBe(
       COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
     );
   });
 
   it("takes asOf verbatim from the summary (the conflict key's date half)", () => {
     const report = reportWith("Fund X", "2026-12-31");
-    expect(deriveSnapshot(report, TEST_GLANCE).asOf).toBe("2026-12-31");
+    expect(deriveSnapshot(report, TEST_GLANCE, TEST_DCA).asOf).toBe("2026-12-31");
   });
 });
 
@@ -96,7 +97,7 @@ describe("parsePushArgs", () => {
 describe("loadFixture → deriveSnapshot (a TEST input, no longer the push input)", () => {
   it("loads the shipped fixture and derives its identity/version", async () => {
     const report = await loadFixture();
-    const { fundId, asOf, schemaVersion } = deriveSnapshot(report, TEST_GLANCE);
+    const { fundId, asOf, schemaVersion } = deriveSnapshot(report, TEST_GLANCE, TEST_DCA);
     expect({ fundId, asOf, schemaVersion }).toEqual({
       fundId: "sanitized-exploratory-fund",
       asOf: "2026-05-29",

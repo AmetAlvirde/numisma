@@ -208,7 +208,7 @@ export function buildGlanceBlock(
  * What crosses the wire is a list of row ids, which `sections` already carries.
  *
  * WHY A MAP AND NOT THE ROW ID. 19 of the fund's rows name no instrument — invariant
- * across all 28 anchors, while the row total is not (31 or 33, depending on whether the
+ * across every committed anchor, while the row total is not (31 or 33, depending on whether the
  * late-opened instruments exist on that anchor). The 19 are the
  * tempo, account, tier and portfolio rows aggregate instruments without disclosing
  * which. Matching on the id is not merely imprecise, it is wrong in both directions

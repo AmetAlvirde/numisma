@@ -508,15 +508,23 @@ all expected rather than faults:
 
 1. **Push-side (code half):** exit `0`, prints
    `[push] pushed snapshot fundId=<slug> asOf=<log's last event date>
-   schemaVersion=3 feedGap=<arrived>/<expected> reserveFloor=<pct|absent>
-   suppressed=[<keys>]`; exactly one row for that `(fund_id, as_of)`; the
-   `report` JSONB carries exactly `totals`, `dashboard`, and `glance`. Verify
-   all three at once — this asserts what *landed*, which is stronger than the
-   CI contract test's assertion about what the code *would produce*. Read
-   `suppressed=[…]` on a first push: any key listed there is a number the
-   projection is deliberately NOT rendering because its input was
-   unexpectedly absent — an empty `[]` is the clean signal, a non-empty list
-   is worth explaining before you move on:
+   schemaVersion=4 feedGap=<arrived>/<expected> reserveFloor=<pct|absent>
+   suppressed=[<keys>] dca=<loaded|unreadable>/<count>`; exactly one row for
+   that `(fund_id, as_of)`; the `report` JSONB carries exactly `dashboard`,
+   `dca`, `glance`, and `totals` — four keys, and the query sorts them, so
+   that is the order you will see. Verify all of it in the one query below —
+   this asserts what *landed*, which is stronger than the CI contract test's
+   assertion about what the code *would produce*. Read `suppressed=[…]` on a
+   first push: any key listed there is a number the projection is
+   deliberately NOT rendering because its input was unexpectedly absent — an
+   empty `[]` is the clean signal, a non-empty list is worth explaining
+   before you move on. Read `dca=…` the same way: the left half is the plans
+   sidecar's whole-file outcome, and `dca=unreadable/0` means the file could
+   not be read — NOT the same fact as a fund that has declared no plans
+   (`dca=loaded/0`). The right half is how many positions the sidecar named.
+   Neither value fails the push: the DCA branch degrades on its own without
+   costing the anchor its NAV, so an unexpected `unreadable` is a thing to
+   explain, not a reason to call the cutover failed:
 
    ```sh
    psql "$PROJECTION_WRITE_DATABASE_URL" -c "SELECT fund_id, as_of, schema_version, pushed_at, (SELECT count(*) FROM composition_snapshot) AS total_rows, (SELECT array_agg(k ORDER BY k) FROM jsonb_object_keys(report) AS k) AS report_keys FROM composition_snapshot;"
@@ -619,7 +627,7 @@ these connection strings rely on. On that upgrade, change them to
 | Seeded account password rotated — old rejected, new accepted | manual | PASS — both halves verified at the deployed URL | 2026-07-25 |
 | Rate-limit attack against the deployed URL (`auth:verify-limit`) | manual | PASS — 150 attempts, `403=14 429=136`, first 429 at #15, exit 0 | 2026-07-25 |
 | Rate-limit counter is DB-backed (D5), not per-instance memory | manual | PASS — 1 row, `has_signin_bucket=t`, `max_count=11` | 2026-07-25 |
-| First real push, push-side signal | manual | PASS — `fundId=<fund>-fund asOf=2026-07-24 schemaVersion=2` (v2 was current then; v3 today); 1 row; keys `{dashboard,totals}` | 2026-07-25 |
+| First real push, push-side signal | manual | PASS — `fundId=<fund>-fund asOf=2026-07-24 schemaVersion=2` (v2 was current then; v4 today); 1 row; keys `{dashboard,totals}` | 2026-07-25 |
 | First real push, **gate-closing** signal (phone, away from desk) | manual | TODO | TODO |
 | Soak: one week spanning a weekend, four conditions hold | manual | TODO | TODO |
 

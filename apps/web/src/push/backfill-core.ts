@@ -46,17 +46,22 @@
  *
  * So {@link writeAnchorFixture} SYNTHESIZES before it writes ({@link
  * synthesizeAnchors}), and that is the only path to the file. What survives is what
- * slice 4 reads and nothing else: every anchor date, the `glance` block verbatim, the
- * Reserve row's `percentOfFund`, the day-over-day NAV percentage, and the full
- * structural shape down to which rows genuinely lack a cost basis — INCLUDING every
- * row id and row label, which are load-bearing shape and stay verbatim (repo policy,
+ * the replay reads and nothing else: every anchor date, the `glance` block verbatim,
+ * the Reserve row's `percentOfFund`, the day-over-day NAV percentage, the `dca`
+ * branch's states and counts — `source`, every `state` and `kind`, the rung COUNT per
+ * position, the `unattributable` count — and the full structural shape down to which
+ * rows genuinely lack a cost basis. INCLUDING every row id, row label and plan
+ * `positionId`, which are load-bearing shape and stay verbatim (repo policy,
  * `docs/local-data.md`: code identifiers keep their literal names). What does not
- * survive is every magnitude — NAV is re-anchored at a round fictional 100000 and each
+ * survive is every magnitude — NAV is re-anchored at a round fictional 100000, each
  * row's `usdValue` / `costBasisUsd` / `unrealizedPnlUsd` / `percentOfFund` is invented
- * from documented parameters — plus the fund's own IDENTITY: `fundName` becomes
+ * from documented parameters, and every rung `priceUsd` is invented on a synthetic
+ * descending ladder (a declared entry level is a magnitude, and ADR-006 notes it is
+ * the same shape as a stop level) — plus the fund's own IDENTITY: `fundName` becomes
  * "Sanitized Exploratory Fund" (#149) and `fundId` is re-derived as that name's slug
- * rather than carried over, so the real `fund_id` no longer rides on all 28 anchors.
- * That is the whole list: the file is sanitized, not de-identified.
+ * rather than carried over, so the real `fund_id` no longer rides on every anchor in
+ * the committed file. That is the whole list: the file is sanitized, not
+ * de-identified.
  *
  * A uniform SCALE of the real payload was the cheap alternative and it is rejected,
  * because it is reversible: issues #146 and #149 already publish three real NAVs, so
@@ -80,8 +85,9 @@ import {
   serializeAnchorFixture,
 } from "./anchor-fixture.ts";
 import { synthesizeAnchors } from "./fixture-synthesis.ts";
-import type { GlanceBlock, SnapshotAnchor } from "../projection/contract.ts";
+import type { DcaBlock, GlanceBlock, SnapshotAnchor } from "../projection/contract.ts";
 import {
+  buildDcaForAnchor,
   buildGlanceForAnchor,
   deriveSnapshot,
   loadCurrentFold,
@@ -123,7 +129,9 @@ export function parseBackfillArgs(argv: readonly string[]): BackfillArgs {
 /**
  * V3 — THE LOG'S OWN DISTINCT ANCHORED DATES, ASCENDING. NOT calendar days.
  *
- * Of the 34 calendar days from genesis, 28 are anchored. Five of the six gaps are
+ * Fewer calendar days from genesis are anchored than have elapsed — 28 of 34 when this
+ * was written, a dated observation rather than a contract, and the gaps are all in that
+ * first stretch. Five of the six were
  * PRE-LAUNCHD WEEKDAYS: folding them would produce rows on which all thirteen
  * instruments were expected and none arrived, so `feedGap` fires, all three header
  * keys suppress, and NAV is PERMANENTLY BLANK on five historical rows that no later
@@ -137,7 +145,7 @@ export function parseBackfillArgs(argv: readonly string[]): BackfillArgs {
  * before the genesis seed's date. Enumerating from the log's own anchors is safe by
  * construction — an event predating t0 could not have been folded into the current
  * state either — but the filter is explicit rather than implied, because the failure
- * mode it prevents is a mid-run throw on anchor 3 of 28 that reads as a mystery.
+ * mode it prevents is a mid-run throw on anchor 3 of N that reads as a mystery.
  *
  * The genesis DATE ITSELF is deliberately not added as an anchor: it is t0 state, not
  * an observation, and it happens not to appear in the log (measured: 28 distinct
@@ -192,13 +200,14 @@ export interface BackfillOptions {
  *
  * The `asOf` guard is not defensive decoration. `deriveSnapshot` takes the row key
  * from `report.dashboard.summary.asOf`, so if the fold ever answered a different
- * question than the one asked, this loop would silently write 28 rows onto the
+ * question than the one asked, this loop would silently write every row onto the
  * wrong keys — and every one of them would look well-formed. Assert the fold landed
  * on the requested date, once, here.
  */
 export async function foldAnchor(asOf: string): Promise<{
   report: CompositionReport;
   glance: GlanceBlock;
+  dca: DcaBlock;
 }> {
   const fold = await loadCurrentFold(asOf);
   const folded = fold.report.dashboard.summary.asOf;
@@ -208,7 +217,14 @@ export async function foldAnchor(asOf: string): Promise<{
         `write a row keyed to a date that was not requested.`,
     );
   }
-  return { report: fold.report, glance: await buildGlanceForAnchor(fold) };
+  return {
+    report: fold.report,
+    glance: await buildGlanceForAnchor(fold),
+    // As-of, per anchor, exactly like the floor beside it: an anchor that predates a
+    // plan's `effectiveAt` resolves `none` and lands an honestly empty branch. No
+    // special-casing, and no historical row claiming a strategy that did not exist yet.
+    dca: await buildDcaForAnchor(fold),
+  };
 }
 
 /**
@@ -217,9 +233,9 @@ export async function foldAnchor(asOf: string): Promise<{
  *
  * Each anchor re-reads genesis + the log from disk through `loadCurrentFold`. That
  * is deliberate over folding once in memory: it keeps `loadFoldedReview`'s
- * FAIL-LOUD-ON-A-PARTIAL-LOG contract on every single anchor, at the cost of ~28
- * reads of a small local file. A backfill that quietly degraded on a corrupt line
- * would write 28 plausible-but-wrong NAVs in one command.
+ * FAIL-LOUD-ON-A-PARTIAL-LOG contract on every single anchor, at the cost of one
+ * re-read of a small local file per anchor. A backfill that quietly degraded on a corrupt line
+ * would write a full history of plausible-but-wrong NAVs in one command.
  */
 export async function runBackfill(
   options: BackfillOptions = {},
@@ -227,14 +243,14 @@ export async function runBackfill(
   const anchors = await enumerateAnchors(options.paths);
   const results: BackfilledAnchor[] = [];
   for (const [index, asOf] of anchors.entries()) {
-    const { report, glance } = await foldAnchor(asOf);
+    const { report, glance, dca } = await foldAnchor(asOf);
     // One derivation either way: with a pool `upsertSnapshot` derives and writes
     // and hands the derivation back; without one `deriveSnapshot` is that same
     // pure call with the write removed. The payload captured in `results` — and
     // therefore in the fixture — is byte-for-byte what a write would have stored.
     const derived = options.pool
-      ? await upsertSnapshot(options.pool, report, glance)
-      : deriveSnapshot(report, glance);
+      ? await upsertSnapshot(options.pool, report, glance, dca)
+      : deriveSnapshot(report, glance, dca);
     const anchor: BackfilledAnchor = { ...derived, written: !!options.pool };
     results.push(anchor);
     options.onAnchor?.(anchor, index, anchors.length);
