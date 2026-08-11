@@ -28,7 +28,7 @@
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -45,7 +45,9 @@ describe("D11: the route move", () => {
 
   it("renders the DCA card on `/` — standing content, returned on purpose (D6)", () => {
     const index = read("index.tsx");
-    expect(index).toMatch(/DcaCard/);
+    // AS JSX, for the reason the G-D13 half of this file spells out: the import line
+    // alone satisfies a bare `/DcaCard/`, so the card can be deleted with this green.
+    expect(index).toMatch(/<DcaCard/);
     expect(index).toMatch(/components\/DcaCard\.tsx/);
   });
 
@@ -101,6 +103,13 @@ describe("D11: the route move", () => {
  *  - added a `beforeLoad` that fetches the Binance URL on the route → "keeps the spot
  *    fetch to ONE call site" red, naming the route file. Right reason: that is the
  *    helpful move into a loader the 451 comment exists to stop.
+ *  - added a SIDE-EFFECT `import "@numisma/engine";` to `FillPath.tsx`, and separately a
+ *    dynamic `import("@numisma/engine")` to `convexity-caption.ts` → the same test red,
+ *    once each, naming the file. Right reason: neither form has a `from` clause, so the
+ *    specifier matcher could not see them while both pull the engine into the bundle.
+ *  - deleted `<DcaCard view={dca} />` from `index.tsx` and LEFT the import → "keeps the
+ *    DCA card on `/`" red. Right reason: the bare `/DcaCard/` this replaced was satisfied
+ *    by the import line alone, so the card could vanish from `/` with the suite green.
  *
  * THREE OF THESE ASSERTIONS WERE WEAKER AT FIRST and matched this repo's own PROSE:
  * a bare `/DcaCard/`, a `loader…binance` proximity search, and a bare `api.binance.com`
@@ -142,7 +151,10 @@ describe("G-D13: the ladder route", () => {
   it("keeps the DCA card on `/` — the ladder route did not move it", () => {
     // G-D13 promotes the card; it does not relocate it. The route is one tap DOWN from
     // the card, which is the whole shape of the navigation.
-    expect(read("index.tsx")).toMatch(/DcaCard/);
+    // Matched as JSX on BOTH halves. A bare `/DcaCard/` is satisfied by `index.tsx`'s own
+    // import line, so deleting `<DcaCard view={dca} />` and leaving the import took the
+    // card off `/` with this test still green.
+    expect(read("index.tsx")).toMatch(/<DcaCard/);
     // Matched as JSX, not as a word: this route's header explains the card's relation
     // to it in prose, and an assertion that a comment cannot mention the card would be
     // asserting against documentation rather than against a duplicate render.
@@ -182,28 +194,68 @@ describe("G-D13: the ladder route", () => {
     expect(literal.test(spot)).toBe(true);
   });
 
-  it("the ladder surfaces import no engine VALUE beyond the pure format helpers", () => {
-    // ADR-007's client-bundle invariant, asserted at the source seam as well as against
-    // the built bundle: the two spot-dependent decorations compute in a WEB-side pure
-    // module precisely so the browser gains no engine import.
-    for (const file of [
-      "routes/ladder.$planId.tsx",
-      "components/FillPath.tsx",
-      "ladder/fill-path-view.ts",
-      "ladder/convexity-caption.ts",
-    ]) {
+  it("the ladder surfaces import no engine VALUE beyond the pure subpath helpers", () => {
+    // ADR-007's client-bundle invariant, asserted at the source seam. THIS TEST IS WHAT
+    // HOLDS THAT CLAIM — `client-bundle.integration.test.ts` scans the built bundle for
+    // `composition_snapshot`, DB URLs and secret tokens, and would stay green with an
+    // engine value import in every file below (and it is `skipIf(!hasBuild)` besides).
+    //
+    // OVER THE WHOLE REACHABLE MODULE GRAPH, not a hand-kept list of four: an engine
+    // value import in a NEW web module that `FillPath.tsx` pulls in transitively is the
+    // way this invariant actually breaks, and a list nobody remembers to extend cannot
+    // see it. The walk follows relative specifiers only — a package specifier is what is
+    // being judged, not traversed.
+    const closure = reachableFrom("routes/ladder.$planId.tsx");
+    expect(closure.length).toBeGreaterThan(4);
+
+    // The two PURE SUBPATHS are browser-safe by construction: each is a leaf module with
+    // no imports of its own, which is why the subpath exports exist at all. The engine
+    // ROOT is what drags `node:os`/`node:path` into the bundle.
+    const allowed = ["@numisma/engine/format", "@numisma/engine/calendar"];
+    for (const file of closure) {
       const source = readFileSync(join(HERE, "..", file), "utf-8");
       for (const match of source.matchAll(
         /^\s*import\s+(?!type\b)([\s\S]*?)\bfrom\s*["'](@numisma\/[^"']+)["']/gm,
       )) {
-        // `@numisma/engine/format` is pure formatting and already crosses on `/`.
-        expect(match[2], `${file} imports ${match[2]} at runtime`).toBe(
-          "@numisma/engine/format",
-        );
+        expect(allowed, `${file} imports ${match[2]} at runtime`).toContain(match[2]);
       }
+      // NEITHER OF THESE HAS A `from` CLAUSE, so the matcher above cannot see them, and
+      // either one pulls the whole engine into the browser bundle just as effectively.
+      expect(source, `${file} side-effect-imports the engine`).not.toMatch(
+        /^\s*import\s*["']@numisma\/engine["']/m,
+      );
+      expect(source, `${file} dynamically imports the engine`).not.toMatch(
+        /\bimport\s*\(\s*["']@numisma\/engine["']/,
+      );
     }
   });
 });
+
+/**
+ * Every web module reachable from `entry` by RELATIVE import, `entry` included.
+ *
+ * A deliberately small walk: relative specifiers with an explicit extension, which is
+ * this app's own convention (`verbatimModuleSyntax` + `.ts`/`.tsx` in every specifier),
+ * so nothing has to be resolved. `type`-only imports are followed too — a module that
+ * only contributes types cannot pull the engine in, but reading it costs nothing and the
+ * alternative is a second parser that can disagree with the one above.
+ */
+function reachableFrom(entry: string): string[] {
+  const seen = new Set<string>();
+  const pending = [entry];
+  while (pending.length > 0) {
+    const rel = pending.pop()!;
+    if (seen.has(rel)) continue;
+    seen.add(rel);
+    const source = readFileSync(join(HERE, "..", rel), "utf-8");
+    for (const match of source.matchAll(/from\s*["'](\.[^"']+)["']/g)) {
+      const root = join(HERE, "..");
+      const resolved = relative(root, resolve(dirname(join(root, rel)), match[1]!));
+      pending.push(resolved);
+    }
+  }
+  return [...seen].sort();
+}
 
 /** Every `.ts`/`.tsx` under `apps/web/src`, for the one-call-site sweep above. */
 function allWebSources(): string[] {

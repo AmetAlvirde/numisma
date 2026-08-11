@@ -276,10 +276,12 @@ describe("the committed anchor fixture", () => {
     const anchors = await loadAnchorFixture();
     const planShape = new RegExp(`^${SYNTHETIC_PLAN_ID_PREFIX}\\d{12}$`);
     let ladders = 0;
+    let rungs = 0;
     for (const anchor of anchors) {
       for (const position of anchor.report.dca.positions) {
         if (position.kind === "dcaLadder") {
           ladders += 1;
+          rungs += (position.rungs ?? []).length;
           expect(position.planId, `${anchor.asOf} ${position.positionId}`).toMatch(planShape);
         }
         // A rung on a v5 file always carries an id: a ladder row without one is a v4 row
@@ -289,9 +291,12 @@ describe("the committed anchor fixture", () => {
         });
       }
     }
-    // False-pass guard: with no ladder in the file the loop above asserts nothing, which
-    // is the failure mode a shape scan over real data is most prone to.
+    // False-pass guard, in BOTH cardinalities: with no ladder the loop asserts nothing,
+    // and with a ladder whose `rungs` regenerated EMPTY the per-rung half asserts nothing
+    // while the ladder half still passes. A shape scan over real data fails this way
+    // silently or not at all.
     expect(ladders).toBeGreaterThan(0);
+    expect(rungs).toBeGreaterThan(0);
   });
 
   it("records NO INVENTED FILL — the day-zero shape is honest, a fill history is not", async () => {
@@ -314,9 +319,11 @@ describe("the committed anchor fixture", () => {
     // and the two WAITING figures are the honest day-zero shape — and they are precisely
     // what slice 4's AC-2 has to render. Forbidding them would force the fixture to lie
     // in the opposite direction.
+    let checkedRungs = 0;
     for (const anchor of await loadAnchorFixture()) {
       for (const position of anchor.report.dca.positions) {
         const where = `${anchor.asOf} ${position.positionId}`;
+        checkedRungs += (position.rungs ?? []).length;
         // ABSENT, NEVER ZERO: a recorded fill has cost > 0 and quantity > 0, so any of
         // these appearing at all means a fill was invented.
         for (const measured of ["deployedUsd", "unitsAcquired", "avgEntryUsd"] as const) {
@@ -340,6 +347,10 @@ describe("the committed anchor fixture", () => {
         }
       }
     }
+    // False-pass guard: 41 of the 42 anchors carry no position at all, so a fixture that
+    // kept its ladder row and lost its rungs would leave every per-rung assertion above
+    // vacuous while the row-level ones still passed.
+    expect(checkedRungs).toBeGreaterThan(0);
   });
 
   it("is anchored at a round fictional NAV and names an obviously fictional fund", async () => {
@@ -574,6 +585,7 @@ describe("the committed anchor fixture", () => {
     // emitter cannot produce at all (INVENTED). Between the two it deliberately allows
     // the states this fixture's history does not happen to contain today.
     const shapes = emittedShapes();
+    let keyedRungs = 0;
     for (const anchor of await loadAnchorFixture()) {
       const dca = anchor.report.dca;
       // The branch ROOT, latched exactly: `tornActs` is the fund-level count, and its
@@ -585,6 +597,7 @@ describe("the committed anchor fixture", () => {
         expectKeysWithin(Object.keys(position), shapes.rowMax, `${where} row`);
         if (position.kind !== "dcaLadder") continue;
         expectKeysCover(Object.keys(position), shapes.ladderRowAlways, `${where} row`);
+        keyedRungs += (position.rungs ?? []).length;
         for (const rung of position.rungs ?? []) {
           const rungWhere = `${where} ${rung.id}`;
           expectKeysCover(Object.keys(rung), shapes.rungAlways, rungWhere);
@@ -600,6 +613,10 @@ describe("the committed anchor fixture", () => {
         }
       }
     }
+    // False-pass guard, as on the two sweeps above: `ladderRowAlways` still passes for a
+    // ladder row whose `rungs` came back EMPTY, and every per-rung key assertion here
+    // would then be asserting over nothing.
+    expect(keyedRungs).toBeGreaterThan(0);
   });
 
   it("anchorAt refuses a date the fixture does not hold", async () => {
