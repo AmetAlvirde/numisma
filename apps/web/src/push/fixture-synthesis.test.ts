@@ -168,10 +168,30 @@ function constructedAnchor(asOf: string, nav: number): SnapshotAnchor {
   } as SnapshotAnchor;
 }
 
+/**
+ * The NAV every constructed input anchor starts at. ROUND AND OBVIOUSLY FICTIONAL, on
+ * purpose: this literal used to be the fund's actual NAV on its first anchor, paired
+ * in the same call with that anchor's actual date, in a file this PUBLIC repository
+ * checks in. A magnitude is the one thing `fixture-synthesis.ts` exists to withhold,
+ * and it does not stop being one because a TEST is what holds it — the module header
+ * makes exactly this point about naming the firing moves in a comment.
+ *
+ * Nothing here reads the absolute value: the synthesizer re-anchors at
+ * {@link SYNTHETIC_START_NAV} and carries the series forward on RATIOS, so the tests
+ * assert over the moves between anchors and never over this number.
+ *
+ * It is 12345.67 rather than a rounder stand-in because the sweep below asserts that
+ * NO input magnitude appears anywhere in the output, and a round input collides with
+ * the synthetic side by construction: 20000 is also the pinned Reserve row's value at
+ * 20% of {@link SYNTHETIC_START_NAV}, which fails the sweep on a coincidence rather
+ * than on a leak. Fictional AND collision-free is the requirement, not just fictional.
+ */
+const CONSTRUCTED_NAV = 12_345.67;
+
 /** Two anchors, the second 5% below the first — a day-over-day move to preserve. */
 const REAL: SnapshotAnchor[] = [
-  constructedAnchor("2026-06-26", 19447.71),
-  constructedAnchor("2026-06-28", 19447.71 * 0.95),
+  constructedAnchor("2026-06-26", CONSTRUCTED_NAV),
+  constructedAnchor("2026-06-28", CONSTRUCTED_NAV * 0.95),
 ];
 
 /** Every number reachable in a payload, for the "no magnitude survived" sweep. */
@@ -341,7 +361,7 @@ describe("what survives — the projections slice 4 replays", () => {
     // and in a form no grep for the id would ever surface. Two series identical except
     // for their real ids must therefore produce identical rung prices.
     const rungsFor = (positionId: string): number[] => {
-      const anchor = constructedAnchor("2026-06-26", 19447.71);
+      const anchor = constructedAnchor("2026-06-26", CONSTRUCTED_NAV);
       anchor.report.dca = {
         source: "loaded",
         unattributable: 0,
@@ -384,7 +404,7 @@ describe("what survives — the projections slice 4 replays", () => {
     // Twenty-four rungs is well past the depth the real sidecar declares today (8),
     // deliberately: the whole failure was that the generator was only ever exercised
     // at a depth where the bug is invisible.
-    const deep = constructedAnchor("2026-06-26", 19447.71);
+    const deep = constructedAnchor("2026-06-26", CONSTRUCTED_NAV);
     deep.report.dca = {
       source: "loaded",
       unattributable: 0,
@@ -420,8 +440,8 @@ describe("what survives — the projections slice 4 replays", () => {
 describe("the NAV jitter — closing the last recoverable series", () => {
   /** A synthetic history whose day-over-day percent changes are exactly `pcts`. */
   function seriesWithMoves(pcts: readonly number[]): SnapshotAnchor[] {
-    const anchors = [constructedAnchor("2026-06-26", 19447.71)];
-    let nav = 19447.71;
+    const anchors = [constructedAnchor("2026-06-26", CONSTRUCTED_NAV)];
+    let nav = CONSTRUCTED_NAV;
     for (const [i, pct] of pcts.entries()) {
       nav *= 1 + pct / 100;
       const date = new Date("2026-06-26T00:00:00Z");
