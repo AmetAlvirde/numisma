@@ -29,9 +29,10 @@
  *    row counts, which rows carry `costBasisUsd`/`unrealizedPnlUsd` and which
  *    genuinely lack them (spec open question 3 — slice 5's per-row cost-basis
  *    rendering depends on the absences being real), `dataSafety`, schema version;
- *  - the `dca` branch's SHAPE ENTIRELY: `source`, every `positionId`, every `state`
- *    and `kind`, the rung COUNT per position, and the `unattributable` count. Those
- *    are states and counts, the same class as `feedGap`, and the card renders them.
+ *  - the `dca` branch's SHAPE: `source`, every `state` and `kind`, the position COUNT,
+ *    the rung COUNT per position, and the `unattributable` count. Those are states and
+ *    counts, the same class as `feedGap`, and the card renders them. The `positionId`
+ *    itself is NOT among them — see below.
  *
  * ── WHAT IS INVENTED, AND WHY IT MUST BE ────────────────────────────────────────
  * Everything no trigger reads. Preserving these would leak the fund's composition
@@ -50,7 +51,13 @@
  *    intended entry level — a magnitude, and one ADR-006 explicitly notes is the same
  *    shape as a stop level — so it falls under the magnitudes rule with everything
  *    else. The COUNT and the ORDER survive because the card is a rung table; the
- *    LEVELS are invented from {@link SYNTHETIC_RUNG_TOP} down.
+ *    LEVELS are invented from {@link SYNTHETIC_RUNG_TOP} down;
+ *  - every `positionId`, which becomes `synthetic-position-N` by first appearance
+ *    across the series. It is not a magnitude, but the operator's naming convention
+ *    spells out a live position's VENUE, INSTRUMENT and STRATEGY, and the string is
+ *    lifted straight out of the private sidecar. See {@link synthesizeDca} for why the
+ *    repo's "code identifiers keep their literal names" policy does not reach it, and
+ *    why the rung wobble is re-seeded from the synthetic id rather than the real one.
  *
  * ── WHAT THIS IS NOT ────────────────────────────────────────────────────────────
  * This is not de-identification, and the committed fixture is not identity-clean.
@@ -58,9 +65,20 @@
  * shape (see the structural bullet above) and the file carries the project's own
  * names — `portfolio:accumulus` and `"Accumulus"` appear on every anchor, dozens of
  * times each. That is repo policy, not an oversight: `docs/local-data.md` holds the
- * line that code identifiers keep their literal names. What synthesis withholds is
- * exactly four things — MAGNITUDES, the NAV series' scale, the fund NAME and the fund
- * ID — and nothing else should be inferred from the fact that this module ran.
+ * line that code identifiers keep their literal names.
+ *
+ * THE LINE THAT POLICY DRAWS IS AUTHORSHIP, NOT SYNTAX, and it is worth stating flatly
+ * because this module already got it wrong once. A string kept verbatim must be one
+ * THIS REPOSITORY AUTHORS — a section id, a row kind, `portfolio:accumulus`, a source
+ * path. A string read out of the private store is DATA no matter how identifier-shaped
+ * it looks, and it is synthesized. `positionId` sat on the wrong side of that line
+ * when the `dca` branch landed, and shipped once in a public fixture (PR #282). When a new field
+ * arrives on this payload, the question is not "is it a magnitude" — it is "did we
+ * write this string, or did the operator's private file". Only the first is kept.
+ *
+ * What synthesis withholds is therefore five things — MAGNITUDES, the NAV series'
+ * scale, the fund NAME, the fund ID and every `positionId` — and nothing else should
+ * be inferred from the fact that this module ran.
  *
  * ── THE NAV SERIES, AND WHY IT IS JITTERED ──────────────────────────────────────
  * Preserving every day-over-day NAV change EXACTLY would be mathematically the same
@@ -221,39 +239,102 @@ const RUNG_STEP = 0.06;
 const RUNG_WOBBLE = 0.01;
 
 /**
- * Synthesize the DCA branch: every state, count and identifier VERBATIM, every rung
- * price invented.
+ * The prefix every synthetic `positionId` carries — the same posture as
+ * {@link SYNTHETIC_FUND_NAME}: a reader who opens the committed file must not have to
+ * reason about whether a position is real.
+ *
+ * Exported for `anchor-fixture.test.ts`, whose guard reads the COMMITTED BYTES: every
+ * `positionId` in the file on disk must match this shape, not merely whatever the
+ * generator would produce if it were re-run.
+ */
+export const SYNTHETIC_POSITION_PREFIX = "synthetic-position";
+
+/**
+ * Map every distinct real `positionId` in a whole series to its synthetic stand-in,
+ * numbered by FIRST APPEARANCE across the anchors in order.
+ *
+ * SERIES-LEVEL rather than per-anchor, because a plan that appears on twelve anchors
+ * is ONE plan and the fixture has to keep saying so: the card groups by id, and a
+ * per-anchor renaming would turn one position into twelve.
+ *
+ * The ordinal discloses only the position COUNT and the order in which they first
+ * appear — both already preserved as shape, both already visible in the file. It is
+ * deliberately NOT a hash of the real id: a hash is a commitment the real string can
+ * be tested against by anyone who guesses it, which is the same disclosure at a higher
+ * price.
+ */
+function synthesizePositionIds(
+  anchors: readonly SnapshotAnchor[],
+): Map<string, string> {
+  const ids = new Map<string, string>();
+  for (const anchor of anchors) {
+    for (const position of anchor.report.dca.positions) {
+      if (!ids.has(position.positionId)) {
+        ids.set(position.positionId, `${SYNTHETIC_POSITION_PREFIX}-${ids.size + 1}`);
+      }
+    }
+  }
+  return ids;
+}
+
+/**
+ * Synthesize the DCA branch: every state and count VERBATIM, every identifier and
+ * every rung price INVENTED.
  *
  * `source`, `state`, `kind` and `unattributable` are copied because they are
  * CONCLUSIONS with no magnitude in them — the same reasoning that copies the `glance`
  * block whole.
  *
- * `positionId` IS PRESERVED FOR A DIFFERENT REASON, and the difference matters: it is
- * not a conclusion, it is an operator-authored string lifted verbatim out of the
- * private sidecar. It survives under the same REPO POLICY that keeps every row id and
- * row label in this file — code identifiers keep their literal names
- * (`docs/local-data.md`) — the policy this module's own header restates when it
- * explains why `portfolio:accumulus` stays put. Do not generalize the conclusions
- * sentence onto it: by that logic the fund NAME would survive too, and this module
- * deliberately replaces it. Identifiers stay because policy says so; magnitudes and
- * the fund's identity go because the public bar says so.
+ * `positionId` IS REPLACED, and it is the one identifier in this file that is. Row ids
+ * and row labels stay verbatim under the repo policy that code identifiers keep their
+ * literal names (`docs/local-data.md`) — but that policy governs names THIS REPOSITORY
+ * AUTHORS: source paths, doc filenames, `portfolio:accumulus`. A `positionId` is not
+ * one of those. It is an operator-authored string lifted out of the PRIVATE sidecar,
+ * and the convention names the venue, the instrument and the strategy of a live
+ * position — the fund's composition, in the one field that had been reasoned about as
+ * though it were a code identifier. One real id did ship on exactly that reasoning
+ * (PR #282), which is why the rule now lives in code rather than in a paragraph:
+ * DATA-DERIVED strings are synthesized, REPOSITORY-AUTHORED names are kept, and
+ * `anchor-fixture.test.ts` reads the committed bytes rather than trusting either.
  *
- * Only `priceUsd` is replaced, and it is replaced positionally
- * so that a ladder of eight rungs stays a ladder of eight rungs: the card under test
- * renders a row per rung, and a synthesis that changed the count would change what the
- * fixture proves.
+ * THE RUNG WOBBLE IS SEEDED FROM THE SYNTHETIC ID, not the real one. Seeding it from
+ * the real string would leave every committed rung price a hash commitment to the very
+ * thing this function exists to withhold — the disclosure would survive the rename,
+ * in a form nobody would think to grep for.
+ *
+ * Among the rungs only `priceUsd` is replaced, and it is replaced positionally so that
+ * a ladder of eight rungs stays a ladder of eight rungs: the card under test renders a
+ * row per rung, and a synthesis that changed the count would change what the fixture
+ * proves.
  *
  * The rung ORDER is left where it was found. This module never sorts; the view does.
  */
-function synthesizeDca(dca: DcaBlock, asOf: string): DcaBlock {
+function synthesizeDca(
+  dca: DcaBlock,
+  asOf: string,
+  ids: ReadonlyMap<string, string>,
+): DcaBlock {
   return {
     source: dca.source,
     unattributable: dca.unattributable,
     positions: dca.positions.map((position) => {
-      const synthetic = { ...position };
+      const positionId = ids.get(position.positionId);
+      if (positionId === undefined) {
+        // Unreachable through `synthesizeAnchors`, which maps the whole series before
+        // it synthesizes any anchor. A throw rather than a fallback to the real id:
+        // the one outcome this function must never have is emitting the private
+        // string because a lookup missed.
+        throw new Error(
+          `fixture synthesis: no synthetic id was assigned for a position on ${asOf}.`,
+        );
+      }
+      // Spread first so the override lands in `positionId`'s ORIGINAL slot: the
+      // committed file's key order is asserted elsewhere, and a renamed key that
+      // moved would read as a shape change.
+      const synthetic = { ...position, positionId };
       if (position.rungs !== undefined) {
         synthetic.rungs = position.rungs.map((_rung, index) => {
-          const wobble = RUNG_WOBBLE * (2 * hashUnit(asOf, position.positionId, `rung-${index}`) - 1);
+          const wobble = RUNG_WOBBLE * (2 * hashUnit(asOf, positionId, `rung-${index}`) - 1);
           const level =
             SYNTHETIC_RUNG_TOP * Math.pow(1 - RUNG_STEP, index) * (1 + wobble);
           return { priceUsd: Math.round(level * 100) / 100 };
@@ -287,10 +368,16 @@ const PCT_EPSILON = 1e-9;
  * FNV-1a over the inputs, mapped to `[0, 1)`. The ONLY source of variation in this
  * module, and it is a pure function of `(asOf, rowId, salt)` — which is what makes
  * regeneration byte-identical.
+ *
+ * The parts are joined on `\0` so that `("ab", "c")` and `("a", "bc")` cannot collide
+ * on one seed. It is written as the ESCAPE and must stay that way: the literal control
+ * character was here first, and a single raw NUL made every text tool — `grep`, `rg`,
+ * GitHub's blob view — classify this whole file as binary and silently skip it. A
+ * sanitizer that no code search can find is a bad place to hide.
  */
 function hashUnit(...parts: string[]): number {
   let hash = 0x811c9dc5;
-  for (const part of parts.join(" ")) {
+  for (const part of parts.join("\0")) {
     hash ^= part.codePointAt(0) ?? 0;
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
@@ -592,7 +679,11 @@ function assertDescending(sectionId: string, rows: CompositionRow[]): void {
 }
 
 /** Synthesize ONE anchor onto a given synthetic NAV. */
-function synthesizeAnchor(anchor: SnapshotAnchor, nav: number): SnapshotAnchor {
+function synthesizeAnchor(
+  anchor: SnapshotAnchor,
+  nav: number,
+  positionIds: ReadonlyMap<string, string>,
+): SnapshotAnchor {
   const { dashboard, totals, glance, dca } = anchor.report;
   const asOf = anchor.asOf;
 
@@ -663,8 +754,9 @@ function synthesizeAnchor(anchor: SnapshotAnchor, nav: number): SnapshotAnchor {
       // Copied, never recomputed: `feedGap` and `suppressed` ARE the triggers slice 4
       // replays, and they carry no magnitude to sanitize (D14 already forbids dates).
       glance: structuredClone(glance),
-      // States and counts verbatim, rung LEVELS invented — see `synthesizeDca`.
-      dca: synthesizeDca(dca, asOf),
+      // States and counts verbatim, position IDS and rung LEVELS invented — see
+      // `synthesizeDca`.
+      dca: synthesizeDca(dca, asOf, positionIds),
     },
   };
 }
@@ -721,6 +813,9 @@ export function synthesizeAnchors(
   anchors: readonly SnapshotAnchor[],
 ): SnapshotAnchor[] {
   const out: SnapshotAnchor[] = [];
+  // Assigned over the WHOLE series before any anchor is synthesized, so one plan
+  // keeps one id across every anchor it appears on.
+  const positionIds = synthesizePositionIds(anchors);
   let nav = SYNTHETIC_START_NAV;
   for (const [index, anchor] of anchors.entries()) {
     if (index > 0) {
@@ -741,7 +836,7 @@ export function synthesizeAnchors(
         nav = SYNTHETIC_START_NAV;
       }
     }
-    out.push(synthesizeAnchor(anchor, nav));
+    out.push(synthesizeAnchor(anchor, nav, positionIds));
   }
   return out;
 }

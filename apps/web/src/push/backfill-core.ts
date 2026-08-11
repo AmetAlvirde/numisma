@@ -50,9 +50,9 @@
  * the Reserve row's `percentOfFund`, the day-over-day NAV percentage, the `dca`
  * branch's states and counts — `source`, every `state` and `kind`, the rung COUNT per
  * position, the `unattributable` count — and the full structural shape down to which
- * rows genuinely lack a cost basis. INCLUDING every row id, row label and plan
- * `positionId`, which are load-bearing shape and stay verbatim (repo policy,
- * `docs/local-data.md`: code identifiers keep their literal names). What does not
+ * rows genuinely lack a cost basis. INCLUDING every row id and row label, which are
+ * load-bearing shape and stay verbatim (repo policy, `docs/local-data.md`: code
+ * identifiers keep their literal names). What does not
  * survive is every magnitude — NAV is re-anchored at a round fictional 100000, each
  * row's `usdValue` / `costBasisUsd` / `unrealizedPnlUsd` / `percentOfFund` is invented
  * from documented parameters, and every rung `priceUsd` is invented on a synthetic
@@ -60,7 +60,12 @@
  * the same shape as a stop level) — plus the fund's own IDENTITY: `fundName` becomes
  * "Sanitized Exploratory Fund" (#149) and `fundId` is re-derived as that name's slug
  * rather than carried over, so the real `fund_id` no longer rides on every anchor in
- * the committed file. That is the whole list: the file is sanitized, not
+ * the committed file. Plan `positionId`s go the same way, to
+ * `synthetic-position-N`: the repo's literal-names policy covers identifiers THIS
+ * REPOSITORY authors, and a `positionId` is a string read out of the private sidecar
+ * that names a live position's venue, instrument and strategy. It was kept verbatim
+ * when the `dca` branch landed and shipped once (PR #282) before the rule was moved
+ * into code. That is the whole list: the file is sanitized, not
  * de-identified.
  *
  * A uniform SCALE of the real payload was the cheap alternative and it is rejected,
