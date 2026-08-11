@@ -101,8 +101,10 @@ export async function makeTempStore(
  * two conclusion-only arms. An empty block, or one with a single row, would let a leak
  * inside a shape nobody walked go unnoticed.
  *
- * `buildDcaBlock` is what the PUSH uses; this is a fixture, and the two are asserted
- * against each other in `dca-block.test.ts`.
+ * `buildDcaBlock` is what the PUSH uses; this is a fixture, and nothing asserts the two
+ * against each other. What holds this fixture to the wire's closed world is the type:
+ * `ProjectionKeyAllowList`'s `dcaPosition` assert closes the key set at compile time,
+ * and TypeScript's excess-property check refuses a stray key in the literal below.
  */
 export const TEST_DCA: DcaBlock = {
   source: "loaded",
@@ -126,14 +128,17 @@ export const TEST_DCA: DcaBlock = {
 };
 
 /**
- * A representative v3 `GlanceBlock` for tests that need a well-formed payload but
+ * A representative v4 `GlanceBlock` for tests that need a well-formed payload but
  * are not testing the glance derivation itself (the upsert path, the D8 key-path
  * contract). Deliberately NOT an empty block: it carries a floor, a real shortfall
  * and the resulting suppression, so a key-path allow-list walking it sees every
  * branch — including the optional `reserveTargetPct` an empty block would hide.
  *
- * `buildGlanceBlock` is what the PUSH uses; this is a fixture, and the two are
- * asserted against each other in `glance.test.ts`.
+ * `buildGlanceBlock` is what the PUSH uses; this is a fixture, and nothing asserts the
+ * two against each other. What keeps this block honest is `ALLOWED_KEY_PATHS` in
+ * `projection-payload.test.ts`: it fails on a path the payload produces that nobody
+ * listed AND on a listed path the payload stops producing, so a fixture that drifted
+ * narrower than the real block goes red there.
  */
 export const TEST_GLANCE: GlanceBlock = {
   reserveTargetPct: 10,
