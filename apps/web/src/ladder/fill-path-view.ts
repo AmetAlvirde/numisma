@@ -178,7 +178,20 @@ export interface FillPathRungView {
   pricePassedUnconfirmed: boolean;
   /** The venue says filled; the book has no lot for it. A call to action. */
   filledAtVenueNotRecorded: boolean;
-  /** The join was inferred, not declared — the surface showing its own confidence. */
+  /**
+   * The join was inferred (`joinProvenance === "price-matched"`), not declared.
+   *
+   * NOTHING RENDERS THIS, AND THAT IS DELIBERATE (M5.3, spec #302 §5). This doc used to
+   * call it "the surface showing its own confidence", which read as a claim that the rung
+   * list draws it; `RowState`'s own header, written in the same commit, says the opposite
+   * and is the one that is true — a price-matched join is how a limit ladder NORMALLY
+   * reconciles, so marking it marked the ordinary case with nothing to compare against.
+   * What the mark was guarding survives as `declaredPriceMismatch` on the inspect card.
+   *
+   * THE FIELD STAYS ANYWAY (D7, standing AAR call): it is a decided conclusion the UI has
+   * chosen not to draw, and unpicking a view module for a presentation call would be the
+   * wrong layer to edit. A reader looking for its render site should stop looking.
+   */
   matchedByPrice: boolean;
   /** A declared join whose order sits at a different price. Honored, and flagged. */
   placedAtUsd?: number;
@@ -194,7 +207,22 @@ export interface ChartCircle {
   next: boolean;
 }
 
-/** Hand-rolled SVG geometry — no chart library; the repo has none and adds none. */
+/**
+ * Hand-rolled SVG geometry.
+ *
+ * THIS DOCSTRING USED TO ASSERT "no chart library; the repo has none and adds none" —
+ * TRUE WHEN WRITTEN, FALSE SINCE THIS BRANCH'S FIRST COMMIT (M5.1, spec #302 §5). The web
+ * surface adopted `@tanstack/charts` to draw the Price Drop Path, knowingly and priced:
+ * see **ADR-018**, which is now the single home for that decision and supersedes — not
+ * corrects — the no-library posture. A false constraint left standing is worse than none,
+ * because the next reader takes it as a live rule.
+ *
+ * WHAT THIS TYPE IS FOR NOW is therefore narrower than it looks: the picture is drawn by
+ * `PriceDropPathChart` off `price-drop-path.ts`, and the only field with a live consumer
+ * is `nowX`, read as a message chain to answer "is spot live". Finishing the demolition —
+ * and promoting `spotIsLive` to a named boolean so the chain goes away — is **slice 3 of
+ * spec #285**, which owns this code. Nothing here is edited by #302 except this comment.
+ */
 export interface ChartGeometry {
   width: number;
   height: number;
