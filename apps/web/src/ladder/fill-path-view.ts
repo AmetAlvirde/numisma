@@ -127,6 +127,21 @@ export interface FillPathRungView {
   label: string;
   venueAxis?: DcaWireVenueAxis;
   bookAxis?: DcaWireBookAxis;
+  /**
+   * THE VENUE FILLED THIS RUNG — decided here, and nowhere else on the web side.
+   *
+   * This is the one state the fill path's three-colour key turns on: the solid segment,
+   * the filled dot, the `Filled` legend entry and the tinted row all read it, and a
+   * picture that disagreed with its own legend about which rung filled would be the
+   * surface contradicting its own caption. `venueAxis === "filled"` was spelled at six
+   * sites before this field existed; it is now spelled once, by `venueFilled`.
+   *
+   * `venueAxis` IS OPTIONAL ON THIS CONTRACT, AND ITS ABSENCE MEANS NEVER PLACED
+   * (absence rule 1) — so the undefined arm is `false`. A rung no order ever joined has
+   * not filled, and neither has a rung whose fill state is unavailable: `true` here is
+   * only ever the venue's own positive statement, never an inference from a gap.
+   */
+  filled: boolean;
   /** No order ever joined this rung — absence rule 1. */
   notPlaced: boolean;
   /** An order is still claiming capital at the venue for this rung. */
@@ -287,6 +302,24 @@ export function needsRecording(rung: DcaWireRung): boolean {
   );
 }
 
+/**
+ * THE FILLED PREDICATE, SPELLED ONCE — the venue's own positive statement that this rung
+ * filled, and the only place in `apps/web` that reads the literal.
+ *
+ * EXPORTED BECAUSE TWO SURFACES ASK IT OFF THE WIRE, the same reason `needsRecording` is:
+ * this page decides `FillPathRungView.filled` with it, and `glance/dca-view.ts` counts
+ * filled rungs for the DCA card on `/`. Every other consumer reads the decided field.
+ * Six copies of `venueAxis === "filled"` were six chances for the picture, the legend and
+ * the list to drift apart about the one state they all colour.
+ *
+ * ABSENCE IS NOT A FILL. `venueAxis` is optional on the wire, and both of its absences —
+ * no order ever joined (absence rule 1), or a sidecar that could not be read (rule 2) —
+ * are `false` here. Only the literal says yes.
+ */
+export function venueFilled(rung: DcaWireRung): boolean {
+  return rung.venueAxis === "filled";
+}
+
 const CHART_WIDTH = 320;
 const CHART_HEIGHT = 120;
 const PAD_X = 10;
@@ -434,7 +467,7 @@ export function composeFillPathPage(
   // where price is; a stale number decorating rungs would be the page asserting a
   // present-tense fact it does not have.
   const livePrice = spot.status === "live" ? spot.priceUsd : undefined;
-  const isWaiting = (rung: DcaWireRung) => rung.venueAxis !== "filled";
+  const isWaiting = (rung: DcaWireRung) => !venueFilled(rung);
   const nextRung =
     livePrice === undefined
       ? undefined
@@ -458,6 +491,7 @@ export function composeFillPathPage(
       label: labelFor(rung, reconciled),
       ...(rung.venueAxis === undefined ? {} : { venueAxis: rung.venueAxis }),
       ...(rung.bookAxis === undefined ? {} : { bookAxis: rung.bookAxis }),
+      filled: venueFilled(rung),
       notPlaced,
       resting,
       waiting: isWaiting(rung),
@@ -476,9 +510,7 @@ export function composeFillPathPage(
   });
 
   const waitingDeclaredUsd = row.figures?.waitingDeclaredUsd;
-  const filledRungs = rungs.filter(
-    (rung) => rung.venueAxis === "filled",
-  ).length;
+  const filledRungs = rungs.filter((rung) => rung.filled).length;
   // Day zero: the three measured tiles have nothing to say, so the surface says what the
   // ladder INTENDS instead. `expected` rides on `notStarted` and never outlives it.
   const notStarted = hasNotStarted(row.figures);
@@ -633,7 +665,7 @@ function chartFor(
     key: rung.key,
     cx: round(x(rung.priceUsd)),
     cy: round(y(rung.sizeUsd!)),
-    filled: rung.venueAxis === "filled",
+    filled: rung.filled,
     next: rung.isNext,
   }));
 

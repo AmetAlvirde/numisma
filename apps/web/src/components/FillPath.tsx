@@ -5,6 +5,7 @@ import type {
   FillPathView,
   MeasuredFigure,
 } from "../ladder/fill-path-view.ts";
+import { COMPACT_USD } from "../ladder/price-drop-path.ts";
 import { PriceDropPathChart } from "./PriceDropPathChart.tsx";
 
 /**
@@ -416,24 +417,15 @@ function UnrecordedWarnings({ view }: { view: FillPathView }) {
   );
 }
 
-/** Compact, so the span reads as a span rather than as two long figures. Same notation
- *  the chart's own axis ticks use (`AXIS_USD` in `PriceDropPathChart`), so the header
- *  and the axis directly beneath it cannot print the same price two ways. */
-const RANGE_USD = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
-
 /**
  * THE LADDER'S PRICE SPAN, TAKEN BY EXPLICIT MIN/MAX AND NOT OFF THE ENDS OF THE ARRAY.
  *
  * `view.rungs` does arrive sorted DESCENDING by price from `ladder/fill-path-view.ts`, so
  * `rungs[0]` and `rungs.at(-1)` would be right today — and would silently print the span
  * backwards the day that sort is changed or a caller passes an unsorted list. `cumulate`
- * in the chart genuinely cannot avoid depending on that ordering (a running sum IS an
- * order), so it documents the dependency instead. This readout has no such excuse: a
+ * in `ladder/price-drop-path.ts` genuinely cannot avoid depending on that ordering (a
+ * running sum IS an order), so it states the dependency on its own interface and asserts
+ * it in a test instead. This readout has no such excuse: a
  * min/max is order-free, so it takes one and owes the reader no caveat.
  *
  * Absent when there is nothing to span — a single rung is a price, not a range.
@@ -445,7 +437,12 @@ const RANGE_USD = new Intl.NumberFormat("en-US", {
 function priceSpan(rungs: readonly FillPathRungView[]): string | undefined {
   if (rungs.length < 2) return undefined;
   const prices = rungs.map((rung) => rung.priceUsd);
-  return `~${RANGE_USD.format(Math.min(...prices))}–${RANGE_USD.format(
+  // COMPACT, so the span reads as a span rather than as two long figures — and the SAME
+  // formatter the chart's own axis ticks use, imported rather than declared again, so the
+  // header and the axis directly beneath it cannot print the same price two ways. This
+  // was a byte-identical second `Intl.NumberFormat` with a comment on each half asking
+  // the other not to change.
+  return `~${COMPACT_USD.format(Math.min(...prices))}–${COMPACT_USD.format(
     Math.max(...prices),
   )}`;
 }
@@ -761,7 +758,7 @@ function RungListCard({
               type="button"
               className={
                 "fp-row" +
-                (rung.venueAxis === "filled" ? " is-filled" : "") +
+                (rung.filled ? " is-filled" : "") +
                 (rung.isNext ? " is-next" : "") +
                 (rung.key === selected?.key ? " is-selected" : "") +
                 (rung.notPlaced ? " is-unplaced" : "")

@@ -3,11 +3,25 @@ import { defineChart, dot, lineY, ruleX, ruleY, text } from "@tanstack/charts";
 import { scaleLinear } from "@tanstack/charts/scales/linear";
 import { Chart } from "@tanstack/charts/react";
 import type { FillPathRungView, MeasuredFigure } from "../ladder/fill-path-view.ts";
+import {
+  COMPACT_USD,
+  cumulate,
+  splitAt,
+  spotMarkFor,
+  withRadius,
+  type RungPoint,
+} from "../ladder/price-drop-path.ts";
 
 /**
- * THE PRICE DROP PATH, DRAWN BY TANSTACK CHARTS (supersedes spec #285 §6.2, whose
- * "no chart library: the repo has none and adds none" this file deliberately breaks —
- * an ADR is owed).
+ * THE PRICE DROP PATH, DRAWN BY TANSTACK CHARTS (ADR-018).
+ *
+ * ── THIS FILE IS MARKS AND A DEFINITION; THE ARITHMETIC IS NEXT DOOR ─────────────────
+ * Every quantity the picture stands on — the running total, the ring radius, the split
+ * index, the now rule's clamp and the one compact-USD formatter — lives in
+ * `ladder/price-drop-path.ts`, which is pure, coverage-visible and tested. Read that
+ * module for WHY each number is the number it is, and for the three preconditions this
+ * component's props are required to satisfy (a plottable ladder, LIVE-only spot, rungs
+ * descending by price). What is left here is which mark draws what, and why.
  *
  * A LINE, BECAUSE THE LINE IS THE ARGUMENT. The ladder's convexity — that each rung
  * buys more than the last, and by how much it accelerates — lives in the SLOPE between
@@ -77,20 +91,12 @@ import type { FillPathRungView, MeasuredFigure } from "../ladder/fill-path-view.
  * nothing reachable.
  *
  * ── DETERMINISTIC ACROSS THE SSR BOUNDARY ────────────────────────────────────────────
- * `initialWidth` fixes the server's width so the first client render matches, the two
- * `Intl.NumberFormat`s are module-scope and explicitly `en-US` rather than locale-
- * dependent, both scale domains are computed from the data instead of inferred, and the
- * definition is memoized on the values it captures. Nothing here reads a clock, a
- * `window`, or a random number.
+ * `initialWidth` fixes the server's width so the first client render matches, the one
+ * `Intl.NumberFormat` is module-scope in the pure module and explicitly `en-US` rather
+ * than locale-dependent, both scale domains are computed from the data instead of
+ * inferred, and the definition is memoized on the values it captures. Nothing here reads
+ * a clock, a `window`, or a random number.
  */
-
-/** Explicit locale: an SSR boundary is exactly where an implicit one diverges. */
-const AXIS_USD = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
 
 /** The card is judged on a phone; this is close to the real width, so the first
  *  post-hydration resize is small rather than a jump. */
@@ -111,175 +117,6 @@ const ASPECT_RATIO = 1.25 / 1;
  *  picture and the key that explains it cannot drift apart. */
 const WAITING_DASH = "1 1";
 
-/** THE RING OF THE LARGEST RUNG, and the floor no ring may shrink below. See
- *  `withRadius` for why these are the two numbers the encoding needs and why there is
- *  no cap: normalizing on the largest rung means the biggest ring is `R_MAX` on every
- *  ladder, so a steep ratio makes the small end small rather than the big end huge. */
-const R_MAX = 9;
-const R_MIN = 2.5;
-
-/** One rung's worth of decided fact. `filled` is read off the view module's own
- *  `venueAxis`; no component here re-derives whether a rung filled. */
-interface RungPoint {
-  key: string;
-  priceUsd: number;
-  sizeUsd: number;
-  /** RUNNING TOTAL of `sizeUsd` from the first rung down to this one — see
-   *  `cumulate` for why this, and not `sizeUsd`, is what the line plots. */
-  cumulativeUsd: number;
-  /** THE RUNG'S OWN SIZE, DRAWN AS AREA — see `withRadius`. Carried on the point rather
-   *  than recomputed per mark so the ring, its selection halo and its selection disc are
-   *  all sized off one number and cannot disagree about how big this rung is. */
-  radiusPx: number;
-  filled: boolean;
-}
-
-/**
- * THE CAPITAL VALUE IS A RUNNING TOTAL, BECAUSE THAT IS THE QUESTION THE CARD IS ASKED.
- *
- * The reader of a price drop path wants "if price falls to HERE, how much will the fund
- * have committed IN TOTAL?" — a running sum. The per-rung series cannot answer it: it
- * shows eight independent amounts and leaves the reader adding in their head, and the
- * top of its axis is the single largest rung rather than the whole ladder. The convexity
- * survives the change intact — it is now the ACCELERATING SLOPE of the cumulative curve
- * rather than the rising height of separate points.
- *
- * THE ORDER IS DECIDED IN ANOTHER MODULE AND THIS SUM DEPENDS ON IT. `rungs` arrives
- * already sorted DESCENDING by price by `ladder/fill-path-view.ts`
- * (`wireRungs.sort((a, b) => b.priceUsd - a.priceUsd)`), which is the order a FALLING
- * price walks them in — so accumulating in array order is accumulating down the ladder.
- * Nothing here re-sorts: a second ordering would be a second opinion about which way the
- * ladder runs, and the two would drift.
- */
-function cumulate(
-  points: readonly Omit<RungPoint, "cumulativeUsd" | "radiusPx">[],
-): Omit<RungPoint, "radiusPx">[] {
-  let running = 0;
-  return points.map((point) => {
-    running += point.sizeUsd;
-    return { ...point, cumulativeUsd: running };
-  });
-}
-
-/**
- * THE RUNG'S SIZE, SHOWN INSTEAD OF STATED. This replaces the caption clause that used to
- * be printed under the chart in words — "the deepest rung is 6.3× the first". A sentence
- * asserting a ratio is a thing the reader has to take on trust and then imagine; a ring
- * six times the area of the one above it IS the ratio, arriving before the reading does.
- *
- * AREA, NOT RADIUS, CARRIES THE MAGNITUDE — hence the square root. Sizing radius directly
- * by the ratio would draw a deepest rung with forty times the ink of the first, which is
- * not a picture of 6.3× by any reading. Area is the channel the eye actually integrates
- * for a disc, so `r ∝ √size` is what makes the ring look like the number it stands for.
- *
- * NORMALIZED ON THE LARGEST RUNG, NOT ON THE FIRST. The biggest ring is therefore `R_MAX`
- * on every ladder and the picture cannot outgrow its plot — a steep ratio shrinks the
- * shallow end rather than inflating the deep one. Normalizing on the first rung instead
- * would need a CAP to stay on canvas, and a cap silently flattens exactly the convex
- * ladders this encoding exists to show.
- *
- * `R_MIN` IS A LEGIBILITY FLOOR AND IT DOES DISTORT. On a ladder steeper than ~13× the
- * shallowest ring would otherwise fall under a pixel and read as a gap in the line — an
- * absent rung, which is a worse lie than an overstated small one. The floor binds rarely
- * and only at the end where the alternative is nothing at all.
- */
-function withRadius(points: readonly Omit<RungPoint, "radiusPx">[]): RungPoint[] {
-  const largest = Math.max(...points.map((point) => point.sizeUsd));
-  return points.map((point) => ({
-    ...point,
-    radiusPx:
-      largest > 0
-        ? Math.max(R_MIN, R_MAX * Math.sqrt(point.sizeUsd / largest))
-        : R_MIN,
-  }));
-}
-
-/**
- * THE ONE PLACE THAT DECIDES "FILLED", because the legend and the path must never
- * disagree: a green segment with no `Filled` key beside it is the picture contradicting
- * its own caption. The view module already decided this; nothing here re-derives it.
- */
-function isFilled(rung: FillPathRungView): boolean {
-  return rung.venueAxis === "filled";
-}
-
-/**
- * WHERE THE SOLID PATH BECOMES THE DASHED ONE — the LAST filled rung, not a per-rung
- * classification.
- *
- * A path is a sequence, and a sequence has one handoff. Classifying each rung and
- * drawing a segment per class would shatter the line into pieces the moment the venue
- * filled a rung out of order, which is exactly when the operator most needs to read the
- * curve. Taking the last filled index instead says something weaker and true: everything
- * up to here has been walked, everything past it has not.
- *
- * Returns `-1` when nothing has filled (day zero — the whole path is dashed).
- */
-function splitAt(points: readonly RungPoint[]): number {
-  let last = -1;
-  points.forEach((point, index) => {
-    if (point.filled) last = index;
-  });
-  return last;
-}
-
-/**
- * WHERE THE "NOW" RULE GOES, AND WHAT IT IS ALLOWED TO CLAIM.
- *
- * The axis is scaled to the ladder (see the domain comment in the component), so spot
- * is frequently outside it — the fund normally sits above every rung it has declared.
- * There are only two honest things to do with a price that is off the chart, and this
- * does the second: PIN the rule to the edge and SAY SO in the label.
- *
- * A rule pinned to the edge while the label still reads like an ordinary plotted price
- * is a lie — it invites the reader to measure a position that was clamped. So the two
- * always travel together: whenever `y` is not the real price, the label carries an ARROW
- * and the reader knows the mark is a direction, not a coordinate.
- *
- * THE ARROW REPLACED THE SENTENCE. This used to read `spot ~$64,412 — above the ladder`:
- * a caption doing three jobs, of which the picture already did two. "spot" names a figure
- * the header card prints live, two lines above; "above the ladder" describes a rule the
- * reader can SEE sitting at the top edge. What survives is the one fact the picture
- * genuinely cannot state — the number — with `↑` carrying the clamp warning as a glyph
- * rather than as prose. The honesty constraint above is unchanged; only its length is.
- *
- * COMPACT NOW, IN `AXIS_USD`, so the mark reads at the same precision as the tick labels
- * it floats among. A dollar-exact price beside `$60K` gridlines is a false precision: it
- * looks measurable off an axis that could never resolve it.
- *
- * The alternative — padding the domain out to reach spot with a cap on how far — cannot
- * work on its own: the moment the cap binds, spot is outside the domain again and needs
- * this same treatment anyway. It would buy a second mechanism for the same case.
- *
- * PRICE IS THE VERTICAL AXIS NOW, so the rule is HORIZONTAL and the pinning rotated with
- * it: "above the ladder" pins to `yHigh`, the TOP of the plot, and "below the ladder" to
- * `yLow`, the bottom. The label no longer picks a side — it always rides the RIGHT edge
- * of the capital axis, end-anchored, which is where a trading chart prints its last
- * price. What still varies is `dy`: the top-pinned label sits ABOVE its rule (clear of
- * the plot entirely, where nothing is drawn) and every other one sits above it too, but
- * the bottom-pinned one is nudged to clear the capital axis's own tick labels.
- */
-function spotMarkFor(
-  spotUsd: number | undefined,
-  bounds: { low: number; high: number; yLow: number; yHigh: number },
-): { y: number; label: string; dy: number } | undefined {
-  if (spotUsd === undefined) return undefined;
-  // `~` BECAUSE THIS COPY OF SPOT IS COMPACTED, while the header card prints the same
-  // reading to the cent. Two exact-looking prices differing by change is the surface
-  // contradicting itself; the mark says "this one is the rounded one".
-  const money = `~${AXIS_USD.format(spotUsd)}`;
-
-  if (spotUsd > bounds.high) {
-    return { y: bounds.yHigh, label: `↑ ${money}`, dy: -4 };
-  }
-  if (spotUsd < bounds.low) {
-    return { y: bounds.yLow, label: `↓ ${money}`, dy: -5 };
-  }
-
-  // In range: the rule is to scale, so the label carries no direction.
-  return { y: spotUsd, label: `spot ${money}`, dy: -4 };
-}
-
 export function PriceDropPathChart({
   rungs,
   selectedKey,
@@ -296,9 +133,11 @@ export function PriceDropPathChart({
   deployed: MeasuredFigure;
 }) {
   const definition = useMemo(() => {
-    // A rung with no declared size has no y and cannot be a point. The caller only
+    // A rung with no declared size has no x and cannot be a point. The caller only
     // renders this component when the view module says the ladder is plottable, so
-    // this is a type narrowing rather than a policy.
+    // this is a type narrowing rather than a policy — it is what turns a
+    // `FillPathRungView` into the pure module's `PlottableRung`, whose required
+    // `sizeUsd` is where that precondition is now written down.
     const points: RungPoint[] = withRadius(
       cumulate(
         rungs.flatMap((rung) =>
@@ -309,7 +148,7 @@ export function PriceDropPathChart({
                   key: rung.key,
                   priceUsd: rung.priceUsd,
                   sizeUsd: rung.sizeUsd,
-                  filled: isFilled(rung),
+                  filled: rung.filled,
                 },
               ],
         ),
@@ -557,7 +396,7 @@ export function PriceDropPathChart({
           // measured figure is allowed to sit on a declared axis, and why the two are
           // not the same number.
           label: "Cumulative declared capital (USD)",
-          ticks: { format: (value: number) => AXIS_USD.format(value) },
+          ticks: { format: (value: number) => COMPACT_USD.format(value) },
         },
       },
       y: {
@@ -579,7 +418,7 @@ export function PriceDropPathChart({
           // MOVING IT — to a heading over the chart — was the alternative considered and
           // dropped: it frees the same horizontal strip but spends a whole line of
           // vertical space to do it, on the axis this 5:4 box has least of.
-          ticks: { format: (value: number) => AXIS_USD.format(value) },
+          ticks: { format: (value: number) => COMPACT_USD.format(value) },
         },
       },
       // See this file's header: the chart is presentation, so it mounts no interaction.
@@ -590,7 +429,7 @@ export function PriceDropPathChart({
     });
   }, [rungs, selectedKey, spotUsd, deployed]);
 
-  const anyFilled = rungs.some(isFilled);
+  const anyFilled = rungs.some((rung) => rung.filled);
 
   return (
     // THE WRAPPER IS WHAT HIDES IT — chart AND legend. `ariaLabel` below is a required
