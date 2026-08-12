@@ -1,8 +1,8 @@
 import { useMemo } from "react";
-import { defineChart, dot, lineY, ruleX, text } from "@tanstack/charts";
+import { defineChart, dot, lineY, ruleX, ruleY, text } from "@tanstack/charts";
 import { scaleLinear } from "@tanstack/charts/scales/linear";
 import { Chart } from "@tanstack/charts/react";
-import type { FillPathRungView } from "../ladder/fill-path-view.ts";
+import type { FillPathRungView, MeasuredFigure } from "../ladder/fill-path-view.ts";
 
 /**
  * THE PRICE DROP PATH, DRAWN BY TANSTACK CHARTS (supersedes spec #285 §6.2, whose
@@ -14,10 +14,32 @@ import type { FillPathRungView } from "../ladder/fill-path-view.ts";
  * rungs. A bar chart has no slope: it shows eight independent magnitudes and leaves the
  * reader to infer the curve. This was tried as bars and rejected for exactly that.
  *
- * The y value is the RUNNING CUMULATIVE declared capital down the ladder, not the
+ * The capital value is the RUNNING CUMULATIVE declared capital down the ladder, not the
  * per-rung size — see `cumulate` for why, and for the ordering the sum depends on. Under
  * that reading the slope between two points IS the next rung's size, so the convexity
  * argument above is not weakened by the change; it is drawn more directly.
+ *
+ * ── THE RING SIZE SAYS WHAT THE CAPTION USED TO ──────────────────────────────────────
+ * Each rung's dot is scaled by the AREA of that rung's declared size (`withRadius`), so
+ * the deepest ring is visibly six-odd times the shallowest on a convex ladder. This took
+ * over from a printed sentence — "the deepest rung is 6.3× the first" — which now renders
+ * screen-reader-only under the chart (`FillPath`'s `ChartCard`). The two encodings are
+ * complements, not duplicates: the SLOPE answers "how fast does commitment accelerate as
+ * price falls" across the ladder, the RING answers "how big is THIS buy" at one rung, and
+ * a reader working the inspect slider is asking the second question.
+ *
+ * ── PRICE IS THE VERTICAL AXIS, THE WAY EVERY TRADING CHART IS DRAWN ─────────────────
+ * This was once price-on-x with the axis REVERSED so price fell left to right, which is
+ * a picture nobody has ever read a market off. Price now runs up the y axis, ascending —
+ * the deepest rung at the bottom, the shallowest at the top — and cumulative capital runs
+ * along x from $0. The path therefore starts top-left (highest rung, nothing committed
+ * yet) and descends to bottom-right (deepest rung, the ladder's whole declared total).
+ * No axis is reversed: the library's default linear y already puts high at the top, and
+ * the old `reverse: true` existed only to undo the old orientation.
+ *
+ * THE CAPITAL AXIS STARTS AT $0, NOT AT THE FIRST RUNG'S RUNNING TOTAL. "How much has
+ * been committed by the time price reaches here" begins at nothing, and an axis that
+ * began at the first rung's size would silently hide the first commitment.
  *
  * WHAT THE HAND-ROLLED SVG COULD NOT SAY. The predecessor was also a polyline, but over
  * an unlabelled canvas: no axis, no tick, no unit, an unlabelled dashed rule stranded at
@@ -70,20 +92,31 @@ const AXIS_USD = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 1,
 });
 
-const SPOT_USD = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  maximumFractionDigits: 0,
-});
-
 /** The card is judged on a phone; this is close to the real width, so the first
  *  post-hydration resize is small rather than a jump. */
 const INITIAL_WIDTH = 320;
-const HEIGHT = 200;
+
+/** THE PICTURE IS A RATIO, NOT A FIXED-HEIGHT BAND. A constant height over a measured
+ *  width is not a shape at all — the same ladder was a squat strip on a wide card and a
+ *  near-square on a phone. `aspectRatio` is width ÷ height, so 1.25 is a 5:4 box: barely
+ *  wider than it is tall, which gives the cumulative climb room to read as a climb
+ *  without turning the price axis into a slit.
+ *
+ *  The wrapper caps the width (`.fp-chart`) so the ratio cannot turn a wide desktop card
+ *  into a half-viewport-tall chart. The cap belongs in CSS rather than here because it is
+ *  a layout bound, not a property of the chart. */
+const ASPECT_RATIO = 1.25 / 1;
 
 /** The dash the WAITING segment and its legend swatch share. One constant, so the
  *  picture and the key that explains it cannot drift apart. */
-const WAITING_DASH = "5 4";
+const WAITING_DASH = "1 1";
+
+/** THE RING OF THE LARGEST RUNG, and the floor no ring may shrink below. See
+ *  `withRadius` for why these are the two numbers the encoding needs and why there is
+ *  no cap: normalizing on the largest rung means the biggest ring is `R_MAX` on every
+ *  ladder, so a steep ratio makes the small end small rather than the big end huge. */
+const R_MAX = 9;
+const R_MIN = 2.5;
 
 /** One rung's worth of decided fact. `filled` is read off the view module's own
  *  `venueAxis`; no component here re-derives whether a rung filled. */
@@ -94,11 +127,15 @@ interface RungPoint {
   /** RUNNING TOTAL of `sizeUsd` from the first rung down to this one — see
    *  `cumulate` for why this, and not `sizeUsd`, is what the line plots. */
   cumulativeUsd: number;
+  /** THE RUNG'S OWN SIZE, DRAWN AS AREA — see `withRadius`. Carried on the point rather
+   *  than recomputed per mark so the ring, its selection halo and its selection disc are
+   *  all sized off one number and cannot disagree about how big this rung is. */
+  radiusPx: number;
   filled: boolean;
 }
 
 /**
- * THE Y VALUE IS A RUNNING TOTAL, BECAUSE THAT IS THE QUESTION THE CARD IS ASKED.
+ * THE CAPITAL VALUE IS A RUNNING TOTAL, BECAUSE THAT IS THE QUESTION THE CARD IS ASKED.
  *
  * The reader of a price drop path wants "if price falls to HERE, how much will the fund
  * have committed IN TOTAL?" — a running sum. The per-rung series cannot answer it: it
@@ -115,13 +152,46 @@ interface RungPoint {
  * ladder runs, and the two would drift.
  */
 function cumulate(
-  points: readonly Omit<RungPoint, "cumulativeUsd">[],
-): RungPoint[] {
+  points: readonly Omit<RungPoint, "cumulativeUsd" | "radiusPx">[],
+): Omit<RungPoint, "radiusPx">[] {
   let running = 0;
   return points.map((point) => {
     running += point.sizeUsd;
     return { ...point, cumulativeUsd: running };
   });
+}
+
+/**
+ * THE RUNG'S SIZE, SHOWN INSTEAD OF STATED. This replaces the caption clause that used to
+ * be printed under the chart in words — "the deepest rung is 6.3× the first". A sentence
+ * asserting a ratio is a thing the reader has to take on trust and then imagine; a ring
+ * six times the area of the one above it IS the ratio, arriving before the reading does.
+ *
+ * AREA, NOT RADIUS, CARRIES THE MAGNITUDE — hence the square root. Sizing radius directly
+ * by the ratio would draw a deepest rung with forty times the ink of the first, which is
+ * not a picture of 6.3× by any reading. Area is the channel the eye actually integrates
+ * for a disc, so `r ∝ √size` is what makes the ring look like the number it stands for.
+ *
+ * NORMALIZED ON THE LARGEST RUNG, NOT ON THE FIRST. The biggest ring is therefore `R_MAX`
+ * on every ladder and the picture cannot outgrow its plot — a steep ratio shrinks the
+ * shallow end rather than inflating the deep one. Normalizing on the first rung instead
+ * would need a CAP to stay on canvas, and a cap silently flattens exactly the convex
+ * ladders this encoding exists to show.
+ *
+ * `R_MIN` IS A LEGIBILITY FLOOR AND IT DOES DISTORT. On a ladder steeper than ~13× the
+ * shallowest ring would otherwise fall under a pixel and read as a gap in the line — an
+ * absent rung, which is a worse lie than an overstated small one. The floor binds rarely
+ * and only at the end where the alternative is nothing at all.
+ */
+function withRadius(points: readonly Omit<RungPoint, "radiusPx">[]): RungPoint[] {
+  const largest = Math.max(...points.map((point) => point.sizeUsd));
+  return points.map((point) => ({
+    ...point,
+    radiusPx:
+      largest > 0
+        ? Math.max(R_MIN, R_MAX * Math.sqrt(point.sizeUsd / largest))
+        : R_MIN,
+  }));
 }
 
 /**
@@ -163,80 +233,86 @@ function splitAt(points: readonly RungPoint[]): number {
  *
  * A rule pinned to the edge while the label still reads like an ordinary plotted price
  * is a lie — it invites the reader to measure a position that was clamped. So the two
- * always travel together: whenever `x` is not the real price, the copy carries
- * "above the ladder" / "below the ladder" and the reader knows the mark is a direction,
- * not a coordinate.
+ * always travel together: whenever `y` is not the real price, the label carries an ARROW
+ * and the reader knows the mark is a direction, not a coordinate.
+ *
+ * THE ARROW REPLACED THE SENTENCE. This used to read `spot ~$64,412 — above the ladder`:
+ * a caption doing three jobs, of which the picture already did two. "spot" names a figure
+ * the header card prints live, two lines above; "above the ladder" describes a rule the
+ * reader can SEE sitting at the top edge. What survives is the one fact the picture
+ * genuinely cannot state — the number — with `↑` carrying the clamp warning as a glyph
+ * rather than as prose. The honesty constraint above is unchanged; only its length is.
+ *
+ * COMPACT NOW, IN `AXIS_USD`, so the mark reads at the same precision as the tick labels
+ * it floats among. A dollar-exact price beside `$60K` gridlines is a false precision: it
+ * looks measurable off an axis that could never resolve it.
  *
  * The alternative — padding the domain out to reach spot with a cap on how far — cannot
  * work on its own: the moment the cap binds, spot is outside the domain again and needs
  * this same treatment anyway. It would buy a second mechanism for the same case.
  *
- * THE AXIS IS REVERSED, so a HIGH price renders at the LEFT. That is why "above the
- * ladder" pins to `xHigh` and anchors its label `start`.
+ * PRICE IS THE VERTICAL AXIS NOW, so the rule is HORIZONTAL and the pinning rotated with
+ * it: "above the ladder" pins to `yHigh`, the TOP of the plot, and "below the ladder" to
+ * `yLow`, the bottom. The label no longer picks a side — it always rides the RIGHT edge
+ * of the capital axis, end-anchored, which is where a trading chart prints its last
+ * price. What still varies is `dy`: the top-pinned label sits ABOVE its rule (clear of
+ * the plot entirely, where nothing is drawn) and every other one sits above it too, but
+ * the bottom-pinned one is nudged to clear the capital axis's own tick labels.
  */
 function spotMarkFor(
   spotUsd: number | undefined,
-  bounds: { low: number; high: number; xLow: number; xHigh: number },
-): { x: number; label: string; anchor: "start" | "middle" | "end"; dx: number } | undefined {
+  bounds: { low: number; high: number; yLow: number; yHigh: number },
+): { y: number; label: string; dy: number } | undefined {
   if (spotUsd === undefined) return undefined;
-  const money = SPOT_USD.format(spotUsd);
+  // `~` BECAUSE THIS COPY OF SPOT IS COMPACTED, while the header card prints the same
+  // reading to the cent. Two exact-looking prices differing by change is the surface
+  // contradicting itself; the mark says "this one is the rounded one".
+  const money = `~${AXIS_USD.format(spotUsd)}`;
 
   if (spotUsd > bounds.high) {
-    return {
-      x: bounds.xHigh,
-      label: `spot ${money} — above the ladder`,
-      anchor: "start",
-      dx: 4,
-    };
+    return { y: bounds.yHigh, label: `↑ ${money}`, dy: -4 };
   }
   if (spotUsd < bounds.low) {
-    return {
-      x: bounds.xLow,
-      label: `spot ${money} — below the ladder`,
-      anchor: "end",
-      dx: -4,
-    };
+    return { y: bounds.yLow, label: `↓ ${money}`, dy: -5 };
   }
 
-  // In range: the rule is to scale, so the label is bare. It still keeps off the axis
-  // gutter — `anchor: "middle"` overhangs the plot when spot sits near an end of the
-  // ladder, so the anchor flips to whichever side has room.
-  const fromLeft = (bounds.xHigh - spotUsd) / (bounds.xHigh - bounds.xLow);
-  const anchor = fromLeft < 0.15 ? "start" : fromLeft > 0.85 ? "end" : "middle";
-  return {
-    x: spotUsd,
-    label: `spot ${money}`,
-    anchor,
-    dx: anchor === "start" ? 4 : anchor === "end" ? -4 : 0,
-  };
+  // In range: the rule is to scale, so the label carries no direction.
+  return { y: spotUsd, label: `spot ${money}`, dy: -4 };
 }
 
 export function PriceDropPathChart({
   rungs,
   selectedKey,
   spotUsd,
+  deployed,
 }: {
   rungs: readonly FillPathRungView[];
   selectedKey: string | undefined;
   /** LIVE spot only. A last close is not "now", so the caller passes nothing for it. */
   spotUsd: number | undefined;
+  /** The MEASURED deployed total, or the named reason there is none — see the deployed
+   *  rule's mark below for why a measurement is being drawn on a declared axis, and why
+   *  the `known: false` arm must draw nothing rather than a rule at zero. */
+  deployed: MeasuredFigure;
 }) {
   const definition = useMemo(() => {
     // A rung with no declared size has no y and cannot be a point. The caller only
     // renders this component when the view module says the ladder is plottable, so
     // this is a type narrowing rather than a policy.
-    const points: RungPoint[] = cumulate(
-      rungs.flatMap((rung) =>
-        rung.sizeUsd === undefined
-          ? []
-          : [
-              {
-                key: rung.key,
-                priceUsd: rung.priceUsd,
-                sizeUsd: rung.sizeUsd,
-                filled: isFilled(rung),
-              },
-            ],
+    const points: RungPoint[] = withRadius(
+      cumulate(
+        rungs.flatMap((rung) =>
+          rung.sizeUsd === undefined
+            ? []
+            : [
+                {
+                  key: rung.key,
+                  priceUsd: rung.priceUsd,
+                  sizeUsd: rung.sizeUsd,
+                  filled: isFilled(rung),
+                },
+              ],
+        ),
       ),
     );
 
@@ -268,21 +344,25 @@ export function PriceDropPathChart({
       .filter((gap) => gap > 0);
     const pad = (gaps.length > 0 ? Math.min(...gaps) : (high - low) / 4) * 0.75;
 
-    const xLow = low - pad;
-    const xHigh = high + pad;
-    const xScale = scaleLinear().domain([xLow, xHigh]);
-    // THE TOP OF THE AXIS IS THE WHOLE LADDER'S DECLARED TOTAL — the last point's
-    // running sum, which is the largest by construction while sizes are non-negative.
-    // `Math.max` over the column rather than `at(-1)` so a zero-or-negative size could
-    // never make the domain shorter than a point already plotted inside it.
+    const yLow = low - pad;
+    const yHigh = high + pad;
+    const yScale = scaleLinear().domain([yLow, yHigh]);
+    // THE FAR END OF THE CAPITAL AXIS IS THE WHOLE LADDER'S DECLARED TOTAL — the last
+    // point's running sum, which is the largest by construction while sizes are
+    // non-negative. `Math.max` over the column rather than `at(-1)` so a zero-or-negative
+    // size could never make the domain shorter than a point already plotted inside it.
     //
-    // `.nice()` first, THEN read the top back, so the spot label is placed against the
+    // IT STARTS AT $0 — see the header. The first rung's dot therefore sits off the left
+    // edge by its own size, which is the picture being honest: reaching the top rung
+    // already costs something.
+    //
+    // `.nice()` first, THEN read the end back, so the spot label is placed against the
     // domain the axis actually drew rather than against a number we guessed. The label
-    // therefore rides the top of the CUMULATIVE domain and stays clear of the curve.
-    const yScale = scaleLinear()
+    // therefore rides the RIGHT edge of the plot, clear of the descending curve.
+    const xScale = scaleLinear()
       .domain([0, Math.max(...points.map((point) => point.cumulativeUsd))])
       .nice();
-    const yTop = yScale.domain()[1];
+    const xEnd = xScale.domain()[1];
 
     // THE TWO SLICES OVERLAP ON THE JUNCTION RUNG, which is what makes the solid and
     // dashed strokes meet instead of leaving a rung-wide hole between them.
@@ -291,61 +371,118 @@ export function PriceDropPathChart({
     const dashed = split < 0 ? points : points.slice(split);
 
     const selected = points.filter((point) => point.key === selectedKey);
-    const spotMark = spotMarkFor(spotUsd, { low, high, xLow, xHigh });
-    const spotRow = spotMark === undefined ? [] : [{ priceUsd: spotMark.x }];
+    const spotMark = spotMarkFor(spotUsd, { low, high, yLow, yHigh });
+    const spotRow = spotMark === undefined ? [] : [{ priceUsd: spotMark.y }];
+
+    // THE DEPLOYED RULE IS ONLY DRAWN WHEN THE FIGURE WAS MEASURED. `deployed` is a
+    // `MeasuredFigure`, so the absent arm carries a REASON and never a number; a rule
+    // parked at $0 on day zero would claim the fund had been measured and found to have
+    // spent nothing, which is a different sentence from "no fill has been recorded yet".
+    const deployedRow = deployed.known ? [{ deployedUsd: deployed.value }] : [];
 
     return defineChart({
       marks: [
         // WAITING FIRST, SO SOLID PAINTS OVER IT at the shared junction rung.
+        //
+        // STILL `lineY` AFTER THE SWAP: `lineY` means "y as a function of x", which is
+        // exactly the new reading — price at each level of committed capital. Only the
+        // channels moved.
         lineY(dashed, {
-          x: "priceUsd",
-          y: "cumulativeUsd",
+          x: "cumulativeUsd",
+          y: "priceUsd",
           stroke: "var(--muted)",
           strokeWidth: 1.5,
           strokeDasharray: WAITING_DASH,
         }),
         lineY(solid, {
-          x: "priceUsd",
-          y: "cumulativeUsd",
+          x: "cumulativeUsd",
+          y: "priceUsd",
           stroke: "var(--pos)",
           strokeWidth: 1.75,
         }),
-        // THE "NOW" RULE, AND THE LABEL THAT SAYS WHAT IT IS. `ruleX` carries no label
-        // channel in 0.11.0, so the annotation is a composed `text` mark at the same
-        // semantic x — which is the library's documented pattern, not a workaround.
+        // THE "NOW" RULE, AND THE LABEL THAT SAYS WHAT IT IS. HORIZONTAL, at the spot
+        // price — `ruleY` now, because price is the vertical axis and a last-price mark
+        // that does not run across the price levels is not a last-price mark. `ruleY`
+        // carries no label channel in 0.11.0, so the annotation is a composed `text` mark
+        // at the same semantic y — the library's documented pattern, not a workaround.
         //
         // SOLID, AND IN ITS OWN COLOUR. It used to be a white DASHED rule standing next
         // to a grey DASHED path, which is the worst pairing in the picture: the same
         // stroke style meaning two unrelated things. Now the only dashed thing on the
         // chart is "waiting", and `--now` belongs to nothing else.
-        ruleX(spotRow, {
-          x: "priceUsd",
+        ruleY(spotRow, {
+          y: "priceUsd",
           stroke: "var(--now)",
           strokeWidth: 1.5,
         }),
         text(spotRow, {
-          x: "priceUsd",
-          // A CONSTANT HAS TO BE AN ACCESSOR HERE. `text.y` takes only a channel in
+          // A CONSTANT HAS TO BE AN ACCESSOR HERE. `text.x` takes only a channel in
           // 0.11.0, unlike `barY.y1`/`y2`, which also accept a bare number.
-          y: () => yTop,
+          x: () => xEnd,
+          y: "priceUsd",
           text: () => spotMark!.label,
           fill: "var(--now)",
           fontSize: 10,
-          anchor: spotMark?.anchor ?? "middle",
-          dx: spotMark?.dx ?? 0,
+          // END-ANCHORED AT THE RIGHT EDGE, where a trading chart prints its last price.
+          // The label runs back into the plot from there rather than off it.
+          anchor: "end",
+          dy: spotMark?.dy ?? -4,
+        }),
+        // THE DEPLOYED RULE — VERTICAL, ON THE CAPITAL AXIS.
+        //
+        // WHY THIS MARK MIXES TWO QUANTITIES, AND WHAT THAT COSTS THE READER. The axis it
+        // stands on is CUMULATIVE DECLARED capital — an INTENTION, the sizes the operator
+        // wrote down. `deployed` is MEASURED: what the fund actually spent, off recorded
+        // lots. Both are USD committed to this ladder, and "how far along the declared
+        // path am I really" is the question this card exists to answer, so putting them on
+        // one axis is defensible — but it is NOT self-evident, and the next reader will
+        // otherwise assume this rule sits exactly where the solid path becomes dashed.
+        //
+        // IT GENERALLY WILL NOT. That junction is the last FILLED rung's DECLARED
+        // cumulative; this rule is the measured spend. They coincide only when every
+        // filled rung filled in full at its declared size. A rule to the LEFT of the
+        // junction means the fund spent less than it declared for the rungs it walked; to
+        // the RIGHT, more. Neither is an error, and neither is readable off the picture
+        // without knowing that these are two different kinds of number.
+        ruleX(deployedRow, {
+          x: "deployedUsd",
+          stroke: "var(--pos)",
+          // THINNER THAN THE "NOW" RULE, AT THE SAME OPACITY (0.5 is the library's own
+          // rule default, which is what the now-rule renders at). Deployed is a standing
+          // fact about the past; "now" is the mark the operator is reading the chart
+          // against, and it must stay the loudest annotation on the picture.
+          strokeWidth: 1.25,
+          strokeOpacity: 0.5,
+        }),
+        text(deployedRow, {
+          x: "deployedUsd",
+          // WHERE IT MEETS THE AXIS — the bottom of the price domain, nudged up so the
+          // word sits inside the plot rather than in the tick gutter.
+          y: () => yLow,
+          text: () => "Deployed",
+          fill: "var(--pos)",
+          fontSize: 10,
+          anchor: "start",
+          dx: 4,
           dy: -4,
         }),
         // HOLLOW DOTS, FILLED WITH THE CARD'S OWN BACKGROUND, so the line reads through
         // the ring rather than being interrupted by a blob. Two marks rather than one
         // because `dot.stroke` is a flat string in 0.11.0, not a per-datum channel — so
         // a ring's colour has to come from which mark drew it.
+        //
+        // THE RING'S SIZE IS THE RUNG'S SIZE — `r` IS a per-datum channel in 0.11.0, so
+        // unlike `stroke` it needs no splitting. `rScale` is deliberately unused: the
+        // radius arrives pre-computed by `withRadius`, which is where the √ and the
+        // normalization are written down and argued for rather than inherited from a
+        // library default.
         dot(
           points.filter((point) => !point.filled),
           {
-            x: "priceUsd",
-            y: "cumulativeUsd",
+            x: "cumulativeUsd",
+            y: "priceUsd",
             key: "key",
-            r: 3.5,
+            r: "radiusPx",
             fill: "var(--card)",
             stroke: "var(--muted)",
             strokeWidth: 1.5,
@@ -354,10 +491,10 @@ export function PriceDropPathChart({
         dot(
           points.filter((point) => point.filled),
           {
-            x: "priceUsd",
-            y: "cumulativeUsd",
+            x: "cumulativeUsd",
+            y: "priceUsd",
             key: "key",
-            r: 3.5,
+            r: "radiusPx",
             fill: "var(--card)",
             stroke: "var(--pos)",
             strokeWidth: 1.75,
@@ -370,23 +507,31 @@ export function PriceDropPathChart({
         //
         // TWO MARKS MAKE ONE TARGET. The halo is the card's own background, punching a
         // clear hole in the line and the ring underneath so the disc lands on empty
-        // space instead of on top of stroke; the disc then reads as solid at a size no
-        // ring uses. Still a disc-versus-ring distinction, so it never recolours a rung
-        // and cannot overwrite whether that rung filled.
+        // space instead of on top of stroke; the disc then reads as solid where every
+        // other rung is hollow. Still a disc-versus-ring distinction, so it never
+        // recolours a rung and cannot overwrite whether that rung filled.
+        //
+        // BOTH RADII ARE NOW THE SELECTED RUNG'S OWN, OFFSET — not the fixed 8/5.5 pair
+        // they were while every ring was 3.5. Fixed sizes were a second, contradictory
+        // size encoding the moment rings started carrying one: selecting the shallowest
+        // rung would have INFLATED it past the deepest, so the slider would appear to
+        // change how big a buy is. Offsetting instead keeps the selected rung the size
+        // it is and makes selection read as fill, which is a channel the picture has
+        // not otherwise spent.
         dot(selected, {
-          x: "priceUsd",
-          y: "cumulativeUsd",
+          x: "cumulativeUsd",
+          y: "priceUsd",
           key: "key",
-          r: 8,
+          r: (point: RungPoint) => point.radiusPx + 4,
           fill: "var(--bg)",
           stroke: "var(--bg)",
           strokeWidth: 2,
         }),
         dot(selected, {
-          x: "priceUsd",
-          y: "cumulativeUsd",
+          x: "cumulativeUsd",
+          y: "priceUsd",
           key: "key",
-          r: 5.5,
+          r: (point: RungPoint) => point.radiusPx + 1,
           fill: "var(--text)",
           stroke: "var(--bg)",
           strokeWidth: 1.5,
@@ -394,18 +539,6 @@ export function PriceDropPathChart({
       ],
       x: {
         scale: xScale,
-        // PRICE FALLS TO THE RIGHT. This one flag is what makes the picture match the
-        // card's name; without it the path runs the other way and the card reads
-        // backwards. It matches `chartFor`'s own high-left ordering.
-        reverse: true,
-        axis: {
-          label: "Price dropping left to right",
-          ticks: { format: (value: number) => AXIS_USD.format(value) },
-        },
-      },
-      y: {
-        scale: yScale,
-        grid: true,
         axis: {
           // NOT "deployed capital", however the mock words it. Deployed is what the fund
           // actually SPENT, and it is a measured figure on the header card that is absent
@@ -418,7 +551,34 @@ export function PriceDropPathChart({
           // "CUMULATIVE" because the value at a rung is the running total of every rung
           // at or above it, not that rung's own size — see `cumulate`. Dropping the word
           // would make the reader measure a single rung against a total-sized axis.
+          //
+          // THIS WORDING CARRIES MORE WEIGHT SINCE THE SWAP, because a rule literally
+          // labelled `Deployed` now stands on this same axis — see that mark for why a
+          // measured figure is allowed to sit on a declared axis, and why the two are
+          // not the same number.
           label: "Cumulative declared capital (USD)",
+          ticks: { format: (value: number) => AXIS_USD.format(value) },
+        },
+      },
+      y: {
+        scale: yScale,
+        // GRIDLINES ON PRICE, because a trading chart is read off horizontal price
+        // levels: the whole point of the swap is that a rung is now a height.
+        grid: true,
+        axis: {
+          // NO LABEL, DELIBERATELY — unlike the x axis above, which keeps its own.
+          //
+          // "Price (USD)" was the one caption on this chart that told the reader nothing
+          // the ticks beside it did not already say: `$47.5K` running up the left edge of
+          // a chart on a trading surface is a price in dollars by every convention the
+          // reader arrives with. The x axis is the opposite case — "cumulative declared
+          // capital" is a quantity nobody can infer from `$120K`, and it is doing real
+          // work distinguishing declared from deployed. One label earns its ink; the
+          // other was a rotated column of pixels spent restating the axis it sat on.
+          //
+          // MOVING IT — to a heading over the chart — was the alternative considered and
+          // dropped: it frees the same horizontal strip but spends a whole line of
+          // vertical space to do it, on the axis this 5:4 box has least of.
           ticks: { format: (value: number) => AXIS_USD.format(value) },
         },
       },
@@ -428,7 +588,7 @@ export function PriceDropPathChart({
       keyboard: false,
       tooltip: false,
     });
-  }, [rungs, selectedKey, spotUsd]);
+  }, [rungs, selectedKey, spotUsd, deployed]);
 
   const anyFilled = rungs.some(isFilled);
 
@@ -439,7 +599,7 @@ export function PriceDropPathChart({
     <div className="fp-chart" aria-hidden="true">
       <Chart
         definition={definition}
-        height={HEIGHT}
+        aspectRatio={ASPECT_RATIO}
         initialWidth={INITIAL_WIDTH}
         tabIndex={-1}
         idPrefix="fp-chart"

@@ -25,8 +25,22 @@
   box-sizing: border-box;
 }
 
+/* 320px IS THE FLOOR, NOT THE SMALLEST CASE TO KEEP SOLVING. Every layout in this file
+   is designed against a 320px viewport — a 288px card, 254px of content — and below that
+   the reflow stops being a layout and starts being damage: rails collapse, labels break
+   mid-word, figures wrap away from the labels that name them.
+
+   So the page STOPS RESPONDING at 320px and the viewport scrolls sideways instead. One
+   declaration on `body` does it: the body can never be narrower than 320px, so `html`'s
+   scroll area outgrows the viewport and the browser offers the pan. Every card inherits
+   the floor through it, which is also what makes the `@container` rules honest — no card
+   is ever asked a width its base case was not written for.
+
+   This is the ONE place a horizontal scrollbar is allowed at the page level. The other
+   deliberate sideways scroll is `.table-scroll`, and that one is scoped to a table. */
 body {
   margin: 0;
+  min-width: 320px;
   background: var(--bg);
   color: var(--text);
   font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
@@ -69,18 +83,60 @@ h2 {
   margin: 4px 0 0;
 }
 
+/* Fund name left, the data-safety badge hard right. `wrap` and a shrinkable title block
+   are what keep the pair on the card at 320px: the warn badge's text is a joined list of
+   causes (`⚠ no current mark · 3 non-live`) and there is no width at which that is a
+   pill-shaped word. `.badge`'s `nowrap` is overridden for exactly this one placement,
+   and stays the default everywhere else: a badge is a word, and a word that breaks
+   stops reading as a chip. */
 .summary-head {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
 }
 
+.summary-head > div {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.summary-head .badge {
+  flex: 0 1 auto;
+  white-space: normal;
+}
+
+/* ── THE STANDING NUMBERS, PHONE FIRST ──────────────────────────────────────
+   ONE COLUMN OF DATA ROWS AT 320px — label left, figure hard right, one line each —
+   and a real grid of tiles once the card is wide enough. This is the same shape and
+   the same reasoning as `.fp-tiles` on the Fill Path header: `auto-fit` already
+   collapsed to a single column at this width, but it collapsed to STACKED tiles,
+   which spends two lines per number and leaves the figures on a ragged left edge.
+   The right rail plus `tabular-nums` puts all three on one axis the eye runs down.
+
+   THE CARD IS THE QUERY CONTAINER, not the viewport — see `.glance` and `.summary`.
+   Both carry the shared container name `metrics-card` precisely so this pair of rules
+   is written once; two copies of it would be two things to keep in step. */
 .metrics {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 12px;
+  grid-template-columns: 1fr;
+  gap: 8px;
   margin: 16px 0 0;
+}
+
+/* A GRID, NOT A FLEX ROW, AND THE VALUE IS THE HALF THAT GIVES. Every figure here
+   carries a trailing reference in the same `<dd>` — `vs Sun 9 Aug`, `floor 10%`, or an
+   absence cause — so a value is a phrase, not a number, and sizing it to content (the
+   Fill Path header's rule, where the values genuinely are numbers) crushed `Change`
+   to 30px and printed its own label through it. Terms sized to content, values take
+   the remainder and wrap inside it, still against the right rail. Same mechanism and
+   same reasoning as `.fp-detail`. */
+.metrics > div {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: 10px;
 }
 
 .metrics dt {
@@ -89,9 +145,39 @@ h2 {
 }
 
 .metrics dd {
-  margin: 2px 0 0;
+  margin: 0;
   font-size: 1.15rem;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* A figure here carries a trailing reference (`vs Sun 9 Aug`, `floor 10%`) or, absent,
+   its cause. Both are longer than the number and both wrap under it at the rail rather
+   than widening the row. */
+.metrics dd .absent {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+@container metrics-card (min-width: 380px) {
+  .metrics {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+  }
+
+  .metrics > div {
+    display: block;
+  }
+
+  .metrics dd {
+    margin: 2px 0 0;
+    text-align: left;
+  }
+
+  .metrics dd .absent {
+    justify-content: flex-start;
+  }
 }
 
 .pos {
@@ -121,15 +207,45 @@ h2 {
   color: #fff;
 }
 
+/* THE ESCAPE HATCH, AND THE ONE PLACE A SURFACE IS ALLOWED TO SCROLL SIDEWAYS. A five-
+   column composition row is not reflowable at 320px: `Label · USD value · % of fund`
+   and two deltas each named against a reference are five figures that mean nothing
+   apart, and stacking them per row would turn one table into thirty-one blocks. So the
+   table keeps its shape and the reader pans it.
+
+   THE SCROLLER IS THE QUERY CONTAINER, not the card and not the viewport — the only
+   place in this file where that is true, and for a reason: the judgement below is about
+   whether THIS TABLE has room, and the scroller is the box that knows. It also means
+   the rule needs no class of its own on either card that uses it. */
 .table-scroll {
+  container: table-scroll / inline-size;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
 
 table {
-  width: 100%;
   border-collapse: collapse;
   font-variant-numeric: tabular-nums;
+}
+
+/* AT 320px THE TABLE IS SIZED TO ITS CONTENT AND PANNED. Under a bare `width: 100%` it
+   fits itself to the card first and overflows only once even min-content will not go in,
+   so the narrow reader got the worst of both: `% OF / FUND` broken across two lines,
+   every cell wrapped to its tightest, AND a scrollbar anyway. Sized to content, the
+   cells are whole and the panning is the only cost. `min-width` keeps a two-column
+   table (the DCA card's) spanning its card rather than huddling at the left. */
+.table-scroll table {
+  width: max-content;
+  min-width: 100%;
+}
+
+/* Above the phone, FITTING THE CARD WINS. There is enough width for the browser's own
+   squeeze to land on wrapped LABELS rather than on wrapped headers and figures, and a
+   table the eye takes in whole beats one it has to pan. Same 380px the cards use. */
+@container table-scroll (min-width: 380px) {
+  .table-scroll table {
+    width: 100%;
+  }
 }
 
 th,
@@ -209,7 +325,25 @@ thead th {
    The verdict is the only thing above 20px and it lands before the eye reaches
    the numbers: the surface is judged on how fast the *no* reads, on a phone, in
    a queue. The three standing numbers reuse `.metrics`, so the glance and the
-   big picture stay one visual system. */
+   big picture stay one visual system.
+
+   THE CARD IS THE QUERY CONTAINER, not the viewport, so the glance lays itself out the
+   same whether the narrowness comes from a 320px phone or from a column it is dropped
+   into later. The second name is deliberate: `metrics-card` is the name the shared
+   `.metrics` breakpoint queries, and `glance` is here for anything only this card wants. */
+.glance,
+.summary {
+  container-type: inline-size;
+}
+
+.glance {
+  container-name: glance metrics-card;
+}
+
+.summary {
+  container-name: summary metrics-card;
+}
+
 .verdict {
   margin: 0;
   font-size: 1.5rem;
@@ -261,19 +395,27 @@ thead th {
 }
 
 /* ── the DCA card (spec #277 D4/D6) ─────────────────────────────────────────
-   ONE BLOCK, APPENDED — nothing above this line changed. The card is built out
-   of classes that already exist (`.card`, `.table-scroll`, `table`, `th.num`,
-   `.absent`, `.muted`), because the price-sorted rung table IS hot-set item 11's
-   plot and it costs no new substrate. What is genuinely new is only the plan
-   header — an id, a state word and a kind, on one line that wraps on a phone.
+   ONE BLOCK, APPENDED, when it landed. The card is built out of classes that
+   already exist (`.card`, `.table-scroll`, `table`, `th.num`, `.absent`,
+   `.muted`), because the price-sorted rung table IS hot-set item 11's plot and it
+   costs no new substrate. What is genuinely new is only the plan header — an id, a
+   state word and a kind, on one line that wraps on a phone.
+
+   THE 320px REWORK DID REACH ABOVE THIS LINE, and the sentence that used to say
+   "nothing above this line changed" is gone rather than left to be believed.
+   `.metrics`, `.summary-head` and `.table-scroll table` were rewritten phone-first
+   in place, because they are the shared substrate this card and the glance and the
+   big picture all render through — a second, later block redeclaring them would put
+   two competing definitions of one grid in one file. THE DCA CARD ITSELF NEEDED NO
+   BREAKPOINT: `.dca-head` already wraps, `.dca-alert` is one line of prose, and the
+   rung table is two columns that fit 254px unwrapped. It has no container.
 
    THE CHART GATE IS RETIRED (spec #285 §6.2, slice #289). This comment used to
    say the chart "and any rewrite of this file" were gated on node 7.10 (#145),
-   the sign-in design issue. The chart shipped in slice #289 and this file was
-   NOT rewritten — the Fill Path block below is appended, nothing above it
-   changed, which is the constraint the gate was really protecting. Leaving the
-   sentence standing would read as a live rule to the next person and stop them
-   building something already built. #145 stays independent. */
+   the sign-in design issue. The chart shipped in slice #289 and this file was NOT
+   rewritten — the constraint the gate was really protecting. Leaving the sentence
+   standing would read as a live rule to the next person and stop them building
+   something already built. #145 stays independent. */
 .dca-plan {
   margin-top: 14px;
 }
@@ -331,38 +473,196 @@ thead th {
 }
 
 /* ── the Fill Path (spec #285, slice #289) ──────────────────────────────────
-   ONE BLOCK, APPENDED — nothing above this line changed, which is the promise
-   the retired chart gate above was really making. Plain hand-written CSS: no
-   styling library, no chart library, no rewrite.
+   ONE BLOCK, APPENDED, when it landed — no rewrite, which is the promise the
+   retired chart gate above was really making. Plain hand-written CSS: no styling
+   library, no chart library. The 320px rework has since edited `.metrics`,
+   `.summary-head` and `.table-scroll table` above the line, in place and phone-
+   first; see the DCA card's header for why those three and no others.
 
    PHONE FIRST, against U's 320px rework. Every width here is fluid and every
    fixed number is a type size or a gap, so the four cards stack the same at
    320px and at desk width; `.dashboard` already caps the line length. */
+/* THE CARD IS THE QUERY CONTAINER, not the viewport. Every rule below asks how wide
+   THIS CARD is, so the header lays itself out the same whether the narrowness comes
+   from a 320px phone or from a column it is dropped into later. */
+.fp-header {
+  container: fp-header / inline-size;
+}
+
 .fp-header h1 {
   margin: 0;
   font-size: 1.15rem;
   overflow-wrap: anywhere;
 }
 
-.fp-sub {
-  margin: 2px 0 12px;
-  font-size: 0.8rem;
+/* Identity block, then Spot. At 320px there is no corner to put a corner figure in,
+   so `block` stacks them and the spot row below takes the full width as a data row —
+   the wrapped-and-right-aligned version orphaned three lines against a left-aligned
+   card and read as debris. The row form is restored at container width. */
+.fp-header-head {
+  display: block;
 }
 
-/* The three measured tiles. `auto-fit` rather than three columns: at 320px they
-   stack, and each tile's absence state is a wrapping em dash plus a cause, which
-   needs the room more than the alignment. */
+/* Title and state badge share a baseline and wrap together, so a long position id
+   pushes the badge to its own line rather than squeezing the title. */
+.fp-header-id {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+  margin-bottom: 10px;
+}
+
+/* THE STATE, AS A TAG. Same colour semantics the DCA card's state word already uses —
+   `pending` deliberately NOT an alarm colour, since a declared plan awaiting its first
+   fill is the normal starting state; `unreadable` is the only one that wants the eye.
+   A chip rather than bare text because here it sits beside a heading and needs an edge
+   to stop reading as part of the title. */
+.fp-badge {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.fp-badge-active {
+  color: var(--pos);
+}
+
+.fp-badge-unreadable {
+  color: var(--warn);
+}
+
+/* ── THE DATA ROWS (narrow) ──────────────────────────────────────────────────
+   Spot and the three tiles are the SAME SHAPE at 320px: label left, figure hard
+   right, one line each. Stacked label-over-value tiles cost two lines apiece and
+   left the numbers on a ragged left edge; the right rail plus `tabular-nums` puts
+   every figure on one axis the eye can run down. */
+.fp-spot,
+.fp-tile {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-end;
+  column-gap: 10px;
+  row-gap: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+/* THE LABEL IS THE ONLY THING THAT GIVES. `flex: 1 1 0` (a zero basis, not `auto`)
+   is what makes "Expected average entry" wrap to two lines instead of shoving its
+   figure onto a line of its own — the label is prose and survives a break, the number
+   is the thing being aligned and must not leave the rail. */
+.fp-spot > .fp-tile-label,
+.fp-tile > .fp-tile-label {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.fp-spot > .fp-tile-value,
+.fp-spot > .fp-spot-value,
+.fp-tile > .fp-tile-value {
+  flex: 0 0 auto;
+  text-align: right;
+}
+
+.fp-spot {
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 12px;
+}
+
+/* SPOT IS CONTEXT, NOT THE ANSWER. It reads in `--muted` like every other reference
+   figure on the card, which leaves Waiting as the one accented number — the hierarchy
+   is carried by exactly one thing being bright, so a second bright figure costs it. */
+.fp-spot-value {
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.fp-spot-note {
+  font-size: 0.7rem;
+}
+
+/* An absent figure carries a cause, and the cause is longer than any price. It wraps
+   under its em dash at the right rail rather than widening the row. */
+.fp-spot .absent,
+.fp-tile .absent {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  text-align: right;
+}
+
+/* One column of rows at 320px; a real grid of tiles once the card is wide enough. */
 .fp-tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  gap: 12px;
+  grid-template-columns: 1fr;
+  gap: 8px;
   margin-bottom: 14px;
 }
 
-.fp-tile {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+@container fp-header (min-width: 380px) {
+  .fp-header-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0 16px;
+  }
+
+  .fp-header-id {
+    flex: 1 1 180px;
+  }
+
+  /* Back to the corner figure: label over value, right-aligned, no rule under it. */
+  .fp-spot {
+    flex-direction: column;
+    align-items: flex-end;
+    column-gap: 0;
+    row-gap: 1px;
+    padding-bottom: 0;
+    border-bottom: 0;
+    margin: 0 0 12px;
+    text-align: right;
+  }
+
+  .fp-spot > .fp-tile-label,
+  .fp-spot > .fp-spot-value {
+    flex: 0 0 auto;
+  }
+
+  .fp-tiles {
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 12px;
+  }
+
+  .fp-tile {
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    column-gap: 0;
+    row-gap: 2px;
+  }
+
+  .fp-tile > .fp-tile-label,
+  .fp-tile > .fp-tile-value {
+    flex: 0 0 auto;
+    text-align: left;
+  }
+
+  .fp-tile .absent {
+    justify-content: flex-start;
+    text-align: left;
+  }
 }
 
 .fp-tile-label {
@@ -401,17 +701,93 @@ thead th {
   font-size: 0.78rem;
 }
 
+/* The measured-layout Waiting block takes the SAME row shape as the tiles above it —
+   label left, figure right — with its sentence breaking to a full-width line under
+   both. `flex: 1 0 100%` is what forces that break, so the sentence never tries to
+   share the rail with the number it explains. */
 .fp-waiting {
   border-top: 1px solid var(--line);
   padding-top: 12px;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-end;
+  column-gap: 10px;
+}
+
+.fp-waiting > .fp-tile-label {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.fp-waiting > .fp-tile-value {
+  flex: 0 0 auto;
+  text-align: right;
 }
 
 .fp-waiting-sub {
+  flex: 1 0 100%;
   margin: 4px 0 0;
   font-size: 0.78rem;
+  text-wrap: pretty;
+}
+
+@container fp-header (min-width: 380px) {
+  .fp-waiting {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    row-gap: 2px;
+  }
+
+  .fp-waiting > .fp-tile-label,
+  .fp-waiting > .fp-tile-value {
+    flex: 0 0 auto;
+    text-align: left;
+  }
+}
+
+/* DAY ZERO'S BLOCK — a headline figure and two quiet projections under it. */
+.fp-expected {
+  margin-bottom: 14px;
+}
+
+.fp-expected .fp-tiles {
+  margin-bottom: 0;
+}
+
+/* THE ONE NUMBER THE CARD IS ABOUT. Label above rather than on the rail: the rail is
+   for the reference rows, and stepping out of it is half of what makes this read first.
+   The other half is size — `--muted` alone lost to the projections, whose strings are
+   simply longer. */
+.fp-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: 12px;
+}
+
+.fp-hero-value {
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The projections are reference, not headline: a step down in size on top of the
+   `--muted` colour they already carried. */
+.fp-tiles-quiet .fp-tile-value {
+  font-size: 0.95rem;
+}
+
+/* A PROJECTION READS QUIETER THAN A MEASUREMENT. Waiting keeps full weight — it is a
+   real total off a reconciliation that ran — while the two expected figures sit in
+   `--muted`, the same colour every other unmeasured thing on this page uses. No new
+   colour: the distinction is one the palette already draws. */
+.fp-expected-value {
+  color: var(--muted);
 }
 
 /* THE TORN-ACT BANNER — above everything, and the only red block on the page
@@ -460,6 +836,42 @@ thead th {
   font-size: 0.95rem;
 }
 
+/* Title left, the ladder's price span right — one row, baseline-aligned so the two read
+   as a heading and its subject rather than as two stacked labels.
+
+   IT WRAPS RATHER THAN SQUEEZES, and the span is the half that gives way. At 254px the
+   two total 217px so the row survives as a row; a deeper ladder (`~$1.2M–$2.3M`) would
+   not, and the choice then is between breaking the TITLE across two lines and dropping
+   the span to its own. The span keeps the right rail on that second line — `margin-left`
+   rather than `space-between`, which aligns a lone wrapped item to the start.
+   No breakpoint: this holds at every width, so there is nothing for a query to ask. */
+.fp-chart-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0 10px;
+}
+
+.fp-chart-head h2 {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.fp-chart-head .fp-chart-range {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+/* Quieter than the title: it is the chart's subject, not a second heading. Tabular
+   figures so the two ends of the span line up as numbers. */
+.fp-chart-range {
+  margin-bottom: 10px;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
 /* The aria-hidden wrapper around the TanStack chart. It measures the card and the
    library owns everything inside it.
 
@@ -472,9 +884,22 @@ thead th {
    tick labels, grid and titles rather than shipping a palette, so setting it here is
    what makes the guides legible in the dark theme. Per-mark paint comes from the same
    variables, named in `PriceDropPathChart`. */
+/* THE CAP IS WHAT KEEPS THE RATIO SANE. The chart's height is now derived from its
+   measured width (`ASPECT_RATIO` in `PriceDropPathChart`), so width and height cannot be
+   tuned independently: uncapped on the 760px column, the same 5:4 box that reads well on
+   a phone becomes a 550px-tall chart. Centred, so it does not read as left-weighted on a
+   wide screen.
+
+   RAISED FROM 360px: capping near the phone width left the desk rendering a phone-sized
+   picture in the middle of a 760px card, and this chart's whole subject is the SHAPE of a
+   curve — the thing that gets harder to read the smaller the box. 500px is still short of
+   the column, so the 5:4 box stays a box rather than becoming a half-viewport wall, and
+   the phone is untouched (it never reached the old cap either). */
 .fp-chart {
   display: block;
   width: 100%;
+  max-width: 500px;
+  margin-inline: auto;
   color: var(--muted);
   font-size: 10px;
 }
@@ -515,18 +940,41 @@ thead th {
   border-top-style: dashed;
 }
 
-/* The now rule is vertical in the chart, so its swatch is too — a horizontal dash
-   here would be a second waiting swatch in a different colour. Solid and `--now`,
-   matching the rule exactly: dashed is reserved for "waiting" on this card. */
+/* The now rule is HORIZONTAL in the chart — price is the y axis now, so spot is a price
+   LEVEL the way a trading chart draws last price — and this swatch turned with it. It
+   was a vertical tick while the rule was vertical; leaving it that way would have made
+   the key draw a mark the picture no longer contains.
+
+   It stays distinguishable from `waiting` on colour and on solidity, not on angle:
+   `--now` and unbroken, where waiting is `--muted` and dashed. */
 .fp-legend-swatch.is-now {
-  width: 0;
-  height: 11px;
-  border-top: 0;
-  border-left: 2px solid var(--now);
+  border-top-color: var(--now);
+}
+
+/* HIDDEN FROM THE EYE, KEPT IN THE ACCESSIBILITY TREE. The standard clip-rect idiom, and
+   every declaration in it is doing a job: `display: none` and `visibility: hidden` would
+   remove the node from the tree along with the layout, which is exactly what must not
+   happen to the chart's substitute caption.
+
+   `clip-path` alongside the legacy `clip` because the latter is deprecated and the former
+   is what current engines honour; `white-space: nowrap` so a long sentence collapsed into
+   a 1px box cannot still contribute scroll height. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* The chart's accessible substitute. Sized as prose, not as a caption footnote:
-   for a screen-reader user this sentence IS the chart. */
+   for a screen-reader user this sentence IS the chart — and since it went `.sr-only`,
+   that reader is the ONLY one it has. */
 .fp-caption {
   margin: 10px 0 0;
   font-size: 0.85rem;
@@ -540,8 +988,26 @@ thead th {
   margin-top: 14px;
 }
 
+/* `width: 100%` IS NOT THE WHOLE STORY for a range input: the UA sheet gives it a 2px
+   side margin, so a full-width slider is 4px wider than its card and the tail of the
+   track sat under the card's border at 320px. The margin goes, not the width. */
 .fp-inspect input {
   width: 100%;
+  margin-inline: 0;
+}
+
+/* THE CARD IS THE QUERY CONTAINER, not the viewport — same rule as `.fp-header`. */
+.fp-selected {
+  container: fp-selected / inline-size;
+}
+
+/* THE HEADING CARRIES THE `next` BADGE NOW — see `SelectedRungCard`. Flex so the badge
+   sits on the heading's baseline row rather than wrapping under it, and `gap` rather than
+   a margin on the badge so the heading reads identically on the rungs that have none. */
+.fp-selected h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .fp-selected-price {
@@ -550,10 +1016,43 @@ thead th {
   font-variant-numeric: tabular-nums;
 }
 
+/* THE SIZE TRAILS THE PRICE — see `RungHeadline`. Colour alone does the demoting, at the
+   same type size: the two figures are one sentence and shrinking half of it would break
+   the line's rhythm and its tabular alignment. */
+.fp-selected-size {
+  color: var(--muted);
+}
+
+/* The joining word may recede furthest of all — it is the only thing on the line that is
+   not a number. */
+.fp-selected-at {
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+/* THE UNIT IS NOT PART OF THE FIGURE. `USD` drops a step so the eye lands on the amount
+   and reads the unit second. NO OPACITY OF ITS OWN any more: it now sits inside
+   `.fp-selected-size`, which is already muted, and stacking the two dimmed the currency
+   past legibility. Size alone separates it from the number it belongs to. */
+.fp-selected-price .fp-unit {
+  font-size: 0.75em;
+}
+
+/* THE SAME DATA ROWS THE HEADER CARD USES — term left, value hard right, on a shared
+   rail — because this `<dl>` is the same kind of thing: a short label and a figure.
+
+   HERE IT IS THE VALUE THAT GIVES, not the label, which is the opposite of the header
+   card and for a reason: one value on this list is not a figure at all. `Order placed
+   at` carries a price AND the sentence `differs from the declared rung`, which is
+   longer than every term on the card put together. Sized the header's way — term
+   `minmax(0, 1fr)`, value `auto` — that one row's max-content ate the whole grid and
+   crushed the term column to zero width, taking `Declared size` and `State` with it.
+   So the terms are sized to content and the value column takes the remainder and wraps
+   inside it, still against the right rail. */
 .fp-detail {
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 4px 12px;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 12px;
   margin: 10px 0 0;
   font-size: 0.85rem;
 }
@@ -564,6 +1063,31 @@ thead th {
 
 .fp-detail dd {
   margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.fp-detail .absent {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* Wide enough for the value column to sit beside its term rather than against the far
+   edge: at desk width a right rail 690px from the label is not an alignment, it is a
+   gap the eye has to cross. */
+@container fp-selected (min-width: 380px) {
+  .fp-detail {
+    grid-template-columns: auto 1fr;
+    gap: 4px 12px;
+  }
+
+  .fp-detail dd {
+    text-align: left;
+  }
+
+  .fp-detail .absent {
+    justify-content: flex-start;
+  }
 }
 
 .fp-pills {
@@ -619,6 +1143,11 @@ thead th {
    with the state painted across the whole of it — a shared bottom border made the
    ladder a grid to be read left-to-right, cell by cell. The gap is what lets the
    run of filled rungs at the top read as a block at a glance. */
+/* THE CARD IS THE QUERY CONTAINER, not the viewport — same rule as `.fp-header`. */
+.fp-list {
+  container: fp-list / inline-size;
+}
+
 .fp-list ul {
   list-style: none;
   display: grid;
@@ -629,12 +1158,35 @@ thead th {
 
 /* EVERY ROW IS A BUTTON so the inspect panel is keyboard- and screen-reader-
    reachable without the chart. Reset to look like a tile, but keep a real focus
-   ring — this is the accessible path and it has to be visible. */
+   ring — this is the accessible path and it has to be visible.
+
+   ── AT 320px THE PRICE IS SIZED AND THE STATE UNFOLDS ───────────────────────────
+   There are 224px inside a tile. The desk shape spends 36 of them on a fixed rung-
+   number gutter and hands the leftover to the state, which took 93px for `matched by
+   price` and left `$57,500.00` in a 71px box it silently overflowed — printing the
+   ladder's own prices through the state beside them. So at this width the gutter
+   shrinks to the two characters it actually holds and the FIGURES column is sized to
+   content: a price never clips, because it is the thing the row is about.
+
+   THE GUTTER SHRINKS BUT STAYS FIXED. Each tile is its own grid, so an `auto` gutter
+   would be measured per tile and `R9` and `R10` would set their prices at different
+   left edges — a ragged ladder in the one list whose whole job is to be read down.
+
+   THE STATE STOPS BEING A COLUMN AND BECOMES PART OF THE TILE'S GRID. Even with the
+   price sized, the remainder is ~80px, and `price passed, unconfirmed` cannot go in:
+   its longest word plus the pill's own border is wider than that, so the loudest rung
+   on the ladder — the one with three qualifiers — was the one that overflowed. That is
+   not fixable by tuning, because no width is guaranteed to hold a pill. `display:
+   contents` dissolves the wrapper so its three children become items of the ROW's grid:
+   the two status lines stay on the right rail in column 3, and the qualifiers take a
+   full-width line of their own, where a pill has the whole tile to sit in. It is the
+   one thing CSS can do here that the markup's nesting otherwise forbids, and it costs
+   no TSX change — see the `@container` block below for the desk shape it returns to. */
 .fp-row {
   display: grid;
-  grid-template-columns: 2.25rem minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
+  grid-template-columns: 1.75rem auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0 10px;
   width: 100%;
   padding: 12px 14px;
   border: 1px solid var(--line);
@@ -645,6 +1197,7 @@ thead th {
   text-align: left;
   cursor: pointer;
 }
+
 
 /* THE SAME THREE COLOURS THE CHART DRAWS WITH, and no fourth: `--pos` filled,
    `--now` next, bare `--bg` waiting. Mixed into the background rather than used
@@ -685,7 +1238,10 @@ thead th {
   outline-offset: 2px;
 }
 
+/* Centred against the whole tile rather than sat on the price's baseline: the rung
+   number labels the tile, not the first figure in it. */
 .fp-row-index {
+  align-self: center;
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 600;
@@ -707,16 +1263,32 @@ thead th {
   letter-spacing: -0.01em;
 }
 
+/* THE SIZE AND ITS `@`, DEMOTED TOGETHER — the row is scanned down the price column, so
+   the price keeps `.fp-row-price`'s weight and everything leading up to it steps back.
+   Weight AND colour here, unlike the inspect card's colour-only demotion: a list row is
+   read at a glance rather than as a sentence, and 700-weight grey still reads as loud.
+
+   Its own rule rather than `.muted` so it stays legible against the `is-filled` and
+   `is-next` tints, which already move the row's colour. */
 .fp-row-size {
   color: var(--muted);
-  font-size: 0.82rem;
-  font-variant-numeric: tabular-nums;
+  font-weight: 400;
 }
 
+/* The preposition recedes one step further than the figure it follows. */
+.fp-row-at {
+  opacity: 0.7;
+}
+
+/* DISSOLVED AT 320px — see `.fp-row`. Its three children are placed on the row's own
+   grid instead; the block at the end of this section is the shape it folds back into. */
 .fp-row-state {
-  display: grid;
-  justify-items: end;
-  gap: 3px;
+  display: contents;
+}
+
+.fp-row-status,
+.fp-row-substatus {
+  grid-column: 3;
   text-align: right;
 }
 
@@ -750,11 +1322,56 @@ thead th {
   color: var(--muted);
 }
 
+/* A FULL-WIDTH LINE OF ITS OWN AT 320px. A pill cannot be made narrower than its
+   longest word, so it is given the whole tile rather than a column that might not
+   hold it; still right-aligned, so it hangs off the same rail as the status above. */
 .fp-row-quals {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 4px;
+  grid-column: 1 / -1;
+  margin-top: 4px;
+}
+
+/* ── THE DESK SHAPE OF A RUNG TILE ──────────────────────────────────────────────
+   Room again: the gutter returns to a size that reads as a column of its own, the
+   figures give their surplus back to the state, and the state folds back UP into the
+   single right-hand cell it was — status over substatus over qualifiers, which all fit
+   side by side once there is width for them.
+
+   THIS BLOCK IS LAST IN THE SECTION ON PURPOSE. A container query carries no extra
+   specificity, so it only beats the phone-first rules above if it comes after them;
+   written beside `.fp-row`, its `display: grid` lost to `.fp-row-state`'s `contents`
+   further down and the desk quietly got the phone's stacked tile. Anything added here
+   must stay below the base rule it answers. */
+@container fp-list (min-width: 380px) {
+  .fp-row {
+    grid-template-columns: 2.25rem minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .fp-row-index {
+    align-self: auto;
+  }
+
+  .fp-row-state {
+    display: grid;
+    justify-items: end;
+    gap: 3px;
+    text-align: right;
+  }
+
+  .fp-row-status,
+  .fp-row-substatus {
+    grid-column: auto;
+  }
+
+  .fp-row-quals {
+    grid-column: auto;
+    margin-top: 0;
+  }
 }
 
 .fp-orphans {
@@ -762,20 +1379,18 @@ thead th {
   font-size: 0.8rem;
 }
 
-/* Precision and completeness are separate <p>s because they are separate claims,
-   and a reader should be able to disbelieve one without the other. */
-.fp-provenance p {
-  margin: 0 0 8px;
-  font-size: 0.78rem;
+/* THE COMPLETENESS LINE, in the selected-rung card — quiet, and separated from the
+   `State` row above by a hairline, because it is the caveat ON that row rather than
+   another fact about the rung. */
+.fp-recorded {
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 0.75rem;
   line-height: 1.5;
-  color: var(--muted);
 }
 
-.fp-provenance p:last-child {
-  margin-bottom: 0;
-}
-
-.fp-spot strong {
+.fp-recorded strong {
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
