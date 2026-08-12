@@ -80,6 +80,36 @@ export type MeasuredFigure =
   | { known: true; value: number }
   | { known: false; why: string };
 
+/**
+ * WHAT THE DECLARED LADDER WOULD ACQUIRE IF IT WERE WALKED — an INTENTION, and a
+ * separate type from `MeasuredFigure` for exactly that reason.
+ *
+ * `MeasuredFigure` means "a figure that was measured, or the named reason it was not",
+ * and its whole job is that no projection can ever stand where a measurement belongs. An
+ * expectation is a third thing: nothing was measured and nothing failed to be measured,
+ * because there was nothing to measure yet. Giving it its own type is what stops a
+ * refactor from quietly passing these numbers to `<Figure>` and printing a projection
+ * under the label `Deployed`. The word "Expected" in the UI copy is the operator-facing
+ * half of that guarantee; this type is the half that survives the next edit.
+ *
+ * BOTH NUMBERS ARE DERIVED FROM RUNGS THE OPERATOR DECLARED, and from nothing else. No
+ * order, no lot and no venue reading is involved.
+ */
+export interface ExpectedFigures {
+  /** Σ over declared rungs of `sizeUsd / priceUsd` — units, if every rung filled. */
+  units: number;
+  /**
+   * Total declared USD ÷ expected units.
+   *
+   * THIS IS A SIZE-WEIGHTED HARMONIC MEAN OF THE RUNG PRICES, NOT THE ARITHMETIC MEAN.
+   * A DCA ladder is convex — the lower rungs commit more capital and buy more units per
+   * dollar — so averaging the prices would overstate the entry the ladder is aiming at,
+   * by more the more convex the operator made it. It is derived from the two totals here
+   * precisely so no caller is tempted to average prices instead.
+   */
+  avgEntryUsd: number;
+}
+
 export type TornActReading =
   | { status: "outstanding"; count: number }
   | { status: "clear" }
@@ -143,7 +173,10 @@ export interface ChartGeometry {
  * visible. Two arms cannot say this: an `else` on `neverPlacedUsd > 0` prints "all of it
  * is resting at the venue" for a ladder with nothing resting at all.
  */
-export type WaitingSplit = "nothing-waiting" | "all-resting" | "partly-unplaced";
+export type WaitingSplit =
+  | "nothing-waiting"
+  | "all-resting"
+  | "partly-unplaced";
 
 export interface FillPathFigures {
   waitingDeclaredUsd: number;
@@ -167,6 +200,23 @@ export interface FillPathView {
   deployed: MeasuredFigure;
   unitsAcquired: MeasuredFigure;
   avgEntry: MeasuredFigure;
+  /**
+   * DAY ZERO — a reconciliation RAN and found nothing filled. See `hasNotStarted`.
+   *
+   * This is NOT the same question as "are the three measured figures absent", even
+   * though today the answer coincides: `figures` absent (absence rule 2) also leaves
+   * all three absent, and that ladder has NOT been established as unstarted — it was
+   * never checked. `false` here therefore covers both "something has filled" and "we
+   * could not tell", which are different facts and stay different downstream.
+   */
+  notStarted: boolean;
+  /**
+   * The declared ladder's own projection — present ONLY on a `notStarted` ladder that
+   * declares enough to project from (see `expectedFigures`). Absent everywhere else,
+   * including on any ladder that has started: once a real fill exists, the measured
+   * figures are the answer and an expectation beside them would compete with it.
+   */
+  expected?: ExpectedFigures;
   /**
    * ABSENT WHEN NO RECONCILIATION RAN — absence rule 2, held all the way to the render.
    * These two totals are present at zero (zero waiting capital is a real answer) but
@@ -232,7 +282,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  */
 export function needsRecording(rung: DcaWireRung): boolean {
   const consumed = rung.venueConsumedQuantity ?? 0;
-  return consumed > 0 && rung.bookAxis !== undefined && rung.bookAxis !== "recorded";
+  return (
+    consumed > 0 && rung.bookAxis !== undefined && rung.bookAxis !== "recorded"
+  );
 }
 
 const CHART_WIDTH = 320;
@@ -241,7 +293,10 @@ const PAD_X = 10;
 const PAD_Y = 12;
 
 /** Absence rule 4's cause, split by absence rule 2's distinction. */
-function measured(value: number | undefined, reconciled: boolean): MeasuredFigure {
+function measured(
+  value: number | undefined,
+  reconciled: boolean,
+): MeasuredFigure {
   if (value !== undefined) return { known: true, value };
   return {
     known: false,
@@ -249,6 +304,68 @@ function measured(value: number | undefined, reconciled: boolean): MeasuredFigur
       ? "no fill recorded yet"
       : "the orders sidecar could not be read for this ladder",
   };
+}
+
+/**
+ * HAS THIS LADDER NOT STARTED BUYING? — the day-zero predicate, spelled here so the
+ * component never re-derives it from the shape of three absences.
+ *
+ * ── THE TWO ABSENCES THIS FUNCTION EXISTS TO KEEP APART ─────────────────────────────
+ * "No figures to show" has two causes and only one of them is day zero:
+ *
+ *  1. `figures` ABSENT (absence rule 2) — the orders sidecar could not be read. NOTHING
+ *     was measured because nothing could be CHECKED. That ladder may be fully walked for
+ *     all this snapshot knows. It is `reconciled: false` and it returns FALSE here, so
+ *     the surface keeps saying it could not check. Projecting an expectation onto it
+ *     would print a confident number on the one row whose whole content is "unknown".
+ *  2. RECONCILIATION RAN AND FOUND NOTHING FILLED — this, and only this, is day zero.
+ *
+ * ALL THREE MEASURED FIGURES MUST BE ABSENT, not just `deployedUsd`. By absence rule 4
+ * the three move together — a recorded fill has cost > 0 AND quantity > 0 — so requiring
+ * all three costs nothing on well-formed input and refuses to call a ladder "unstarted"
+ * off a half-populated `figures` block, which would be a projection standing beside a
+ * real measurement.
+ */
+function hasNotStarted(
+  figures:
+    | { deployedUsd?: number; unitsAcquired?: number; avgEntryUsd?: number }
+    | undefined,
+): boolean {
+  if (figures === undefined) return false;
+  return (
+    figures.deployedUsd === undefined &&
+    figures.unitsAcquired === undefined &&
+    figures.avgEntryUsd === undefined
+  );
+}
+
+/**
+ * THE DECLARED LADDER'S PROJECTION, or nothing.
+ *
+ * ABSENT RATHER THAN DEGRADED when the ladder does not declare enough to project from:
+ * a rung with no `sizeUsd` (a v4 row — absence rule 1's neighbour, the same absence
+ * `chartFor` refuses to plot) contributes no units, and silently summing the rest would
+ * state an expectation for a ladder half of whose capital is unaccounted. A non-positive
+ * price or size is refused for the same reason, and it also keeps the division safe.
+ *
+ * The average is the two TOTALS divided — see `ExpectedFigures.avgEntryUsd` for why the
+ * arithmetic mean of the prices is the wrong number here.
+ */
+function expectedFigures(
+  rungs: readonly FillPathRungView[],
+): ExpectedFigures | undefined {
+  if (rungs.length === 0) return undefined;
+  let totalUsd = 0;
+  let units = 0;
+  for (const rung of rungs) {
+    if (rung.sizeUsd === undefined || rung.sizeUsd <= 0 || rung.priceUsd <= 0) {
+      return undefined;
+    }
+    totalUsd += rung.sizeUsd;
+    units += rung.sizeUsd / rung.priceUsd;
+  }
+  if (units <= 0) return undefined;
+  return { units, avgEntryUsd: totalUsd / units };
 }
 
 /** Absence rule 3: `0` is the all-clear; absent is "could not check". */
@@ -308,7 +425,9 @@ export function composeFillPathPage(
   const reconciled = row.figures !== undefined;
   // Copy before sorting: `latest.report` is the loader's own object, shared with every
   // other surface on the page, and `Array.prototype.sort` is in-place.
-  const wireRungs = [...(row.rungs ?? [])].sort((a, b) => b.priceUsd - a.priceUsd);
+  const wireRungs = [...(row.rungs ?? [])].sort(
+    (a, b) => b.priceUsd - a.priceUsd,
+  );
 
   // ── the two spot-dependent decorations ────────────────────────────────────────────
   // A LAST CLOSE IS NOT NOW. Only a LIVE reading may drive a marker that claims to know
@@ -349,14 +468,21 @@ export function composeFillPathPage(
       ...(rung.declaredPriceMismatch && rung.orderPriceUsd !== undefined
         ? { placedAtUsd: rung.orderPriceUsd }
         : {}),
-      ...(rung.venueAxis === "partly-filled" && rung.venueFilledFraction !== undefined
+      ...(rung.venueAxis === "partly-filled" &&
+      rung.venueFilledFraction !== undefined
         ? { filledPercent: Math.round(rung.venueFilledFraction * 100) }
         : {}),
     };
   });
 
   const waitingDeclaredUsd = row.figures?.waitingDeclaredUsd;
-  const filledRungs = rungs.filter((rung) => rung.venueAxis === "filled").length;
+  const filledRungs = rungs.filter(
+    (rung) => rung.venueAxis === "filled",
+  ).length;
+  // Day zero: the three measured tiles have nothing to say, so the surface says what the
+  // ladder INTENDS instead. `expected` rides on `notStarted` and never outlives it.
+  const notStarted = hasNotStarted(row.figures);
+  const expected = notStarted ? expectedFigures(rungs) : undefined;
 
   return {
     status: "ok",
@@ -370,14 +496,20 @@ export function composeFillPathPage(
       deployed: measured(row.figures?.deployedUsd, reconciled),
       unitsAcquired: measured(row.figures?.unitsAcquired, reconciled),
       avgEntry: measured(row.figures?.avgEntryUsd, reconciled),
-      ...(row.figures === undefined ? {} : { figures: waitingFigures(row.figures) }),
+      notStarted,
+      ...(expected === undefined ? {} : { expected }),
+      ...(row.figures === undefined
+        ? {}
+        : { figures: waitingFigures(row.figures) }),
       rungs,
       // Absence rule 5: absent IS zero — but ONLY beside a present `figures`.
       ...(row.figures === undefined ? {} : { orphanLots: row.orphanLots ?? 0 }),
       tornActs: readTornActs(latest.report.dca.tornActs),
       warnings: {
-        filledNotRecorded: rungs.filter((rung) => rung.filledAtVenueNotRecorded).length,
-        pricePassedNoFill: rungs.filter((rung) => rung.pricePassedUnconfirmed).length,
+        filledNotRecorded: rungs.filter((rung) => rung.filledAtVenueNotRecorded)
+          .length,
+        pricePassedNoFill: rungs.filter((rung) => rung.pricePassedUnconfirmed)
+          .length,
       },
       ...(reconciled
         ? {
@@ -385,7 +517,9 @@ export function composeFillPathPage(
               filledRungs,
               totalRungs: rungs.length,
               percent:
-                rungs.length === 0 ? 0 : Math.round((filledRungs / rungs.length) * 100),
+                rungs.length === 0
+                  ? 0
+                  : Math.round((filledRungs / rungs.length) * 100),
             },
           }
         : {}),
@@ -439,7 +573,11 @@ function spotFields(
   spot: SpotReading,
 ): Pick<FillPathView, "spotUsd" | "spotUnavailable" | "spotLoading"> {
   if (spot.status === "live") {
-    return { spotUsd: spot.priceUsd, spotUnavailable: false, spotLoading: false };
+    return {
+      spotUsd: spot.priceUsd,
+      spotUnavailable: false,
+      spotLoading: false,
+    };
   }
   if (spot.status === "loading") {
     return { spotUnavailable: false, spotLoading: true };
@@ -474,8 +612,14 @@ function chartFor(
   if (rungs.some((rung) => rung.sizeUsd === undefined)) return undefined;
 
   const prices = rungs.map((rung) => rung.priceUsd);
-  const high = Math.max(...prices, ...(livePrice === undefined ? [] : [livePrice]));
-  const low = Math.min(...prices, ...(livePrice === undefined ? [] : [livePrice]));
+  const high = Math.max(
+    ...prices,
+    ...(livePrice === undefined ? [] : [livePrice]),
+  );
+  const low = Math.min(
+    ...prices,
+    ...(livePrice === undefined ? [] : [livePrice]),
+  );
   const maxSize = Math.max(...rungs.map((rung) => rung.sizeUsd!));
   if (high === low || maxSize <= 0) return undefined;
 
