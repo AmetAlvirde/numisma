@@ -1,6 +1,6 @@
 /**
  * `ladder/price-drop-path` — the Price Drop Path's quantitative logic, tested (spec #302
- * slice A, T1–T4).
+ * slices A and C, T1–T4 and T6).
  *
  * WHY THESE FOUR FUNCTIONS ARE TESTED AND THE CHART IS STILL NOT. The chart is
  * presentation (ADR-019) and the repo buys no render harness for it. What used to sit
@@ -40,12 +40,38 @@
  *    clamp warning, and nothing was clamped.
  *  - dropped the bottom-pinned label's `dy` nudge → 1 red. Right reason: the label sat
  *    back in the capital axis's own tick gutter.
+ *
+ * ── MUTATION CHECK, T6 (slice C; performed 2026-08-12) ───────────────────────────────
+ * `deployedMarkFor`'s first red was WEAK — "not a function", which proves only that an
+ * export is missing. So the arms were mutated after green instead. Seven mutants, seven
+ * red on the first round:
+ *
+ *  - removed the over-domain arm entirely — THE DEFECT ITSELF, restored → 2 red, reading
+ *    `expected 5525 to be 4500` and `expected 4501 to be less than or equal to 4500`.
+ *    Right reason: the rule left the plot, at 1.3× the axis, in silence.
+ *  - `>=` instead of `>` on the clamp → the on-the-end test red with `'Deployed ~$4.5K →'`.
+ *    Right reason: a total the plot can draw was clamped and warned about.
+ *  - pinned the rule but left the label `"Deployed"` → 2 red. Right reason: a mark pinned
+ *    to the edge while its label reads like an ordinary plotted value invites the reader to
+ *    measure a position that was clamped — `spotMarkFor`'s own argument.
+ *  - pinned label left at `yLow` → 1 red. Right reason: the bottom-right corner is where a
+ *    below-the-ladder spot label prints, and an overfilled ladder is exactly the one whose
+ *    price has fallen through every rung.
+ *  - REFUSED the rule instead of clamping it → 2 red. The contract allows either arm, so
+ *    this mutant is what makes the ruling a checked decision rather than a preference: the
+ *    reading an overfilled ladder most needs would vanish precisely when it matters.
+ *  - removed the under-domain arm → 2 red, reading `expected -9999 to be greater than or
+ *    equal to 0`. Right reason: a rule off the LEFT edge is exactly as silent as one off
+ *    the right.
+ *  - drew the absent figure as a rule at $0 → 1 red. Right reason: "measured and found to
+ *    have spent nothing" is a different sentence from "no fill has been recorded yet".
  */
 import { describe, expect, it } from "vitest";
 import {
   R_MAX,
   R_MIN,
   cumulate,
+  deployedMarkFor,
   splitAt,
   spotMarkFor,
   withRadius,
@@ -263,5 +289,88 @@ describe("spotMarkFor — the now rule, and what it may claim (T4)", () => {
     expect(spotMarkFor(60_000, BOUNDS)!.y).toBe(60_000);
     expect(spotMarkFor(60_000, BOUNDS)!.label).toBe("spot ~$60K");
     expect(spotMarkFor(50_000, BOUNDS)!.y).toBe(50_000);
+  });
+});
+
+describe("deployedMarkFor — a MEASURED rule on a DECLARED axis (T6)", () => {
+  // A ladder declaring $4,250 in total, whose capital axis `.nice()`s out to $4,500,
+  // spanning 22K–50K in price with the component's own padding. Authored to match the
+  // shape of the `overfilled` fixture's ladder, not copied from any measurement.
+  const BOUNDS = { xStart: 0, xEnd: 4_500, yLow: 21_250, yHigh: 50_750 };
+
+  it("draws no mark at all when there is no measured deployed total", () => {
+    // Day zero. A rule parked at $0 would claim the fund was measured and found to have
+    // spent nothing, which is a different sentence from "no fill has been recorded yet".
+    expect(deployedMarkFor(undefined, BOUNDS)).toBeUndefined();
+  });
+
+  it("plots an IN-DOMAIN total at its own value, unmarked and unnumbered", () => {
+    const mark = deployedMarkFor(910, BOUNDS)!;
+    expect(mark.x).toBe(910);
+    expect(mark.label).toBe("Deployed");
+    // The glyph is the clamp warning, and nothing was clamped.
+    expect(mark.label).not.toContain("→");
+    expect(mark.label).not.toContain("←");
+    // Rides the bottom of the plot, nudged up out of the tick gutter.
+    expect(mark.y).toBe(BOUNDS.yLow);
+    expect(mark.anchor).toBe("start");
+    expect(mark.dx).toBe(4);
+    expect(mark.dy).toBe(-4);
+  });
+
+  it("PINS an overfill to the axis end and says so with a glyph AND the number", () => {
+    // THE DEFECT THIS SLICE EXISTS FOR. `deployed` is measured and the axis is declared,
+    // so the measurement has no reason to respect the axis's end — at 1.3× the declared
+    // total the un-clamped rule drew at 130% of the plot width, outside the plot area,
+    // to the right of the last tick, in silence.
+    const mark = deployedMarkFor(5_525, BOUNDS)!;
+    expect(mark.x).toBe(BOUNDS.xEnd);
+    // Same contract `spotMarkFor` holds: whenever `x` is not the real value, the label
+    // carries the direction glyph, so the mark reads as a direction and not a coordinate.
+    expect(mark.label).toContain("→");
+    // …and the one fact the pinned picture genuinely cannot state any more: the number.
+    expect(mark.label).toBe("Deployed ~$5.5K →");
+    // The label moves to the TOP of the plot when pinned, because the bottom-right corner
+    // is where `spotMarkFor` prints a below-the-ladder spot — and an overfilled ladder is
+    // exactly the one whose price has fallen through every rung.
+    expect(mark.y).toBe(BOUNDS.yHigh);
+    expect(mark.anchor).toBe("end");
+    expect(mark.dx).toBe(-4);
+    expect(mark.dy).toBe(12);
+  });
+
+  it("PINS a total below the axis start the same way, glyph pointing out", () => {
+    const mark = deployedMarkFor(-500, BOUNDS)!;
+    expect(mark.x).toBe(BOUNDS.xStart);
+    expect(mark.label).toBe("← Deployed ~-$500");
+    expect(mark.y).toBe(BOUNDS.yHigh);
+    expect(mark.anchor).toBe("start");
+    expect(mark.dx).toBe(4);
+    expect(mark.dy).toBe(12);
+  });
+
+  it("treats a total sitting exactly ON the axis end as in domain", () => {
+    // Strict comparisons, for `spotMarkFor`'s reason: a value the plot can draw is not
+    // clamped and is not warned about. A ladder walked in full to its declared sizes
+    // lands here, and it is the ordinary case rather than an edge.
+    const mark = deployedMarkFor(BOUNDS.xEnd, BOUNDS)!;
+    expect(mark.x).toBe(BOUNDS.xEnd);
+    expect(mark.label).toBe("Deployed");
+    expect(mark.y).toBe(BOUNDS.yLow);
+  });
+
+  it("never returns an `x` outside the axis, for any total", () => {
+    // THE PROPERTY, ASSERTED AS THE SUBJECT. The old mark had no out-of-domain arm at all
+    // — it was the one plot mark exempt from the contract the spot rule holds. This is
+    // what makes the exemption gone rather than special-cased.
+    const totals = [-9_999, -1, 0, 1, 910, 4_499, 4_500, 4_501, 5_525, 1e9];
+    for (const total of totals) {
+      const mark = deployedMarkFor(total, BOUNDS)!;
+      expect(mark.x).toBeGreaterThanOrEqual(BOUNDS.xStart);
+      expect(mark.x).toBeLessThanOrEqual(BOUNDS.xEnd);
+      // …and a clamped mark is never silent about it.
+      const clamped = mark.x !== total;
+      expect(/[→←]/.test(mark.label)).toBe(clamped);
+    }
   });
 });
