@@ -66,6 +66,9 @@
  *  - drew the absent figure as a rule at $0 → 1 red. Right reason: "measured and found to
  *    have spent nothing" is a different sentence from "no fill has been recorded yet".
  */
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   R_MAX,
@@ -371,6 +374,49 @@ describe("deployedMarkFor — a MEASURED rule on a DECLARED axis (T6)", () => {
       // …and a clamped mark is never silent about it.
       const clamped = mark.x !== total;
       expect(/[→←]/.test(mark.label)).toBe(clamped);
+    }
+  });
+});
+
+/**
+ * THE ONE BRANCH OF THE CHART A TEST CAN SEE WITHOUT A HARNESS (finding on PR #308).
+ *
+ * `PriceDropPathChart` cannot be rendered by any test in this repo (D1, deferred —
+ * `docs/coverage-rationale.md` §6), and its legend is plain JSX rather than a chart mark,
+ * so no pure module holds it. What CAN be read is the source, the way
+ * `rung-state-seam.test.ts` reads its own: whether each entry is GATED at all.
+ *
+ * THE RULE THE CHART SET FOR ITSELF is that each entry appears only when the thing it
+ * explains is on screen — `Filled` on `anyFilled`, `Now` on a known spot. `Waiting` shipped
+ * ungated, so `/ladder-fixture/overfilled` (eight filled rungs, a dashed slice one point
+ * long that draws nothing) printed a grey dashed key for a colour absent from its picture.
+ * This does not check WHICH condition gates which entry — that is behaviour no scan can
+ * see. It checks that no entry is unconditional, which is what drifted.
+ *
+ * MUTATION CHECK (performed 2026-08-12): removed the `anyWaiting` gate again → red,
+ * `legend entry 2 renders unconditionally`. Right reason: that IS the defect. Removed the
+ * `anyFilled` gate → red on entry 1. Right reason: the rule is not about one entry.
+ */
+describe("the chart's legend gates every entry on the mark it explains", () => {
+  const source = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "components", "PriceDropPathChart.tsx"),
+    "utf8",
+  );
+
+  it("renders no legend entry unconditionally", () => {
+    const legend = /<ul className="fp-legend">([\s\S]*?)<\/ul>/.exec(source)?.[1];
+    expect(legend, "the legend is no longer a `fp-legend` list").toBeDefined();
+    // Each `<li>` must be preceded — since the previous entry closed — by a JSX
+    // conditional. `?` covers the two ternary spellings the file already uses (`cond ? (…)
+    // : null` and `cond ? null : (…)`); `&&` covers the other way anyone would write it.
+    const chunks = legend!.split("<li>");
+    expect(chunks.length - 1, "the legend no longer has three entries").toBe(3);
+    for (const [index, chunk] of chunks.slice(0, -1).entries()) {
+      const sincePreviousEntry = chunk.slice(chunk.lastIndexOf("</li>") + 1);
+      expect(
+        /\?|&&/.test(sincePreviousEntry),
+        `legend entry ${index + 1} renders unconditionally`,
+      ).toBe(true);
     }
   });
 });
