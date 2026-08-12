@@ -25,6 +25,17 @@
  *    of the declared price range. The total is the wire's `waitingDeclaredUsd`, not a
  *    figure re-derived here, so the caption and the waiting tile can never disagree.
  *
+ * WHY THE COPY SAYS "STILL WAITING" AND NOT JUST "WAITING" (M7, spec #302 §7, RULED
+ * 2026-08-12). The chart this sentence substitutes for has an x axis that tops out at the
+ * WHOLE DECLARED total, while clause 2's total is the WAITING one. On day zero the two are
+ * the same number and read as a deliberate rhyme; on the first fill they diverge, and an
+ * unqualified "of the $3,500 waiting" sitting beside an axis that ends at $4,600 invites
+ * the reader to treat one figure as a mistyping of the other. Both are correct — the
+ * ADJACENCY was the defect. The ruling puts the qualifier in the PROSE and leaves the
+ * scale alone: prose can carry a qualifier, a scale stays a scale. So "still" is
+ * load-bearing, not decoration, and the caption never names the declared total at all —
+ * it does not narrate the axis.
+ *
  * WHY THE MIDPOINT AND NOT SPOT. A convexity claim has to be about the ladder, not
  * about today. The midpoint of the declared range is a property of the declaration
  * itself, so the sentence says the same thing tomorrow; a spot-anchored threshold would
@@ -116,7 +127,7 @@ export function convexityCaption(input: CaptionInput): string | undefined {
       .filter((rung) => rung.waiting && rung.priceUsd < midpoint)
       .reduce((sum, rung) => sum + rung.sizeUsd!, 0);
     clauses.push(
-      `${wholeUsd(belowMidpoint)} of the ${wholeUsd(waitingTotal)} waiting sits ` +
+      `${wholeUsd(belowMidpoint)} of the ${wholeUsd(waitingTotal)} still waiting sits ` +
         `below the ladder's midpoint, ${wholeUsd(midpoint)}`,
     );
   }

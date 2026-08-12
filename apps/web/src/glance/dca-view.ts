@@ -33,7 +33,7 @@
  * the component decides wording.
  */
 import type { DcaPositionRow, SnapshotAnchor } from "../projection/contract.ts";
-import { needsRecording } from "../ladder/fill-path-view.ts";
+import { needsRecording, venueFilled } from "../ladder/fill-path-view.ts";
 
 /**
  * THE ALERT LINE'S THREE COUNTS (spec #285 G-D13, slice #289) — what the card says
@@ -138,7 +138,7 @@ function alertFor(position: DcaPositionRow): { alert?: DcaAlertView } {
   return {
     alert: {
       rungs: rungs.length,
-      filled: rungs.filter((rung) => rung.venueAxis === "filled").length,
+      filled: rungs.filter(venueFilled).length,
       needsRecording: rungs.filter(needsRecording).length,
     },
   };

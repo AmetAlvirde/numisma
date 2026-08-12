@@ -69,7 +69,7 @@ describe("convexityCaption — the shape of the capital curve, in a sentence", (
       rungs: CONVEX,
       waitingDeclaredUsd: WHOLE_LADDER,
     });
-    expect(caption).toContain("$3,100 of the $4,600 waiting");
+    expect(caption).toContain("$3,100 of the $4,600 still waiting");
     expect(caption).toContain("below the ladder's midpoint, $52,000");
   });
 
@@ -86,7 +86,7 @@ describe("convexityCaption — the shape of the capital curve, in a sentence", (
       ],
       waitingDeclaredUsd: 1_200,
     });
-    expect(caption).toContain("$500 of the $1,200 waiting");
+    expect(caption).toContain("$500 of the $1,200 still waiting");
     expect(caption).toContain("below the ladder's midpoint, $52,000");
   });
 
@@ -100,7 +100,37 @@ describe("convexityCaption — the shape of the capital curve, in a sentence", (
       rungs: walked,
       waitingDeclaredUsd: WHOLE_LADDER - 1_100,
     });
-    expect(caption).toContain("$2,000 of the $3,500 waiting");
+    expect(caption).toContain("$2,000 of the $3,500 still waiting");
+  });
+
+  /**
+   * M7 (spec #302 §7, RULED 2026-08-12) — THE QUALIFIER THAT KEEPS THE CAPTION'S TOTAL
+   * FROM BEING READ AS THE AXIS TOP.
+   *
+   * The chart's x axis tops out at the WHOLE DECLARED total; this sentence names the
+   * WAITING total. On day zero they are the same number and read as a deliberate rhyme.
+   * On the first fill they diverge, and a bare "of the $3,500 waiting" beside an axis
+   * ending at $4,600 invites the reader to treat one as a typo of the other. Both
+   * numbers are correct — the adjacency was the defect. The ruling qualifies the PROSE
+   * and leaves the scale alone: prose can carry a qualifier, a scale stays a scale.
+   */
+  it("says STILL waiting, so its total cannot be read as the axis's declared top", () => {
+    // The same walked ladder as above: $4,600 declared, $1,100 filled, $3,500 waiting.
+    // The axis still tops out at $4,600. The sentence has to say which of the two it
+    // means without naming the other, because the other is not its subject.
+    const walked = CONVEX.map((rung) =>
+      rung.priceUsd === 44_000 ? { ...rung, waiting: false } : rung,
+    );
+    const caption = convexityCaption({
+      rungs: walked,
+      waitingDeclaredUsd: WHOLE_LADDER - 1_100,
+    });
+    expect(caption).toContain("still waiting");
+    // Not the unqualified phrasing this replaced — the teeth for the ruling, so a
+    // future edit cannot quietly drop the word and leave the test green.
+    expect(caption).not.toContain("$3,500 waiting");
+    // The declared total is NOT in the sentence: the caption does not narrate the axis.
+    expect(caption).not.toContain("$4,600");
   });
 
   it("says buys SHRINK when the deepest rung is smaller than the first", () => {

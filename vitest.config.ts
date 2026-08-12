@@ -52,7 +52,8 @@ export default defineConfig({
         "apps/tui/src/smoke-openTui.ts",
         "apps/tui/src/smoke-startup-openTui.ts",
         // apps/web coverage posture (PRD #121 / slice #122). The include glob is
-        // `*.ts`, so the `.tsx` render components (SummaryCard, SectionTable) and
+        // `*.ts`, so the `.tsx` render components (SummaryCard, SectionTable, and the
+        // ladder's FillPath + PriceDropPathChart) and
         // the route/router `.tsx` files are already outside instrumentation — a
         // deliberate decision, not an accident: they are RTL-shaped render surfaces,
         // not Node-unit-testable, and this increment does not add an RTL toolchain

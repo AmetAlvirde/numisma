@@ -62,9 +62,10 @@ have no such spawn test today — they remain untested-by-any-suite, not merely
 uninstrumented — which is a real, open gap, not one this table should imply is
 closed by analogy.
 
-The `.tsx` render components (`SummaryCard`, `SectionTable`) and the route/router
-`.tsx` files are **not** matched by the coverage include glob (`apps/*/src/**/*.ts`
-matches `.ts`, not `.tsx`) — a deliberate posture recorded in §6, not an oversight.
+The `.tsx` render components (`SummaryCard`, `SectionTable`, `FillPath`,
+`PriceDropPathChart`) and the route/router `.tsx` files are **not** matched by the
+coverage include glob (`apps/*/src/**/*.ts` matches `.ts`, not `.tsx`) — a
+deliberate posture recorded in §6, not an oversight.
 
 ## 2. Defensive / unreachable guards (kept on purpose, cannot be tested honestly)
 
@@ -392,8 +393,15 @@ the one account (`auth/seed-account.ts`, `pnpm auth:seed`) is an excluded
 self-executing script (above).
 
 **`.tsx` render components — documented exclusion, not RTL (Open Question
-resolved):** `SummaryCard` and `SectionTable` (and the route/router `.tsx` files)
-are outside instrumentation because the include glob is `*.ts`, not `*.tsx`. This
+resolved):** `SummaryCard`, `SectionTable`, `FillPath` and `PriceDropPathChart`
+(and the route/router `.tsx` files) are outside instrumentation because the include
+glob is `*.ts`, not `*.tsx`. The ladder's two — added to this ledger by spec #302
+slice E (M4) — were the largest uninstrumented surfaces in the app while going
+unnamed here, which is the one thing this document exists to prevent: **no gap is
+silent, including a gap in the account of the gaps.** Their entry is below, after
+the dashboard pair.
+
+For `SummaryCard` and `SectionTable` the exclusion
 is deliberate: they render already-tested engine data (`@numisma/engine/format` +
 the four dashboard types, whose formatting is locked by
 `packages/engine/src/format.test.ts`), and the `CompositionReport` type import in
@@ -415,6 +423,44 @@ assert that the components actually consult them. That is a weaker guarantee tha
 rendering the component, and it is named here rather than implied — it catches a
 surface silently reverting to the raw payload; it cannot catch a layout mistake or
 a wrong branch inside JSX. **The reader must open the page to judge that.**
+
+**`FillPath.tsx` and `PriceDropPathChart.tsx` — the ladder's two (M4, spec #302
+slice E).** Same exclusion, same reason (the glob is `*.ts`), and by line count
+the two largest uninstrumented files in `apps/web`. They went unnamed in this
+ledger through the whole `prototype/tanstack-charts` spike; naming them is the
+policy, because a gap this document does not mention is exactly the gap it exists
+to prevent.
+
+*What compensates, and how much.* The strong part of the answer is that the
+quantitative logic these two used to hold **is no longer in them**: spec #302
+slice A lifted `cumulate`, `withRadius`, `splitAt`, `spotMarkFor`,
+`deployedMarkFor` and the compact-USD formatter into
+`apps/web/src/ladder/price-drop-path.ts`, which IS measured — the repo's own rule
+from the trigger paragraph below ("any branch that cannot be lifted into a pure
+module should buy the toolchain") applied in the direction it was written for, and
+these branches *could* be lifted. Every state a rung can be in is likewise decided
+in the measured `ladder/fill-path-view.ts` and its state copy authored in the
+measured `ladder/rung-state-copy.ts`; the components read decided fields. So the
+chart's arithmetic — the ring scale's floor, the running total's ordering
+dependency, the out-of-domain clamp — is under the number, in `price-drop-path.ts`
+and its tests, rather than inside the blind spot.
+
+*What is left uncovered, stated plainly.* Mark composition and JSX: which mark
+draws which decided field, the `aria-hidden` wrapper and its `.sr-only`
+substitute, the legend's three entries and their swatch classes, the row tints.
+A wrong prop on the right value, or a legend swatch pointed at the wrong token,
+is not catchable here. Two things stand in: the **fixture surface** added by spec
+#302 slice B (`/ladder-fixture/{day-zero,partly-walked,out-of-order,overfilled}`
+under `pnpm --filter @numisma/web dev`), which is the first time any started-ladder
+branch could be rendered by a person at all — a reviewer can open every state
+without touching real data — and the **a11y invariant, which remains unasserted**
+(the chart subtree is `aria-hidden`, nothing in it is focusable, a substitute node
+exists). That last one is the audit's T7, blocked on the deferred component-test
+harness (D1) and held meanwhile by
+[ADR-019](../context/adr/ADR-019-the-chart-is-presentation-its-accessible-substitute-is-generated.md)
+rather than by a test. It is a real, open gap — recorded, not closed by analogy.
+The generated caption that substitute consists of is fully measured
+(`ladder/convexity-caption.test.ts`).
 
 This increment still does **not** add a React Testing Library toolchain (jsdom +
 RTL + the react vite plugin in the test path) — the reliability payoff does not

@@ -163,9 +163,57 @@ describe("the five absence rules", () => {
     dca.positions[0]!.rungs![7] = { id: "rung-8", priceUsd: 44_000, sizeUsd: 250 };
     const rung = ok(dca).rungs.find((r) => r.priceUsd === 44_000)!;
     expect(rung.notPlaced).toBe(true);
-    expect(rung.label).toBe("declared — not placed");
+    expect(rung.stateCopy).toBe("declared — not placed");
     expect(rung.filledPercent).toBeUndefined();
     expect(rung.resting).toBe(false);
+    // AND NOT FILLED. `venueAxis` is optional on this contract, so `filled` has an
+    // undefined arm, and this is it: the absence rule 1 rung. Reading a missing axis as
+    // anything but `false` would tint the row, solidify the path's segment and light the
+    // `Filled` legend entry for a rung no order ever joined.
+    expect(rung.filled).toBe(false);
+  });
+
+  it("decides `filled` off the venue's own statement, once, for every consumer", () => {
+    // THE PREDICATE HAS ONE AUTHORING SITE (spec #302 slice A). The chart's path split,
+    // its dots, the legend, the `is-filled` row tint and the progress count all read this
+    // field; `venueAxis === "filled"` used to be spelled at each of them.
+    const dca = structuredClone(DAY_ZERO);
+    Object.assign(dca.positions[0]!.rungs![0]!, {
+      venueAxis: "filled",
+      label: "filled",
+      venueConsumedQuantity: 1,
+      venueFilledFraction: 1,
+      resting: false,
+    });
+    // A PARTLY-FILLED RUNG IS NOT FILLED. Only the literal says yes: the path's solid
+    // segment stops at a rung the venue has finished, and "some of it" is still waiting.
+    Object.assign(dca.positions[0]!.rungs![1]!, {
+      venueAxis: "partly-filled",
+      label: "partly filled · 40%",
+      venueConsumedQuantity: 0.4,
+      venueFilledFraction: 0.4,
+    });
+    const view = ok(dca);
+    expect(view.rungs.map((rung) => rung.filled)).toEqual([
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
+    // The same field is what the progress count and the chart's circles are derived
+    // from, so none of the three can disagree about which rung filled.
+    expect(view.progress).toEqual({
+      filledRungs: 1,
+      totalRungs: 8,
+      percent: 13,
+    });
+    expect(view.chart!.circles.map((circle) => circle.filled)).toEqual(
+      view.rungs.map((rung) => rung.filled),
+    );
   });
 
   it("tells an unreadable sidecar apart from a ladder that simply has no fills", () => {
@@ -360,8 +408,10 @@ describe("the two spot-dependent decorations — and nothing else moves with pri
 });
 
 describe("the pills, the warnings and the banners", () => {
-  it("carries the wire's own label through — the phone and the desk say one thing", () => {
-    expect(ok(DAY_ZERO).rungs[0]!.label).toBe("waiting");
+  it("authors the state words HERE, from the axes — never off the wire's label", () => {
+    // #306: the wire still carries the engine's `label` (C1 — no wire change), and this
+    // module reads it nowhere. `rung-state-seam.test.ts` is where that is pinned.
+    expect(ok(DAY_ZERO).rungs[0]!.stateCopy).toBe("waiting");
   });
 
   it("counts a venue fill with no recorded lot as the certain warning", () => {
@@ -478,6 +528,130 @@ describe("the chart, its caption, and the provenance footer", () => {
   it("reports progress as rungs walked — zero on day zero, and that is the truth", () => {
     const view = ok(DAY_ZERO);
     expect(view.progress).toEqual({ filledRungs: 0, totalRungs: 8, percent: 0 });
+  });
+});
+
+/**
+ * THE DAY-ZERO PROJECTION — what the declared ladder would acquire, offered ONLY while
+ * there is nothing measured to offer instead.
+ *
+ * EVERY NUMBER BELOW IS HAND-AUTHORED and every expectation is computed by hand in the
+ * comment beside it. Nothing here is seeded from the dev fixture or from any real run.
+ *
+ * THE SECOND HALF OF THIS BLOCK IS THE ONLY COVERAGE THE "SOMETHING FILLED" LAYOUT HAS.
+ * The dev fixture has zero filled rungs, so a browser can only ever exercise the day-zero
+ * path; that the card REVERTS the moment a fill exists is asserted here or nowhere.
+ */
+describe("the expected figures", () => {
+  /**
+   * A DELIBERATELY CONVEX TWO-RUNG LADDER, chosen so the right answer is distinguishable
+   * from both wrong ones:
+   *   $200 at $40,000 → 0.005 units      $600 at $20,000 → 0.030 units
+   *   total $800, total 0.035 units      →  800 / 0.035 = $22,857.14…
+   * The arithmetic mean of the PRICES is $30,000 and the size-weighted arithmetic mean is
+   * $25,000. Neither is the entry this ladder is aiming at.
+   */
+  const CONVEX: DcaBlock = {
+    source: "loaded",
+    unattributable: 0,
+    tornActs: 0,
+    positions: [
+      {
+        positionId: "synthetic-position-2",
+        state: "pending",
+        kind: "dcaLadder",
+        planId: PLAN_ID,
+        rungs: [
+          { id: "rung-1", priceUsd: 40_000, sizeUsd: 200 },
+          { id: "rung-2", priceUsd: 20_000, sizeUsd: 600 },
+        ],
+        figures: { waitingDeclaredUsd: 800, waitingRestingUsd: 800 },
+      },
+    ],
+  };
+
+  it("projects units and a SIZE-WEIGHTED HARMONIC average entry, not a mean of prices", () => {
+    const view = ok(CONVEX);
+    expect(view.notStarted).toBe(true);
+    expect(view.expected).toBeDefined();
+    expect(view.expected!.units).toBeCloseTo(0.035, 12);
+    expect(view.expected!.avgEntryUsd).toBeCloseTo(22_857.142857142855, 6);
+    // The two numbers the convexity makes wrong, named so the guard cannot pass by
+    // accident: the mean of the prices, and the size-weighted mean of the prices.
+    expect(view.expected!.avgEntryUsd).not.toBeCloseTo(30_000, 0);
+    expect(view.expected!.avgEntryUsd).not.toBeCloseTo(25_000, 0);
+  });
+
+  it("keeps the TWO no-figures absences apart — an unread sidecar gets no projection", () => {
+    // Absence rule 2. `figures` absent means nothing could be CHECKED, which is NOT
+    // "this ladder has not started": it may be fully walked for all this row knows.
+    // Projecting here would print a confident number on the one row that says it could
+    // not look, so `notStarted` is false and there is no expectation at all.
+    const dca = structuredClone(CONVEX);
+    delete dca.positions[0]!.figures;
+    const view = ok(dca);
+    expect(view.reconciled).toBe(false);
+    expect(view.notStarted).toBe(false);
+    expect(view.expected).toBeUndefined();
+  });
+
+  it("withdraws the projection the moment anything is measured", () => {
+    // THE REVERTED-TO-TODAY PATH. Once a fill exists the measured figures are the
+    // answer, and an expectation beside them would compete with a measurement.
+    const dca = structuredClone(CONVEX);
+    dca.positions[0]!.figures = {
+      deployedUsd: 200,
+      unitsAcquired: 0.005,
+      avgEntryUsd: 40_000,
+      waitingDeclaredUsd: 600,
+      waitingRestingUsd: 600,
+    };
+    const view = ok(dca);
+    expect(view.notStarted).toBe(false);
+    expect(view.expected).toBeUndefined();
+    expect(view.deployed).toEqual({ known: true, value: 200 });
+  });
+
+  it("does not call a ladder unstarted off a HALF-populated figures block", () => {
+    // All three measured figures move together by construction. One of them present is
+    // not day zero — it is a row this module has no coherent reading of, and the last
+    // thing it should do is stand a projection beside the one real measurement.
+    const dca = structuredClone(CONVEX);
+    dca.positions[0]!.figures = {
+      deployedUsd: 200,
+      waitingDeclaredUsd: 600,
+      waitingRestingUsd: 600,
+    };
+    const view = ok(dca);
+    expect(view.notStarted).toBe(false);
+    expect(view.expected).toBeUndefined();
+  });
+
+  it("refuses to project when a rung declares no size — absent, never partial", () => {
+    // A v4 rung carries no `sizeUsd`. Summing the rest would state an expectation for a
+    // ladder half of whose capital is unaccounted for, which is worse than saying
+    // nothing — the same refusal `chartFor` makes about the same absence.
+    const dca = structuredClone(CONVEX);
+    delete dca.positions[0]!.rungs![1]!.sizeUsd;
+    const view = ok(dca);
+    expect(view.notStarted).toBe(true);
+    expect(view.expected).toBeUndefined();
+  });
+
+  it("projects the live-shaped eight-rung day-zero ladder too", () => {
+    // DAY_ZERO is eight rungs of $250. Every rung's units are 250/price, so the check
+    // that matters is that the average lands strictly INSIDE the price range and below
+    // the mean of the prices — the ladder is flat-sized here, and even that is convex.
+    const view = ok(DAY_ZERO);
+    expect(view.notStarted).toBe(true);
+    expect(view.expected).toBeDefined();
+    const prices = [60_000, 58_000, 56_000, 54_000, 50_000, 48_000, 46_000, 44_000];
+    const units = prices.reduce((sum, price) => sum + 250 / price, 0);
+    expect(view.expected!.units).toBeCloseTo(units, 12);
+    expect(view.expected!.avgEntryUsd).toBeCloseTo(2_000 / units, 6);
+    const arithmetic = prices.reduce((sum, price) => sum + price, 0) / prices.length;
+    expect(view.expected!.avgEntryUsd).toBeLessThan(arithmetic);
+    expect(view.expected!.avgEntryUsd).toBeGreaterThan(44_000);
   });
 });
 
