@@ -262,3 +262,131 @@ export function spotMarkFor(
   // In range: the rule is to scale, so the label carries no direction.
   return { y: spotUsd, label: `spot ${money}`, dy: -4 };
 }
+
+/** The plot's CAPITAL extent — the x domain the axis actually drew, after `.nice()`, plus
+ *  the two price edges a label may ride. `deployedMarkFor` needs the price edges because
+ *  a vertical rule's label has to sit at SOME height, and which height is a function of
+ *  whether the rule was clamped — see there. */
+export interface CapitalBounds {
+  /** $0 — the axis's own floor. See the component: the running total starts at nothing. */
+  xStart: number;
+  /** The whole ladder's DECLARED total, `.nice()`d. `deployed` is MEASURED and has no
+   *  reason to respect it, which is this function's entire subject. */
+  xEnd: number;
+  yLow: number;
+  yHigh: number;
+}
+
+/** The deployed rule and the label that says what it is — every channel the marks need,
+ *  decided here. `x` is a capital value in the chart's own domain and `y` a price in it;
+ *  `dx`/`dy` are the label's pixel nudges and `anchor` which end of the text is pinned. */
+export interface DeployedMark {
+  x: number;
+  y: number;
+  label: string;
+  anchor: "start" | "end";
+  dx: number;
+  dy: number;
+}
+
+/** The clamp warning, as a glyph. HORIZONTAL, because the deployed rule stands on the
+ *  horizontal axis — `spotMarkFor`'s `↑`/`↓` rotated with the quantity they annotate. */
+const OVER_GLYPH = "→";
+const UNDER_GLYPH = "←";
+
+/**
+ * WHERE THE "DEPLOYED" RULE GOES, AND WHAT IT IS ALLOWED TO CLAIM.
+ *
+ * THE AXIS IS DECLARED AND THIS NUMBER IS MEASURED, so the number can leave the axis.
+ * The x domain ends at the whole ladder's cumulative DECLARED total — the sizes the
+ * operator wrote down. `deployed` is what the fund actually spent, off recorded lots, and
+ * nothing makes a measurement respect an intention: fills at market above a declared
+ * level, or lots recorded against the ladder from outside it, both produce a total larger
+ * than the ladder ever declared. At 1.3× it drew at 130% of the plot width — outside the
+ * plot area, to the right of the last tick, in silence.
+ *
+ * SO THE SAME CONTRACT `spotMarkFor` HOLDS, HELD HERE: pin to the edge and SAY SO. This
+ * mark used to be the ONE plot mark exempt from that contract, twenty lines below the
+ * function that states it, for no reason anybody had written down. The exemption is gone
+ * rather than special-cased — the property "`x` is inside the domain, and a clamped `x`
+ * always carries a glyph" is asserted over a range of totals in T6.
+ *
+ * REFUSING THE RULE WAS THE OTHER HONEST OPTION AND IT LOSES. The contract allows either
+ * (refuse, or clamp and mark visibly), but drawing nothing would delete the one reading an
+ * overfilled ladder most needs — that the fund is past the end of what it declared — and
+ * would delete it exactly when it matters, leaving a picture indistinguishable from a
+ * ladder walked precisely to plan. Clamping keeps the fact and marks the position as a
+ * direction. It is also the treatment already on the chart, so the surface holds ONE
+ * out-of-domain idea rather than two.
+ *
+ * THE PINNED LABEL CARRIES THE NUMBER; THE IN-DOMAIN ONE DOES NOT. In domain the rule's
+ * position IS the number, read off the axis it stands on, and printing it again beside a
+ * figure the header card already shows to the cent would be a third copy. Pinned, the
+ * position is a direction and the number is the one fact the picture can no longer state —
+ * the same trade `spotMarkFor` makes, and the reason its clamped labels print a price.
+ *
+ * THE PINNED LABEL MOVES TO THE TOP OF THE PLOT. In domain it sits at the bottom, where
+ * the rule meets its axis. Pinned to the right edge it would land in the bottom-right
+ * corner — which is exactly where `spotMarkFor` prints a BELOW-the-ladder spot, and an
+ * overfilled ladder is precisely the one whose price has fallen through every rung. Two
+ * labels in one corner is a collision that only ever happens on the fixture this slice was
+ * built against. The top edge is empty by construction: nothing is drawn above the
+ * shallowest rung except an above-the-ladder spot label, which sits OUTSIDE the plot.
+ *
+ * `deployedUsd` IS MEASURED OR ABSENT. The caller passes `undefined` for the `known: false`
+ * arm of its `MeasuredFigure` rather than a zero — a rule parked at $0 would claim the
+ * fund had been measured and found to have spent nothing, which is a different sentence
+ * from "no fill has been recorded yet". The reason lives in the figure; only its presence
+ * reaches here, which is what keeps this module free of the view contract.
+ *
+ * THE UNDER-DOMAIN ARM IS UNREACHABLE THROUGH THE ENGINE and is drawn anyway. A measured
+ * spend cannot be negative, and the axis floor is a fixed $0 — but "nothing leaves the
+ * domain" is worth having as a property of this function rather than as a case analysis
+ * of its callers, and a rule drawn off the left edge would be exactly as silent as the
+ * one off the right was.
+ */
+export function deployedMarkFor(
+  deployedUsd: number | undefined,
+  bounds: CapitalBounds,
+): DeployedMark | undefined {
+  if (deployedUsd === undefined) return undefined;
+
+  if (deployedUsd > bounds.xEnd) {
+    return {
+      x: bounds.xEnd,
+      y: bounds.yHigh,
+      // The glyph sits at the edge it was pinned to, pointing off the plot — so it trails
+      // the text here and leads it below. `~` because this copy is compacted, while the
+      // header card prints the same reading to the cent.
+      label: `Deployed ~${COMPACT_USD.format(deployedUsd)} ${OVER_GLYPH}`,
+      anchor: "end",
+      dx: -4,
+      // DOWN, INTO the plot, because the label rides the plot's top edge here — the one
+      // nudge on this mark that is not simply "clear of the axis".
+      dy: 12,
+    };
+  }
+
+  if (deployedUsd < bounds.xStart) {
+    return {
+      x: bounds.xStart,
+      y: bounds.yHigh,
+      label: `${UNDER_GLYPH} Deployed ~${COMPACT_USD.format(deployedUsd)}`,
+      anchor: "start",
+      dx: 4,
+      dy: 12,
+    };
+  }
+
+  // In domain: the rule is to scale, so the label carries no direction and no number.
+  return {
+    x: deployedUsd,
+    y: bounds.yLow,
+    label: "Deployed",
+    anchor: "start",
+    dx: 4,
+    // UP, off the price axis's floor, so the word sits inside the plot rather than in the
+    // capital axis's own tick gutter.
+    dy: -4,
+  };
+}
