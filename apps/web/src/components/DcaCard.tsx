@@ -21,9 +21,11 @@ import type { DcaPositionView, DcaView } from "../glance/dca-view.ts";
  * This header used to say a price-axis chart was "gated on node 7.10 (#145)" — the
  * sign-in design issue. THAT WAS TRUE AND IS NOT ANY MORE, and a false constraint left
  * standing is worse than none: the next reader takes it as a live rule and does not
- * build the thing. The chart shipped in slice #289 as hand-rolled SVG on
- * `/ladder/$planId` — no chart library, and `styles.css` gained an appended block with
- * nothing above it changed, so the constraints the gate was protecting held anyway.
+ * build the thing. The chart shipped in slice #289 on `/ladder/$planId`, and `styles.css`
+ * gained an appended block with nothing above it changed, so the constraints the gate was
+ * protecting held anyway. This paragraph also used to say "no chart library" — true of
+ * #289's hand-rolled SVG, FALSE SINCE the Price Drop Path adopted `@tanstack/charts`
+ * (**ADR-018**), which is the only place that decision is recorded (M5.1, spec #302 §5).
  * #145 stays independent (G-D10a); this card inherits the theme when it lands.
  *
  * THE TABLE IS STILL THE PLOT HERE. The rungs price-sorted descending — the sort lives

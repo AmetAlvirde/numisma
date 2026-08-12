@@ -81,6 +81,7 @@ These are the seams most likely to be misread from the tree alone:
 | [`hosted-cutover-runbook.md`](./hosted-cutover-runbook.md) | The end-to-end cutover to hosted, step by step. |
 | [`coverage-rationale.md`](./coverage-rationale.md) | What the measured coverage number includes, what is excluded, and why each exclusion is honest. |
 | [`domain-model.md`](./domain-model.md) | The domain vocabulary: the verbs, position semantics, the closed book, the invalidation watch, the profit-split, and Orders. |
+| [`ladder-fill-path.md`](./ladder-fill-path.md) | The DCA ladder card's two product rules: the day-zero projection (and why it is already reliable by construction), and the three-colour state key the picture and the rung list share. |
 | [`scripts.md`](./scripts.md) | The full `pnpm` script reference across all workspace members. |
 | [`local-data.md`](./local-data.md) | The durable-store rule, the `<dataDir>` layout, the write allowlist, and the `<fund>`/`<exchange>` placeholder convention. |
 

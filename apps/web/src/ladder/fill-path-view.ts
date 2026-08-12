@@ -33,8 +33,9 @@
  * confident lie. They are not symmetrical, and the asymmetry is deliberate:
  *
  *  1. A RUNG WITH NO ORDER JOINED carries only `{id, priceUsd, sizeUsd}` — no zeroed
- *     quantities, no label (`push/dca-block.ts`'s `toWireRung`). That absence IS
- *     `declared — not placed`. A missing `venueConsumedQuantity` is not a 0% fill.
+ *     quantities, no axes (`push/dca-block.ts`'s `toWireRung`). That absence IS
+ *     `declared — not placed`, spelled by `ladder/rung-state-copy.ts`. A missing
+ *     `venueConsumedQuantity` is not a 0% fill.
  *  2. `figures` PRESENT means a reconciliation ran at all. Absent means the orders
  *     sidecar was unreadable or only partly read — NOT that nothing is placed. The two
  *     get different causes on the same em-dash, because they are different facts.
@@ -64,6 +65,7 @@ import type {
   SnapshotAnchor,
 } from "../projection/contract.ts";
 import { convexityCaption } from "./convexity-caption.ts";
+import { rungStateCopy } from "./rung-state-copy.ts";
 
 /**
  * What the caller knows about spot right now. THREE arms, because "still loading" and
@@ -80,6 +82,36 @@ export type MeasuredFigure =
   | { known: true; value: number }
   | { known: false; why: string };
 
+/**
+ * WHAT THE DECLARED LADDER WOULD ACQUIRE IF IT WERE WALKED — an INTENTION, and a
+ * separate type from `MeasuredFigure` for exactly that reason.
+ *
+ * `MeasuredFigure` means "a figure that was measured, or the named reason it was not",
+ * and its whole job is that no projection can ever stand where a measurement belongs. An
+ * expectation is a third thing: nothing was measured and nothing failed to be measured,
+ * because there was nothing to measure yet. Giving it its own type is what stops a
+ * refactor from quietly passing these numbers to `<Figure>` and printing a projection
+ * under the label `Deployed`. The word "Expected" in the UI copy is the operator-facing
+ * half of that guarantee; this type is the half that survives the next edit.
+ *
+ * BOTH NUMBERS ARE DERIVED FROM RUNGS THE OPERATOR DECLARED, and from nothing else. No
+ * order, no lot and no venue reading is involved.
+ */
+export interface ExpectedFigures {
+  /** Σ over declared rungs of `sizeUsd / priceUsd` — units, if every rung filled. */
+  units: number;
+  /**
+   * Total declared USD ÷ expected units.
+   *
+   * THIS IS A SIZE-WEIGHTED HARMONIC MEAN OF THE RUNG PRICES, NOT THE ARITHMETIC MEAN.
+   * A DCA ladder is convex — the lower rungs commit more capital and buy more units per
+   * dollar — so averaging the prices would overstate the entry the ladder is aiming at,
+   * by more the more convex the operator made it. It is derived from the two totals here
+   * precisely so no caller is tempted to average prices instead.
+   */
+  avgEntryUsd: number;
+}
+
 export type TornActReading =
   | { status: "outstanding"; count: number }
   | { status: "clear" }
@@ -93,14 +125,51 @@ export interface FillPathRungView {
   ladderIndex: number;
   priceUsd: number;
   sizeUsd?: number;
-  /** The wire's label, or the never-placed state that an absent label encodes. */
-  label: string;
+  /**
+   * THE STATE WORDS, AUTHORED ON THIS SIDE — `rungStateCopy`'s output, from the two axes
+   * (see `ladder/rung-state-copy.ts` for why the engine's `label` is not read here).
+   *
+   * IT IS COPY, AND NOTHING BRANCHES ON IT. Every component that used to compare it now
+   * reads a fact beside it — `venueResting`, `notPlaced`, `filledPercent`. The field is
+   * named for what it is so that a comparison against it reads as the mistake it is.
+   */
+  stateCopy: string;
   venueAxis?: DcaWireVenueAxis;
   bookAxis?: DcaWireBookAxis;
+  /**
+   * THE VENUE FILLED THIS RUNG — decided here, and nowhere else on the web side.
+   *
+   * This is the one state the fill path's three-colour key turns on: the solid segment,
+   * the filled dot, the `Filled` legend entry and the tinted row all read it, and a
+   * picture that disagreed with its own legend about which rung filled would be the
+   * surface contradicting its own caption. `venueAxis === "filled"` was spelled at six
+   * sites before this field existed; it is now spelled once, by `venueFilled`.
+   *
+   * `venueAxis` IS OPTIONAL ON THIS CONTRACT, AND ITS ABSENCE MEANS NEVER PLACED
+   * (absence rule 1) — so the undefined arm is `false`. A rung no order ever joined has
+   * not filled, and neither has a rung whose fill state is unavailable: `true` here is
+   * only ever the venue's own positive statement, never an inference from a gap.
+   */
+  filled: boolean;
   /** No order ever joined this rung — absence rule 1. */
   notPlaced: boolean;
   /** An order is still claiming capital at the venue for this rung. */
   resting: boolean;
+  /**
+   * THE VENUE IS HOLDING AN ORDER AND HAS CONSUMED NOTHING — `venueAxis === "resting"`,
+   * decided here, and the FACT the two components branch on where they used to compare
+   * the engine's `waiting` literal.
+   *
+   * NOT THE SAME QUESTION AS `resting` ABOVE, and the pair is why this field exists.
+   * `resting` is "the order still claims capital", which a PARTLY FILLED rung also does;
+   * this is "the venue has said nothing about it yet", which is the ladder's ordinary
+   * state and the one the surface prints as an empty state column. Suppressing on
+   * `resting` would blank the column on a rung that is 40% filled.
+   *
+   * Absence of `venueAxis` is `false`, both times: a rung no order joined is not resting,
+   * and a rung whose fill state is unavailable is not a rung the venue is holding.
+   */
+  venueResting: boolean;
   /** Unfilled at the venue: what `waitingDeclaredUsd` is summed over. */
   waiting: boolean;
   /** SPOT-DEPENDENT: the first rung a falling price would reach. */
@@ -109,7 +178,20 @@ export interface FillPathRungView {
   pricePassedUnconfirmed: boolean;
   /** The venue says filled; the book has no lot for it. A call to action. */
   filledAtVenueNotRecorded: boolean;
-  /** The join was inferred, not declared — the surface showing its own confidence. */
+  /**
+   * The join was inferred (`joinProvenance === "price-matched"`), not declared.
+   *
+   * NOTHING RENDERS THIS, AND THAT IS DELIBERATE (M5.3, spec #302 §5). This doc used to
+   * call it "the surface showing its own confidence", which read as a claim that the rung
+   * list draws it; `RowState`'s own header, written in the same commit, says the opposite
+   * and is the one that is true — a price-matched join is how a limit ladder NORMALLY
+   * reconciles, so marking it marked the ordinary case with nothing to compare against.
+   * What the mark was guarding survives as `declaredPriceMismatch` on the inspect card.
+   *
+   * THE FIELD STAYS ANYWAY (D7, standing AAR call): it is a decided conclusion the UI has
+   * chosen not to draw, and unpicking a view module for a presentation call would be the
+   * wrong layer to edit. A reader looking for its render site should stop looking.
+   */
   matchedByPrice: boolean;
   /** A declared join whose order sits at a different price. Honored, and flagged. */
   placedAtUsd?: number;
@@ -125,7 +207,22 @@ export interface ChartCircle {
   next: boolean;
 }
 
-/** Hand-rolled SVG geometry — no chart library; the repo has none and adds none. */
+/**
+ * Hand-rolled SVG geometry.
+ *
+ * THIS DOCSTRING USED TO ASSERT "no chart library; the repo has none and adds none" —
+ * TRUE WHEN WRITTEN, FALSE SINCE THIS BRANCH'S FIRST COMMIT (M5.1, spec #302 §5). The web
+ * surface adopted `@tanstack/charts` to draw the Price Drop Path, knowingly and priced:
+ * see **ADR-018**, which is now the single home for that decision and supersedes — not
+ * corrects — the no-library posture. A false constraint left standing is worse than none,
+ * because the next reader takes it as a live rule.
+ *
+ * WHAT THIS TYPE IS FOR NOW is therefore narrower than it looks: the picture is drawn by
+ * `PriceDropPathChart` off `price-drop-path.ts`, and the only field with a live consumer
+ * is `nowX`, read as a message chain to answer "is spot live". Finishing the demolition —
+ * and promoting `spotIsLive` to a named boolean so the chain goes away — is **slice 3 of
+ * spec #285**, which owns this code. Nothing here is edited by #302 except this comment.
+ */
 export interface ChartGeometry {
   width: number;
   height: number;
@@ -143,7 +240,10 @@ export interface ChartGeometry {
  * visible. Two arms cannot say this: an `else` on `neverPlacedUsd > 0` prints "all of it
  * is resting at the venue" for a ladder with nothing resting at all.
  */
-export type WaitingSplit = "nothing-waiting" | "all-resting" | "partly-unplaced";
+export type WaitingSplit =
+  | "nothing-waiting"
+  | "all-resting"
+  | "partly-unplaced";
 
 export interface FillPathFigures {
   waitingDeclaredUsd: number;
@@ -167,6 +267,23 @@ export interface FillPathView {
   deployed: MeasuredFigure;
   unitsAcquired: MeasuredFigure;
   avgEntry: MeasuredFigure;
+  /**
+   * DAY ZERO — a reconciliation RAN and found nothing filled. See `hasNotStarted`.
+   *
+   * This is NOT the same question as "are the three measured figures absent", even
+   * though today the answer coincides: `figures` absent (absence rule 2) also leaves
+   * all three absent, and that ladder has NOT been established as unstarted — it was
+   * never checked. `false` here therefore covers both "something has filled" and "we
+   * could not tell", which are different facts and stay different downstream.
+   */
+  notStarted: boolean;
+  /**
+   * The declared ladder's own projection — present ONLY on a `notStarted` ladder that
+   * declares enough to project from (see `expectedFigures`). Absent everywhere else,
+   * including on any ladder that has started: once a real fill exists, the measured
+   * figures are the answer and an expectation beside them would compete with it.
+   */
+  expected?: ExpectedFigures;
   /**
    * ABSENT WHEN NO RECONCILIATION RAN — absence rule 2, held all the way to the render.
    * These two totals are present at zero (zero waiting capital is a real answer) but
@@ -232,7 +349,27 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  */
 export function needsRecording(rung: DcaWireRung): boolean {
   const consumed = rung.venueConsumedQuantity ?? 0;
-  return consumed > 0 && rung.bookAxis !== undefined && rung.bookAxis !== "recorded";
+  return (
+    consumed > 0 && rung.bookAxis !== undefined && rung.bookAxis !== "recorded"
+  );
+}
+
+/**
+ * THE FILLED PREDICATE, SPELLED ONCE — the venue's own positive statement that this rung
+ * filled, and the only place in `apps/web` that reads the literal.
+ *
+ * EXPORTED BECAUSE TWO SURFACES ASK IT OFF THE WIRE, the same reason `needsRecording` is:
+ * this page decides `FillPathRungView.filled` with it, and `glance/dca-view.ts` counts
+ * filled rungs for the DCA card on `/`. Every other consumer reads the decided field.
+ * Six copies of `venueAxis === "filled"` were six chances for the picture, the legend and
+ * the list to drift apart about the one state they all colour.
+ *
+ * ABSENCE IS NOT A FILL. `venueAxis` is optional on the wire, and both of its absences —
+ * no order ever joined (absence rule 1), or a sidecar that could not be read (rule 2) —
+ * are `false` here. Only the literal says yes.
+ */
+export function venueFilled(rung: DcaWireRung): boolean {
+  return rung.venueAxis === "filled";
 }
 
 const CHART_WIDTH = 320;
@@ -241,7 +378,10 @@ const PAD_X = 10;
 const PAD_Y = 12;
 
 /** Absence rule 4's cause, split by absence rule 2's distinction. */
-function measured(value: number | undefined, reconciled: boolean): MeasuredFigure {
+function measured(
+  value: number | undefined,
+  reconciled: boolean,
+): MeasuredFigure {
   if (value !== undefined) return { known: true, value };
   return {
     known: false,
@@ -251,6 +391,68 @@ function measured(value: number | undefined, reconciled: boolean): MeasuredFigur
   };
 }
 
+/**
+ * HAS THIS LADDER NOT STARTED BUYING? — the day-zero predicate, spelled here so the
+ * component never re-derives it from the shape of three absences.
+ *
+ * ── THE TWO ABSENCES THIS FUNCTION EXISTS TO KEEP APART ─────────────────────────────
+ * "No figures to show" has two causes and only one of them is day zero:
+ *
+ *  1. `figures` ABSENT (absence rule 2) — the orders sidecar could not be read. NOTHING
+ *     was measured because nothing could be CHECKED. That ladder may be fully walked for
+ *     all this snapshot knows. It is `reconciled: false` and it returns FALSE here, so
+ *     the surface keeps saying it could not check. Projecting an expectation onto it
+ *     would print a confident number on the one row whose whole content is "unknown".
+ *  2. RECONCILIATION RAN AND FOUND NOTHING FILLED — this, and only this, is day zero.
+ *
+ * ALL THREE MEASURED FIGURES MUST BE ABSENT, not just `deployedUsd`. By absence rule 4
+ * the three move together — a recorded fill has cost > 0 AND quantity > 0 — so requiring
+ * all three costs nothing on well-formed input and refuses to call a ladder "unstarted"
+ * off a half-populated `figures` block, which would be a projection standing beside a
+ * real measurement.
+ */
+function hasNotStarted(
+  figures:
+    | { deployedUsd?: number; unitsAcquired?: number; avgEntryUsd?: number }
+    | undefined,
+): boolean {
+  if (figures === undefined) return false;
+  return (
+    figures.deployedUsd === undefined &&
+    figures.unitsAcquired === undefined &&
+    figures.avgEntryUsd === undefined
+  );
+}
+
+/**
+ * THE DECLARED LADDER'S PROJECTION, or nothing.
+ *
+ * ABSENT RATHER THAN DEGRADED when the ladder does not declare enough to project from:
+ * a rung with no `sizeUsd` (a v4 row — absence rule 1's neighbour, the same absence
+ * `chartFor` refuses to plot) contributes no units, and silently summing the rest would
+ * state an expectation for a ladder half of whose capital is unaccounted. A non-positive
+ * price or size is refused for the same reason, and it also keeps the division safe.
+ *
+ * The average is the two TOTALS divided — see `ExpectedFigures.avgEntryUsd` for why the
+ * arithmetic mean of the prices is the wrong number here.
+ */
+function expectedFigures(
+  rungs: readonly FillPathRungView[],
+): ExpectedFigures | undefined {
+  if (rungs.length === 0) return undefined;
+  let totalUsd = 0;
+  let units = 0;
+  for (const rung of rungs) {
+    if (rung.sizeUsd === undefined || rung.sizeUsd <= 0 || rung.priceUsd <= 0) {
+      return undefined;
+    }
+    totalUsd += rung.sizeUsd;
+    units += rung.sizeUsd / rung.priceUsd;
+  }
+  if (units <= 0) return undefined;
+  return { units, avgEntryUsd: totalUsd / units };
+}
+
 /** Absence rule 3: `0` is the all-clear; absent is "could not check". */
 function readTornActs(count: number | undefined): TornActReading {
   if (count === undefined) return { status: "unchecked" };
@@ -258,17 +460,13 @@ function readTornActs(count: number | undefined): TornActReading {
 }
 
 /**
- * Whether a rung's label should be the never-placed state.
- *
- * ABSENCE RULE 1 AND ABSENCE RULE 2 MEET HERE, and conflating them is the bug this
- * function exists to prevent. A missing `venueAxis` means "no order joined" ONLY when a
- * reconciliation ran at all; on a v4 row, or one whose sidecar could not be read, the
- * same missing field means "unknown" — and rendering that as `declared — not placed`
- * would be the surface stating a fact nobody established.
+ * THE RESTING PREDICATE, spelled once — the venue holds an order for this rung and has
+ * consumed none of it. See {@link FillPathRungView.venueResting} for why it is not
+ * `rung.resting`, and `ladder/rung-state-copy.ts` for what used to answer this question
+ * (a comparison against the engine's `waiting` string, at two component sites).
  */
-function labelFor(rung: DcaWireRung, reconciled: boolean): string {
-  if (rung.label !== undefined) return rung.label;
-  return reconciled ? "declared — not placed" : "fill state unavailable";
+function venueResting(rung: DcaWireRung): boolean {
+  return rung.venueAxis === "resting";
 }
 
 export function composeFillPathPage(
@@ -308,14 +506,16 @@ export function composeFillPathPage(
   const reconciled = row.figures !== undefined;
   // Copy before sorting: `latest.report` is the loader's own object, shared with every
   // other surface on the page, and `Array.prototype.sort` is in-place.
-  const wireRungs = [...(row.rungs ?? [])].sort((a, b) => b.priceUsd - a.priceUsd);
+  const wireRungs = [...(row.rungs ?? [])].sort(
+    (a, b) => b.priceUsd - a.priceUsd,
+  );
 
   // ── the two spot-dependent decorations ────────────────────────────────────────────
   // A LAST CLOSE IS NOT NOW. Only a LIVE reading may drive a marker that claims to know
   // where price is; a stale number decorating rungs would be the page asserting a
   // present-tense fact it does not have.
   const livePrice = spot.status === "live" ? spot.priceUsd : undefined;
-  const isWaiting = (rung: DcaWireRung) => rung.venueAxis !== "filled";
+  const isWaiting = (rung: DcaWireRung) => !venueFilled(rung);
   const nextRung =
     livePrice === undefined
       ? undefined
@@ -331,16 +531,32 @@ export function composeFillPathPage(
     // unplaced, which its own pill already says.
     const pricePassedUnconfirmed =
       livePrice !== undefined && resting && rung.priceUsd >= livePrice;
+    // MEASURED, and decided before the words so the words can be authored FROM it: the
+    // percentage the state copy carries and the percentage the pill prints are the same
+    // number by construction, not two roundings that agree.
+    const filledPercent =
+      rung.venueAxis === "partly-filled" && rung.venueFilledFraction !== undefined
+        ? Math.round(rung.venueFilledFraction * 100)
+        : undefined;
     return {
       key: rung.id ?? `rung-at-${rung.priceUsd}`,
       ladderIndex: index + 1,
       priceUsd: rung.priceUsd,
       ...(rung.sizeUsd === undefined ? {} : { sizeUsd: rung.sizeUsd }),
-      label: labelFor(rung, reconciled),
+      // THE ENGINE'S `label` IS NOT READ — see `ladder/rung-state-copy.ts`. The facts go
+      // in; the words come out on this side of the package boundary.
+      stateCopy: rungStateCopy({
+        reconciled,
+        ...(rung.venueAxis === undefined ? {} : { venueAxis: rung.venueAxis }),
+        ...(rung.bookAxis === undefined ? {} : { bookAxis: rung.bookAxis }),
+        ...(filledPercent === undefined ? {} : { filledPercent }),
+      }),
       ...(rung.venueAxis === undefined ? {} : { venueAxis: rung.venueAxis }),
       ...(rung.bookAxis === undefined ? {} : { bookAxis: rung.bookAxis }),
+      filled: venueFilled(rung),
       notPlaced,
       resting,
+      venueResting: venueResting(rung),
       waiting: isWaiting(rung),
       isNext: rung === nextRung,
       pricePassedUnconfirmed,
@@ -349,14 +565,16 @@ export function composeFillPathPage(
       ...(rung.declaredPriceMismatch && rung.orderPriceUsd !== undefined
         ? { placedAtUsd: rung.orderPriceUsd }
         : {}),
-      ...(rung.venueAxis === "partly-filled" && rung.venueFilledFraction !== undefined
-        ? { filledPercent: Math.round(rung.venueFilledFraction * 100) }
-        : {}),
+      ...(filledPercent === undefined ? {} : { filledPercent }),
     };
   });
 
   const waitingDeclaredUsd = row.figures?.waitingDeclaredUsd;
-  const filledRungs = rungs.filter((rung) => rung.venueAxis === "filled").length;
+  const filledRungs = rungs.filter((rung) => rung.filled).length;
+  // Day zero: the three measured tiles have nothing to say, so the surface says what the
+  // ladder INTENDS instead. `expected` rides on `notStarted` and never outlives it.
+  const notStarted = hasNotStarted(row.figures);
+  const expected = notStarted ? expectedFigures(rungs) : undefined;
 
   return {
     status: "ok",
@@ -370,14 +588,20 @@ export function composeFillPathPage(
       deployed: measured(row.figures?.deployedUsd, reconciled),
       unitsAcquired: measured(row.figures?.unitsAcquired, reconciled),
       avgEntry: measured(row.figures?.avgEntryUsd, reconciled),
-      ...(row.figures === undefined ? {} : { figures: waitingFigures(row.figures) }),
+      notStarted,
+      ...(expected === undefined ? {} : { expected }),
+      ...(row.figures === undefined
+        ? {}
+        : { figures: waitingFigures(row.figures) }),
       rungs,
       // Absence rule 5: absent IS zero — but ONLY beside a present `figures`.
       ...(row.figures === undefined ? {} : { orphanLots: row.orphanLots ?? 0 }),
       tornActs: readTornActs(latest.report.dca.tornActs),
       warnings: {
-        filledNotRecorded: rungs.filter((rung) => rung.filledAtVenueNotRecorded).length,
-        pricePassedNoFill: rungs.filter((rung) => rung.pricePassedUnconfirmed).length,
+        filledNotRecorded: rungs.filter((rung) => rung.filledAtVenueNotRecorded)
+          .length,
+        pricePassedNoFill: rungs.filter((rung) => rung.pricePassedUnconfirmed)
+          .length,
       },
       ...(reconciled
         ? {
@@ -385,7 +609,9 @@ export function composeFillPathPage(
               filledRungs,
               totalRungs: rungs.length,
               percent:
-                rungs.length === 0 ? 0 : Math.round((filledRungs / rungs.length) * 100),
+                rungs.length === 0
+                  ? 0
+                  : Math.round((filledRungs / rungs.length) * 100),
             },
           }
         : {}),
@@ -439,7 +665,11 @@ function spotFields(
   spot: SpotReading,
 ): Pick<FillPathView, "spotUsd" | "spotUnavailable" | "spotLoading"> {
   if (spot.status === "live") {
-    return { spotUsd: spot.priceUsd, spotUnavailable: false, spotLoading: false };
+    return {
+      spotUsd: spot.priceUsd,
+      spotUnavailable: false,
+      spotLoading: false,
+    };
   }
   if (spot.status === "loading") {
     return { spotUnavailable: false, spotLoading: true };
@@ -474,8 +704,14 @@ function chartFor(
   if (rungs.some((rung) => rung.sizeUsd === undefined)) return undefined;
 
   const prices = rungs.map((rung) => rung.priceUsd);
-  const high = Math.max(...prices, ...(livePrice === undefined ? [] : [livePrice]));
-  const low = Math.min(...prices, ...(livePrice === undefined ? [] : [livePrice]));
+  const high = Math.max(
+    ...prices,
+    ...(livePrice === undefined ? [] : [livePrice]),
+  );
+  const low = Math.min(
+    ...prices,
+    ...(livePrice === undefined ? [] : [livePrice]),
+  );
   const maxSize = Math.max(...rungs.map((rung) => rung.sizeUsd!));
   if (high === low || maxSize <= 0) return undefined;
 
@@ -489,7 +725,7 @@ function chartFor(
     key: rung.key,
     cx: round(x(rung.priceUsd)),
     cy: round(y(rung.sizeUsd!)),
-    filled: rung.venueAxis === "filled",
+    filled: rung.filled,
     next: rung.isNext,
   }));
 
