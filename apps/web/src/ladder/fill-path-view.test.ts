@@ -163,7 +163,7 @@ describe("the five absence rules", () => {
     dca.positions[0]!.rungs![7] = { id: "rung-8", priceUsd: 44_000, sizeUsd: 250 };
     const rung = ok(dca).rungs.find((r) => r.priceUsd === 44_000)!;
     expect(rung.notPlaced).toBe(true);
-    expect(rung.label).toBe("declared — not placed");
+    expect(rung.stateCopy).toBe("declared — not placed");
     expect(rung.filledPercent).toBeUndefined();
     expect(rung.resting).toBe(false);
     // AND NOT FILLED. `venueAxis` is optional on this contract, so `filled` has an
@@ -408,8 +408,10 @@ describe("the two spot-dependent decorations — and nothing else moves with pri
 });
 
 describe("the pills, the warnings and the banners", () => {
-  it("carries the wire's own label through — the phone and the desk say one thing", () => {
-    expect(ok(DAY_ZERO).rungs[0]!.label).toBe("waiting");
+  it("authors the state words HERE, from the axes — never off the wire's label", () => {
+    // #306: the wire still carries the engine's `label` (C1 — no wire change), and this
+    // module reads it nowhere. `rung-state-seam.test.ts` is where that is pinned.
+    expect(ok(DAY_ZERO).rungs[0]!.stateCopy).toBe("waiting");
   });
 
   it("counts a venue fill with no recorded lot as the certain warning", () => {

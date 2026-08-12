@@ -33,8 +33,9 @@
  * confident lie. They are not symmetrical, and the asymmetry is deliberate:
  *
  *  1. A RUNG WITH NO ORDER JOINED carries only `{id, priceUsd, sizeUsd}` — no zeroed
- *     quantities, no label (`push/dca-block.ts`'s `toWireRung`). That absence IS
- *     `declared — not placed`. A missing `venueConsumedQuantity` is not a 0% fill.
+ *     quantities, no axes (`push/dca-block.ts`'s `toWireRung`). That absence IS
+ *     `declared — not placed`, spelled by `ladder/rung-state-copy.ts`. A missing
+ *     `venueConsumedQuantity` is not a 0% fill.
  *  2. `figures` PRESENT means a reconciliation ran at all. Absent means the orders
  *     sidecar was unreadable or only partly read — NOT that nothing is placed. The two
  *     get different causes on the same em-dash, because they are different facts.
@@ -64,6 +65,7 @@ import type {
   SnapshotAnchor,
 } from "../projection/contract.ts";
 import { convexityCaption } from "./convexity-caption.ts";
+import { rungStateCopy } from "./rung-state-copy.ts";
 
 /**
  * What the caller knows about spot right now. THREE arms, because "still loading" and
@@ -123,8 +125,15 @@ export interface FillPathRungView {
   ladderIndex: number;
   priceUsd: number;
   sizeUsd?: number;
-  /** The wire's label, or the never-placed state that an absent label encodes. */
-  label: string;
+  /**
+   * THE STATE WORDS, AUTHORED ON THIS SIDE — `rungStateCopy`'s output, from the two axes
+   * (see `ladder/rung-state-copy.ts` for why the engine's `label` is not read here).
+   *
+   * IT IS COPY, AND NOTHING BRANCHES ON IT. Every component that used to compare it now
+   * reads a fact beside it — `venueResting`, `notPlaced`, `filledPercent`. The field is
+   * named for what it is so that a comparison against it reads as the mistake it is.
+   */
+  stateCopy: string;
   venueAxis?: DcaWireVenueAxis;
   bookAxis?: DcaWireBookAxis;
   /**
@@ -146,6 +155,21 @@ export interface FillPathRungView {
   notPlaced: boolean;
   /** An order is still claiming capital at the venue for this rung. */
   resting: boolean;
+  /**
+   * THE VENUE IS HOLDING AN ORDER AND HAS CONSUMED NOTHING — `venueAxis === "resting"`,
+   * decided here, and the FACT the two components branch on where they used to compare
+   * the engine's `waiting` literal.
+   *
+   * NOT THE SAME QUESTION AS `resting` ABOVE, and the pair is why this field exists.
+   * `resting` is "the order still claims capital", which a PARTLY FILLED rung also does;
+   * this is "the venue has said nothing about it yet", which is the ladder's ordinary
+   * state and the one the surface prints as an empty state column. Suppressing on
+   * `resting` would blank the column on a rung that is 40% filled.
+   *
+   * Absence of `venueAxis` is `false`, both times: a rung no order joined is not resting,
+   * and a rung whose fill state is unavailable is not a rung the venue is holding.
+   */
+  venueResting: boolean;
   /** Unfilled at the venue: what `waitingDeclaredUsd` is summed over. */
   waiting: boolean;
   /** SPOT-DEPENDENT: the first rung a falling price would reach. */
@@ -408,17 +432,13 @@ function readTornActs(count: number | undefined): TornActReading {
 }
 
 /**
- * Whether a rung's label should be the never-placed state.
- *
- * ABSENCE RULE 1 AND ABSENCE RULE 2 MEET HERE, and conflating them is the bug this
- * function exists to prevent. A missing `venueAxis` means "no order joined" ONLY when a
- * reconciliation ran at all; on a v4 row, or one whose sidecar could not be read, the
- * same missing field means "unknown" — and rendering that as `declared — not placed`
- * would be the surface stating a fact nobody established.
+ * THE RESTING PREDICATE, spelled once — the venue holds an order for this rung and has
+ * consumed none of it. See {@link FillPathRungView.venueResting} for why it is not
+ * `rung.resting`, and `ladder/rung-state-copy.ts` for what used to answer this question
+ * (a comparison against the engine's `waiting` string, at two component sites).
  */
-function labelFor(rung: DcaWireRung, reconciled: boolean): string {
-  if (rung.label !== undefined) return rung.label;
-  return reconciled ? "declared — not placed" : "fill state unavailable";
+function venueResting(rung: DcaWireRung): boolean {
+  return rung.venueAxis === "resting";
 }
 
 export function composeFillPathPage(
@@ -483,17 +503,32 @@ export function composeFillPathPage(
     // unplaced, which its own pill already says.
     const pricePassedUnconfirmed =
       livePrice !== undefined && resting && rung.priceUsd >= livePrice;
+    // MEASURED, and decided before the words so the words can be authored FROM it: the
+    // percentage the state copy carries and the percentage the pill prints are the same
+    // number by construction, not two roundings that agree.
+    const filledPercent =
+      rung.venueAxis === "partly-filled" && rung.venueFilledFraction !== undefined
+        ? Math.round(rung.venueFilledFraction * 100)
+        : undefined;
     return {
       key: rung.id ?? `rung-at-${rung.priceUsd}`,
       ladderIndex: index + 1,
       priceUsd: rung.priceUsd,
       ...(rung.sizeUsd === undefined ? {} : { sizeUsd: rung.sizeUsd }),
-      label: labelFor(rung, reconciled),
+      // THE ENGINE'S `label` IS NOT READ — see `ladder/rung-state-copy.ts`. The facts go
+      // in; the words come out on this side of the package boundary.
+      stateCopy: rungStateCopy({
+        reconciled,
+        ...(rung.venueAxis === undefined ? {} : { venueAxis: rung.venueAxis }),
+        ...(rung.bookAxis === undefined ? {} : { bookAxis: rung.bookAxis }),
+        ...(filledPercent === undefined ? {} : { filledPercent }),
+      }),
       ...(rung.venueAxis === undefined ? {} : { venueAxis: rung.venueAxis }),
       ...(rung.bookAxis === undefined ? {} : { bookAxis: rung.bookAxis }),
       filled: venueFilled(rung),
       notPlaced,
       resting,
+      venueResting: venueResting(rung),
       waiting: isWaiting(rung),
       isNext: rung === nextRung,
       pricePassedUnconfirmed,
@@ -502,10 +537,7 @@ export function composeFillPathPage(
       ...(rung.declaredPriceMismatch && rung.orderPriceUsd !== undefined
         ? { placedAtUsd: rung.orderPriceUsd }
         : {}),
-      ...(rung.venueAxis === "partly-filled" &&
-      rung.venueFilledFraction !== undefined
-        ? { filledPercent: Math.round(rung.venueFilledFraction * 100) }
-        : {}),
+      ...(filledPercent === undefined ? {} : { filledPercent }),
     };
   });
 
