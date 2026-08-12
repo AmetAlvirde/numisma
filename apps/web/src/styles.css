@@ -600,9 +600,12 @@ thead th {
   color: var(--warn);
 }
 
+/* `--now`, not `--pos`. The next rung is where price is HEADING, which belongs to the
+   same story as where price IS; green would borrow the colour that means FILLED for the
+   one rung on the ladder that has not. */
 .fp-pill-next {
-  border-color: var(--pos);
-  color: var(--pos);
+  border-color: var(--now);
+  color: var(--now);
 }
 
 /* The join caption is not a pill: it is the surface annotating its own
@@ -612,51 +615,146 @@ thead th {
   font-style: italic;
 }
 
+/* TILES, NOT TABLE ROWS. A rung is one thing with a state, so it gets one card
+   with the state painted across the whole of it — a shared bottom border made the
+   ladder a grid to be read left-to-right, cell by cell. The gap is what lets the
+   run of filled rungs at the top read as a block at a glance. */
 .fp-list ul {
   list-style: none;
+  display: grid;
+  gap: 8px;
   margin: 0;
   padding: 0;
 }
 
 /* EVERY ROW IS A BUTTON so the inspect panel is keyboard- and screen-reader-
-   reachable without the chart. Reset to look like a row, but keep a real focus
+   reachable without the chart. Reset to look like a tile, but keep a real focus
    ring — this is the accessible path and it has to be visible. */
 .fp-row {
   display: grid;
-  grid-template-columns: 1.5rem auto 1fr;
+  grid-template-columns: 2.25rem minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
-  padding: 10px 6px;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  background: none;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
   color: var(--text);
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
 
-.fp-row.is-selected {
-  background: var(--line);
+/* THE SAME THREE COLOURS THE CHART DRAWS WITH, and no fourth: `--pos` filled,
+   `--now` next, bare `--bg` waiting. Mixed into the background rather than used
+   neat, so the tint says "which state" without competing with the price for the
+   eye — the numbers are still the loudest thing in the tile. */
+.fp-row.is-filled {
+  background: color-mix(in srgb, var(--pos) 12%, var(--bg));
+  border-color: color-mix(in srgb, var(--pos) 34%, var(--line));
+}
+
+.fp-row.is-next {
+  background: color-mix(in srgb, var(--now) 14%, var(--bg));
+  border-color: color-mix(in srgb, var(--now) 42%, var(--line));
+}
+
+/* Dashed, per G-D12: a declared rung with no order is not a state the ladder is in,
+   it is one it never entered. Same language the unplaced pill used to carry. */
+.fp-row.is-unplaced {
+  border-style: dashed;
 }
 
 .fp-row.is-unplaced .fp-row-price {
   color: var(--muted);
 }
 
+/* SELECTION IS A RING, NOT A FILL — a background swap would fight the state tint and
+   could make a waiting rung look filled while the operator inspected it. */
+.fp-row.is-selected {
+  border-color: var(--text);
+  border-style: solid;
+  box-shadow: 0 0 0 1px var(--text);
+}
+
+/* NEUTRAL, DELIBERATELY. `--pos` here would ring a waiting rung in the colour that
+   means filled the moment a keyboard reached it. */
 .fp-row:focus-visible {
-  outline: 2px solid var(--pos);
-  outline-offset: -2px;
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
 }
 
 .fp-row-index {
   color: var(--muted);
   font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+/* The two numbers that describe a rung, stacked in the order the chart plots them:
+   the price it buys at, and the capital it commits there. */
+.fp-row-figures {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
 }
 
 .fp-row-price {
+  font-size: 1.05rem;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.fp-row-size {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.fp-row-state {
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+  text-align: right;
+}
+
+/* Sentence case from a lower-case wire label without touching the string: the DOM
+   still carries exactly what the view module decided. */
+.fp-row-status {
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.fp-row-status::first-letter {
+  text-transform: uppercase;
+}
+
+.fp-row.is-filled .fp-row-status {
+  color: var(--pos);
+}
+
+.fp-row.is-next .fp-row-status {
+  color: var(--now);
+}
+
+.fp-row.is-unplaced .fp-row-status {
+  color: var(--muted);
+}
+
+/* The venue's word, under the spot-derived one. Quiet, because `next` is the fact
+   the operator came for — but present, because the two are different claims. */
+.fp-row-substatus {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.fp-row-quals {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
 }
 
 .fp-orphans {

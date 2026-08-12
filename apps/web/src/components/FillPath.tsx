@@ -406,6 +406,19 @@ function Pills({ rung }: { rung: FillPathRungView }) {
  * EVERY ROW IS A BUTTON, selecting on click and on FOCUS. That is §6.3c: the slider is
  * one path to the inspect panel and this is the other, so a keyboard or a screen reader
  * walks the ladder and the panel follows without touching the chart.
+ *
+ * ── EACH ROW IS ITS OWN TILE, TINTED BY STATE ───────────────────────────────────────
+ * It used to be a bordered table: three columns of the same weight, so `$47,500` and
+ * the pill beside it competed and the ladder's shape had to be read rather than seen.
+ * A rung is one thing with a state, so it gets one tile — rung number, then the two
+ * numbers that describe it stacked (the price it buys at, the capital it commits), then
+ * the state, right-aligned.
+ *
+ * THE TINT REUSES THE CHART'S PALETTE and no other: `--pos` for filled, `--now` for the
+ * rung price reaches next, bare `--bg` for waiting. That is the same three-colour key
+ * the Price Drop Path draws with, so the list and the picture cannot say different
+ * things about the same rung. The `next` pill was `--pos`-bordered before this, which
+ * borrowed the colour that means FILLED for the one rung that has not.
  */
 function RungListCard({
   view,
@@ -426,6 +439,8 @@ function RungListCard({
               type="button"
               className={
                 "fp-row" +
+                (rung.venueAxis === "filled" ? " is-filled" : "") +
+                (rung.isNext ? " is-next" : "") +
                 (rung.key === selected?.key ? " is-selected" : "") +
                 (rung.notPlaced ? " is-unplaced" : "")
               }
@@ -433,11 +448,22 @@ function RungListCard({
               onClick={() => onSelect(rung.key)}
               onFocus={() => onSelect(rung.key)}
             >
-              <span className="fp-row-index">{rung.ladderIndex}</span>
-              <span className="fp-row-price">{formatUsd(rung.priceUsd)}</span>
-              <span className="fp-row-state">
-                <Pills rung={rung} />
+              <span className="fp-row-index">R{rung.ladderIndex}</span>
+              <span className="fp-row-figures">
+                <span className="fp-row-price">{formatUsd(rung.priceUsd)}</span>
+                {/* THE DECLARED SIZE, under the price it buys at — the pair the chart
+                    plots, now readable as a pair in the record too. Absent is the
+                    em-dash and its cause, never a `$0`: a rung whose size the snapshot
+                    does not carry has not declared zero capital. */}
+                <span className="fp-row-size">
+                  {rung.sizeUsd === undefined ? (
+                    <Absent why="size not carried" />
+                  ) : (
+                    formatUsd(rung.sizeUsd)
+                  )}
+                </span>
               </span>
+              <RowState rung={rung} />
             </button>
           </li>
         ))}
@@ -452,6 +478,43 @@ function RungListCard({
         </p>
       ) : null}
     </section>
+  );
+}
+
+/**
+ * THE RIGHT-HAND COLUMN — what state this rung is in, loudest thing first.
+ *
+ * `next` IS PROMOTED OVER THE LABEL, NOT SUBSTITUTED FOR IT. Being next is the fact the
+ * operator opened the page about, so it takes the strong line; but `next` is a fact
+ * about SPOT and the label is a fact about the VENUE, and one cannot stand in for the
+ * other — a rung can be next AND partly filled, or next AND never placed. So the label
+ * stays, quietly, on the line beneath. Nothing the old row said is dropped.
+ *
+ * THE UNPLACED PILL IS GONE because `label` already reads `declared — not placed` for
+ * exactly that rung; the pill was the same sentence twice. The row's dashed border still
+ * carries it visually, per G-D12.
+ */
+function RowState({ rung }: { rung: FillPathRungView }) {
+  return (
+    <span className="fp-row-state">
+      <span className="fp-row-status">{rung.isNext ? "next" : rung.label}</span>
+      {rung.isNext ? <span className="fp-row-substatus">{rung.label}</span> : null}
+      {rung.pricePassedUnconfirmed ||
+      rung.filledPercent !== undefined ||
+      rung.matchedByPrice ? (
+        <span className="fp-row-quals">
+          {rung.pricePassedUnconfirmed ? (
+            <span className="fp-pill fp-pill-inferred">price passed, unconfirmed</span>
+          ) : null}
+          {rung.filledPercent === undefined ? null : (
+            <span className="fp-pill">partly filled · {rung.filledPercent}%</span>
+          )}
+          {rung.matchedByPrice ? (
+            <span className="fp-pill-caption muted">matched by price</span>
+          ) : null}
+        </span>
+      ) : null}
+    </span>
   );
 }
 
