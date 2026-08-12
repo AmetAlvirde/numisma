@@ -6,9 +6,11 @@ import type { FillPathRungView, MeasuredFigure } from "../ladder/fill-path-view.
 import {
   COMPACT_USD,
   cumulate,
+  deployedMarkFor,
   splitAt,
   spotMarkFor,
   withRadius,
+  type DeployedMark,
   type RungPoint,
 } from "../ladder/price-drop-path.ts";
 
@@ -213,11 +215,18 @@ export function PriceDropPathChart({
     const spotMark = spotMarkFor(spotUsd, { low, high, yLow, yHigh });
     const spotRow = spotMark === undefined ? [] : [{ priceUsd: spotMark.y }];
 
-    // THE DEPLOYED RULE IS ONLY DRAWN WHEN THE FIGURE WAS MEASURED. `deployed` is a
-    // `MeasuredFigure`, so the absent arm carries a REASON and never a number; a rule
-    // parked at $0 on day zero would claim the fund had been measured and found to have
-    // spent nothing, which is a different sentence from "no fill has been recorded yet".
-    const deployedRow = deployed.known ? [{ deployedUsd: deployed.value }] : [];
+    // THE DEPLOYED RULE, DECIDED NEXT DOOR — where it draws, whether it was clamped, and
+    // what the label is then allowed to say. Only the figure's PRESENCE crosses over: the
+    // absent arm of a `MeasuredFigure` carries a REASON, which is a view concept and not
+    // the pure module's business, so it becomes `undefined` here and the mark refuses
+    // itself. See `deployedMarkFor` for why a measured figure may sit on a declared axis,
+    // why an out-of-domain one is pinned rather than dropped, and why the pinned label is
+    // the only one carrying a number.
+    const deployedMark = deployedMarkFor(
+      deployed.known ? deployed.value : undefined,
+      { xStart: xScale.domain()[0], xEnd, yLow, yHigh },
+    );
+    const deployedRow = deployedMark === undefined ? [] : [deployedMark];
 
     return defineChart({
       marks: [
@@ -283,27 +292,54 @@ export function PriceDropPathChart({
         // junction means the fund spent less than it declared for the rungs it walked; to
         // the RIGHT, more. Neither is an error, and neither is readable off the picture
         // without knowing that these are two different kinds of number.
+        //
+        // AND BECAUSE THE MEASUREMENT CAN EXCEED THE INTENTION, the position is clamped and
+        // the clamp is said out loud — `deployedMarkFor` decides `x`, `y`, the label and
+        // every nudge, so no arm of this mark can leave the plot the way it used to. There
+        // is no branch here: the marks read what the module decided.
+        //
+        // NEUTRAL INK, NOT `--pos`. This rule used to be drawn in the SAME green as the
+        // filled path, the filled dot, the `Filled` legend swatch and the filled row tint
+        // — a fifth job for a colour whose one job is "this rung filled". The picture and
+        // the list share exactly THREE state colours (`--pos` filled, `--muted` waiting,
+        // `--now` where price is) and add no fourth, so `Deployed` cannot have a hue at
+        // all without either inventing a state or borrowing one. It takes `--text`
+        // instead: the chart's non-state ink, already spent on the selection disc for the
+        // same reason, brighter than the `--muted` guides it must not be mistaken for and
+        // theme-defined rather than a literal, so it stays legible wherever the palette
+        // goes. The rule is a MEASUREMENT the chart annotates itself with, and neutral ink
+        // is what that reads as.
         ruleX(deployedRow, {
-          x: "deployedUsd",
-          stroke: "var(--pos)",
-          // THINNER THAN THE "NOW" RULE, AT THE SAME OPACITY (0.5 is the library's own
-          // rule default, which is what the now-rule renders at). Deployed is a standing
-          // fact about the past; "now" is the mark the operator is reading the chart
-          // against, and it must stay the loudest annotation on the picture.
-          strokeWidth: 1.25,
-          strokeOpacity: 0.5,
+          x: "x",
+          stroke: "var(--text)",
+          // THINNER THAN THE "NOW" RULE, which stays the loudest annotation on the picture
+          // at 1.5px in a saturated hue: deployed is a standing fact about the past, "now"
+          // is the mark the operator reads the chart against.
+          //
+          // THE OPACITY IS SET AGAINST THE AXIS SPINE, NOT PICKED. `--text` is the
+          // brightest token in the palette, so it needs holding back — but the first
+          // attempt (0.4) landed it DIMMER than the `--muted` spines and gridlines the
+          // library draws in `currentColor`, and a mark quieter than the frame it stands in
+          // reads as part of the frame. 0.7 puts it just past the spine: unmistakably a
+          // drawn mark, still plainly quieter than the now rule and the selection disc.
+          strokeWidth: 1,
+          strokeOpacity: 0.7,
         }),
         text(deployedRow, {
-          x: "deployedUsd",
-          // WHERE IT MEETS THE AXIS — the bottom of the price domain, nudged up so the
-          // word sits inside the plot rather than in the tick gutter.
-          y: () => yLow,
-          text: () => "Deployed",
-          fill: "var(--pos)",
+          x: "x",
+          // THE HEIGHT IS THE MODULE'S CALL, NOT A CONSTANT — the bottom of the plot where
+          // the rule meets its axis, the top when the rule was pinned to the right edge
+          // and the bottom-right corner is already a spot label's. Same for `anchor`,
+          // `dx` and `dy`: all three are per-datum channels in 0.11.0, so the decision
+          // travels on the mark instead of being re-made here.
+          y: "y",
+          text: (mark: DeployedMark) => mark.label,
+          fill: "var(--text)",
           fontSize: 10,
-          anchor: "start",
-          dx: 4,
-          dy: -4,
+          fontWeight: 600,
+          anchor: (mark: DeployedMark) => mark.anchor,
+          dx: (mark: DeployedMark) => mark.dx,
+          dy: (mark: DeployedMark) => mark.dy,
         }),
         // HOLLOW DOTS, FILLED WITH THE CARD'S OWN BACKGROUND, so the line reads through
         // the ring rather than being interrupted by a blob. Two marks rather than one
