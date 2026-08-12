@@ -44,7 +44,7 @@ import type {
   DcaWireRung,
   SnapshotAnchor,
 } from "../projection/contract.ts";
-import type { SpotReading } from "./fill-path-view.ts";
+import { venueFilled, type SpotReading } from "./fill-path-view.ts";
 
 /** One ladder to look at, and the name it answers to in the URL. */
 export interface LadderFixture {
@@ -168,10 +168,17 @@ function declaredOnly(index: number): DcaWireRung {
   return { id: rungId(index), priceUsd, sizeUsd };
 }
 
-/** Σ of the declared sizes of every rung the venue has NOT filled. */
+/**
+ * Σ of the declared sizes of every rung the venue has NOT filled.
+ *
+ * THE PREDICATE IS BORROWED, NOT RE-SPELLED. `venueFilled` is the one site that reads the
+ * `"filled"` literal, so these fixtures cannot come to disagree with the page they are
+ * fixtures FOR about which rung filled — the drift a fifth `venueAxis` arm would otherwise
+ * need three separate edits to avoid.
+ */
 function waitingDeclaredUsd(rungs: readonly DcaWireRung[]): number {
   return rungs
-    .filter((rung) => rung.venueAxis !== "filled")
+    .filter((rung) => !venueFilled(rung))
     .reduce((sum, rung) => sum + (rung.sizeUsd ?? 0), 0);
 }
 
