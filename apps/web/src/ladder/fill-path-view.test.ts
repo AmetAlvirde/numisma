@@ -166,6 +166,54 @@ describe("the five absence rules", () => {
     expect(rung.label).toBe("declared — not placed");
     expect(rung.filledPercent).toBeUndefined();
     expect(rung.resting).toBe(false);
+    // AND NOT FILLED. `venueAxis` is optional on this contract, so `filled` has an
+    // undefined arm, and this is it: the absence rule 1 rung. Reading a missing axis as
+    // anything but `false` would tint the row, solidify the path's segment and light the
+    // `Filled` legend entry for a rung no order ever joined.
+    expect(rung.filled).toBe(false);
+  });
+
+  it("decides `filled` off the venue's own statement, once, for every consumer", () => {
+    // THE PREDICATE HAS ONE AUTHORING SITE (spec #302 slice A). The chart's path split,
+    // its dots, the legend, the `is-filled` row tint and the progress count all read this
+    // field; `venueAxis === "filled"` used to be spelled at each of them.
+    const dca = structuredClone(DAY_ZERO);
+    Object.assign(dca.positions[0]!.rungs![0]!, {
+      venueAxis: "filled",
+      label: "filled",
+      venueConsumedQuantity: 1,
+      venueFilledFraction: 1,
+      resting: false,
+    });
+    // A PARTLY-FILLED RUNG IS NOT FILLED. Only the literal says yes: the path's solid
+    // segment stops at a rung the venue has finished, and "some of it" is still waiting.
+    Object.assign(dca.positions[0]!.rungs![1]!, {
+      venueAxis: "partly-filled",
+      label: "partly filled · 40%",
+      venueConsumedQuantity: 0.4,
+      venueFilledFraction: 0.4,
+    });
+    const view = ok(dca);
+    expect(view.rungs.map((rung) => rung.filled)).toEqual([
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
+    // The same field is what the progress count and the chart's circles are derived
+    // from, so none of the three can disagree about which rung filled.
+    expect(view.progress).toEqual({
+      filledRungs: 1,
+      totalRungs: 8,
+      percent: 13,
+    });
+    expect(view.chart!.circles.map((circle) => circle.filled)).toEqual(
+      view.rungs.map((rung) => rung.filled),
+    );
   });
 
   it("tells an unreadable sidecar apart from a ladder that simply has no fills", () => {
