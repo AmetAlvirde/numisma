@@ -14,6 +14,11 @@ import type { FillPathRungView } from "../ladder/fill-path-view.ts";
  * rungs. A bar chart has no slope: it shows eight independent magnitudes and leaves the
  * reader to infer the curve. This was tried as bars and rejected for exactly that.
  *
+ * The y value is the RUNNING CUMULATIVE declared capital down the ladder, not the
+ * per-rung size — see `cumulate` for why, and for the ordering the sum depends on. Under
+ * that reading the slope between two points IS the next rung's size, so the convexity
+ * argument above is not weakened by the change; it is drawn more directly.
+ *
  * WHAT THE HAND-ROLLED SVG COULD NOT SAY. The predecessor was also a polyline, but over
  * an unlabelled canvas: no axis, no tick, no unit, an unlabelled dashed rule stranded at
  * the canvas edge, and `preserveAspectRatio="none"` squashing every dot into an ellipse.
@@ -86,7 +91,37 @@ interface RungPoint {
   key: string;
   priceUsd: number;
   sizeUsd: number;
+  /** RUNNING TOTAL of `sizeUsd` from the first rung down to this one — see
+   *  `cumulate` for why this, and not `sizeUsd`, is what the line plots. */
+  cumulativeUsd: number;
   filled: boolean;
+}
+
+/**
+ * THE Y VALUE IS A RUNNING TOTAL, BECAUSE THAT IS THE QUESTION THE CARD IS ASKED.
+ *
+ * The reader of a price drop path wants "if price falls to HERE, how much will the fund
+ * have committed IN TOTAL?" — a running sum. The per-rung series cannot answer it: it
+ * shows eight independent amounts and leaves the reader adding in their head, and the
+ * top of its axis is the single largest rung rather than the whole ladder. The convexity
+ * survives the change intact — it is now the ACCELERATING SLOPE of the cumulative curve
+ * rather than the rising height of separate points.
+ *
+ * THE ORDER IS DECIDED IN ANOTHER MODULE AND THIS SUM DEPENDS ON IT. `rungs` arrives
+ * already sorted DESCENDING by price by `ladder/fill-path-view.ts`
+ * (`wireRungs.sort((a, b) => b.priceUsd - a.priceUsd)`), which is the order a FALLING
+ * price walks them in — so accumulating in array order is accumulating down the ladder.
+ * Nothing here re-sorts: a second ordering would be a second opinion about which way the
+ * ladder runs, and the two would drift.
+ */
+function cumulate(
+  points: readonly Omit<RungPoint, "cumulativeUsd">[],
+): RungPoint[] {
+  let running = 0;
+  return points.map((point) => {
+    running += point.sizeUsd;
+    return { ...point, cumulativeUsd: running };
+  });
 }
 
 /**
@@ -190,17 +225,19 @@ export function PriceDropPathChart({
     // A rung with no declared size has no y and cannot be a point. The caller only
     // renders this component when the view module says the ladder is plottable, so
     // this is a type narrowing rather than a policy.
-    const points: RungPoint[] = rungs.flatMap((rung) =>
-      rung.sizeUsd === undefined
-        ? []
-        : [
-            {
-              key: rung.key,
-              priceUsd: rung.priceUsd,
-              sizeUsd: rung.sizeUsd,
-              filled: isFilled(rung),
-            },
-          ],
+    const points: RungPoint[] = cumulate(
+      rungs.flatMap((rung) =>
+        rung.sizeUsd === undefined
+          ? []
+          : [
+              {
+                key: rung.key,
+                priceUsd: rung.priceUsd,
+                sizeUsd: rung.sizeUsd,
+                filled: isFilled(rung),
+              },
+            ],
+      ),
     );
 
     // THE DOMAIN IS THE LADDER, AND ONLY THE LADDER.
@@ -234,10 +271,16 @@ export function PriceDropPathChart({
     const xLow = low - pad;
     const xHigh = high + pad;
     const xScale = scaleLinear().domain([xLow, xHigh]);
+    // THE TOP OF THE AXIS IS THE WHOLE LADDER'S DECLARED TOTAL — the last point's
+    // running sum, which is the largest by construction while sizes are non-negative.
+    // `Math.max` over the column rather than `at(-1)` so a zero-or-negative size could
+    // never make the domain shorter than a point already plotted inside it.
+    //
     // `.nice()` first, THEN read the top back, so the spot label is placed against the
-    // domain the axis actually drew rather than against a number we guessed.
+    // domain the axis actually drew rather than against a number we guessed. The label
+    // therefore rides the top of the CUMULATIVE domain and stays clear of the curve.
     const yScale = scaleLinear()
-      .domain([0, Math.max(...points.map((point) => point.sizeUsd))])
+      .domain([0, Math.max(...points.map((point) => point.cumulativeUsd))])
       .nice();
     const yTop = yScale.domain()[1];
 
@@ -256,14 +299,14 @@ export function PriceDropPathChart({
         // WAITING FIRST, SO SOLID PAINTS OVER IT at the shared junction rung.
         lineY(dashed, {
           x: "priceUsd",
-          y: "sizeUsd",
+          y: "cumulativeUsd",
           stroke: "var(--muted)",
           strokeWidth: 1.5,
           strokeDasharray: WAITING_DASH,
         }),
         lineY(solid, {
           x: "priceUsd",
-          y: "sizeUsd",
+          y: "cumulativeUsd",
           stroke: "var(--pos)",
           strokeWidth: 1.75,
         }),
@@ -300,7 +343,7 @@ export function PriceDropPathChart({
           points.filter((point) => !point.filled),
           {
             x: "priceUsd",
-            y: "sizeUsd",
+            y: "cumulativeUsd",
             key: "key",
             r: 3.5,
             fill: "var(--card)",
@@ -312,7 +355,7 @@ export function PriceDropPathChart({
           points.filter((point) => point.filled),
           {
             x: "priceUsd",
-            y: "sizeUsd",
+            y: "cumulativeUsd",
             key: "key",
             r: 3.5,
             fill: "var(--card)",
@@ -332,7 +375,7 @@ export function PriceDropPathChart({
         // and cannot overwrite whether that rung filled.
         dot(selected, {
           x: "priceUsd",
-          y: "sizeUsd",
+          y: "cumulativeUsd",
           key: "key",
           r: 8,
           fill: "var(--bg)",
@@ -341,7 +384,7 @@ export function PriceDropPathChart({
         }),
         dot(selected, {
           x: "priceUsd",
-          y: "sizeUsd",
+          y: "cumulativeUsd",
           key: "key",
           r: 5.5,
           fill: "var(--text)",
@@ -364,12 +407,18 @@ export function PriceDropPathChart({
         scale: yScale,
         grid: true,
         axis: {
-          // NOT "deployed capital". Deployed is what the fund actually SPENT, and it is
-          // a measured figure on the header card that is absent until a fill is
-          // recorded. This axis plots the size the operator DECLARED per rung, which on
-          // an unwalked ladder is money that has not moved. Naming it "deployed" would
-          // print a measurement where there is only an intention.
-          label: "Declared capital (USD)",
+          // NOT "deployed capital", however the mock words it. Deployed is what the fund
+          // actually SPENT, and it is a measured figure on the header card that is absent
+          // until a fill is recorded. This axis plots the size the operator DECLARED,
+          // which on an unwalked ladder is money that has not moved. Naming it "deployed"
+          // would print a measurement where there is only an intention — and this axis
+          // reaches the ladder's FULL total at the deepest rung, so on day zero
+          // "deployed" would claim the whole ladder had been spent.
+          //
+          // "CUMULATIVE" because the value at a rung is the running total of every rung
+          // at or above it, not that rung's own size — see `cumulate`. Dropping the word
+          // would make the reader measure a single rung against a total-sized axis.
+          label: "Cumulative declared capital (USD)",
           ticks: { format: (value: number) => AXIS_USD.format(value) },
         },
       },
