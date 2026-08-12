@@ -466,6 +466,13 @@ export function PriceDropPathChart({
   }, [rungs, selectedKey, spotUsd, deployed]);
 
   const anyFilled = rungs.some((rung) => rung.filled);
+  // THE SAME GATE, THE OTHER WAY ROUND. Every legend entry appears only when the thing
+  // it explains is on screen (see the legend below), and a fully walked ladder has no
+  // dashed segment: `splitAt` returns the last index, so the dashed slice is a single
+  // point and the mark draws nothing. `Waiting` was printed unconditionally, so the
+  // `overfilled` ladder captioned a colour absent from its own picture, beside a rung
+  // list whose waiting total reads $0.00.
+  const anyWaiting = rungs.some((rung) => !rung.filled);
 
   return (
     // THE WRAPPER IS WHAT HIDES IT — chart AND legend. `ariaLabel` below is a required
@@ -492,10 +499,12 @@ export function PriceDropPathChart({
             Filled
           </li>
         ) : null}
-        <li>
-          <span className="fp-legend-swatch is-waiting" />
-          Waiting
-        </li>
+        {anyWaiting ? (
+          <li>
+            <span className="fp-legend-swatch is-waiting" />
+            Waiting
+          </li>
+        ) : null}
         {spotUsd === undefined ? null : (
           <li>
             <span className="fp-legend-swatch is-now" />
