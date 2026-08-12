@@ -658,12 +658,6 @@ function RecordedThrough({ view }: { view: FillPathView }) {
 }
 
 /**
- * THE ENGINE'S WORD FOR A RESTING RUNG, matched exactly — `packages/engine/src/fill-path.ts`
- * emits it for `axis === "resting"` and for nothing else. See `Pills` for what turns on it.
- */
-const WAITING_LABEL = "waiting";
-
-/**
  * The pills — now the surface's EXCEPTION ROW, not its status row. Everything that
  * survives here is a fact the card cannot state any other way; the ordinary case renders
  * no pills at all.
@@ -674,12 +668,17 @@ const WAITING_LABEL = "waiting";
  * inference on screen beside its premise. The badge moved up to the heading and the
  * redundant pill is dropped.
  *
- * DROPPED ONLY AGAINST THE EXACT WAITING LABEL, THOUGH — never on `isNext` alone. `label`
- * is engine-authored and a next rung may still carry `declared — not placed`, `cancelled —
- * fills recorded against it`, or `fill state unavailable` on an unreconciled snapshot.
- * None of those is implied by "next", and all of them still print. The comparison is the
- * narrow claim; `isNext` alone would have been the wrong one and would have swallowed an
- * unplaced next rung's whole warning.
+ * DROPPED ONLY ON THE VENUE'S RESTING STATE, THOUGH — never on `isNext` alone. A next rung
+ * may still be `declared — not placed`, `cancelled — fills recorded against it`, partly
+ * filled, or `fill state unavailable` on an unreconciled snapshot. None of those is implied
+ * by "next", and all of them still print. `venueResting` is the narrow claim; `isNext`
+ * alone would have been the wrong one and would have swallowed an unplaced next rung's
+ * whole warning.
+ *
+ * IT IS A FACT, NOT THE WORDS (#306). This used to read `rung.label === "waiting"` — a
+ * comparison against a string the ENGINE authored, in another package, whose rewording
+ * would have re-enabled the pill silently with every test still green. `stateCopy` is
+ * rendered here and compared nowhere; see `ladder/rung-state-copy.ts`.
  *
  * ── "MATCHED BY PRICE" IS GONE ────────────────────────────────────────────────────────
  * It is the join's provenance — that this rung was tied to its order by price rather than
@@ -690,7 +689,7 @@ const WAITING_LABEL = "waiting";
  */
 function Pills({ rung }: { rung: FillPathRungView }) {
   // The state pill is suppressed exactly when the heading's `next` badge already said it.
-  const stateIsRedundant = rung.isNext && rung.label === WAITING_LABEL;
+  const stateIsRedundant = rung.isNext && rung.venueResting;
   const pills = [
     rung.notPlaced ? (
       <span key="state" className="fp-pill fp-pill-unplaced">
@@ -698,7 +697,7 @@ function Pills({ rung }: { rung: FillPathRungView }) {
       </span>
     ) : stateIsRedundant ? null : (
       <span key="state" className="fp-pill">
-        {rung.label}
+        {rung.stateCopy}
       </span>
     ),
     rung.pricePassedUnconfirmed ? (
@@ -822,17 +821,18 @@ function RungListCard({
  * filled, never placed, cancelled) had to compete with it for the reader's eye. An empty
  * state column now MEANS waiting, and the exceptions are the only things in it.
  *
- * The suppression is against the engine's exact `waiting` literal (`WAITING_LABEL`),
- * never against `rung.waiting` — see `Pills` for why that distinction is load-bearing.
- * `declared — not placed`, `cancelled — fills recorded against it`, every `filled` variant
- * and `fill state unavailable` all still print, in the same place, unchanged.
+ * The suppression is on `venueResting` — the venue holds an order and has consumed none of
+ * it — and never on `rung.waiting` or `rung.resting`, either of which would blank the
+ * column on a rung that is 40% filled. `declared — not placed`, `cancelled — fills
+ * recorded against it`, every `filled` variant and `fill state unavailable` all still
+ * print, in the same place, unchanged. See `Pills` for why it is a fact and not the words.
  *
- * `next` IS PROMOTED OVER THE LABEL, NOT SUBSTITUTED FOR IT. Being next is the fact the
+ * `next` IS PROMOTED OVER THE STATE, NOT SUBSTITUTED FOR IT. Being next is the fact the
  * operator opened the page about, so it takes the strong line; but `next` is a fact about
- * SPOT and the label is a fact about the VENUE, and one cannot stand in for the other — a
- * rung can be next AND partly filled, or next AND never placed. So a non-waiting label
- * still rides the line beneath. What is dropped is only the `waiting` sub-line under
- * `next`, which the view module already guarantees is implied.
+ * SPOT and the state is a fact about the VENUE, and one cannot stand in for the other — a
+ * rung can be next AND partly filled, or next AND never placed. So any state other than
+ * plain resting still rides the line beneath. What is dropped is only the `waiting`
+ * sub-line under `next`, which the view module already guarantees is implied.
  *
  * ── "MATCHED BY PRICE" IS DROPPED FROM THE ROW ────────────────────────────────────────
  * The distinction it drew is real — `joinProvenance` is `"declared" | "price-matched"`,
@@ -847,14 +847,15 @@ function RungListCard({
  * contract with its tests: it is a decided conclusion the UI has chosen not to draw, and
  * unpicking the view module for a presentation call would be the wrong layer to edit.
  *
- * THE UNPLACED PILL IS GONE because `label` already reads `declared — not placed` for
+ * THE UNPLACED PILL IS GONE because `stateCopy` already reads `declared — not placed` for
  * exactly that rung; the pill was the same sentence twice. The row's dashed border still
  * carries it visually, per G-D12.
  */
 function RowState({ rung }: { rung: FillPathRungView }) {
-  const labelIsDefault = rung.label === WAITING_LABEL;
-  const status = rung.isNext ? "next" : labelIsDefault ? undefined : rung.label;
-  const substatus = rung.isNext && !labelIsDefault ? rung.label : undefined;
+  // THE ORDINARY RUNG, decided on the venue axis and not on what it is called.
+  const stateIsDefault = rung.venueResting;
+  const status = rung.isNext ? "next" : stateIsDefault ? undefined : rung.stateCopy;
+  const substatus = rung.isNext && !stateIsDefault ? rung.stateCopy : undefined;
   const hasQuals =
     rung.pricePassedUnconfirmed || rung.filledPercent !== undefined;
 

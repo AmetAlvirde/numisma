@@ -22,13 +22,14 @@
  *    fact slice C reviews against is the figure leaving the domain, not the fixture's
  *    existence.
  *  - moved `partly-walked`'s spot BELOW the partly-filled rung (39,000 → 33,000) → "the
- *    rung price will reach next carries a non-default label" red, `expected 'waiting' not
- *    to be 'waiting'`. Right reason: `RowState`'s substatus arm is `isNext && label !==
- *    "waiting"`, so it lands only while the partly-filled rung is the next one, and only a
- *    fixture-declared spot can put it there. (Moving spot ABOVE the whole ladder does NOT
- *    kill it — the first WAITING rung is still the partly-filled one. Recorded because it
- *    was the first mutant tried and it survived: the claim is about which rung is next, not
- *    about where spot is.)
+ *    rung price will reach next is in a non-default state" red (re-confirmed 2026-08-12
+ *    against #306's predicate: `expected true to be false`, the next rung being one the
+ *    venue is merely resting on). Right reason: `RowState`'s substatus arm is `isNext &&
+ *    !venueResting`, so it lands only while the partly-filled rung is the next one, and
+ *    only a fixture-declared spot can put it there. (Moving spot ABOVE the whole ladder
+ *    does NOT kill it — the first WAITING rung is still the partly-filled one. Recorded
+ *    because it was the first mutant tried and it survived: the claim is about which rung
+ *    is next, not about where spot is.)
  *  - re-sorted `out-of-order`'s fills into a prefix → "a filled rung sits BELOW an
  *    unfilled one" red. Right reason: the solid segment runs to the LAST filled rung, and
  *    a prefix of fills cannot show that.
@@ -129,12 +130,13 @@ describe("the started-ladder fixture surface", () => {
     expect(view.figures?.split).toBe("partly-unplaced");
   });
 
-  it("partly walked: the rung price will reach next carries a non-default label", () => {
-    // `RowState`'s SUBSTATUS arm is `isNext && label !== "waiting"` — unreachable from
-    // live data, and unreachable without a fixture-declared spot.
+  it("partly walked: the rung price will reach next is in a non-default state", () => {
+    // `RowState`'s SUBSTATUS arm is `isNext && !venueResting` — unreachable from live
+    // data, and unreachable without a fixture-declared spot. Asserted on the FACT the
+    // component branches on (#306), not on the words it happens to print.
     const next = render("partly-walked").rungs.find((rung) => rung.isNext);
     expect(next).toBeDefined();
-    expect(next!.label).not.toBe("waiting");
+    expect(next!.venueResting).toBe(false);
     // The same rung is the one the cards open on, which is what puts `Pills`'
     // partly-filled arm on screen.
     expect(next!.filledPercent).toBeDefined();

@@ -33,8 +33,8 @@
  * ── SPOT IS DECLARED, NOT FETCHED ───────────────────────────────────────────────────
  * Each fixture carries its own {@link SpotReading}. Two of the states here are
  * SPOT-DEPENDENT — `isNext` and `waiting · price passed, unconfirmed` — and `RowState`'s
- * substatus arm needs a specific one of them (`isNext` on a rung whose label is not
- * `waiting`). A live Binance reading against invented rung prices would land those
+ * substatus arm needs a specific one of them (`isNext` on a rung the venue is not merely
+ * resting on — `venueResting` false, #306). A live Binance reading against invented rung prices would land those
  * decorations wherever the market happened to be that afternoon, which is not a fixture.
  * It also means this surface performs NO network read at all.
  */
@@ -296,7 +296,7 @@ const DAY_ZERO = fixtureOf({
  *
  * SPOT IS PLACED AT 39,000 ON PURPOSE — just above the partly-filled rung. That makes the
  * partly-filled rung the one a falling price reaches NEXT, which is the only way to reach
- * `RowState`'s substatus line (`isNext` AND a label that is not `waiting`) and, because
+ * `RowState`'s substatus line (`isNext` AND `venueResting` false) and, because
  * the cards open on the next rung, the only way `Pills`' partly-filled arm appears without
  * the reader dragging the slider.
  */
