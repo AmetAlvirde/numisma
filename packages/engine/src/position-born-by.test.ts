@@ -180,9 +180,9 @@ describe("the position gate learns time", () => {
 
   // Z2 — THE ASSERTION IS THE DELTA, NOT THE RESTING STATE.
   it("moves no cash and mints no closed-book row when the batch is rejected", () => {
-    const before = foldEvents(genesis(), []);
+    const before = foldEvents(genesis(), []).data;
     const { committed } = ingestBatch(backdatedBatch());
-    const after = foldEvents(genesis(), committed);
+    const after = foldEvents(genesis(), committed).data;
 
     expect(totalCash(after) - totalCash(before)).toBe(0);
     expect((after.closedPositions ?? []).length - (before.closedPositions ?? []).length).toBe(0);
@@ -194,7 +194,7 @@ describe("the position gate learns time", () => {
   // id, cleared the A1 post-close guard on that empty set. With the born-by rule in
   // front, close #1 is refused and #2 never gets its chance.
   it("makes the double-close chain unreachable — the FIRST backdated close is refused", () => {
-    const before = foldEvents(genesis(), []);
+    const before = foldEvents(genesis(), []).data;
     const { committed, rejection } = ingestBatch([
       ...backdatedBatch(),
       {
@@ -205,7 +205,7 @@ describe("the position gate learns time", () => {
         settlement: { reserveId: "pulse-cash", proceeds: 100 },
       },
     ]);
-    const after = foldEvents(genesis(), committed);
+    const after = foldEvents(genesis(), committed).data;
 
     expectBornByRejection(rejection, "positionId");
     expect(committed).toHaveLength(0);

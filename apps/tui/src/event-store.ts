@@ -157,7 +157,10 @@ export async function ingestInbox(
   // the ingest. `paths.log` is `<dataDir>/events.jsonl`, so its dirname is the dataDir.
   try {
     const dataDir = dirname(paths.log);
-    const foldedHead = foldEvents(genesis, [...existing, ...toAppend]);
+    // SLICE-A SHIM — replaced in PRD #323 slice D, where the digest derives from the
+    // full envelope and records the discard count. Until then the committed
+    // `head-digest.json` still reads as an unqualified clean head.
+    const foldedHead = foldEvents(genesis, [...existing, ...toAppend]).data;
     const appVersion = readAppVersion(resolveWorkspaceRoot());
     await captureIngestCommit({ dataDir, folded: foldedHead, appendedEvents: toAppend, appVersion });
   } catch (error) {

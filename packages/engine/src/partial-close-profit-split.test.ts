@@ -103,7 +103,7 @@ describe("splitTierRemoval — pro-rata within a tier, exact residual", () => {
 describe("PositionTrimmed — partial close", () => {
   it("emits a partial row, survives with reduced lots, credits the reserve, conserves NAV", () => {
     const seed = genesis();
-    const baseNav = buildCompositionReport(foldEvents(seed, [])).totals.fundValueUsd;
+    const baseNav = buildCompositionReport(foldEvents(seed, []).data).totals.fundValueUsd;
     // Remove all 4 c2 units at mark 100 -> proceeds 400; cost = 2*60 + 2*80 = 280.
     const trim = accept(seed, {
       id: "t1",
@@ -113,7 +113,7 @@ describe("PositionTrimmed — partial close", () => {
       removals: [{ tier: "c2", quantity: 4 }],
       settlement: { reserveId: "sink-usdt", proceeds: 400 },
     });
-    const data = foldEvents(seed, [trim]);
+    const data = foldEvents(seed, [trim]).data;
     const report = buildCompositionReport(data);
 
     const row = report.closedBook.rows.find((r) => r.positionId === "btc-pos");
@@ -153,7 +153,7 @@ describe("PositionTrimmed — partial close", () => {
 describe("PositionAddedTo — appends, never merges (ADR-002)", () => {
   it("appends a new lot preserving its own cost/tier and debits the funding reserve", () => {
     const seed = genesis();
-    const baseNav = buildCompositionReport(foldEvents(seed, [])).totals.fundValueUsd;
+    const baseNav = buildCompositionReport(foldEvents(seed, []).data).totals.fundValueUsd;
     const add = accept(seed, {
       id: "a1",
       asOf: "2026-06-02",
@@ -162,7 +162,7 @@ describe("PositionAddedTo — appends, never merges (ADR-002)", () => {
       lot: { tier: "c1", quantity: 1, cost: 100 }, // funded at mark -> NAV conserved
       funding: { reserveId: "trade-usdt", amount: 100 },
     });
-    const data = foldEvents(seed, [add]);
+    const data = foldEvents(seed, [add]).data;
     const pos = data.positions.find((p) => p.id === "btc-pos");
     const c1Lots = pos?.lots.filter((l) => l.tier === "c1") ?? [];
     expect(c1Lots).toEqual([
@@ -193,7 +193,7 @@ describe("profit-split — descriptive-only, sidecar-driven", () => {
       id: "t1", asOf: "2026-06-02", type: "PositionTrimmed", positionId: "btc-pos",
       removals: [{ tier: "c2", quantity: 4 }], settlement: { reserveId: "sink-usdt", proceeds: 400 },
     });
-    const data = foldEvents(seed, [trim]);
+    const data = foldEvents(seed, [trim]).data;
     const hwm = composeProfitSplit(data, pickPolicyAsOf(prefs, "2026-06-05"), seed, 12.5);
     const perClose = composeProfitSplit(data, pickPolicyAsOf(prefs, "2026-06-20"), seed, 12.5);
     expect(hwm?.obligationUsd).toBeCloseTo(0.4 * 120, 6); // 40% of peak cumulative
@@ -202,6 +202,6 @@ describe("profit-split — descriptive-only, sidecar-driven", () => {
     // Empty-guard: no policy -> no block.
     expect(composeProfitSplit(data, undefined, seed, 12.5)).toBeUndefined();
     // No closes -> no block (blanking leaves NAV untouched).
-    expect(composeProfitSplit(foldEvents(seed, []), pickPolicyAsOf(prefs), seed, 12.5)).toBeUndefined();
+    expect(composeProfitSplit(foldEvents(seed, []).data, pickPolicyAsOf(prefs), seed, 12.5)).toBeUndefined();
   });
 });

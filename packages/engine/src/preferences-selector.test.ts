@@ -132,7 +132,7 @@ describe("pickPolicyAsOf — pure as-of selection", () => {
 describe("standalone fold — no sidecar present, still the pure #90 book", () => {
   it("folds to the closed book and leaves the profit-split block empty (NAV untouched)", () => {
     const seed = genesis();
-    const baseNav = buildCompositionReport(foldEvents(seed, [])).totals.fundValueUsd;
+    const baseNav = buildCompositionReport(foldEvents(seed, []).data).totals.fundValueUsd;
 
     const trim = accept(seed, {
       id: "t1",
@@ -142,7 +142,7 @@ describe("standalone fold — no sidecar present, still the pure #90 book", () =
       removals: [{ tier: "c2", quantity: 4 }],
       settlement: { reserveId: "sink-usdt", proceeds: 400 },
     });
-    const data = foldEvents(seed, [trim]);
+    const data = foldEvents(seed, [trim]).data;
     const report = buildCompositionReport(data);
 
     // The log folds standalone: the realized closed book exists with no sidecar.

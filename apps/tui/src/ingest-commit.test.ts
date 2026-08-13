@@ -73,13 +73,13 @@ const GENESIS = {
 const MARK = { id: "mark-aapl", asOf: "2026-06-06", type: "PriceMarked", instrumentId: "aapl-usd", price: 160 };
 
 /** A folded read model + the one parsed event, from the fixtures above. */
-function foldedFixture(): { folded: ReturnType<typeof foldEvents>; appended: PortfolioEvent[] } {
+function foldedFixture(): { folded: ReturnType<typeof foldEvents>["data"]; appended: PortfolioEvent[] } {
   const parsedGenesis = parseFundReview(JSON.stringify(GENESIS));
   if (parsedGenesis.kind !== "ok") throw new Error("bad genesis fixture");
   const parsedMark = parseEvent(MARK);
   if (parsedMark.kind !== "ok") throw new Error("bad mark fixture");
   const appended = [parsedMark.value];
-  const folded = foldEvents(parsedGenesis.value, appended);
+  const folded = foldEvents(parsedGenesis.value, appended).data;
   return { folded, appended };
 }
 

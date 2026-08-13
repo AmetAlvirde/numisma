@@ -58,7 +58,9 @@ export function logLine(event: Record<string, unknown>): string {
 
 /** A folded read model + the single parsed event, from the fixtures above. */
 export function foldedFixture(): {
-  folded: ReturnType<typeof foldEvents>;
+  // SLICE-A SHIM — replaced in PRD #323 slice D. `foldEvents` now returns an envelope;
+  // the capture fixture still hands the bare read model to `deriveHeadDigest`.
+  folded: ReturnType<typeof foldEvents>["data"];
   appended: PortfolioEvent[];
 } {
   const parsedGenesis = parseFundReview(JSON.stringify(GENESIS));
@@ -66,7 +68,7 @@ export function foldedFixture(): {
   const parsedMark = parseEvent(MARK);
   if (parsedMark.kind !== "ok") throw new Error("bad mark fixture");
   const appended = [parsedMark.value];
-  const folded = foldEvents(parsedGenesis.value, appended);
+  const folded = foldEvents(parsedGenesis.value, appended).data; // SLICE-A SHIM — PRD #323 slice D
   return { folded, appended };
 }
 

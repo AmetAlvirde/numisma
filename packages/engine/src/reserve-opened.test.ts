@@ -94,7 +94,7 @@ describe("ReserveOpened — the fold", () => {
   // a missing arm would drop the Reserve entirely and every later Transfer into it
   // would vanish without a word.
   it("inserts the Reserve at amount 0, leaving NAV untouched", () => {
-    const folded = foldEvents(genesis(), [accepted(openReserve())]);
+    const folded = foldEvents(genesis(), [accepted(openReserve())]).data;
     const born = folded.reserves.find((reserve) => reserve.id === "capital-cash");
 
     expect(born).toBeDefined();
@@ -122,7 +122,7 @@ describe("ReserveOpened — the fold", () => {
         tier: "c2",
       }),
     ];
-    const folded = foldEvents(genesis(), events);
+    const folded = foldEvents(genesis(), events).data;
     const born = folded.reserves.find((reserve) => reserve.id === "capital-cash");
 
     expect(born?.amount).toBe(400);
@@ -138,7 +138,7 @@ describe("ReserveOpened — the fold", () => {
   // credit while NAV still looked perfect. Asserting `toEqual([])` fails on both
   // `undefined` and on a "simplification" that drops the key.
   it("births a Reserve with an EMPTY lots array, not an absent one", () => {
-    const folded = foldEvents(genesis(), [accepted(openReserve())]);
+    const folded = foldEvents(genesis(), [accepted(openReserve())]).data;
     const born = folded.reserves.find((reserve) => reserve.id === "capital-cash");
 
     expect(born?.lots).toEqual([]);
@@ -153,7 +153,7 @@ describe("ReserveOpened — the fold", () => {
   it("composes a born-and-never-funded Reserve with no warnings and NAV unchanged", () => {
     const before = buildCompositionReport(genesis());
     const after = buildCompositionReport(
-      foldEvents(genesis(), [accepted(openReserve())]),
+      foldEvents(genesis(), [accepted(openReserve())]).data,
     );
 
     expect(after.warnings).toEqual([]);
@@ -213,7 +213,7 @@ describe("ReserveOpened — the three registration sites", () => {
     });
 
     // Site 3 — fold.ts's `foldEvents` arm.
-    const folded = foldEvents(genesis(), [parsed.value]);
+    const folded = foldEvents(genesis(), [parsed.value]).data;
     expect(folded.reserves.map((reserve) => reserve.id)).toContain("capital-cash");
   });
 });
@@ -417,9 +417,9 @@ describe("ReserveOpened — the gate learns time", () => {
   // a test that asserts absolute balances passes this bug and does not count. Every
   // claim below is of the form "nothing moved": after MINUS before, exactly zero.
   it("moves no cash at all when the batch is rejected — every delta exactly 0", () => {
-    const before = foldEvents(genesis(), []);
+    const before = foldEvents(genesis(), []).data;
     const { committed } = ingestBatch(backdatedBatch());
-    const after = foldEvents(genesis(), committed);
+    const after = foldEvents(genesis(), committed).data;
 
     // Fund-wide: pre-fix the Transfer sorted first, debited `pulse-cash`, and credited
     // a Reserve that did not exist yet — a −400 delta with `warnings: []`.

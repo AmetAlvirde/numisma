@@ -108,7 +108,7 @@ describe("blotter lineage — many partial trims + a final full close thread one
       }),
     );
 
-    const data = foldEvents(seed, events);
+    const data = foldEvents(seed, events).data;
     const rows = data.closedPositions ?? [];
 
     // Five rows: four partial trims + one full close.
