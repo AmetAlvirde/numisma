@@ -513,6 +513,32 @@ export function buildEventReference(
     });
   }
 
+  // ADR-017's as-of world, LAZY AND MEMOISED BY DATE. Nothing folds until a guard asks,
+  // and today the only caller is a trim aimed at an already-retired position — so every
+  // trim, mark and close on an OPEN position pays exactly one closure allocation and no
+  // fold. The memo is keyed by date, not by event, because that is the whole of the
+  // question: two backdated verbs sharing a date share a world.
+  //
+  // The prefix is STRICTLY BEFORE `asOf`, mirroring the fold's own placement of a
+  // backdated verb: everything dated earlier is already in the world it lands in, and
+  // its same-dated siblings are not (the fold's (`asOf`, then log index) order settles
+  // those, and a gate that pre-applied them would judge against a world the fold has not
+  // built yet). Recursion is not a hazard: the returned reference is built by this same
+  // constructor and its own `worldAsOf` is equally lazy.
+  const worldsAsOf = new Map<string, EventReference>();
+  const worldAsOf = (asOf: string): EventReference => {
+    const memoised = worldsAsOf.get(asOf);
+    if (memoised !== undefined) {
+      return memoised;
+    }
+    const world = buildEventReference(
+      genesis,
+      priorEvents.filter((event) => event.asOf < asOf),
+    );
+    worldsAsOf.set(asOf, world);
+    return world;
+  };
+
   return {
     positionIds,
     reserveIds: new Set(folded.reserves.map((reserve) => reserve.id)),
@@ -532,6 +558,7 @@ export function buildEventReference(
         { instrumentId: position.instrumentId, lots: position.lots },
       ]),
     ),
+    worldAsOf,
   };
 }
 
@@ -1096,12 +1123,34 @@ function crossReferenceTrim(
   if (bornBy) {
     return { ...bornBy, message: `PositionTrimmed ${bornBy.message}` };
   }
-  if (reference.closedPositionIds.has(event.positionId)) {
+  // ADR-017, THE TRIM HALF: "a close is the position's last dated event" is a rule about
+  // DATES, so this refusal must be too. A trim dated STRICTLY BEFORE the close that
+  // retired the position is a correctly-dated trim reported late, and the fold places it
+  // where its date says. `>=` matches the seal rule's strictness in the other direction:
+  // the two rules meet on the close date itself and must not disagree there.
+  const retiredAsOf = reference.closedPositionAsOf.get(event.positionId);
+  if (retiredAsOf !== undefined && event.asOf >= retiredAsOf) {
     return eventError(
       "positionId",
       `PositionTrimmed targets position id '${event.positionId}', which is already closed.`,
     );
   }
+  // AND THE COMPARISON IS NOT THE WORK. Reaching here with `retiredAsOf` set means the
+  // trim is BACKDATED and its target is retired in `reference` — so `positionLots` has no
+  // entry for it. Judged against that world the sufficiency gate below would see
+  // `available = 0` and refuse every backdated trim with a message that misdescribes the
+  // fund's own history; worse, the settlement-magnitude gate is guarded on
+  // `if (held && last !== undefined)` and would SILENTLY STOP FIRING — no error, no
+  // warning, nothing red — leaving the backdated trim the one class of trim admitted with
+  // no proceeds sanity check at all.
+  //
+  // So the remaining gates judge against the world AS OF THE TRIM'S OWN DATE (ADR-015's
+  // doctrine one level deeper: the gate judges against the fold, and for a backdated verb
+  // the relevant fold is the one at the verb's date). `held` comes back as a SIDE EFFECT
+  // of that, which is why the magnitude hole is closed structurally here rather than by
+  // patching its conditional. For an ordinary trim this is `reference` itself — no fold,
+  // no allocation, no change in behavior.
+  const world = retiredAsOf === undefined ? reference : reference.worldAsOf(event.asOf);
   const trimSettlesInto = requireReserveBornBy(
     reference,
     event.settlement.reserveId,
@@ -1111,7 +1160,7 @@ function crossReferenceTrim(
   if (trimSettlesInto.kind === "event-error") {
     return { ...trimSettlesInto.error, message: `PositionTrimmed ${trimSettlesInto.error.message}` };
   }
-  const held = reference.positionLots.get(event.positionId);
+  const held = world.positionLots.get(event.positionId);
   const availableByTier = new Map<CapitalTier, number>();
   for (const lot of held?.lots ?? []) {
     availableByTier.set(lot.tier, (availableByTier.get(lot.tier) ?? 0) + lot.quantity);
@@ -1154,7 +1203,7 @@ function crossReferenceTrim(
   }
   // Settlement-magnitude gate on the removed subset: expected ≈ Σ removed quantity ×
   // the instrument's last close; a gross deviation is a fat-finger, rejected loud.
-  const last = held ? reference.lastClose.get(held.instrumentId) : undefined;
+  const last = held ? world.lastClose.get(held.instrumentId) : undefined;
   if (held && last !== undefined) {
     const removedQuantity = event.removals.reduce((sum, removal) => sum + removal.quantity, 0);
     const expected = removedQuantity * last.price;

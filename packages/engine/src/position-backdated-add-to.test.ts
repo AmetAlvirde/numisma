@@ -247,10 +247,14 @@ describe("ADR-017 — the pair reads in both directions", () => {
   });
 });
 
-// THE OTHER THREE CALL SITES DO NOT MOVE. Two of them never will (ADR-017 rules them
-// date-INSENSITIVE on the merits); the third is ADR-017's second slice and is pinned
-// here only so this slice cannot reach it by accident through the shared carrier.
-describe("ADR-017 — the sites this slice leaves alone", () => {
+// THE OTHER TWO CALL SITES DO NOT MOVE, AND NEVER WILL — ADR-017 rules both of them
+// date-INSENSITIVE on the merits. The third site, `PositionTrimmed`, was pinned here as
+// unmoved while it was still ADR-017's second slice; that slice has since landed, so its
+// pin now reads the other way up and lives with the rest of the trim rule in
+// `position-backdated-trim.test.ts`. What survives here is the boundary this file cares
+// about: relaxing BOTH verbs through the shared `closedPositionAsOf` carrier must still
+// leave these two flat refusals alone.
+describe("ADR-017 — the sites that stay date-blind", () => {
   it("a backdated SECOND close is still refused flat: whichever sorts first retires the id", () => {
     const result = ingestBatch([
       openLate(),
@@ -273,15 +277,24 @@ describe("ADR-017 — the sites this slice leaves alone", () => {
     expect(result.rejection?.message).toContain("already closed");
   });
 
-  it("a backdated PositionTrimmed is still refused — that relaxation is ADR-017's second slice", () => {
+  it("but a backdated PositionTrimmed is now admitted — the second slice landed", () => {
+    // The exact batch this block used to pin as refused. Kept because it is the one
+    // assertion proving the two relaxations share a carrier and not a copy: the same
+    // `closedPositionAsOf` answers "closed as of when" for the add-to above and for the
+    // trim here. The trim rule's own boundary, magnitude and fold coverage is in
+    // `position-backdated-trim.test.ts`.
     const result = ingestBatch([
       openLate(),
       closePayload("evt-close", CLOSED_AS_OF),
       trimPayload("evt-trim", "2026-06-08"),
     ]);
 
-    expect(result.rejection?.message).toContain("PositionTrimmed");
-    expect(result.rejection?.message).toContain("already closed");
+    expect(result.rejection).toBeNull();
+    expect(result.committed.map((event) => event.id)).toEqual([
+      "evt-open-late",
+      "evt-close",
+      "evt-trim",
+    ]);
   });
 });
 
