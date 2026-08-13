@@ -56,11 +56,14 @@ export function logLine(event: Record<string, unknown>): string {
   return `${JSON.stringify({ schemaVersion: EVENT_SCHEMA_VERSION, ...event })}\n`;
 }
 
-/** A folded read model + the single parsed event, from the fixtures above. */
+/**
+ * The fold ENVELOPE + the single parsed event, from the fixtures above. The envelope,
+ * not the bare read model: the capture derives its digest from `{data, skipped}` so the
+ * committed head carries a discard count (ADR-020). This fixture's log folds cleanly, so
+ * its `skipped` is empty — {@link GHOST_CLOSE} seeds the drop case.
+ */
 export function foldedFixture(): {
-  // SLICE-A SHIM — replaced in PRD #323 slice D. `foldEvents` now returns an envelope;
-  // the capture fixture still hands the bare read model to `deriveHeadDigest`.
-  folded: ReturnType<typeof foldEvents>["data"];
+  folded: ReturnType<typeof foldEvents>;
   appended: PortfolioEvent[];
 } {
   const parsedGenesis = parseFundReview(JSON.stringify(GENESIS));
@@ -68,9 +71,21 @@ export function foldedFixture(): {
   const parsedMark = parseEvent(MARK);
   if (parsedMark.kind !== "ok") throw new Error("bad mark fixture");
   const appended = [parsedMark.value];
-  const folded = foldEvents(parsedGenesis.value, appended).data; // SLICE-A SHIM — PRD #323 slice D
+  const folded = foldEvents(parsedGenesis.value, appended);
   return { folded, appended };
 }
+
+/**
+ * A close naming a position that was never opened — the fold reads it, cannot apply it,
+ * and records the drop. Authored for these tests; every id is invented here.
+ */
+export const GHOST_CLOSE = {
+  id: "close-ghost",
+  asOf: "2026-06-07",
+  type: "PositionClosed",
+  positionId: "never-opened",
+  settlement: { reserveId: "cash-core", proceeds: 400 },
+};
 
 /** Run git in `cwd`, returning status + stdout (never throws). */
 export function git(cwd: string, args: string[]): { status: number; stdout: string } {

@@ -29,7 +29,7 @@ import { fileURLToPath } from "node:url";
 import {
   deriveHeadDigest,
   formatIngestCommitMessage,
-  type FundReviewData,
+  type FoldedReview,
   type PortfolioEvent,
 } from "@numisma/engine";
 
@@ -167,10 +167,14 @@ function verbCounts(events: PortfolioEvent[]): Record<string, number> {
  *
  * `headEventId` is the id of the log's head, i.e. the LAST appended event (appends go to
  * the tail), or `null` when nothing was appended.
+ *
+ * `folded` is the fold's whole ENVELOPE (`FoldedReview`), never a bare read model: the
+ * digest records how many events that fold discarded (ADR-020), and a caller that could
+ * hand over `.data` alone would commit an unqualified clean head over damaged history.
  */
 export async function captureIngestCommit(input: {
   dataDir: string;
-  folded: FundReviewData;
+  folded: FoldedReview;
   appendedEvents: PortfolioEvent[];
   appVersion: string;
   /** Test seam: override the git executor. Defaults to the real, TTY-safe runner. */
@@ -182,7 +186,9 @@ export async function captureIngestCommit(input: {
     const headEventId =
       appendedEvents.length > 0 ? appendedEvents[appendedEvents.length - 1]!.id : null;
 
-    // 1) head-digest.json — the compact folded head a reader can trust without replay.
+    // 1) head-digest.json — the compact folded head a reader can trust without replay,
+    //    QUALIFIED by the fold's discard count (ADR-020): a reader who never replays the
+    //    log still learns that this head was folded over events that could not be applied.
     const headDigest = deriveHeadDigest(folded, headEventId, appVersion);
     await writeFile(
       join(dataDir, "head-digest.json"),
@@ -225,7 +231,7 @@ export async function captureIngestCommit(input: {
     const message = formatIngestCommitMessage({
       verbs: verbCounts(appendedEvents),
       totalCount: appendedEvents.length,
-      asOf: folded.review.asOf,
+      asOf: folded.data.review.asOf,
       appVersion,
       timestamp: new Date().toISOString(),
     });

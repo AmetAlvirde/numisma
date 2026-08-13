@@ -72,14 +72,14 @@ const GENESIS = {
 
 const MARK = { id: "mark-aapl", asOf: "2026-06-06", type: "PriceMarked", instrumentId: "aapl-usd", price: 160 };
 
-/** A folded read model + the one parsed event, from the fixtures above. */
-function foldedFixture(): { folded: ReturnType<typeof foldEvents>["data"]; appended: PortfolioEvent[] } {
+/** The fold envelope + the one parsed event, from the fixtures above. */
+function foldedFixture(): { folded: ReturnType<typeof foldEvents>; appended: PortfolioEvent[] } {
   const parsedGenesis = parseFundReview(JSON.stringify(GENESIS));
   if (parsedGenesis.kind !== "ok") throw new Error("bad genesis fixture");
   const parsedMark = parseEvent(MARK);
   if (parsedMark.kind !== "ok") throw new Error("bad mark fixture");
   const appended = [parsedMark.value];
-  const folded = foldEvents(parsedGenesis.value, appended).data;
+  const folded = foldEvents(parsedGenesis.value, appended);
   return { folded, appended };
 }
 
@@ -117,13 +117,13 @@ describe("captureIngestCommit — lands a head-digest + commit in the dataDir re
     const headDigest = JSON.parse(await readFile(resolve(dir, "head-digest.json"), "utf8"));
     expect(headDigest.headEventId).toBe("mark-aapl");
     expect(headDigest.appVersion).toBe("abc1234");
-    expect(headDigest.asOf).toBe(folded.review.asOf);
+    expect(headDigest.asOf).toBe(folded.data.review.asOf);
 
     // A new commit exists on top of the seed, with the engine's deterministic message.
     const expected = formatIngestCommitMessage({
       verbs: { PriceMarked: 1 },
       totalCount: 1,
-      asOf: folded.review.asOf,
+      asOf: folded.data.review.asOf,
       appVersion: "abc1234",
       timestamp: "ignored",
     });

@@ -3,7 +3,7 @@
 // replaying the whole log), and a deterministic ingest commit message. Both are
 // pure — no IO, no clock — so the IO/git shell that persists them can be tested
 // against a fixed input.
-import type { FundReviewData } from "./contracts.js";
+import type { FoldedReview } from "./contracts.js";
 import { buildCompositionReport } from "./compose/report.js";
 
 /**
@@ -20,9 +20,27 @@ import { buildCompositionReport } from "./compose/report.js";
  * `fundValueUsd` (from `buildCompositionReport`) values only the live, supported
  * population. The two intentionally diverge when a non-live position is logged — the
  * count is "positions on the book", not "positions contributing to the fund value".
+ *
+ * **v2 — `discardedEventCount` (the Discard Channel, ADR-020).** The fold may drop an
+ * event whose target it cannot find. Without a marker here, that damage is laundered:
+ * `fundValueUsd` and the counts come out wrong in the one artifact whose premise is
+ * that nobody replays the log to re-check them. So the digest carries the count of
+ * events the capture fold discarded — `0` on a clean fold, always present.
+ *
+ * A COUNT, NOT THE LIST. The skip records (`SkippedFoldEvent`, with their locators) go
+ * to surfaces where a reader can act on them; a digest nothing folds back is not such a
+ * surface. The count alone is what ADR-006's membership test admits, on exactly the
+ * trust-without-replay ground that admits `fundValueUsd`: a reader opening
+ * `head-digest.json` must be able to see a QUALIFIED head. The digest therefore carries
+ * no skip list, no event ids, and no locators.
+ *
+ * The 1 → 2 bump is cheap because there is no reader to migrate — see this type's own
+ * "no engine reader" note above and ADR-003's Head Digest amendment (no
+ * `parseHeadDigest`, no code path that trusts it). Forward-only: v1 digests standing in
+ * existing accumulus commits are not repaired.
  */
 export interface HeadDigest {
-  schemaVersion: 1;
+  schemaVersion: 2;
   asOf: string;
   fundValueUsd: number;
   /**
@@ -32,29 +50,42 @@ export interface HeadDigest {
    */
   openPositionCount: number;
   closedPositionCount: number;
+  /**
+   * How many events the capture fold read and then discarded — `folded.skipped.length`.
+   * `0` on a clean fold, and present on every digest so a nonzero count is a positive
+   * signal rather than a missing key. A COUNT ONLY: the records themselves (ids,
+   * indices, reasons) live on the surfaces a reader can act from — see {@link HeadDigest}.
+   */
+  discardedEventCount: number;
   headEventId: string | null;
   appVersion: string;
 }
 
 /**
- * Derive a {@link HeadDigest} from a folded read model. `fundValueUsd` is taken from
- * `buildCompositionReport(folded)` — the ONE canonical fund-value computation — rather
- * than re-summing positions by hand, so the Head Digest and the composition report can
- * never drift (the named ADR-003 anti-drift invariant). `headEventId` is the id of the
- * last event folded in (or `null` for the genesis-only state).
+ * Derive a {@link HeadDigest} from the fold's ENVELOPE. `fundValueUsd` is taken from
+ * `buildCompositionReport(folded.data)` — the ONE canonical fund-value computation —
+ * rather than re-summing positions by hand, so the Head Digest and the composition
+ * report can never drift (the named ADR-003 anti-drift invariant). `headEventId` is the
+ * id of the last event folded in (or `null` for the genesis-only state).
+ *
+ * It takes the whole `FoldedReview`, never a bare `FundReviewData`, so a caller
+ * STRUCTURALLY cannot derive a digest that omits the discard count: unwrapping the
+ * envelope before the digest is exactly the laundering ADR-020 exists to stop.
  */
 export function deriveHeadDigest(
-  folded: FundReviewData,
+  folded: FoldedReview,
   headEventId: string | null,
   appVersion: string,
 ): HeadDigest {
-  const { fundValueUsd } = buildCompositionReport(folded).totals;
+  const { data, skipped } = folded;
+  const { fundValueUsd } = buildCompositionReport(data).totals;
   return {
-    schemaVersion: 1,
-    asOf: folded.review.asOf,
+    schemaVersion: 2,
+    asOf: data.review.asOf,
     fundValueUsd,
-    openPositionCount: folded.positions.length,
-    closedPositionCount: (folded.closedPositions ?? []).length,
+    openPositionCount: data.positions.length,
+    closedPositionCount: (data.closedPositions ?? []).length,
+    discardedEventCount: skipped.length,
     headEventId,
     appVersion,
   };
