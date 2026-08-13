@@ -105,24 +105,31 @@ describe("cash leg — Open debits the funding reserve, tiered by the lots' own 
 });
 
 describe("cash leg — Close credits the settlement reserve, proceeds tiered proportionally", () => {
-  it("splits proceeds by the closed position's cost-basis tier mix; loss falls per Tier", () => {
-    // alt-pos cost basis: c1 100 + c2 300 = 400. Proceeds 360 = a realized loss.
-    // c1 weight 25% → 90 (lost 10), c2 weight 75% → 270 (lost 30). Lineage shrinks
-    // honestly on the same Tier it was risked on.
+  it("splits proceeds by the closed position's cost-basis tier mix; the gain lands per Tier", () => {
+    // alt-pos cost basis: c1 100 + c2 300 = 400. Proceeds 600 = a realized gain of 200.
+    // c1 weight 25% → 150 (gained 50), c2 weight 75% → 450 (gained 150). Lineage grows
+    // on the same Tier it was risked on.
+    //
+    // 600 is a GATE-LEGAL fill, which is why it is not a loss: the settlement-magnitude
+    // gate expects 20 units × last close 40 = 800 and admits ±50%, so the legal band is
+    // 400–1200 — and 400 is this position's exact cost basis. No admissible close of
+    // alt-pos can realize a loss at all; the loss-absorption path is locked on the
+    // real-shaped gram fixture in cash-settlement-scenarios.test.ts (108 against a basis
+    // of 120), where a loss IS reachable.
     const close: PortfolioEvent = {
       id: "close-alt",
       asOf: "2026-06-03",
       type: "PositionClosed",
       positionId: "alt-pos",
-      settlement: { reserveId: "tiered", proceeds: 360 },
+      settlement: { reserveId: "tiered", proceeds: 600 },
     };
 
     const data = foldEvents(genesis(), [close]);
     const reserve = reserveById(data, "tiered");
 
-    expect(reserve.amount).toBe(1860); // 1500 + 360
-    expect(tierQty(reserve, "c1")).toBeCloseTo(1090, 6); // 1000 + 90
-    expect(tierQty(reserve, "c2")).toBeCloseTo(770, 6); // 500 + 270
+    expect(reserve.amount).toBe(2100); // 1500 + 600
+    expect(tierQty(reserve, "c1")).toBeCloseTo(1150, 6); // 1000 + 150
+    expect(tierQty(reserve, "c2")).toBeCloseTo(950, 6); // 500 + 450
     expect(data.positions.some((position) => position.id === "alt-pos")).toBe(false);
   });
 
