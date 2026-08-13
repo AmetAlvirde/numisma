@@ -193,3 +193,29 @@ export const CHILD_REAP_MUTATION = {
   anchor: '[[ -n "$WATCHDOG_KIDS" ]] && kill -KILL $WATCHDOG_KIDS 2>/dev/null',
   replacement: ': "mutation: the watchdog child kill was removed"',
 } as const;
+
+/**
+ * THE `tee`-DEAFNESS MUTATION — it inverts assertion 2, which is what slice 2 is really
+ * claiming.
+ *
+ * The logging `tee` runs inside a process substitution that ignores TERM and PIPE. Without
+ * that trap the `tee` is an ordinary member of the run's process group, so the watchdog's
+ * group-TERM kills it FIRST and the shell is left writing into a dead pipe while it tries
+ * to run its EXIT trap. Measured during development at THREE RUNS IN FIVE: the shell died
+ * of SIGPIPE partway through `exit`, before the trap body was even entered, and the
+ * heartbeat — the one breadcrumb the entire watchdog exists to leave — was lost.
+ *
+ * THAT IT IS RACY IS THE REASON THIS CONTROL EXISTS AT ALL. A single lucky green run had
+ * already pronounced this fixed once. The control therefore repeats until it observes a
+ * loss, and a suite that has quietly stopped asserting the heartbeat on the timeout path
+ * cannot pass it.
+ *
+ * Note what is NOT mutated: the TERM handler's own `trap '' PIPE` stays. It is the second
+ * half of a two-part fix and was measurably not enough on its own, which is precisely what
+ * this mutation reproduces.
+ */
+export const TEE_DEAFNESS_MUTATION = {
+  name: "drop `trap '' TERM PIPE` from the logging process substitution",
+  anchor: "exec > >(trap '' TERM PIPE; tee -a \"$LOG_FILE\") 2>&1",
+  replacement: 'exec > >(tee -a "$LOG_FILE") 2>&1',
+} as const;

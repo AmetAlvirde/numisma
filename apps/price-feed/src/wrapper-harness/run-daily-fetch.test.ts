@@ -49,7 +49,7 @@
  * nothing to say about them, and a trigger that armed on them would be claiming otherwise.
  */
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -68,6 +68,7 @@ import {
 import {
   CHILD_REAP_MUTATION,
   LAUNCHD_BARE_PATH,
+  TEE_DEAFNESS_MUTATION,
   caseEnv,
   makeCaseDir,
   mutateWrapper,
@@ -957,6 +958,46 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
   }
 
   it(
+    "the fake's `ignores-term` behavior really is deaf — the dispatch entry is not a comment",
+    async () => {
+      // The one behavior in the table that no case drives end-to-end, exercised directly so
+      // it cannot rot into a fake that quietly dies on TERM. A later case that reached for
+      // it would then be a timeout case that no longer needs an escalation, which is the
+      // shape of a test that has stopped testing anything.
+      const dirs = makeCaseDir(TIMEOUT_CASE_OPTIONS);
+      setFakeBehavior(dirs.caseDir, "prices:fetch", "ignores-term");
+      const child = spawn(join(dirs.binDir, "pnpm"), ["prices:fetch"], {
+        cwd: dirs.caseDir,
+        env: caseEnv(dirs, TIMEOUT_CASE_OPTIONS),
+        detached: true,
+        stdio: "ignore",
+      });
+      const pid = child.pid ?? -1;
+      expect(pid).toBeGreaterThan(0);
+      try {
+        await sleep(750);
+        expect(
+          existsSync(join(dirs.caseDir, "sentinels", sentinelNameFor("prices:fetch"))),
+          "the fake never started",
+        ).toBe(true);
+        process.kill(-pid, "SIGTERM");
+        await sleep(1_000);
+        expect(
+          processesInPgid(pid).length,
+          "the `ignores-term` fake died of the very TERM it exists to ignore",
+        ).toBeGreaterThan(0);
+      } finally {
+        try {
+          process.kill(-pid, "SIGKILL");
+        } catch {
+          /* already gone */
+        }
+      }
+    },
+    60_000,
+  );
+
+  it(
     `case 2 — watchdog timeout with a REACTIVE child, ${RUNS_PER_CASE} consecutive times`,
     async () => {
       const settles: number[] = [];
@@ -1171,6 +1212,94 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
         expect(healthy.pgidResidue).toEqual([]);
       },
       120_000,
+    );
+  });
+
+  // ── S6 · THE `tee`-DEAFNESS MUTATION CONTROL ──────────────────────────────────────
+  describe("the `tee`-deafness mutation — assertion 2 is seen RED before it is trusted", () => {
+    it("fails LOUDLY when its anchor text is gone, rather than mutating nothing", () => {
+      const dirs = makeCaseDir(TIMEOUT_CASE_OPTIONS);
+      expect(() =>
+        mutateWrapper(WRAPPER_PATH, dirs.caseDir, {
+          name: "an anchor that has rotted away",
+          anchor: "exec > >(trap '' TERM PIPE; tee -a \"$LOG_FILE_THAT_NEVER_EXISTED\") 2>&1",
+          replacement: ":",
+        }),
+      ).toThrow(/anchor has rotted/);
+      // And the REAL anchor is still there — the half that catches the rot rather than
+      // merely reporting that a made-up string is missing.
+      expect(() => mutateWrapper(WRAPPER_PATH, dirs.caseDir, TEE_DEAFNESS_MUTATION)).not.toThrow();
+    });
+
+    it(
+      "makes case 2 go RED by losing the heartbeat on the timeout path",
+      async () => {
+        // WHY THIS REPEATS. The defect is RACY: whether the shell dies of SIGPIPE depends on
+        // whether the group-TERM has already taken `tee` by the time the shell writes its
+        // next byte to the log pipe. It was measured at roughly three runs in five, and a
+        // single lucky green had already pronounced it fixed once — so a control that ran
+        // the mutation ONCE and saw the heartbeat survive would report "the guard was seen
+        // red" about a run that proved nothing. It attempts up to the repetition floor and
+        // stops at the first observed loss.
+        const outcomes: string[] = [];
+        let losses = 0;
+        for (let attempt = 1; attempt <= RUNS_PER_CASE && losses === 0; attempt += 1) {
+          const dirs = makeCaseDir(TIMEOUT_CASE_OPTIONS);
+          setFakeBehavior(dirs.caseDir, "prices:fetch", "hangs");
+          // The committed wrapper is never touched: the mutation lives and dies in the case
+          // dir, exactly as the child-reap control's does.
+          const mutated = mutateWrapper(WRAPPER_PATH, dirs.caseDir, TEE_DEAFNESS_MUTATION);
+          expect(mutated.startsWith(dirs.caseDir)).toBe(true);
+
+          const record = await launchWrapper({
+            caseDir: dirs.caseDir,
+            wrapperPath: mutated,
+            env: caseEnv(dirs, TIMEOUT_CASE_OPTIONS),
+            groupLeader: true,
+            settleDeadlineMs: timeoutSettleDeadlineMs(TIMEOUT_CASE_OPTIONS),
+            maxWaitMs: 120_000,
+          });
+
+          // The watchdog still fired — this run really is the timeout path, so a lost
+          // heartbeat is the mutation's doing and not a run that never timed out.
+          expect(record.watchdogFired, `attempt ${attempt}: the watchdog never fired`).toBe(true);
+          if (record.heartbeat === undefined) {
+            losses += 1;
+          }
+          outcomes.push(
+            `${record.heartbeat === undefined ? "LOST" : "kept"}` +
+              `(exit=${record.exitCode ?? `signal ${record.signal ?? "?"}`})`,
+          );
+        }
+        console.log(`[wrapper harness] tee-deafness mutation outcomes: ${outcomes.join(", ")}`);
+
+        expect(
+          losses,
+          `the tee-deafness mutation never lost the heartbeat in ${outcomes.length} runs, so ` +
+            "assertion 2 has not been seen red and this control is guarding nothing: " +
+            outcomes.join(", "),
+        ).toBeGreaterThan(0);
+
+        // AND THE UNMUTATED WRAPPER KEEPS IT, on the same case and the same path — so what
+        // went red is the missing `trap '' TERM PIPE` and not the timeout path itself.
+        const clean = makeCaseDir(TIMEOUT_CASE_OPTIONS);
+        setFakeBehavior(clean.caseDir, "prices:fetch", "hangs");
+        const healthy = await launchWrapper({
+          caseDir: clean.caseDir,
+          wrapperPath: WRAPPER_PATH,
+          env: caseEnv(clean, TIMEOUT_CASE_OPTIONS),
+          groupLeader: true,
+          settleDeadlineMs: timeoutSettleDeadlineMs(TIMEOUT_CASE_OPTIONS),
+          maxWaitMs: 120_000,
+        });
+        expect(healthy.watchdogFired).toBe(true);
+        expect(healthy.exitCode, "the unmutated timeout path exited by signal").toBe(124);
+        expect(
+          healthy.heartbeat?.lastStep,
+          "the unmutated wrapper lost the heartbeat too — the `tee` trap is not what is keeping it",
+        ).toBe("timeout:prices-fetch");
+      },
+      600_000,
     );
   });
 });
