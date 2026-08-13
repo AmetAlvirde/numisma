@@ -29,8 +29,8 @@
  * PURE, and the sidecar is never written. Nothing here or downstream writes any file
  * or touches git, and a plans failure never reaches the fold: the fold does not read
  * this file. The one write on the whole `pnpm plans` path is UPSTREAM of this module
- * and belongs to the event log — `loadEventLog`'s quarantine lane, named in
- * `plans-cli.ts`'s header.
+ * and belongs to the event log — `loadEventLog`'s quarantine lane (see the
+ * write-on-read invariant in `packages/event-store/README.md`).
  */
 import { formatUsd, listPlansAsOf, type IsoDate, type LoadedPlans, type PlanLookup } from "@numisma/engine";
 import { unattendedPlansVerdict } from "@numisma/preferences";
