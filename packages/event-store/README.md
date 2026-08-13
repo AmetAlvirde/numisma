@@ -46,7 +46,12 @@ the production entry point on purpose — test scaffolding shared with
 - **Quarantine over abort.** A corrupt log line never aborts a read; it is
   collected and durably surfaced to `events.jsonl.quarantine`, which
   self-heals (removed) once the log reads clean again (`loadEventLog` →
-  `surfaceQuarantine`).
+  `surfaceQuarantine`). The log and genesis themselves are never written on
+  read — only that derived sidecar beside the log moves, and only when the
+  log does not read clean; when it does move, `assertLogFullyLoaded` throws
+  before anything else is written, so the sidecar write and the fail-loud
+  stop are the same event. This is deliberate and shared with every reader
+  of the log, not a local quirk of any one caller.
 - **Fail loud on partial logs.** `assertLogFullyLoaded` refuses to fold when
   any line was quarantined — a silently-dropped event would skew NAV.
 - **Gap report reports, never fills.** `computeGapReport` is pure and
