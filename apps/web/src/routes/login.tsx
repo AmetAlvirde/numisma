@@ -14,7 +14,19 @@ function LoginPage() {
 
   const signIn = useMutation({
     mutationFn: async () => {
-      const { error } = await authClient.signIn.email({ email, password });
+      // Normalized because phone keyboards and autofill are the reason this
+      // form fails where a desktop succeeds: iOS/Android suggestion bars append
+      // a trailing space, and some Android keyboards still capitalize the first
+      // letter even in a type="email" field. The stored account email is
+      // lowercase, so a capital or a stray space reads as "no such user".
+      //
+      // The PASSWORD is deliberately left untouched: whitespace and case are
+      // significant there, and silently trimming a password would reject a
+      // legitimate one.
+      const { error } = await authClient.signIn.email({
+        email: email.trim().toLowerCase(),
+        password,
+      });
       if (error) {
         throw new Error(error.message ?? "Sign in failed");
       }

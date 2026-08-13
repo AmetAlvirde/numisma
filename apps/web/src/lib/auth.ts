@@ -22,12 +22,36 @@ import { betterAuth } from "better-auth";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
 import { Pool } from "pg";
 
+/**
+ * LAN origins allowed during local development only (comma-separated in
+ * DEV_TRUSTED_ORIGINS, e.g. "http://192.168.100.60:3000").
+ *
+ * Better Auth CSRF-checks every /api/auth/* request by comparing the browser's
+ * Origin header against `baseURL` plus `trustedOrigins`. `baseURL` is a single
+ * fixed origin, so hitting `vite dev --host` from a phone at the machine's LAN
+ * IP fails with "Invalid origin" even though it is the same server — the host
+ * differs, and that is exactly what the check is for.
+ *
+ * The production gate is the point, not decoration: a LAN IP in the trusted set
+ * on a hosted deploy would widen the CSRF surface for no benefit, so the list is
+ * dropped whenever NODE_ENV === "production" (which Vercel sets at runtime).
+ * The var is also absent from Vercel's env, making this belt AND braces.
+ */
+const devTrustedOrigins =
+  process.env.NODE_ENV === "production"
+    ? []
+    : (process.env.DEV_TRUSTED_ORIGINS ?? "")
+        .split(",")
+        .map((origin) => origin.trim())
+        .filter(Boolean);
+
 export const auth = betterAuth({
   database: new Pool({
     connectionString: process.env.AUTH_DATABASE_URL,
   }),
   baseURL: process.env.BETTER_AUTH_URL,
   secret: process.env.BETTER_AUTH_SECRET,
+  trustedOrigins: devTrustedOrigins,
   emailAndPassword: {
     enabled: true,
     // Single-tenant invariant (ADR-007): the SERVER rejects new-account
