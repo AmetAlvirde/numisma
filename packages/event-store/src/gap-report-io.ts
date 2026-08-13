@@ -90,10 +90,16 @@ export function gapReportPath(paths: EventStorePaths): string {
  * privacy walk in `gap-report-io.test.ts` rather than by inspection: every key is
  * allowlisted there, so a field nobody has thought of yet fails by default.
  *
- * The structured `lost` array and the already-rendered `lines` are BOTH carried.
- * The duplication is deliberate: the standup can `jq -r '.lines[]'` today without
- * anything having to agree on a text format, and a later reader can consume the
- * structure. A test keeps the two in agreement.
+ * The structured `lost` and `venueDark` arrays and the already-rendered `lines` are
+ * ALL carried. The duplication is deliberate: the standup can `jq -r '.lines[]'`
+ * today without anything having to agree on a text format, and a later reader can
+ * consume the structure. A test keeps them in agreement.
+ *
+ * `venueDark` IS ITS OWN KEY, never folded into `lost` — a reader that counts
+ * `.lost | length` is counting permanently unrecoverable days, and a venue-dark day
+ * is not one (see `gap-report.ts`'s header). Adding it does NOT bump
+ * {@link GAP_REPORT_SCHEMA_VERSION}: the version moves on a removed or retyped
+ * field, and a new key breaks no existing reader.
  *
  * NOT ATOMIC, AND IT DOES NOT CREATE THE DIRECTORY — both accepted. This is a
  * small single-writer file in a directory that by construction already holds the
@@ -113,6 +119,8 @@ export async function writeGapReportFile(
     calendarDays: report.calendarDays,
     anchorsChecked: report.anchorsChecked,
     lost: report.lost,
+    venueDark: report.venueDark,
+    unattributedMarks: report.unattributedMarks,
     summary: formatGapSummary(report),
     lines: formatGapReport(report),
   };

@@ -18,8 +18,12 @@
  * zero-mark Saturday clean; the new rule calls it lost. If a future edit reverts
  * the rule, that assertion is what fails.
  *
- * All events are synthetic. Instrument ids, amounts and prices are invented for
- * the shape of the fixture and correspond to no real position.
+ * All events are synthetic: every amount and every price is invented for the shape
+ * of the fixture and corresponds to no real position. The instrument IDS are the
+ * registry's own, and that is required rather than incidental — the venue-dark
+ * derivation attributes each mark through `instrumentsForSource`, so a fixture of
+ * made-up ids would exercise only the UNATTRIBUTABLE path and never the rule. The
+ * registry is code-owned reference data, not trade data.
  */
 import type { PortfolioEvent } from "@numisma/engine";
 import { describe, expect, it } from "vitest";
@@ -31,13 +35,25 @@ import {
   formatGapSummary,
 } from "./gap-report.js";
 
-// ── The synthetic venue split ────────────────────────────────────────────────
-// Nine weekday-venue instruments and four daily ones, mirroring the real feed's
-// 9-equity / 4-crypto shape. The counts are what make the Saturday case bite:
-// under the old rule the nine self-skip onto Friday's marks, so a Saturday that
-// produced NOTHING still reads 9-arrived.
-const WEEKDAY_VENUE = ["eq-a", "eq-b", "eq-c", "eq-d", "eq-e", "eq-f", "eq-g", "eq-h", "eq-i"];
-const DAILY_VENUE = ["cx-a", "cx-b", "cx-c", "cx-d"];
+// ── The venue split ─────────────────────────────────────────────────────────
+// Nine weekday-venue (`twelvedata`) instruments and four daily (`binance`) ones —
+// the real registry's 9/4 shape, spelled out here rather than derived from
+// `instrumentsForSource` so a registry edit that changes the split fails these
+// cases loudly instead of quietly re-shaping them. The counts are what make the
+// Saturday case bite: under the old rule the nine self-skip onto Friday's marks,
+// so a Saturday that produced NOTHING still reads 9-arrived.
+const WEEKDAY_VENUE = [
+  "aapl",
+  "googl",
+  "tsla",
+  "eww-mxn",
+  "intc-mxn",
+  "nke-mxn",
+  "nu-mxn",
+  "rivn-mxn",
+  "sbux-mxn",
+];
+const DAILY_VENUE = ["btc", "eth", "render", "gram"];
 const ALL_INSTRUMENTS = [...WEEKDAY_VENUE, ...DAILY_VENUE];
 
 /** Real `PriceMarked` events — one per instrument, all carrying `asOf == date`. */
@@ -72,6 +88,14 @@ function positionClosed(date: string, positionId: string): PortfolioEvent {
 }
 
 // ── The rejected rule, kept executable ───────────────────────────────────────
+//
+// DO NOT COLLAPSE THE NEXT TWO HELPERS ONTO `@numisma/engine`'s `isWeekend` /
+// `lastExpectedMarkDate`, even though the engine now exports both (#266 D4). They
+// are hand-copied ON PURPOSE. Their whole job is to hold the REJECTED rule still
+// while the shipped rule moves, so the Saturday case below can assert the
+// disagreement as a fact. Importing the shared definition would make the two sides
+// of that assertion the same code, and a future edit to the shared rule would drag
+// the "old rule" along with it — the pin would go green while measuring nothing.
 
 /** Is this `YYYY-MM-DD` a Saturday or Sunday, read in UTC? */
 function isWeekend(date: string): boolean {
@@ -246,6 +270,118 @@ describe("computeGapReport — the rule: did a mark land on day D", () => {
   });
 });
 
+describe("computeGapReport — the second question: did a whole venue go dark", () => {
+  // Verified weekdays. THURSDAY is the day a weekday venue owes a mark on.
+  const THURSDAY = "2026-07-16";
+  const WEDNESDAY = "2026-07-15";
+
+  it("reports a weekday on which one venue produced nothing and the other was healthy", () => {
+    // The silent-dark case: the crypto marks land, the run exits 0, every
+    // freshness test reads fine, and nine instruments were never quoted.
+    const events: PortfolioEvent[] = marks(THURSDAY, DAILY_VENUE);
+    const report = computeGapReport(events, { since: THURSDAY, until: THURSDAY, now: LATER });
+
+    // STRICTLY ADDITIVE: the day is anchored and carries marks, so neither
+    // existing verdict changes. `lost.length` is what three surfaces render.
+    expect(report.lost).toEqual([]);
+    expect(report.venueDark).toEqual([
+      { date: THURSDAY, source: "twelvedata", expected: 9 },
+    ]);
+  });
+
+  it("stays silent on a Saturday the weekday venue owed nothing on", () => {
+    // The exact false positive that would make this detector unreadable: four
+    // crypto marks on a Saturday is COMPLETE, not degraded.
+    const report = computeGapReport(marks(SATURDAY, DAILY_VENUE), {
+      since: SATURDAY,
+      until: SUNDAY,
+      now: LATER,
+    });
+    expect(report.venueDark).toEqual([]);
+  });
+
+  it("reports the DAILY venue dark on a weekend, because it owes every day", () => {
+    const events: PortfolioEvent[] = marks(SATURDAY, WEEKDAY_VENUE);
+    const report = computeGapReport(events, { since: SATURDAY, until: SATURDAY, now: LATER });
+    expect(report.venueDark).toEqual([{ date: SATURDAY, source: "binance", expected: 4 }]);
+  });
+
+  it("does NOT fire on a partial-venue shortfall — eight of nine is not dark (D3)", () => {
+    const events: PortfolioEvent[] = [
+      ...marks(THURSDAY, DAILY_VENUE),
+      ...marks(THURSDAY, WEEKDAY_VENUE.slice(0, 8)),
+    ];
+    const report = computeGapReport(events, { since: THURSDAY, until: THURSDAY, now: LATER });
+    expect(report.venueDark).toEqual([]);
+    expect(report.lost).toEqual([]);
+  });
+
+  it("never doubles up on a day already reported lost", () => {
+    // `no-marks` and `no-anchor` keep their exact meanings, and a day that is
+    // already a LOST day is not additionally a venue-dark day — one day, one
+    // verdict, or the counts on three surfaces stop adding up.
+    const events: PortfolioEvent[] = [
+      deposit(WEDNESDAY), // anchored, zero marks
+      // THURSDAY carries no event at all
+    ];
+    const report = computeGapReport(events, { since: WEDNESDAY, until: THURSDAY, now: LATER });
+    expect(report.lost).toEqual([
+      { date: WEDNESDAY, reason: "no-marks" },
+      { date: THURSDAY, reason: "no-anchor" },
+    ]);
+    expect(report.venueDark).toEqual([]);
+  });
+
+  it("reports BOTH venues when a day is anchored by a mark it cannot attribute", () => {
+    // A since-retired instrument. It anchors the day and it counts as a mark, so
+    // the day is not lost — but it belongs to no venue, so it fills nobody's
+    // expectation. This is the case that would CRASH under `resolveInstrument`.
+    const events: PortfolioEvent[] = marks(THURSDAY, ["retired-thing"]);
+    const report = computeGapReport(events, { since: THURSDAY, until: THURSDAY, now: LATER });
+
+    expect(report.lost).toEqual([]);
+    expect(report.venueDark).toEqual([
+      { date: THURSDAY, source: "binance", expected: 4 },
+      { date: THURSDAY, source: "twelvedata", expected: 9 },
+    ]);
+  });
+
+  it("buckets unattributable marks separately, and never lets them suppress a verdict", () => {
+    const events: PortfolioEvent[] = [
+      ...marks(THURSDAY, DAILY_VENUE),
+      ...marks(THURSDAY, ["retired-thing", "another-ghost"]),
+    ];
+    const report = computeGapReport(events, { since: THURSDAY, until: THURSDAY, now: LATER });
+
+    expect(report.unattributedMarks).toBe(2);
+    // Two extra marks landed on the day; twelvedata is still dark.
+    expect(report.venueDark).toEqual([
+      { date: THURSDAY, source: "twelvedata", expected: 9 },
+    ]);
+  });
+
+  it("is ascending by date, and repeats itself", () => {
+    const events: PortfolioEvent[] = [
+      ...marks(WEDNESDAY, DAILY_VENUE),
+      ...marks(THURSDAY, DAILY_VENUE),
+    ];
+    const window = { since: WEDNESDAY, until: THURSDAY, now: LATER } as const;
+    const report = computeGapReport(events, window);
+    expect(report.venueDark.map((day) => day.date)).toEqual([WEDNESDAY, THURSDAY]);
+    expect(computeGapReport(events, window)).toEqual(report);
+  });
+
+  it("leaves a fully healthy weekday with nothing to say", () => {
+    const report = computeGapReport(healthyDay(THURSDAY), {
+      since: THURSDAY,
+      until: THURSDAY,
+      now: LATER,
+    });
+    expect(report.venueDark).toEqual([]);
+    expect(report.unattributedMarks).toBe(0);
+  });
+});
+
 describe("the ceiling — yesterday in CDMX, at every hour", () => {
   // CDMX is UTC-6 year-round. 2026-07-12 in CDMX runs 06:00Z that day to 05:59Z
   // the next; every instant inside it must yield the same ceiling.
@@ -306,5 +442,39 @@ describe("formatGapReport / formatGapSummary", () => {
     expect(formatGapSummary(report)).toBe(
       "Numisma: 2 lost day(s) in 2026-07-10…2026-07-12 (3 day(s), 2 anchor(s) checked).",
     );
+  });
+
+  it("names the venue and the weekday on a venue-dark day, so a holiday reads as one", () => {
+    // D7: there is no market-holiday calendar, so ~9-10 weekday holidays a year
+    // fire. Naming the weekday is what lets the reader recognise one on sight.
+    const thursday = "2026-07-16";
+    const report = computeGapReport(marks(thursday, DAILY_VENUE), {
+      since: thursday,
+      until: thursday,
+      now: LATER,
+    });
+    expect(formatGapReport(report)).toEqual([
+      "Numisma: 2026-07-16 (Thursday) — VENUE DARK. twelvedata owed 9 mark(s) and produced none. " +
+        "The day is not lost; the venue was silent, or the market was closed for a holiday.",
+    ]);
+    expect(formatGapSummary(report)).toBe(
+      "Numisma: no lost days in 2026-07-16…2026-07-16 (1 day(s), 1 anchor(s) checked). " +
+        "1 venue-day(s) dark — not lost days: the feed ran and the days are anchored.",
+    );
+  });
+
+  it("prints lost days first, then venue-dark days", () => {
+    // The lost-day lines keep their exact position and wording; the venue-dark
+    // lines are appended. Nothing that reads `lost` changes.
+    const thursday = "2026-07-16";
+    const report = computeGapReport([deposit(FRIDAY), ...marks(thursday, DAILY_VENUE)], {
+      since: FRIDAY,
+      until: thursday,
+      now: LATER,
+    });
+    const lines = formatGapReport(report);
+    expect(lines[0]).toContain("2026-07-10 — NO MARKS");
+    expect(lines.at(-1)).toContain("2026-07-16 (Thursday) — VENUE DARK");
+    expect(lines.filter((line) => line.includes("VENUE DARK"))).toHaveLength(1);
   });
 });

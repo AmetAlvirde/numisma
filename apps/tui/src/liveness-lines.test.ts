@@ -21,8 +21,36 @@ afterEach(async () => {
 
 const NOW = new Date("2026-08-05T12:00:00Z"); // ceiling = 2026-08-04
 
-function mark(date: string): PortfolioEvent {
-  return { id: `pm-cx-a-${date}`, asOf: date, type: "PriceMarked", instrumentId: "cx-a", price: 100 };
+/**
+ * A day on which BOTH venues reported. The registry's own instrument ids, because
+ * since #266 the gap report also asks whether a whole venue went dark, and it
+ * answers that through `instrumentsForSource` — one made-up mark no longer makes a
+ * day clean, and should not: it leaves nine instruments unquoted. Prices invented.
+ */
+const ALL_INSTRUMENTS = [
+  "btc",
+  "eth",
+  "render",
+  "gram",
+  "aapl",
+  "googl",
+  "tsla",
+  "eww-mxn",
+  "intc-mxn",
+  "nke-mxn",
+  "nu-mxn",
+  "rivn-mxn",
+  "sbux-mxn",
+];
+
+function healthyDay(date: string): PortfolioEvent[] {
+  return ALL_INSTRUMENTS.map((instrumentId) => ({
+    id: `pm-${instrumentId}-${date}`,
+    asOf: date,
+    type: "PriceMarked",
+    instrumentId,
+    price: 100,
+  }));
 }
 
 /** A heartbeat in the wrapper's exact printf shape. `day` is the CDMX run day. */
@@ -52,7 +80,7 @@ async function store(options: { events?: readonly PortfolioEvent[]; heartbeat?: 
 describe("loadLivenessLines", () => {
   it("says NOTHING when the job ran clean and no day is lost", async () => {
     const paths = await store({
-      events: [mark("2026-08-04")],
+      events: healthyDay("2026-08-04"),
       heartbeat: heartbeat("2026-08-04", 0, "complete"),
     });
     expect(await loadLivenessLines(paths, NOW, { since: "2026-08-04" })).toEqual([]);
@@ -62,7 +90,7 @@ describe("loadLivenessLines", () => {
     // A failed run is why the days are lost. Reading the consequence first and the
     // reason last is the wrong way round on a channel you scan in two seconds.
     const paths = await store({
-      events: [mark("2026-08-02")],
+      events: healthyDay("2026-08-02"),
       heartbeat: heartbeat("2026-08-04", 127, "resolve-tools"), // ran, and failed
     });
     const lines = await loadLivenessLines(paths, NOW, { since: "2026-08-02" });
@@ -76,7 +104,7 @@ describe("loadLivenessLines", () => {
     // A run that failed AND has not run since is two facts, so the heartbeat
     // contributes two lines. BOTH still precede the lost days.
     const paths = await store({
-      events: [mark("2026-08-02")],
+      events: healthyDay("2026-08-02"),
       heartbeat: heartbeat("2026-08-02", 127, "resolve-tools"),
     });
     const lines = await loadLivenessLines(paths, NOW, { since: "2026-08-02" });
@@ -89,7 +117,7 @@ describe("loadLivenessLines", () => {
   it("still names lost days when no heartbeat was ever written", async () => {
     // The backstop that makes heartbeat silence safe: no breadcrumb, but the marks
     // stopped landing, so the gap report speaks.
-    const paths = await store({ events: [mark("2026-08-02")] });
+    const paths = await store({ events: healthyDay("2026-08-02") });
     const lines = await loadLivenessLines(paths, NOW, { since: "2026-08-02" });
     expect(lines).toHaveLength(2);
     expect(lines.every((line) => line.includes("the day is lost"))).toBe(true);
@@ -99,7 +127,7 @@ describe("loadLivenessLines", () => {
     // The complement: the fetch succeeded and the run died later (step 3 or 4), so
     // the log looks perfect and only the heartbeat knows.
     const paths = await store({
-      events: [mark("2026-08-04")],
+      events: healthyDay("2026-08-04"),
       heartbeat: heartbeat("2026-08-04", 1, "post-check"),
     });
     const lines = await loadLivenessLines(paths, NOW, { since: "2026-08-04" });
@@ -110,7 +138,7 @@ describe("loadLivenessLines", () => {
   });
 
   it("never throws, whatever it finds on disk", async () => {
-    const paths = await store({ events: [mark("2026-08-04")], heartbeat: "{ truncat" });
+    const paths = await store({ events: healthyDay("2026-08-04"), heartbeat: "{ truncat" });
     await expect(loadLivenessLines(paths, NOW, { since: "2026-08-04" })).resolves.toEqual([]);
   });
 });

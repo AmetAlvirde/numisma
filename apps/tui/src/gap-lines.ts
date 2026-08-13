@@ -33,7 +33,7 @@ import {
 } from "@numisma/event-store";
 
 /**
- * The most lost-day lines this channel will print before it summarizes the rest.
+ * The most report lines this channel will print before it summarizes the rest.
  *
  * A startup channel is not a report. After a long outage the derivation walks the
  * WHOLE window and finds every lost day — that is `computeGapReport`'s job and it
@@ -84,17 +84,22 @@ export async function loadGapLines(
   if (withheld <= 0) {
     return all;
   }
-  // `formatGapReport` renders `report.lost`, which the derivation's walk builds
-  // ASCENDING — so the most recent lost days are the tail, and the withheld ones are
-  // the head. The count goes last, under the days it summarizes.
+  // `formatGapReport` renders the lost days ASCENDING and then appends the
+  // venue-dark days, so the withheld head is always the OLDEST LOST DAYS — the
+  // permanent, least-actionable end — and the venue-dark lines, which are the
+  // freshest signal this channel carries, survive the bound by construction.
+  //
+  // The tail line says LINE(S), not "lost day(s)": since #266 the report answers two
+  // questions and a withheld line may be either kind, so counting them as lost days
+  // would overstate the permanent damage on the one surface that is read daily.
   //
   // Deliberately NOT `formatGapSummary`: that one reports the TOTAL over the FULL
   // window and is contractually the always-printed one-liner — it speaks on a clean
   // window, which this channel must never do. This says only how much was withheld,
-  // and names the command that shows the rest. `day(s)` is the house form
+  // and names the command that shows the rest. `line(s)` is the house form
   // (`formatGapSummary`'s `lost day(s)` / `anchor(s)`); there is no singular branch.
   return [
     ...all.slice(withheld),
-    `Numisma: …and ${withheld} earlier lost day(s) (pnpm gap-report).`,
+    `Numisma: …and ${withheld} earlier line(s) (pnpm gap-report).`,
   ];
 }

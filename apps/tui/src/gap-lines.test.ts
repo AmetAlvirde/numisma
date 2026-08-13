@@ -40,6 +40,32 @@ function deposit(date: string): PortfolioEvent {
 }
 
 /**
+ * A day on which BOTH venues reported — the registry's own ids, because since #266
+ * the report also asks whether a whole venue went dark, and that question is
+ * answered through `instrumentsForSource`. A single made-up mark no longer makes a
+ * day clean, and should not: it leaves nine instruments unquoted.
+ */
+const ALL_INSTRUMENTS = [
+  "btc",
+  "eth",
+  "render",
+  "gram",
+  "aapl",
+  "googl",
+  "tsla",
+  "eww-mxn",
+  "intc-mxn",
+  "nke-mxn",
+  "nu-mxn",
+  "rivn-mxn",
+  "sbux-mxn",
+];
+
+function healthyDay(date: string): string[] {
+  return ALL_INSTRUMENTS.map((instrumentId) => JSON.stringify(mark(date, instrumentId)));
+}
+
+/**
  * `count` consecutive `YYYY-MM-DD` days ending at (and including) `until`, ascending.
  *
  * Built on the engine's `addDays` rather than hand-rolled millisecond arithmetic —
@@ -56,14 +82,14 @@ describe("loadGapLines", () => {
   it("SAYS NOTHING when every day in the window carried a mark", async () => {
     // Silence is the feature. A startup channel that speaks on a healthy log is a
     // startup channel you learn to scroll past.
-    const paths = await storeWithLog([JSON.stringify(mark("2026-08-04"))]);
+    const paths = await storeWithLog(healthyDay("2026-08-04"));
     const lines = await loadGapLines(paths, { since: "2026-08-04", now: NOW });
     expect(lines).toEqual([]);
   });
 
   it("names each lost day, one line per day", async () => {
     const paths = await storeWithLog([
-      JSON.stringify(mark("2026-08-02")),
+      ...healthyDay("2026-08-02"),
       JSON.stringify(deposit("2026-08-03")),
     ]);
     const lines = await loadGapLines(paths, { since: "2026-08-02", now: NOW });
@@ -124,7 +150,7 @@ describe("loadGapLines", () => {
         (date) =>
           `Numisma: ${date} — NO DATA. No event of any kind carries this date; the day is lost.`,
       ),
-      `Numisma: …and ${EXTRA} earlier lost day(s) (pnpm gap-report).`,
+      `Numisma: …and ${EXTRA} earlier line(s) (pnpm gap-report).`,
     ]);
 
     // The withheld days are the OLDEST ones, and they are named nowhere.
@@ -142,7 +168,7 @@ describe("loadGapLines", () => {
     const lines = await loadGapLines(paths, { since: lostDays[0] as string, now: NOW });
 
     expect(lines).toHaveLength(MAX_GAP_LINES);
-    expect(lines.join("\n")).not.toContain("earlier lost day(s)");
+    expect(lines.join("\n")).not.toContain("earlier line(s)");
   });
 
   it("reports an absent log as lost days rather than as a failure", async () => {

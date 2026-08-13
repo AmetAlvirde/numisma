@@ -314,6 +314,17 @@ export type {
   InstrumentRegistryEntry,
 } from "./price-feed/registry.js";
 export { instrumentsForSource, resolveInstrument } from "./price-feed/registry.js";
+// The venue calendar: how often each source is expected to mark, and the last date
+// it owed one. ONE home, shared by the push glance builder and the durable log's
+// gap report — two copies would compile happily while disagreeing about whether a
+// venue marks on weekends (#266 D4).
+export type { VenueCadence } from "./price-feed/venue-calendar.js";
+export {
+  VENUE_CADENCE,
+  PRICE_SOURCES,
+  lastExpectedMarkDate,
+  owesMarkOn,
+} from "./price-feed/venue-calendar.js";
 export type { Quote, MarkClock } from "./price-feed/mark.js";
 export {
   tradingDayAsOf,
@@ -336,7 +347,7 @@ export {
 // module and the push glance builder both import from here rather than keeping
 // private copies (guarded by apps/web/src/calendar-contract.test.ts). Also
 // reachable browser-side via the pure `@numisma/engine/calendar` subpath.
-export { addDays, daysBetween } from "./calendar.js";
+export { addDays, daysBetween, isWeekend, weekdayName } from "./calendar.js";
 
 // The `plans.jsonl` sidecar (ADR-004's class, THIRD member) — the operator's
 // durable DECLARATION OF INTENT per position, recorded BESIDE the log and never

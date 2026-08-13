@@ -14,12 +14,14 @@
  * pushed. Following that rule is what makes the verdict module pure by
  * construction.
  *
- * R5 — THE CALENDAR'S NAMED BLIND SPOT. The venue cadence below is weekday-only:
- * it has NO holiday awareness. A US market holiday that falls on a weekday is still
- * a day this file expects a mark on, so the alarm can ring on a day the venue was
- * legitimately closed. Under carry-forward (below) that false *yes* does not last a
- * single day — it PERSISTS until the venue next marks, because an unfilled
- * expectation is only cleared by a fill.
+ * R5 — THE CALENDAR'S NAMED BLIND SPOT. The venue cadence — now
+ * `@numisma/engine`'s `VENUE_CADENCE`, moved down in #266 D4 so this file and the
+ * durable log's gap report share ONE definition — is weekday-only: it has NO
+ * holiday awareness. A US market holiday that falls on a weekday is still a day
+ * this file expects a mark on, so the alarm can ring on a day the venue was
+ * legitimately closed. Under carry-forward that false *yes* does not last a single
+ * day — it PERSISTS until the venue next marks, because an unfilled expectation is
+ * only cleared by a fill.
  *
  * That is accepted for v1 on R3's own logic — a false *yes* costs a glance at the
  * desk; a false *no* is the one failure a triage surface cannot have. And
@@ -35,78 +37,24 @@ import type {
   CompositionReport,
   FundReviewData,
   InstrumentRegistryEntry,
-  PriceSource,
 } from "@numisma/engine";
-import { addDays, composeRowDependencies, instrumentsForSource } from "@numisma/engine";
+import {
+  PRICE_SOURCES,
+  composeRowDependencies,
+  instrumentsForSource,
+  lastExpectedMarkDate,
+} from "@numisma/engine";
 import type { GlanceBlock, GlanceMissingMark } from "../projection/contract.ts";
 import { SUPPRESSION_KEYS } from "../projection/contract.ts";
 
-/** How often a venue is expected to produce a mark. */
-type VenueCadence = "daily" | "weekdays";
-
 /**
- * THE VENUE CALENDAR — keyed on the registry's OWN `source` property, which is the
- * only reason this covers all thirteen instruments.
+ * Every registered instrument, across every source — the union, built from `source`.
  *
- * READ THIS BEFORE EDITING: the non-crypto instruments are TWO registry groups, not
- * one. `EQUITY_ENTRIES` (3 US equities) and `MXN_DERIVED_ENTRIES` (6 SIC entries
- * priced off a US-listed underlying) are BOTH `source: "twelvedata"`. Keying on
- * `source` unions them for free; hand-listing "the equities" instead would
- * under-count the expectation by six and go silent on a real outage — a false *no*.
- *
- * `satisfies Record<PriceSource, VenueCadence>` is the compile-time latch: the day
- * the engine adds a third price source, this object stops compiling and somebody has
- * to state that venue's cadence rather than have it default to "never expected".
+ * `PRICE_SOURCES` is the engine's own key list for `VENUE_CADENCE`, so a venue
+ * cannot be enumerated here without having declared its cadence there.
  */
-const VENUE_CADENCE = {
-  binance: "daily",
-  twelvedata: "weekdays",
-} as const satisfies Record<PriceSource, VenueCadence>;
-
-/** Every registered instrument, across every source — the union, built from `source`. */
 function allRegisteredInstruments(): InstrumentRegistryEntry[] {
-  return (Object.keys(VENUE_CADENCE) as PriceSource[]).flatMap((source) =>
-    instrumentsForSource(source),
-  );
-}
-
-/**
- * The weekday is read in UTC from the plain `YYYY-MM-DD` anchor. A local-time
- * `new Date("2026-07-26")` is parsed as UTC midnight and then rendered in local
- * time, which west of Greenwich lands on the PREVIOUS day — enough to call a Monday
- * a Sunday and silently expect nothing.
- */
-function isWeekend(asOf: string): boolean {
-  const weekday = new Date(`${asOf}T00:00:00Z`).getUTCDay();
-  return weekday === 0 || weekday === 6;
-}
-
-/**
- * The most recent date <= `asOf` on which this venue was expected to mark.
- *
- * CARRY-FORWARD, AND WHY IT REPLACED A SAME-DATE TEST. The original builder asked
- * "is a mark expected TODAY, and did one arrive TODAY" — so an obligation that went
- * unfilled on its due day simply EVAPORATED the next morning. Against the real log
- * the equity feed marked on 2026-06-26 and went dark until 07-06; on Sat 07-04 and
- * Sun 07-05 nothing is expected of a weekday venue, so the builder emitted
- * `{expected: 4, arrived: 4, missing: []}` with nothing suppressed and rendered a
- * full NAV whose nine of thirteen legs were priced eight days earlier. That is a
- * false *no* — the one failure a triage surface cannot have.
- *
- * An unfilled expectation now PERSISTS UNTIL IT IS FILLED. The question asked of each
- * instrument is not "did you quote today" but "is your newest mark at least as recent
- * as the last mark you owed me". The weekend walk is bounded by a guard rather than
- * unbounded, so a malformed anchor cannot spin.
- */
-function lastExpectedMarkDate(source: PriceSource, asOf: string): string {
-  if (VENUE_CADENCE[source] === "daily") {
-    return asOf;
-  }
-  let cursor = asOf;
-  for (let guard = 0; guard < 10 && isWeekend(cursor); guard += 1) {
-    cursor = addDays(cursor, -1);
-  }
-  return cursor;
+  return PRICE_SOURCES.flatMap((source) => instrumentsForSource(source));
 }
 
 /**

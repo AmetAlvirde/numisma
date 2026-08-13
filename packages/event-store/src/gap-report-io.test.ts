@@ -1,8 +1,11 @@
 /**
  * The gap report's ONE async surface, tested against a real log file on disk.
  *
- * The events written here are synthetic — invented instrument ids and round
- * numbers, no real position, price or balance. What is being asserted is the
+ * The events written here are synthetic — round numbers, no real position, price
+ * or balance. The instrument ids are the REGISTRY's, because the venue-dark
+ * derivation attributes marks through it and a made-up id would exercise only the
+ * unattributable path; the registry is code-owned reference data, not trade data.
+ * What is being asserted is the
  * shell's two jobs and nothing more: that it reads the log at the paths it was
  * HANDED (so a caller's `NUMISMA_DATA_DIR` resolution is honoured rather than
  * re-derived), and that it refuses to run on a partial log.
@@ -44,6 +47,30 @@ function mark(date: string, instrumentId: string): PortfolioEvent {
 
 function deposit(date: string): PortfolioEvent {
   return { id: `dep-${date}`, asOf: date, type: "Deposit", reserveId: "cash-core", amount: 500, tier: "c1" };
+}
+
+/**
+ * The registry's own instrument ids, split by venue. Required rather than
+ * decorative: the venue-dark derivation attributes each mark through
+ * `instrumentsForSource`, so a fully-marked day can only be built from ids the
+ * registry knows. Prices and amounts stay invented.
+ */
+const DAILY_VENUE = ["btc", "eth", "render", "gram"];
+const WEEKDAY_VENUE = [
+  "aapl",
+  "googl",
+  "tsla",
+  "eww-mxn",
+  "intc-mxn",
+  "nke-mxn",
+  "nu-mxn",
+  "rivn-mxn",
+  "sbux-mxn",
+];
+
+/** Every venue reporting: no lost day, no dark venue. */
+function healthyDay(date: string): PortfolioEvent[] {
+  return [...DAILY_VENUE, ...WEEKDAY_VENUE].map((instrumentId) => mark(date, instrumentId));
 }
 
 const LATER = new Date("2026-08-05T12:00:00Z");
@@ -98,8 +125,17 @@ describe("loadGapReport", () => {
 /** A report with both lost-day reasons in it, derived from real events. */
 function reportWithBothReasons() {
   return computeGapReport(
-    [mark("2026-07-10", "cx-a"), deposit("2026-07-11")],
+    [...healthyDay("2026-07-10"), deposit("2026-07-11")],
     { since: "2026-07-10", until: "2026-07-12", now: LATER },
+  );
+}
+
+/** A report whose only finding is question 2's: one venue dark on a weekday. */
+function reportWithVenueDark() {
+  // Wednesday. The crypto venue reports; the weekday venue produces nothing.
+  return computeGapReport(
+    DAILY_VENUE.map((instrumentId) => mark("2026-07-15", instrumentId)),
+    { since: "2026-07-15", until: "2026-07-15", now: LATER },
   );
 }
 
@@ -142,11 +178,31 @@ describe("writeGapReportFile", () => {
     // The structured array and the rendered lines describe the SAME days — the
     // duplication is deliberate (the standup can `jq -r '.lines[]'`), so it has to
     // be kept honest.
-    expect(body.lines).toHaveLength(report.lost.length);
+    expect(body.venueDark).toEqual([]);
+    expect(body.unattributedMarks).toBe(0);
+    expect(body.lines).toHaveLength(report.lost.length + report.venueDark.length);
     for (const [index, day] of report.lost.entries()) {
       expect((body.lines as string[])[index]).toContain(day.date);
     }
     expect(body.summary).toContain("2 lost day(s)");
+  });
+
+  it("carries venueDark as its own key, never folded into lost", async () => {
+    // A reader that counts `.lost | length` is counting PERMANENTLY unrecoverable
+    // days. A venue-dark day is not one: the feed ran and the day is anchored.
+    const report = reportWithVenueDark();
+    const { body } = await writeInto(report);
+
+    expect(body.lost).toEqual([]);
+    expect(body.venueDark).toEqual([
+      { date: "2026-07-15", source: "twelvedata", expected: 9 },
+    ]);
+    expect(body.summary).toContain("no lost days");
+    expect(body.summary).toContain("1 venue-day(s) dark");
+    expect(body.lines).toHaveLength(1);
+    expect((body.lines as string[])[0]).toContain("VENUE DARK");
+    // Adding a key does not break a reader, so the version does not move.
+    expect(body.schemaVersion).toBe(1);
   });
 
   it("carries a schemaVersion — asserted, not merely documented", async () => {
@@ -162,7 +218,7 @@ describe("writeGapReportFile", () => {
   });
 
   it("writes a clean report too, with an empty lost array and no lines", async () => {
-    const report = computeGapReport([mark("2026-07-10", "cx-a")], {
+    const report = computeGapReport(healthyDay("2026-07-10"), {
       since: "2026-07-10",
       until: "2026-07-10",
       now: LATER,
@@ -184,7 +240,7 @@ describe("writeGapReportFile", () => {
       now: LATER,
     });
     const second = await writeGapReportFile(
-      computeGapReport([mark("2026-07-10", "cx-a")], {
+      computeGapReport(healthyDay("2026-07-10"), {
         since: "2026-07-10",
         until: "2026-07-10",
         now: LATER,
@@ -234,10 +290,22 @@ const ALLOWED_KEYS = new Set([
   "lost",
   "date",
   "reason",
+  // Question 2's structured findings. `source` and `expected` are allowlisted here
+  // for the same reason every other key is: an unfamiliar key must fail by default.
+  "venueDark",
+  "source",
+  "expected",
+  "unattributedMarks",
   "summary",
   "lines",
 ]);
 const REASONS = new Set(["no-anchor", "no-marks"]);
+/**
+ * The venue names, which are the only NEW free-form strings question 2 puts in the
+ * body. A closed set, not a pattern: `PriceSource` is a closed union in the engine,
+ * so a third venue must be named here deliberately.
+ */
+const SOURCES = new Set(["binance", "twelvedata"]);
 const RENDERED_KEYS = new Set(["summary", "lines"]);
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/;
@@ -270,7 +338,12 @@ function privacyViolations(body: unknown, counts: ReadonlySet<string>): string[]
       failures.push(`${path}: ${typeof value} is neither a date nor a count`);
       return;
     }
-    if (ISO_DATE.test(value) || ISO_INSTANT.test(value) || REASONS.has(value)) {
+    if (
+      ISO_DATE.test(value) ||
+      ISO_INSTANT.test(value) ||
+      REASONS.has(value) ||
+      SOURCES.has(value)
+    ) {
       return;
     }
     if (!renderedField) {
@@ -300,6 +373,10 @@ function countsOf(report: ReturnType<typeof computeGapReport>): ReadonlySet<stri
     String(report.calendarDays),
     String(report.anchorsChecked),
     String(report.lost.length),
+    String(report.venueDark.length),
+    // The per-venue instrument counts a VENUE DARK line names ("owed 9 mark(s)").
+    // Registry cardinality, not a magnitude — but it still has to be declared.
+    ...report.venueDark.map((day) => String(day.expected)),
     String(GAP_REPORT_SCHEMA_VERSION),
   ]);
 }
@@ -312,6 +389,12 @@ function violationPaths(violations: readonly string[]): string[] {
 describe("the privacy property — dates and counts only", () => {
   it("carries nothing but dates, counts, a version and known labels", async () => {
     const report = reportWithBothReasons();
+    const { body } = await writeInto(report);
+    expect(privacyViolations(body, countsOf(report))).toEqual([]);
+  });
+
+  it("holds for a venue-dark body too — the venue name is a label, not data", async () => {
+    const report = reportWithVenueDark();
     const { body } = await writeInto(report);
     expect(privacyViolations(body, countsOf(report))).toEqual([]);
   });
