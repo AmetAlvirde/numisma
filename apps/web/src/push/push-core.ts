@@ -25,14 +25,19 @@ import {
   resolvePlansPath,
   resolvePreferencesPath,
 } from "@numisma/preferences";
-import type { DcaBlock, GlanceBlock, ProjectionReport } from "../projection/contract.ts";
+import type {
+  DcaBlock,
+  GlanceBlock,
+  GlanceVenueDarkDay,
+  ProjectionReport,
+} from "../projection/contract.ts";
 import {
   COMPOSITION_SNAPSHOT_SCHEMA_VERSION,
   fundIdOf,
   toProjectionReport,
 } from "../projection/contract.ts";
 import { buildDcaBlock, type DcaFillInputs } from "./dca-block.ts";
-import { buildGlanceBlock } from "./glance.ts";
+import { buildGlanceBlock, venueDarkOrOmit } from "./glance.ts";
 
 /** What the push shell's two flags decide, once argv has been read. */
 export interface PushArgs {
@@ -179,13 +184,56 @@ export async function loadReserveFloorAsOf(
 
 /**
  * The whole push-side glance derivation for one folded anchor: read the floor
- * as-of, then build the block. The single call the push shell makes.
+ * as-of, derive the venue-dark verdict as-of, then build the block. The single call
+ * the push shell makes.
  */
 export async function buildGlanceForAnchor(
   fold: FoldedAnchor,
 ): Promise<GlanceBlock> {
   const asOf = fold.report.dashboard.summary.asOf;
-  return buildGlanceBlock(fold.data, fold.report, await loadReserveFloorAsOf(asOf));
+  return buildGlanceBlock(
+    fold.data,
+    fold.report,
+    await loadReserveFloorAsOf(asOf),
+    await loadVenueDarkAsOf(asOf),
+  );
+}
+
+/**
+ * #266 D6 — THE VENUE-DARK VERDICT FOR ONE ANCHOR, or `undefined` if it could not be
+ * had. This is the wiring D6 called cheap: `apps/web/src/push` already consumes
+ * `@numisma/event-store` and already folds this exact log, so no package edge is added.
+ *
+ * IT CAN NEVER WITHHOLD THE PUSH, and that is D6's absolute condition rather than a
+ * defensive habit. Both halves are inside the guard — the read AND the derivation —
+ * because either can fail, and neither failure is worth a night without a NAV on the
+ * phone. ADR-007's third amendment names the rule: *degrade the branch, never the
+ * anchor.* An absent field is contractually "this build could not answer", and no
+ * surface may render that as an all-clear.
+ *
+ * IT DELIBERATELY DOES NOT `assertLogFullyLoaded`, unlike {@link loadFillInputs}. The
+ * caller has already folded this same log through `loadFoldedReview`, which asserts it
+ * and throws BEFORE anything reaches here — so a partial log has already stopped the
+ * push, and re-asserting could only turn a clean run into a withheld one. The residual
+ * case is a log that became unreadable between the two reads, and the honest answer
+ * there is an absent field, not a failed push.
+ *
+ * PER-ANCHOR, AND IT COSTS ONE RE-READ OF A SMALL LOCAL FILE. `runBackfill` already
+ * re-reads genesis + the log per anchor deliberately (see its header), and
+ * `loadFillInputs` re-reads it again; this is a third read of the same warm file over
+ * the low tens of anchors. Said out loud rather than hidden: if the anchor count ever
+ * makes that matter, the fix is to hoist ONE read through the loop, not to compute the
+ * verdict once and stamp it on every historical row.
+ */
+async function loadVenueDarkAsOf(
+  asOf: string,
+): Promise<GlanceVenueDarkDay[] | undefined> {
+  try {
+    const log = await loadEventLog(resolveEventStorePaths().log);
+    return venueDarkOrOmit(log.events, asOf);
+  } catch {
+    return undefined;
+  }
 }
 
 /**

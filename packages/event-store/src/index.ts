@@ -12,9 +12,10 @@ export {
   type QuarantinedLine,
 } from "./event-store.js";
 
-// The gap report (#186): which calendar days in the launchd era did the price feed
-// not run on. The derivation is pure and synchronous (`gap-report.js`); the log
-// read is its one async shell (`gap-report-io.js`).
+// The gap report (#186, #266): which calendar days in the launchd era did the price
+// feed not run on, and on which days did a whole VENUE owe marks and produce none.
+// The derivation is pure and synchronous (`gap-report.js`); the log read is its one
+// async shell (`gap-report-io.js`).
 export {
   LAUNCHD_ERA_START,
   REPORT_TIME_ZONE,
@@ -23,10 +24,13 @@ export {
   dueThrough,
   formatGapReport,
   formatGapSummary,
+  formatLostDays,
+  formatVenueDarkDays,
   type GapReport,
   type GapWindow,
   type LostDay,
   type LostDayReason,
+  type VenueDarkDay,
 } from "./gap-report.js";
 // The daily job's heartbeat (#191): the one fact the durable log cannot contain —
 // whether the job ran. Written by bash from an EXIT trap; read here.

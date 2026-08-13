@@ -60,6 +60,22 @@ export const STALE_ANCHOR_DAYS = 2;
 export const FEED_GAP_MIN_MISSING_MARKS = 1;
 
 /**
+ * `venueDark` — how many venue-dark days it takes to speak. One.
+ *
+ * The verdict arrives as `glance.venueDark`, derived push-side from the DURABLE LOG
+ * (#266 D2: a fetch-side detector is blind to its own absence, and a guard that only
+ * runs when the thing it checks ran is not a guard). This module only reads it.
+ *
+ * ABSENT IS NOT AN ALL-CLEAR, AND THAT IS THE WHOLE ENCODING. A pre-v6 row and a row
+ * whose derivation degraded both carry no field, and both mean *this build could not
+ * answer*; `[]` means *checked, nothing dark*. The trigger declines on all three of
+ * those and fires only on a named venue, so a row older than v6 renders NOTHING here.
+ * That falls out of the shape rather than needing a version check — which is what
+ * makes it hard to get wrong later.
+ */
+export const VENUE_DARK_MIN_DAYS = 1;
+
+/**
  * `reserveFloor` — the floor itself is NOT a constant here, and that absence is the
  * decision (V2/R4). It is stamped per anchor by the push from the preferences sidecar
  * and arrives as `glance.reserveTargetPct`; when it is absent the trigger DECLINES.
@@ -91,16 +107,24 @@ export const RESERVE_FLOOR_WIRE_KEY = "glance.reserveTargetPct" as const;
 export const NAV_MOVE_THRESHOLD_PCT = 1.5;
 
 /**
- * PRECEDENCE — `freshness > feedGap > reserveFloor > navMove`, ranked by *does this
- * invalidate what is below it*. Stale data invalidates every conclusion drawn from
- * it; a missing mark invalidates the numbers that descend from NAV; an under-reserved
- * fund is a standing condition that outranks a single day's move.
+ * PRECEDENCE — `freshness > feedGap > venueDark > reserveFloor > navMove`, ranked by
+ * *does this invalidate what is below it*. Stale data invalidates every conclusion
+ * drawn from it; a missing mark invalidates the numbers that descend from NAV; a dark
+ * venue names why they are missing and outranks the fund-condition rules for the same
+ * reason (see D6, below the array); an under-reserved fund is a standing condition
+ * that outranks a single day's move.
  *
  * CHOSEN, NOT MEASURED — and the code says so because a reader will otherwise assume
- * it was fitted to data. It cannot be measured: `feedGap` took 5 of the 6 *yes* days
- * in the fund's entire recorded history and `navMove` the 6th, so NO SAME-DAY
- * COLLISION HAS EVER BEEN OBSERVED. The only exercise this ordering gets is against
- * the synthesized collisions in `verdict.test.ts`.
+ * it was fitted to data. UNTIL #266 IT COULD NOT BE MEASURED AT ALL: `feedGap` took 5
+ * of the 6 *yes* days in the fund's entire recorded history and `navMove` the 6th, so
+ * no same-day collision had ever been observed and the only exercise this ordering got
+ * was against the synthesized collisions in `verdict.test.ts`. Adding `venueDark`
+ * produced the first real ones — `MEASURED_COLLISIONS` in `verdict-replay.test.ts`
+ * names the days on which `feedGap` and `venueDark` both fire and `feedGap` takes the
+ * line. That is the recorded history exercising ONE PAIR of this order, on live-outage
+ * days where both firings have the same cause; the other four positions remain chosen
+ * rather than fitted, and `freshness`, `reserveFloor` and `navMove` have still never
+ * collided with anything in real history.
  *
  * The verdict renders ONE line — `fired[0]` — and D6's "a freshness failure replaces
  * the verdict" is not a special case in the code: it is what being first in this
@@ -112,6 +136,21 @@ export const NAV_MOVE_THRESHOLD_PCT = 1.5;
 export const TRIGGER_PRECEDENCE = [
   "freshness",
   "feedGap",
+  // #266 D6 — BELOW `feedGap` AND ABOVE THE TWO FUND-CONDITION RULES, and the ordering
+  // rule above is what places it. The first three triggers all answer *is the data
+  // under this surface trustworthy*; the last two answer *what is the fund doing*, and
+  // the first question invalidates the second. Within the data half it sits second
+  // because `feedGap` speaks about THIS anchor's own numbers — marks that did not
+  // arrive, which is why three of them are suppressed — while `venueDark` speaks about
+  // the window BEHIND the anchor and suppresses nothing (D8: warn only, the day is not
+  // lost, NAV computes).
+  //
+  // The two overlap on a live outage and that is not a duplication to collapse: while a
+  // venue is dark `feedGap` fires too and takes the line, because unsafe numbers today
+  // outrank a name for why. What `venueDark` uniquely delivers is the outage that
+  // ALREADY RECOVERED — `feedGap` goes quiet the moment the venue marks again, and
+  // without this the whole event would vanish from every automatic channel.
+  "venueDark",
   "reserveFloor",
   "navMove",
 ] as const;
@@ -131,6 +170,7 @@ export type TriggerName = (typeof TRIGGER_PRECEDENCE)[number];
 export const TRIGGERS = {
   freshness: { name: "freshness", staleAfterDays: STALE_ANCHOR_DAYS },
   feedGap: { name: "feedGap", minMissingMarks: FEED_GAP_MIN_MISSING_MARKS },
+  venueDark: { name: "venueDark", minDarkDays: VENUE_DARK_MIN_DAYS },
   reserveFloor: { name: "reserveFloor", floorFrom: RESERVE_FLOOR_WIRE_KEY },
   navMove: { name: "navMove", thresholdPct: NAV_MOVE_THRESHOLD_PCT },
   // `Record<TriggerName, object>` rather than a shape: this latch is about
@@ -324,6 +364,27 @@ export function computeVerdict(
       sentence:
         `${missing} of ${glance.feedGap.expected} instruments ` +
         `${missing === 1 ? "has" : "have"} no current mark`,
+    });
+  }
+
+  // VENUE DARK (#266 D6) — the delivery. Reading the field at all is the version
+  // check: `undefined` is a pre-v6 row or a degraded derivation, and both decline
+  // here. Only a NAMED venue speaks, so this surface can never print an all-clear it
+  // did not earn.
+  //
+  // D7 IS PAID FOR IN THIS SENTENCE. There is no market-holiday calendar, so roughly
+  // nine or ten weekday holidays a year fire — accepted, because a false *yes* costs a
+  // glance and a false *no* is the failure a triage surface cannot have. The message
+  // therefore names the VENUE and the WEEKDAY, which is what lets a holiday read as
+  // one at a glance instead of as an outage.
+  const venueDark = glance.venueDark ?? [];
+  if (venueDark.length >= VENUE_DARK_MIN_DAYS) {
+    const venues = venueDark
+      .map((day) => `${day.source} on ${day.weekday}`)
+      .join(", ");
+    fired.push({
+      name: "venueDark",
+      sentence: `No marks from ${venues} — a day that venue owed them`,
     });
   }
 

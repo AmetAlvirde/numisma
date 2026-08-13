@@ -66,10 +66,15 @@ describe("the trigger constants", () => {
     expect(STALE_ANCHOR_DAYS).toBe(2);
   });
 
-  it("orders precedence freshness > feedGap > reserveFloor > navMove", () => {
+  it("orders precedence freshness > feedGap > venueDark > reserveFloor > navMove", () => {
+    // The split this order encodes: the first three answer *is the data under this
+    // surface trustworthy*, the last two *what is the fund doing*. `venueDark` (#266)
+    // joined the data half below `feedGap`, which speaks about THIS anchor's own
+    // numbers rather than the window behind it.
     expect([...TRIGGER_PRECEDENCE]).toEqual([
       "freshness",
       "feedGap",
+      "venueDark",
       "reserveFloor",
       "navMove",
     ]);
@@ -123,8 +128,11 @@ describe("navMove", () => {
     expect(Math.abs(move)).toBeGreaterThan(NAV_MOVE_THRESHOLD_PCT);
 
     const verdict = computeVerdict(latest, anchors, at("2026-06-28"));
-    expect(verdict.fired).toEqual([]);
-    expect(verdict.needsYou).toBe(false);
+    // `navMove` declines — the claim. The day itself is a *yes* since #266, because
+    // `venueDark` takes it: 06-26 is a Friday the crypto venue produced nothing on,
+    // and that is one of the days this surface used to be silent about. Asserting the
+    // ABSENCE OF navMove rather than an empty array keeps the claim exact.
+    expect(verdict.fired.map((t) => t.name)).not.toContain("navMove");
     // Per-number suppression, the one split real history produces: the reference is
     // unshowable, so Change alone goes — fund value and Reserve still render.
     expect(verdict.slots.change.rendered).toBe(false);

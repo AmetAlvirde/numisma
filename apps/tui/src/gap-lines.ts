@@ -26,14 +26,16 @@
  * remove. A clean window prints nothing; a BROKEN check says so.
  */
 import {
-  formatGapReport,
+  formatLostDays,
+  formatVenueDarkDays,
   loadGapReport,
   type EventStorePaths,
+  type GapReport,
   type GapWindow,
 } from "@numisma/event-store";
 
 /**
- * The most lost-day lines this channel will print before it summarizes the rest.
+ * The most report lines this channel will print before it summarizes the rest.
  *
  * A startup channel is not a report. After a long outage the derivation walks the
  * WHOLE window and finds every lost day — that is `computeGapReport`'s job and it
@@ -50,6 +52,31 @@ import {
  * reason `MAX_WINDOW_DAYS` is exported from `gap-report-core.ts`.
  */
 export const MAX_GAP_LINES = 7;
+
+/**
+ * THE FLOOR THE LOST DAYS CANNOT BE PUSHED BELOW — the bound's other half, and the
+ * reason the two kinds are budgeted rather than concatenated.
+ *
+ * A TAIL SLICE OVER `[...lost, ...venueDark]` STARVES THE LOST DAYS. It withholds
+ * every lost day before it drops one venue-dark line, and once the venue-dark lines
+ * alone reach {@link MAX_GAP_LINES} it can never print a lost day again. That is not
+ * a severity trade-off — the two findings are not the same kind of thing: A LOST DAY
+ * IS PERMANENT and can never be repaired, while a venue-dark day is transient, recurs,
+ * and by D7 fires on ~9-10 market holidays a year. The starving line is the one whose
+ * own text says *the day is not lost*.
+ *
+ * It is not a rare shape either: this app passes no `since`, so the floor is the fixed
+ * `LAUNCHD_ERA_START` and the window grows by a day every day. On holidays alone the
+ * venue-dark side crosses the cap within about a year, permanently, on the one surface
+ * that is read daily and the only automatic one that names permanent data loss.
+ *
+ * So each kind gets a RESERVED FLOOR and neither can be crowded out. The floor is not
+ * a quota: whatever the other kind does not need, this one may spend — a clean
+ * venue-dark side still prints seven lost days. Lost days hold the larger share
+ * because permanence outranks recurrence. Exported for the same reason as
+ * {@link MAX_GAP_LINES}: the test must DRIVE the numbers, not restate them.
+ */
+export const RESERVED_LOST_LINES = 4;
 
 /** The one wording for "the check itself did not run." Shared with `startup.ts`. */
 export function formatGapCheckFailure(error: unknown): string {
@@ -73,28 +100,57 @@ export async function loadGapLines(
   paths: EventStorePaths,
   window: GapWindow,
 ): Promise<string[]> {
-  let all: string[];
+  let report: GapReport;
   try {
-    all = formatGapReport(await loadGapReport(paths, window));
+    report = await loadGapReport(paths, window);
   } catch (error) {
     return [formatGapCheckFailure(error)];
   }
 
-  const withheld = all.length - MAX_GAP_LINES;
-  if (withheld <= 0) {
-    return all;
+  const lost = formatLostDays(report);
+  const venueDark = formatVenueDarkDays(report);
+  if (lost.length + venueDark.length <= MAX_GAP_LINES) {
+    // Under the cap nothing is budgeted and nothing is withheld — including the clean
+    // window, which returns the empty array and keeps this channel silent.
+    return [...lost, ...venueDark];
   }
-  // `formatGapReport` renders `report.lost`, which the derivation's walk builds
-  // ASCENDING — so the most recent lost days are the tail, and the withheld ones are
-  // the head. The count goes last, under the days it summarizes.
-  //
-  // Deliberately NOT `formatGapSummary`: that one reports the TOTAL over the FULL
-  // window and is contractually the always-printed one-liner — it speaks on a clean
-  // window, which this channel must never do. This says only how much was withheld,
-  // and names the command that shows the rest. `day(s)` is the house form
-  // (`formatGapSummary`'s `lost day(s)` / `anchor(s)`); there is no singular branch.
+
+  // THE BUDGET. Each kind may take the whole cap minus whatever the OTHER kind's
+  // reserve actually claims — so a floor when both are over-full, and the full cap
+  // when the other side is quiet. See {@link RESERVED_LOST_LINES}.
+  const shownLost = Math.min(
+    lost.length,
+    MAX_GAP_LINES - Math.min(venueDark.length, MAX_GAP_LINES - RESERVED_LOST_LINES),
+  );
+  const shownVenueDark = Math.min(venueDark.length, MAX_GAP_LINES - shownLost);
+
+  // Each kind keeps its OWN most recent days — the still-actionable end within a kind
+  // — so the head withheld from each is its oldest.
   return [
-    ...all.slice(withheld),
-    `Numisma: …and ${withheld} earlier lost day(s) (pnpm gap-report).`,
+    ...lost.slice(lost.length - shownLost),
+    ...venueDark.slice(venueDark.length - shownVenueDark),
+    withheldLine(lost.length - shownLost, venueDark.length - shownVenueDark),
   ];
+}
+
+/**
+ * The tail line: what was withheld, COUNTED PER KIND.
+ *
+ * One undifferentiated "N line(s)" cannot be read: since #266 a withheld line may be a
+ * permanent lost day or a transient venue-dark day, and the operator's next move is
+ * different for each. Naming both counts is what makes the bound honest rather than
+ * merely quiet, and a kind that lost nothing is omitted rather than reported as zero.
+ *
+ * Deliberately NOT `formatGapSummary`: that one reports the TOTAL over the FULL window
+ * and is contractually the always-printed one-liner — it speaks on a clean window,
+ * which this channel must never do. This says only how much was withheld, and names
+ * the command that shows the rest. `(s)` is the house form (`formatGapSummary`'s
+ * `lost day(s)` / `anchor(s)`); there is no singular branch.
+ */
+function withheldLine(lost: number, venueDark: number): string {
+  const parts = [
+    ...(lost > 0 ? [`${lost} earlier lost day(s)`] : []),
+    ...(venueDark > 0 ? [`${venueDark} earlier venue-dark line(s)`] : []),
+  ];
+  return `Numisma: …and ${parts.join(", ")} (pnpm gap-report).`;
 }

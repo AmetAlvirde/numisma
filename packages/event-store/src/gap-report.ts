@@ -1,7 +1,31 @@
 /**
  * THE GAP REPORT — a pure, synchronous derivation over the durable log that
- * answers one question: **which calendar days in the launchd era did the price
- * feed not run on?**
+ * answers TWO questions about the launchd era:
+ *
+ *   1. **Which calendar days did the price feed not run on?** → `lost`
+ *   2. **On which days did a whole VENUE owe marks and produce none?** → `venueDark`
+ *
+ * IT ANSWERED ONLY THE FIRST UNTIL #266, and the single-question framing that used
+ * to open this header was load-bearing documentation — so it is replaced rather
+ * than amended. The second question exists because the first cannot see the worst
+ * case it neighbours: a venue that goes dark WHILE STILL SERVING STALE BARS makes
+ * every instrument self-skip as INFO, the run exits 0, the heartbeat reads healthy,
+ * and the day is anchored and marked — by the OTHER venue. Question 1 calls that
+ * day clean, correctly. It is not clean.
+ *
+ * THE TWO ANSWERS ARE NOT THE SAME KIND OF THING, and conflating them is the one
+ * mistake this module must not make. A lost day is PERMANENT — the feed did not
+ * run, the marks can never be recovered, NAV is blank on that row forever. A
+ * venue-dark day is not lost: the feed ran, the day is anchored, NAV computes off
+ * the venue that did report. That is why `venueDark` is a SECOND ARRAY rather than
+ * a third `LostDayReason` (#266 D5): three surfaces render `lost.length` as
+ * "N lost day(s)", and a third verdict would silently inflate all three.
+ *
+ * QUESTION 2 IS STRICTLY ADDITIVE. It can only fire on a day that already has an
+ * anchor AND at least one mark — i.e. a day question 1 has already cleared — so
+ * `no-anchor` and `no-marks` keep their exact meanings, and no day carries both
+ * verdicts. It is also WARN-ONLY (#266 D8): nothing is suppressed and the exit code
+ * does not move, which D7 below makes mandatory rather than merely preferable.
  *
  * IT REPORTS. IT NEVER FILLS. Folding an unanchored day writes a row on which all
  * thirteen instruments were expected and none arrived: `feedGap` fires, every
@@ -40,7 +64,32 @@
  * **`marksOn(D) < 13` IS NOT REPORTED, AT ANY SEVERITY.** A Saturday's 4 is
  * complete, not degraded, and one failed Twelve Data symbol is one blank cell that
  * the existing `feedGap` trigger already speaks to. *Day lost* is permanent; *one
- * instrument missing* is not.
+ * instrument missing* is not. **`venueDark` does not overturn this**: its unit is a
+ * whole venue at ZERO, never a count shortfall — eight of nine equities is still
+ * one blank cell and stays unreported (#266 D3).
+ *
+ * ── QUESTION 2, STATED ─────────────────────────────────────────────────────────
+ * **A venue is DARK on D when it owed a mark on D and zero `PriceMarked` events on
+ * D attribute to it.** "Owed" is `owesMarkOn` from `@numisma/engine`'s venue
+ * calendar — the same definition the push glance builder expects marks against, so
+ * the two surfaces cannot disagree about whether a venue marks on weekends.
+ *
+ * ATTRIBUTION IS `instrumentsForSource`, NEVER `resolveInstrument`. The latter
+ * throws loud on an unknown id BY DESIGN, which is right for the fetch orchestrator
+ * and catastrophic here: this is a RETROSPECTIVE derivation over the whole log, so
+ * one since-retired instrument in a historical row would crash every report from
+ * that day forward. Marks that attribute to no registered instrument are counted
+ * into `unattributedMarks` and are otherwise inert — **they may never suppress a
+ * verdict**, because a mark nobody can place is not evidence that a venue reported.
+ *
+ * NO MARKET-HOLIDAY CALENDAR (#266 D7). `owesMarkOn` walks back over weekends and
+ * nothing else, so every weekday US market holiday — roughly 9-10 a year — fires.
+ * That is accepted, on this module's own logic: a false *no* is the one failure a
+ * triage surface cannot have, and a holiday is a false *yes*. It is paid for in the
+ * MESSAGE rather than in a calendar: the line names the venue and the WEEKDAY, so a
+ * holiday reads as a holiday on sight. (A calendar also buys less than it looks
+ * like — a stale one produces false positives, safe; an over-broad one produces
+ * false negatives, dangerous.)
  *
  * INTERIOR GAPS ARE THE POINT. A trailing `max(as_of)` check is exactly what let
  * 07-18…07-26 hide until a human noticed nine days later. Walking the whole window
@@ -62,7 +111,16 @@
  * nine tests inject synthetic counts and never exercise the number the rule was
  * applied to.
  */
-import { addDays, tradingDayAsOf, type PortfolioEvent } from "@numisma/engine";
+import {
+  PRICE_SOURCES,
+  addDays,
+  instrumentsForSource,
+  owesMarkOn,
+  tradingDayAsOf,
+  weekdayName,
+  type PortfolioEvent,
+  type PriceSource,
+} from "@numisma/engine";
 
 /**
  * THE FLOOR. 2026-07-03 is the day the daily launchd scheduler landed
@@ -107,6 +165,25 @@ export interface LostDay {
   reason: LostDayReason;
 }
 
+/**
+ * One venue, one day, zero marks — question 2's finding.
+ *
+ * IT CARRIES THE DATE, and that is deliberate. `GapReport` is a LOCAL artifact:
+ * stdout, `gap-report.json` beside the git-ignored log, and the TUI. ADR-007's
+ * payload allow-list governs the hosted projection payload, which is a different
+ * surface reached through a different module; nothing here imports it and nothing
+ * here may. The local surfaces should name the day, and the weekday the message
+ * needs is derived from the date rather than stored beside it.
+ */
+export interface VenueDarkDay {
+  /** The day the venue owed marks on. */
+  date: string;
+  /** The venue that produced none. */
+  source: PriceSource;
+  /** How many registered instruments that venue owed on this day. */
+  expected: number;
+}
+
 export interface GapReport {
   /** Inclusive window floor actually used. */
   since: string;
@@ -118,6 +195,18 @@ export interface GapReport {
   anchorsChecked: number;
   /** Ascending. Empty means every day in the window carried a mark. */
   lost: LostDay[];
+  /**
+   * Ascending by date, then by venue. Empty means every venue that owed a mark on
+   * a non-lost day produced at least one. **These are NOT lost days** — see the
+   * header. Nothing may fold this into `lost.length`.
+   */
+  venueDark: VenueDarkDay[];
+  /**
+   * `PriceMarked` events in the window whose `instrumentId` has no registry row —
+   * a since-retired or never-registered instrument. Reported so the number is
+   * visible, and deliberately inert: it fills no venue's expectation.
+   */
+  unattributedMarks: number;
 }
 
 /**
@@ -194,21 +283,39 @@ export function computeGapReport(
 
   const anchored = new Set<string>();
   const marksOn = new Map<string, number>();
+  // date → source → marks attributed to that source on that date.
+  const venueMarksOn = new Map<string, Map<PriceSource, number>>();
+  let unattributedMarks = 0;
   for (const event of events) {
     const { asOf } = event;
     if (asOf < since || asOf > until) {
       continue;
     }
     anchored.add(asOf);
-    if (event.type === "PriceMarked") {
-      marksOn.set(asOf, (marksOn.get(asOf) ?? 0) + 1);
+    if (event.type !== "PriceMarked") {
+      continue;
     }
+    marksOn.set(asOf, (marksOn.get(asOf) ?? 0) + 1);
+    // Attribution never throws: an id with no registry row is bucketed, not fatal.
+    const source = SOURCE_BY_INSTRUMENT_ID.get(event.instrumentId);
+    if (source === undefined) {
+      unattributedMarks += 1;
+      continue;
+    }
+    let bySource = venueMarksOn.get(asOf);
+    if (bySource === undefined) {
+      bySource = new Map();
+      venueMarksOn.set(asOf, bySource);
+    }
+    bySource.set(source, (bySource.get(source) ?? 0) + 1);
   }
 
   const lost: LostDay[] = [];
+  const venueDark: VenueDarkDay[] = [];
   let calendarDays = 0;
   let anchorsChecked = 0;
-  // Ascending by construction — the walk IS the sort.
+  // Ascending by construction — the walk IS the sort. `venueDark` inherits that
+  // ordering, and within a day the venue order is `PRICE_SOURCES`'.
   for (let date = since; date <= until; date = addDays(date, 1)) {
     calendarDays += 1;
     if (!anchored.has(date)) {
@@ -219,14 +326,68 @@ export function computeGapReport(
     // Zero marks, not "fewer than thirteen". See the header.
     if ((marksOn.get(date) ?? 0) === 0) {
       lost.push({ date, reason: "no-marks" });
+      // A lost day is not additionally a venue-dark day: one day, one verdict.
+      continue;
+    }
+    const bySource = venueMarksOn.get(date);
+    for (const source of PRICE_SOURCES) {
+      if (!owesMarkOn(source, date) || (bySource?.get(source) ?? 0) > 0) {
+        continue;
+      }
+      venueDark.push({ date, source, expected: EXPECTED_BY_SOURCE[source] ?? 0 });
     }
   }
 
-  return { since, until, calendarDays, anchorsChecked, lost };
+  return { since, until, calendarDays, anchorsChecked, lost, venueDark, unattributedMarks };
 }
 
-/** One line per lost day. EMPTY when the window is clean — the caller stays quiet. */
+/**
+ * `instrumentId` → the venue that serves it, built ONCE from `instrumentsForSource`
+ * — the registry read that cannot throw. A module-level constant because the
+ * registry is code-owned reference data: it cannot change between two calls of a
+ * pure function, and rebuilding it per report would re-walk thirteen rows per day.
+ */
+const SOURCE_BY_INSTRUMENT_ID: ReadonlyMap<string, PriceSource> = new Map(
+  PRICE_SOURCES.flatMap((source) =>
+    instrumentsForSource(source).map(
+      (entry) => [entry.instrumentId, source] as [string, PriceSource],
+    ),
+  ),
+);
+
+/** How many instruments each venue owes on a day it owes anything. */
+const EXPECTED_BY_SOURCE: Readonly<Partial<Record<PriceSource, number>>> =
+  Object.fromEntries(
+    PRICE_SOURCES.map((source) => [source, instrumentsForSource(source).length]),
+  );
+
+/**
+ * One line per lost day, then one per venue-dark venue-day. EMPTY when the window
+ * is clean — the caller stays quiet, and that is what bounds the noise BY
+ * CONSTRUCTION on every channel this feeds.
+ *
+ * LOST DAYS COME FIRST, wording untouched, so the surfaces that already read this
+ * output see their existing lines in their existing order with new lines appended.
+ * The venue-dark line says "the day is not lost" in as many words: it is printed
+ * next to lines that end "the day is lost", and a reader must not have to infer the
+ * difference.
+ */
 export function formatGapReport(report: GapReport): string[] {
+  return [...formatLostDays(report), ...formatVenueDarkDays(report)];
+}
+
+/**
+ * The lost-day lines alone, ascending.
+ *
+ * SPLIT OUT BECAUSE A BOUNDED CHANNEL CANNOT SLICE THE CONCATENATION. The TUI prints
+ * at most seven lines; taking the tail of `formatGapReport`'s output withholds lost
+ * days first and, once the venue-dark lines alone fill the bound, withholds every
+ * lost day forever — a permanent, unfixable finding starved out by a transient,
+ * recurring one. The channel therefore reserves capacity per kind, and reserving
+ * requires the kinds to arrive separately. The rendering itself is unchanged, and
+ * {@link formatGapReport} still returns exactly what it always did.
+ */
+export function formatLostDays(report: GapReport): string[] {
   return report.lost.map(({ date, reason }) =>
     reason === "no-anchor"
       ? `Numisma: ${date} — NO DATA. No event of any kind carries this date; the day is lost.`
@@ -234,12 +395,39 @@ export function formatGapReport(report: GapReport): string[] {
   );
 }
 
-/** The always-printed one-liner: what was checked, and the verdict. */
+/**
+ * The venue-dark lines alone, ascending by date then by venue. See
+ * {@link formatLostDays} for why the two kinds are separable.
+ */
+export function formatVenueDarkDays(report: GapReport): string[] {
+  // The WEEKDAY is not decoration — it is how the reader recognises the ~9-10
+  // market holidays a year this fires on (D7), which are the only false
+  // positives it has by design.
+  return report.venueDark.map(
+    ({ date, source, expected }) =>
+      `Numisma: ${date} (${weekdayName(date)}) — VENUE DARK. ${source} owed ` +
+      `${expected} mark(s) and produced none. The day is not lost; the venue was ` +
+      `silent, or the market was closed for a holiday.`,
+  );
+}
+
+/**
+ * The always-printed one-liner: what was checked, and the verdict.
+ *
+ * THE LOST-DAY SENTENCE IS UNCHANGED, down to the byte, and the venue-dark count
+ * is a SEPARATE sentence that says what it is not. Three surfaces render "N lost
+ * day(s)"; folding venue-dark venue-days into that number would inflate all three.
+ */
 export function formatGapSummary(report: GapReport): string {
   const scope =
     `${report.since}…${report.until} ` +
     `(${report.calendarDays} day(s), ${report.anchorsChecked} anchor(s) checked)`;
-  return report.lost.length === 0
-    ? `Numisma: no lost days in ${scope}.`
-    : `Numisma: ${report.lost.length} lost day(s) in ${scope}.`;
+  const lost =
+    report.lost.length === 0
+      ? `Numisma: no lost days in ${scope}.`
+      : `Numisma: ${report.lost.length} lost day(s) in ${scope}.`;
+  return report.venueDark.length === 0
+    ? lost
+    : `${lost} ${report.venueDark.length} venue-day(s) dark — not lost days: ` +
+      `the feed ran and the days are anchored.`;
 }

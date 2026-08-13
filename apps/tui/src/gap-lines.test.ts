@@ -14,7 +14,7 @@ import { resolve } from "node:path";
 import { addDays, type PortfolioEvent } from "@numisma/engine";
 import { resolveEventStorePaths, type EventStorePaths } from "@numisma/event-store";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadGapLines, MAX_GAP_LINES } from "./gap-lines.js";
+import { loadGapLines, MAX_GAP_LINES, RESERVED_LOST_LINES } from "./gap-lines.js";
 
 const created: string[] = [];
 
@@ -39,6 +39,37 @@ function deposit(date: string): PortfolioEvent {
   return { id: `dep-${date}`, asOf: date, type: "Deposit", reserveId: "cash-core", amount: 500, tier: "c1" };
 }
 
+/** The crypto venue's four — it owes marks on EVERY calendar day. */
+const DAILY_VENUE_INSTRUMENTS = ["btc", "eth", "render", "gram"];
+
+/**
+ * The equity venue's nine, spelled out — so a day carrying only these is a day on
+ * which `binance` owed four marks and produced none, whatever weekday it falls on.
+ */
+const WEEKDAY_VENUE_INSTRUMENTS = [
+  "aapl",
+  "googl",
+  "tsla",
+  "eww-mxn",
+  "intc-mxn",
+  "nke-mxn",
+  "nu-mxn",
+  "rivn-mxn",
+  "sbux-mxn",
+];
+
+/**
+ * A day on which BOTH venues reported — the registry's own ids, because since #266
+ * the report also asks whether a whole venue went dark, and that question is
+ * answered through `instrumentsForSource`. A single made-up mark no longer makes a
+ * day clean, and should not: it leaves nine instruments unquoted.
+ */
+const ALL_INSTRUMENTS = [...DAILY_VENUE_INSTRUMENTS, ...WEEKDAY_VENUE_INSTRUMENTS];
+
+function healthyDay(date: string): string[] {
+  return ALL_INSTRUMENTS.map((instrumentId) => JSON.stringify(mark(date, instrumentId)));
+}
+
 /**
  * `count` consecutive `YYYY-MM-DD` days ending at (and including) `until`, ascending.
  *
@@ -56,14 +87,14 @@ describe("loadGapLines", () => {
   it("SAYS NOTHING when every day in the window carried a mark", async () => {
     // Silence is the feature. A startup channel that speaks on a healthy log is a
     // startup channel you learn to scroll past.
-    const paths = await storeWithLog([JSON.stringify(mark("2026-08-04"))]);
+    const paths = await storeWithLog(healthyDay("2026-08-04"));
     const lines = await loadGapLines(paths, { since: "2026-08-04", now: NOW });
     expect(lines).toEqual([]);
   });
 
   it("names each lost day, one line per day", async () => {
     const paths = await storeWithLog([
-      JSON.stringify(mark("2026-08-02")),
+      ...healthyDay("2026-08-02"),
       JSON.stringify(deposit("2026-08-03")),
     ]);
     const lines = await loadGapLines(paths, { since: "2026-08-02", now: NOW });
@@ -133,6 +164,68 @@ describe("loadGapLines", () => {
     }
   });
 
+  it("NEVER WITHHOLDS A LOST DAY IN FAVOUR OF A VENUE-DARK LINE", async () => {
+    // The starvation case, which no test covered while the bound was a tail slice over
+    // `[...lost, ...venueDark]`: with the lines concatenated, EVERY withheld line is a
+    // lost day before a single venue-dark line is dropped, and once the venue-dark
+    // lines alone reach the cap no lost day can appear on this channel at all. The TUI
+    // passes no `since`, so its window grows by a day every day while D7 accepts ~9-10
+    // weekday-holiday false positives a year — the venue-dark side crosses the cap on
+    // its own within about a year, and the only automatic surface that names permanent
+    // data loss would then never name one again.
+    //
+    // A lost day is PERMANENT and unfixable; a venue-dark day is transient and recurs.
+    // So capacity is reserved per kind: both must always be able to reach the channel.
+    const RESERVED_DARK = MAX_GAP_LINES - RESERVED_LOST_LINES;
+    const LOST = 5;
+    const DARK = 8;
+
+    // 8 days on which only the equity venue marked — `binance` owes on every calendar
+    // day, so each is a venue-dark day whatever weekday it falls on — preceded by 5
+    // days no event of any kind carries.
+    const darkDays = daysEndingAt("2026-08-04", DARK);
+    const lostDays = daysEndingAt(addDays(darkDays[0] as string, -1), LOST);
+    const paths = await storeWithLog(
+      darkDays.flatMap((date) =>
+        WEEKDAY_VENUE_INSTRUMENTS.map((instrumentId) =>
+          JSON.stringify(mark(date, instrumentId)),
+        ),
+      ),
+    );
+
+    const lines = await loadGapLines(paths, { since: lostDays[0] as string, now: NOW });
+
+    // Both kinds reached the channel, and the reserve is what put the lost days there.
+    const shownLost = lines.filter((line) => line.includes("the day is lost"));
+    const shownDark = lines.filter((line) => line.includes("VENUE DARK"));
+    expect(shownLost).toHaveLength(RESERVED_LOST_LINES);
+    expect(shownDark).toHaveLength(RESERVED_DARK);
+    expect(lines).toHaveLength(MAX_GAP_LINES + 1);
+
+    // Each kind keeps its own MOST RECENT days — the still-actionable end, per kind.
+    for (const date of lostDays.slice(-RESERVED_LOST_LINES)) {
+      expect(lines.join("\n")).toContain(date);
+    }
+    // And the tail line is honest about what was withheld FROM EACH, rather than
+    // reporting one undifferentiated count of "lines".
+    expect(lines.at(-1)).toBe(
+      `Numisma: …and ${LOST - RESERVED_LOST_LINES} earlier lost day(s), ` +
+        `${DARK - RESERVED_DARK} earlier venue-dark line(s) (pnpm gap-report).`,
+    );
+  });
+
+  it("lets each kind spend the capacity the other does not need", async () => {
+    // The reserve is a FLOOR, not a quota: a clean venue-dark side must not shrink the
+    // lost days this channel can print. Same log as the truncation case above, and the
+    // full cap still goes to lost days.
+    const lostDays = daysEndingAt("2026-08-04", MAX_GAP_LINES + 2);
+    const paths = await storeWithLog([]);
+    const lines = await loadGapLines(paths, { since: lostDays[0] as string, now: NOW });
+    expect(lines.filter((line) => line.includes("the day is lost"))).toHaveLength(
+      MAX_GAP_LINES,
+    );
+  });
+
   it("prints every lost day, and no tail line, at exactly the cap", async () => {
     // The boundary the off-by-one lives on: a count EQUAL to the cap is not
     // "bounded with zero withheld" — it withholds nothing, so it must say nothing
@@ -142,7 +235,7 @@ describe("loadGapLines", () => {
     const lines = await loadGapLines(paths, { since: lostDays[0] as string, now: NOW });
 
     expect(lines).toHaveLength(MAX_GAP_LINES);
-    expect(lines.join("\n")).not.toContain("earlier lost day(s)");
+    expect(lines.join("\n")).not.toContain("earlier");
   });
 
   it("reports an absent log as lost days rather than as a failure", async () => {

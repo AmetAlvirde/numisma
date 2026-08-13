@@ -138,11 +138,23 @@ describe("as-of calendar arithmetic contract", () => {
     }
   });
 
-  it("imports addDays into the push glance module from the engine", () => {
+  it("keeps the push glance module's calendar work in the engine, declaring none of it", () => {
+    // `addDays` LEFT this file with #266 D4: its only caller here was
+    // `lastExpectedMarkDate`, which moved down to `@numisma/engine` so the durable
+    // log's gap report could share the one definition. So glance now imports the
+    // DERIVED helper rather than the arithmetic — but the invariant this case was
+    // written for is unchanged and is asserted on both sides: glance gets its
+    // calendar work from the engine, and declares none of it privately.
     expect(
-      /\baddDays\b/.test(engineImports(glanceSource)),
-      "push/glance.ts must import addDays from the engine",
+      /\blastExpectedMarkDate\b/.test(engineImports(glanceSource)),
+      "push/glance.ts must import lastExpectedMarkDate from the engine",
     ).toBe(true);
+    for (const name of ["addDays", "isWeekend", "lastExpectedMarkDate"]) {
+      expect(
+        new RegExp(`function\\s+${name}\\b`).test(glanceSource),
+        `push/glance.ts must not declare its own ${name}`,
+      ).toBe(false);
+    }
   });
 
   it("keeps ZERO private copies repo-wide — one declaring file, and it is the engine's", () => {
@@ -164,5 +176,43 @@ describe("as-of calendar arithmetic contract", () => {
   it("keeps the validation both helpers were documented to have", () => {
     expect(() => calendar.addDays("not-a-date", 1)).toThrow(/addDays/);
     expect(() => calendar.daysBetween("2026-07-26", "not-a-date")).toThrow(/daysBetween/);
+  });
+});
+
+/**
+ * The same de-duplication guard, one level up: the VENUE CADENCE.
+ *
+ * Its failure mode is worse than a duplicated `addDays`, which is why it gets its
+ * own sweep (#266 D4). The `satisfies Record<PriceSource, VenueCadence>` latch on
+ * the table guarantees EXHAUSTIVENESS, not AGREEMENT — two copies compile happily
+ * while disagreeing about whether a venue marks on weekends, and the visible result
+ * is two health surfaces (the push glance block and the durable log's gap report)
+ * contradicting each other about the same day.
+ *
+ * Scoped to `VENUE_CADENCE` alone, deliberately. `isWeekend` and
+ * `lastExpectedMarkDate` are NOT swept, because
+ * `packages/event-store/src/gap-report.test.ts` holds a hand-copied pair on
+ * purpose: it re-implements the REJECTED `feedGap.arrived` rule so the
+ * disagreement stays executable, and collapsing it onto the shared definition
+ * would destroy the pin.
+ */
+describe("venue cadence contract", () => {
+  const VENUE_CADENCE_HOME = "packages/engine/src/price-feed/venue-calendar.ts";
+
+  it("exports the venue calendar from @numisma/engine", () => {
+    expect((engine as Record<string, unknown>).VENUE_CADENCE).toEqual({
+      binance: "daily",
+      twelvedata: "weekdays",
+    });
+    expect(typeof (engine as Record<string, unknown>).lastExpectedMarkDate).toBe("function");
+  });
+
+  it("keeps ZERO private copies of the cadence table repo-wide", () => {
+    const declarers = SOURCES.filter(({ text }) =>
+      /(?:const|let|var)\s+VENUE_CADENCE\b/.test(text),
+    ).map(({ file }) => file);
+    expect(declarers, `VENUE_CADENCE must be declared once, in ${VENUE_CADENCE_HOME}`).toEqual([
+      VENUE_CADENCE_HOME,
+    ]);
   });
 });
