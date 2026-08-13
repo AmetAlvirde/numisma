@@ -326,7 +326,13 @@ export {
   owesMarkOn,
 } from "./price-feed/venue-calendar.js";
 export type { Quote, MarkClock } from "./price-feed/mark.js";
+// The trading-day contract every plane must agree on, authored once. The price-feed
+// config, the gap report's `REPORT_TIME_ZONE` and the daily wrapper's `MARK_TZ` all
+// derive from these rather than restating them.
 export {
+  TRADING_DAY_TIME_ZONE,
+  MARK_HOUR,
+  MARK_TIME,
   tradingDayAsOf,
   isAtOrAfterMarkTime,
   priceMarkId,

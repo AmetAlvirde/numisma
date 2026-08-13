@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { instrumentsForSource } from "@numisma/engine";
+import { MARK_HOUR, TRADING_DAY_TIME_ZONE, instrumentsForSource } from "@numisma/engine";
 import { DEFAULT_CONFIG } from "./config.js";
 
 /**
@@ -104,6 +106,28 @@ function firesPerDay(intervals: CalendarInterval[]): number {
   }, 0);
 }
 
+/**
+ * Run the real wrapper under the real `/bin/bash`, for the config-refusal paths ONLY.
+ *
+ * SAFE BECAUSE IT NEVER GETS PAST VALIDATION. Both callers hand it a value the
+ * wrapper is required to reject, and that rejection happens before `mkdir -p
+ * "$LOG_DIR"`, before the EXIT-trap heartbeat is installed and long before anything
+ * touches pnpm, the durable log or a provider — the assertion on the absent log dir
+ * is what holds that true. Never call this with a VALID config: the wrapper would go
+ * on to run the actual daily pipeline against the real data dir. Driving the wrapper
+ * on its succeeding paths is the wrapper harness's job, not this file's.
+ *
+ * `/bin/bash` explicitly, never the shebang's `env bash`: launchd runs 3.2.57, and a
+ * Homebrew bash 5 would silently accept shapes 3.2 rejects.
+ */
+function runWrapper(env: Record<string, string>): { status: number | null; output: string } {
+  const result = spawnSync("/bin/bash", [WRAPPER_PATH], {
+    encoding: "utf8",
+    env: { ...process.env, ...env },
+  });
+  return { status: result.status, output: `${result.stdout ?? ""}${result.stderr ?? ""}` };
+}
+
 describe("the launchd fetch window", () => {
   it.skipIf(!onMac)("is a plist launchd can actually load", () => {
     // A malformed plist is silently ignored by launchd — no error, just no job.
@@ -164,26 +188,41 @@ describe("the launchd fetch window", () => {
     );
   });
 
-  it("keeps the wrapper's own mark hour equal to the contract's, with no leading zero", () => {
+  it("keeps the wrapper's own mark hour DEFAULT equal to the contract's, with no leading zero", () => {
     // The wrapper duplicates the mark hour in bash to decide whether a run could
     // mark at all (the heartbeat's `markWindow`). It cannot import `DEFAULT_CONFIG`,
     // so this is the join: change the contract and a test fails rather than the
     // breadcrumb quietly mis-classifying every run.
     //
-    // THE REGEX REFUSES A LEADING ZERO ON PURPOSE. `[[ x -ge $MARK_HOUR ]]`
+    // THE HOUR IS NOW OVERRIDABLE, WHICH MOVES THIS GUARD BUT DOES NOT RETIRE IT.
+    // What is pinned is the DEFAULT — the `:-` half of the expansion, the value every
+    // scheduled fire actually uses. Matching the whole expansion rather than a bare
+    // literal is deliberate: a wrapper that dropped the `NUMISMA_MARK_HOUR` override
+    // and went back to `MARK_HOUR=18` would fail here, because a caller that can no
+    // longer put a run on either side of the window is a silent loss of exactly the
+    // capability this line exists to provide.
+    //
+    // THE REGEX STILL REFUSES A LEADING ZERO ON PURPOSE. `[[ x -ge $MARK_HOUR ]]`
     // arithmetic-evaluates its right operand, and `08`/`09` are invalid octal. That
     // does not abort — it is an `if` condition, so `set -e` never fires — it silently
     // classifies EVERY run as out-of-window. `Number("08") === 8` would let a guard
     // written the obvious way sail straight past it, so the SHAPE is asserted, not
-    // just the value. (The wrapper also wraps both operands in `10#`; this is the
-    // second lock on the same door, because either alone is enough to be forgotten.)
+    // just the value. (The wrapper also wraps both operands in `10#`, and the sibling
+    // test below drives its actual comparison line to prove it: two locks on one
+    // door, because either alone is enough to be forgotten.)
     const markHour = Number(DEFAULT_CONFIG.markTime.split(":")[0]);
-    const declared = /^MARK_HOUR=([1-9]?[0-9])$/m.exec(readFileSync(WRAPPER_PATH, "utf8"));
+    // The contract's own hour derives from the engine — assert that too, so
+    // re-literalising `DEFAULT_CONFIG` cannot quietly reopen the second copy this
+    // increment closed.
+    expect(markHour).toBe(MARK_HOUR);
+    const declared = /^MARK_HOUR="\$\{NUMISMA_MARK_HOUR:-([1-9]?[0-9])\}"$/m.exec(
+      readFileSync(WRAPPER_PATH, "utf8"),
+    );
     expect(declared?.[1]).toBeDefined();
     expect(Number(declared?.[1])).toBe(markHour);
   });
 
-  it("keeps the wrapper's own mark timezone equal to the contract's", () => {
+  it("keeps the wrapper's own mark timezone DEFAULT equal to the contract's", () => {
     // The hour is meaningless without the zone. The real gate resolves the mark
     // instant through Intl in CDMX explicitly, so a wrapper reading the bare local
     // hour would agree only by coincidence of the OS setting — and the install docs
@@ -191,8 +230,110 @@ describe("the launchd fetch window", () => {
     // supported. Under that config every scheduled fire would classify itself
     // out-of-window, nothing would ever stamp, and the staleness trigger would be
     // permanently and silently dead while the runs themselves marked correctly.
-    const declared = /^MARK_TZ="([^"]+)"$/m.exec(readFileSync(WRAPPER_PATH, "utf8"));
+    //
+    // Same move as the hour above: the OVERRIDE is what lets a caller drive the
+    // window, and the DEFAULT is what every scheduled fire uses, so the default is
+    // what has to equal the contract.
+    expect(DEFAULT_CONFIG.timeZone).toBe(TRADING_DAY_TIME_ZONE);
+    const declared = /^MARK_TZ="\$\{NUMISMA_MARK_TZ:-([^"}]+)\}"$/m.exec(
+      readFileSync(WRAPPER_PATH, "utf8"),
+    );
     expect(declared?.[1]).toBe(DEFAULT_CONFIG.timeZone);
+  });
+
+  it("classifies an 08/09 mark hour by base 10, using the wrapper's own comparison", () => {
+    // THE OCTAL LOCK, EXERCISED RATHER THAN DESCRIBED. The hour became configurable,
+    // so `08`/`09` stopped being hypothetical — and that band is the one where bash
+    // fails in the worst possible way: `[[ 09 -ge 08 ]]` is invalid octal, prints an
+    // error, does NOT abort (an `if` condition is exempt from `set -e`) and takes the
+    // else branch. Every run then records itself as out-of-window, nothing ever
+    // stamps, and the staleness channel dies silently while the marks land fine.
+    //
+    // THE CODE UNDER TEST IS LIFTED FROM THE WRAPPER, not re-typed here — that is the
+    // whole point. Strip the `10#` from either operand in the wrapper and this goes
+    // red (measured: the unguarded form answers `false` for 09 ≥ 08 and exits 0).
+    const wrapper = readFileSync(WRAPPER_PATH, "utf8");
+    const comparison = /^(if \[\[ .*MARK_NOW_HOUR.*MARK_HOUR.*\]\]; then)$/m.exec(wrapper)?.[1];
+    expect(comparison).toBeDefined();
+
+    // `/bin/bash` EXPLICITLY: that is what launchd runs (3.2.57 on macOS), and a
+    // Homebrew bash 5 would let a bash-5-only shape pass here and die in production.
+    const classify = (nowHour: string, markHour: string): string =>
+      execFileSync(
+        "/bin/bash",
+        [
+          "-c",
+          [
+            "set -euo pipefail",
+            `MARK_NOW_HOUR=${nowHour}`,
+            `MARK_HOUR=${markHour}`,
+            comparison!,
+            "  MARK_WINDOW=true",
+            "else",
+            "  MARK_WINDOW=false",
+            "fi",
+            'printf %s "$MARK_WINDOW"',
+          ].join("\n"),
+        ],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+      );
+
+    expect(classify("09", "08")).toBe("true");
+    expect(classify("07", "08")).toBe("false");
+    expect(classify("08", "08")).toBe("true");
+    // And the shape the schedule actually runs, so the guard cannot pass by only
+    // caring about the octal band.
+    expect(classify("18", "18")).toBe("true");
+    expect(classify("09", "18")).toBe("false");
+  });
+
+  it("refuses an unresolvable mark timezone on BOTH sides, instead of quietly becoming UTC", () => {
+    // THE ASYMMETRY THIS CLOSES. TypeScript already fails loudly on a bad zone;
+    // bash does not — `TZ=Not/AZone date +%H` prints the UTC hour with no error and a
+    // zero exit (verified on this box). UTC is disjoint from the CDMX evening window,
+    // so a typo'd override would flip the window wrong on every single run while the
+    // runs kept marking correctly. Now that the zone is settable, that typo is a
+    // thing a caller can actually make.
+    const BAD_ZONE = "Not/AZone";
+    expect(() => new Intl.DateTimeFormat("en-US", { timeZone: BAD_ZONE })).toThrow(RangeError);
+
+    const sandbox = mkdtempSync(join(tmpdir(), "numisma-mark-zone-"));
+    const logDir = join(sandbox, "logs");
+    const result = runWrapper({
+      NUMISMA_MARK_TZ: BAD_ZONE,
+      NUMISMA_PRICEFEED_LOG_DIR: logDir,
+      NUMISMA_DATA_DIR: join(sandbox, "data"),
+      NUMISMA_REPO_DIR: sandbox,
+    });
+
+    expect(result.status).not.toBe(0);
+    // It NAMES THE VALUE. A bare "bad timezone" would leave an operator staring at a
+    // plist and an env file trying to work out which one was read.
+    expect(result.output).toContain(BAD_ZONE);
+    expect(result.output).toContain("FATAL");
+    // BEFORE the mark window, and before anything else happens at all: the run never
+    // reaches `mkdir -p "$LOG_DIR"`, so there is no per-run log, no heartbeat and no
+    // half-done work to explain. A fallback to UTC would have reached all of it.
+    expect(existsSync(logDir)).toBe(false);
+  });
+
+  it("refuses a mark hour that is not an hour, which would classify every run out-of-window", () => {
+    // Same failure mode as the bad zone, through the other override: a non-numeric
+    // hour makes the comparison's arithmetic fail, and that failure does not abort —
+    // it just answers `false`, forever, on every run.
+    const sandbox = mkdtempSync(join(tmpdir(), "numisma-mark-hour-"));
+    const logDir = join(sandbox, "logs");
+    const result = runWrapper({
+      NUMISMA_MARK_HOUR: "noon",
+      NUMISMA_PRICEFEED_LOG_DIR: logDir,
+      NUMISMA_DATA_DIR: join(sandbox, "data"),
+      NUMISMA_REPO_DIR: sandbox,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.output).toContain("noon");
+    expect(result.output).toContain("FATAL");
+    expect(existsSync(logDir)).toBe(false);
   });
 
   it("lists exactly the wrapper steps that follow the one appending marks", () => {

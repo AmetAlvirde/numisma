@@ -6,16 +6,27 @@
  * knob-turner exists (there is one operator today), so these are named defaults,
  * not a sidecar.
  */
-import { resolveDataDir, type MarkClock } from "@numisma/engine";
+import {
+  resolveDataDir,
+  MARK_TIME,
+  TRADING_DAY_TIME_ZONE,
+  type MarkClock,
+} from "@numisma/engine";
 
 export interface PriceFeedConfig extends MarkClock {
   /**
-   * IANA trading-day timezone the mark `asOf` is anchored to. Default CDMX so a
-   * CDMX-evening fetch is dated the local trading day, not the provider's UTC
-   * tomorrow.
+   * IANA trading-day timezone the mark `asOf` is anchored to. Defaults to the
+   * engine's `TRADING_DAY_TIME_ZONE` (CDMX) so a CDMX-evening fetch is dated the
+   * local trading day, not the provider's UTC tomorrow. DERIVED, NOT RESTATED: the
+   * durable log's gap report and the daily wrapper have to agree with this value,
+   * and a second literal here would let them drift apart while both compile.
    */
   timeZone: string;
-  /** Daily mark time (`HH:MM` local). A fetch before it upserts the store only. */
+  /**
+   * Daily mark time (`HH:MM` local). A fetch before it upserts the store only.
+   * Defaults to the engine's `MARK_TIME`, built from the same `MARK_HOUR` the
+   * wrapper's mark-window comparison is pinned against.
+   */
   markTime: string;
   /**
    * Per-request network budget in milliseconds, covering CONNECT + HEADERS + BODY
@@ -61,8 +72,8 @@ export interface PriceFeedConfig extends MarkClock {
 }
 
 export const DEFAULT_CONFIG: PriceFeedConfig = {
-  timeZone: "America/Mexico_City",
-  markTime: "18:00",
+  timeZone: TRADING_DAY_TIME_ZONE,
+  markTime: MARK_TIME,
   requestTimeoutMs: 30_000,
   fixMaxStaleDays: 4,
   // The SINGLE engine resolver: `NUMISMA_DATA_DIR` override with an absolute,
