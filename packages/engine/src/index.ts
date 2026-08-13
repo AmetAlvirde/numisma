@@ -15,6 +15,11 @@ export type {
   Lot,
   PositionLot,
   FundReviewData,
+  // The fold's Discard Channel (PRD #323): the envelope `foldEvents` returns and the
+  // record it carries for every event it read and could not apply.
+  FoldedReview,
+  SkippedFoldEvent,
+  FoldSkipReason,
   Close,
   ReserveRecord,
   PositionRecord,
