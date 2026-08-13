@@ -7,7 +7,15 @@
 // `LoadedPreferences` envelope as an addressable record, never as silence (ADR-020, the
 // Discard Channel). Blank lines are tolerated and are not discards; a non-monotonic file
 // replays deterministically through `pickPolicyAsOf`. Prior art: #90/#93.
-import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  appendFile,
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
 // The pure contract types come from `@numisma/engine`, not `@numisma/preferences` —
@@ -105,6 +113,36 @@ describe("seedDefaultPreferences — the only writer, and genuinely append-only"
     expect(result[0]?.splitBasis).toBe("perClose"); // untouched, not re-seeded
     expect(await readFile(path, "utf8")).toBe(before); // and not written at all
   });
+
+  it("REFUSES to seed over a sidecar it could not READ — a read gap is not an empty file", async () => {
+    // A WRITE-ONLY file: the read fails with EACCES and the append would succeed. That
+    // asymmetry is the whole point — without the guard the seeder sees empty `entries`
+    // (the total loader's answer for a read failure), appends the default 10% policy,
+    // and `pickPolicyAsOf` serves a floor the fund never set from that date forward.
+    // This function's own docstring forbids exactly that: on a read gap the correct
+    // behavior is the OPPOSITE of this function. Before the loader became total, the
+    // read error propagated out of here and no write happened; that refusal is restored.
+    const path = await tempPath();
+    const real = `${JSON.stringify(entry("2026-06-01", "perClose"))}\n`;
+    await writeFile(path, real, "utf8");
+    await chmod(path, 0o200);
+    if ((await loadPreferences(path)).load.status !== "load-failed") {
+      await chmod(path, 0o600);
+      return; // running as a user the mode bits do not bind (root)
+    }
+
+    const failure = await seedDefaultPreferences(path, "2026-07-01", "sink-usdt").then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    await chmod(path, 0o600);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain("could not be read");
+    expect((failure as Error).message).not.toContain(path); // the writer leaks no path either
+    // Nothing was appended. The fund's real policy is still the only line in the file.
+    expect(await readFile(path, "utf8")).toBe(real);
+  });
 });
 
 describe("loadPreferences — validating loader (discard, not throw)", () => {
@@ -129,6 +167,21 @@ describe("loadPreferences — validating loader (discard, not throw)", () => {
     }
     expect(loaded.entries).toEqual([]);
     expect(loaded.skipped).toEqual([]);
+  });
+
+  it("renders a read failure as its errno CODE, never Node's path-carrying message", async () => {
+    // The envelope's `message` is PROSE — `unattendedPreferencesVerdict` prints it to
+    // stderr, log files and CI output. Node's fs errors interpolate the absolute path
+    // they failed on, which is exactly what `SIDECAR_NAME` withholds by design. So the
+    // sanitizer runs at the SOURCE and the field carries a closed-vocabulary token,
+    // making the invariant structural rather than a rule each consumer must remember.
+    const path = await tempPath();
+    await mkdir(path, { recursive: true });
+    const loaded = await loadPreferences(path);
+    expect(loaded.load.status).toBe("load-failed");
+    if (loaded.load.status === "load-failed") {
+      expect(loaded.load.message).toBe("EISDIR");
+    }
   });
 
   it("discards a malformed-JSON line but keeps the valid ones, and never throws", async () => {
@@ -625,5 +678,34 @@ describe("unattendedPreferencesVerdict — the policy, as a value a test can ass
     expect(exitCode).toBe(1);
     expect(messages).toHaveLength(1);
     expect(messages[0]).toContain("preferences.jsonl could not be read");
+    // The CODE, and nothing that could carry a path. EISDIR is one of the few uv
+    // messages that omits the filename, so asserting only on the directory fixture
+    // would leave the one branch that CAN leak unasserted — see the EACCES case below.
+    expect(messages[0]).toContain("EISDIR");
+    expect(messages[0]).not.toContain(path);
+  });
+
+  it("a load-failed diagnostic never launders the absolute path into the prose", async () => {
+    // The likeliest non-ENOENT failure, and the one whose uv message quotes the file:
+    // `EACCES: permission denied, open '/Users/<user>/…/preferences.jsonl'`. A full path
+    // names the operator's home directory and their data store's location, which is the
+    // invariant `addresses the sidecar by NAME, never by path` pins for the skip branch.
+    const path = await tempPath();
+    await writeFile(path, `${JSON.stringify(entry("2026-06-01"))}\n`, "utf8");
+    await chmod(path, 0o000);
+    const loaded = await loadPreferences(path);
+    await chmod(path, 0o600); // restore before any assertion can abort the cleanup
+    if (loaded.load.status !== "load-failed") {
+      // Running as a user the mode bits do not bind (root). The EISDIR assertion above
+      // still pins the sanitizer; there is nothing this fixture can add here.
+      return;
+    }
+
+    const { messages } = unattendedPreferencesVerdict(loaded);
+
+    expect(messages[0]).toContain("EACCES");
+    expect(messages[0]).not.toContain(path);
+    expect(messages[0]).not.toContain(dirname(path));
+    expect(messages[0]).not.toContain(homedir());
   });
 });

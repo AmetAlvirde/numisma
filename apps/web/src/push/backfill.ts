@@ -24,20 +24,27 @@
  * DELETEd (the writer credential cannot).
  */
 import { Pool } from "pg";
-import { unattendedPreferencesVerdict } from "@numisma/preferences";
 import {
   parseBackfillArgs,
-  runBackfill,
+  runBackfillAndReport,
   writeAnchorFixture,
 } from "./backfill-core.ts";
 import { projectionPoolConfig } from "./projection-pool.ts";
-import { PREFERENCES_DIAGNOSTIC_KIND } from "./push-core.ts";
 import { RunReport } from "./unattended-report.ts";
 
 /**
- * Runs the backfill and returns THE PROCESS'S EXIT CODE — non-zero when a sidecar
- * discarded a line, exactly as the daily push's does and for the same warrant. A
- * non-zero return does not mean the replay failed; a failed replay throws.
+ * Runs the backfill and returns THE PROCESS'S EXIT CODE.
+ *
+ * ZERO ON A DISCARD, UNLIKE THE PUSH — deliberate, and the warrant is in
+ * `runBackfillAndReport`'s docstring: this command's exit code is read by
+ * `ops/price-feed/run-daily-fetch.sh`, which turns any non-zero into a heartbeat the
+ * TUI renders as "the daily price job FAILED" on every startup until the sidecar is
+ * edited. A standing fact must not permanently redden an errand channel. The discard
+ * is REPORTED on stderr regardless, and a failed replay still exits 1 — it throws.
+ *
+ * The three lines that fold a verdict into prose and a code live in
+ * `backfill-core.ts`, not here, so a test can assert their ORDER: this file is a
+ * `main().then(..., process.exit)` script that importing would execute.
  */
 async function main(): Promise<number> {
   // `argv.slice(2)` drops the node binary and this script's own path; the parser and
@@ -62,22 +69,15 @@ async function main(): Promise<number> {
     fixtureOnly || !connectionString
       ? undefined
       : new Pool(projectionPoolConfig(connectionString));
-  // The run's operator channel, and this run's own exit code — deliberately two
-  // variables. Prose composes by kind; exit codes compose by policy; a co-tenant kind
-  // that is prose-only simply never touches the second one.
+  // The run's operator channel. Prose composes by kind; exit codes compose by policy;
+  // a co-tenant kind that is prose-only never touches the second one. Both foldings
+  // happen in `runBackfillAndReport`, which returns them separately.
   const channel = new RunReport();
-  let exitCode = 0;
   try {
-    const results = await runBackfill({
+    const { exitCode } = await runBackfillAndReport({
       pool,
-      // Once per ANCHOR, because the sidecar is re-read once per anchor. The channel
-      // is what makes it once per RUN: identical prose under one kind collapses, so
-      // a fifty-anchor replay over one bad policy line prints one line.
-      onPreferencesLoad: (loaded) => {
-        const verdict = unattendedPreferencesVerdict(loaded);
-        channel.add(PREFERENCES_DIAGNOSTIC_KIND, verdict.messages);
-        exitCode = Math.max(exitCode, verdict.exitCode);
-      },
+      channel,
+      emit: (line) => console.error(`[backfill] ${line}`),
       onAnchor: (anchor, index, total) => {
         console.log(
           `[backfill] ${String(index + 1).padStart(3)}/${total} ` +
@@ -89,23 +89,22 @@ async function main(): Promise<number> {
             `${anchor.written ? "" : " (not written)"}`,
         );
       },
+      // The run's own output. It goes in the hook rather than after the call because
+      // the channel is emitted LAST — a diagnostic is the final thing a run says, and
+      // one printed mid-replay is a diagnostic positioned to abort one.
+      onComplete: async (results) => {
+        if (writeFixture) {
+          console.log(`[backfill] fixture written: ${await writeAnchorFixture(results)}`);
+        }
+        const [first] = results;
+        console.log(
+          `[backfill] ${results.length} anchor(s) ` +
+            `${pool ? "upserted" : "derived (no write)"}: ` +
+            `${first?.asOf} … ${results[results.length - 1]?.asOf}`,
+        );
+      },
     });
 
-    if (writeFixture) {
-      console.log(`[backfill] fixture written: ${await writeAnchorFixture(results)}`);
-    }
-
-    const [first] = results;
-    console.log(
-      `[backfill] ${results.length} anchor(s) ` +
-        `${pool ? "upserted" : "derived (no write)"}: ` +
-        `${first?.asOf} … ${results[results.length - 1]?.asOf}`,
-    );
-
-    // AFTER every anchor has been upserted, never during the loop. A discard reported
-    // mid-replay is a discard positioned to abort one — and a partial replay for a
-    // sidecar problem is precisely what report-never-refuse forbids.
-    channel.emit((line) => console.error(`[backfill] ${line}`));
     return exitCode;
   } finally {
     await pool?.end();

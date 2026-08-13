@@ -191,7 +191,8 @@ function validateProfitPolicyEntry(value: unknown): ValidatedEntry {
  *     this loader used to do, and the distinction it buys is load-bearing: empty
  *     `entries` alone would assert "this fund has no policy" when the truth is "the
  *     policy file could not be read", and downstream that difference is a Reserve floor
- *     suppressed on the phone for a reason nobody can see.
+ *     suppressed on the phone for a reason nobody can see. `message` is the errno CODE
+ *     and never Node's own message — see {@link readFailureCode}.
  *   - **A bad line → one `skipped` record, and the read continues.** One 1-based line
  *     number, one closed-vocabulary reason, fixed prose that never quotes the line.
  *
@@ -199,6 +200,31 @@ function validateProfitPolicyEntry(value: unknown): ValidatedEntry {
  * a trailing newline is not something an operator did wrong. Append order is preserved
  * in `entries`; `pickPolicyAsOf` owns as-of ordering.
  */
+/**
+ * A read failure rendered as a CLOSED-VOCABULARY token: the errno code (`EACCES`,
+ * `EISDIR`, `EMFILE`), or the error's class when it carries none.
+ *
+ * NEVER `error.message`. Node's fs errors interpolate the ABSOLUTE PATH they failed on
+ * — `EACCES: permission denied, open '/Users/<user>/…/preferences.jsonl'` — and this
+ * string is PROSE: {@link unattendedPreferencesVerdict} prints it to stderr, and from
+ * there into log files and CI output. {@link SIDECAR_NAME} withholds the path
+ * deliberately (a full path names the operator's home directory and their data store's
+ * location), so a raw errno message would launder it back in through the one branch
+ * that reports a failure. Sanitizing HERE rather than at the verdict makes the
+ * invariant structural: no consumer of the envelope can reintroduce the leak.
+ *
+ * Same spirit as {@link PreferenceSkipReason} — the diagnostic names a category, never
+ * the payload. The code is the whole diagnostic value anyway: `EACCES` says fix the
+ * permissions, `EMFILE` says something is leaking descriptors.
+ */
+function readFailureCode(error: unknown): string {
+  if (error instanceof Error) {
+    const { code } = error as NodeJS.ErrnoException;
+    return typeof code === "string" && code.length > 0 ? code : error.constructor.name;
+  }
+  return "unknown-read-error";
+}
+
 export async function loadPreferences(path: string): Promise<LoadedPreferences> {
   let raw: string;
   try {
@@ -211,7 +237,7 @@ export async function loadPreferences(path: string): Promise<LoadedPreferences> 
       load: {
         status: "load-failed",
         sourcePath: path,
-        message: error instanceof Error ? error.message : String(error),
+        message: readFailureCode(error),
       },
       entries: [],
       skipped: [],
@@ -320,9 +346,20 @@ export function unattendedPreferencesVerdict(
  * That state is now VISIBLE rather than inferred: the same load whose `entries` are
  * empty carries a `skipped` record per discarded line, so "no policy yet" and "a policy
  * file every line of which was rejected" are distinguishable at the call site. This
- * seeder deliberately does not act on that distinction — it reads `entries` and nothing
- * else. It is a writer, not a reporting surface, and its own return stays
- * `ProfitPolicyEntry[]`.
+ * seeder deliberately does not act on THAT distinction — a quarantined file is still a
+ * file this writer read, and it appends. It is a writer, not a reporting surface, and
+ * its own return stays `ProfitPolicyEntry[]`.
+ *
+ * IT DOES ACT ON THE `load` OUTCOME, AND MUST. Making the loader total (slice 1)
+ * silently converted a non-`ENOENT` read error from "propagate, write nothing" into
+ * "empty `entries`, so seed" — and empty entries from a FAILED READ are not the same
+ * fact as empty entries from an empty file. Under EMFILE, EACCES or a transient EIO
+ * over a sidecar holding the fund's real policy, seeding would append the default 10%
+ * floor with today's `effectiveAt`, and `pickPolicyAsOf` would serve it from that date
+ * forward: the invented read-gap floor the paragraph below forbids, arriving through
+ * the writer instead of the reader. So a `load-failed` outcome THROWS here, restoring
+ * the pre-total-loader refusal. Reporting is the unattended verdict's job; this
+ * function's only safe move on a read gap is to touch nothing.
  *
  * This is a SEED FOR A NEW SIDECAR, and it is NOT a read-gap fallback — the distinction
  * is load-bearing. It writes `defaultProfitPolicyEntry`, whose `reserveTargetPct` is
@@ -338,6 +375,13 @@ export async function seedDefaultPreferences(
   routingReserveId: string,
 ): Promise<ProfitPolicyEntry[]> {
   const existing = await loadPreferences(path);
+  if (existing.load.status === "load-failed") {
+    // `message` is the errno code, never a path — see `readFailureCode`.
+    throw new Error(
+      `${SIDECAR_NAME} could not be read (${existing.load.message}); refusing to seed a ` +
+        `default policy over a file whose contents are unknown.`,
+    );
+  }
   if (existing.entries.length > 0) {
     return existing.entries;
   }

@@ -44,6 +44,16 @@ export class RunReport {
   readonly #byKind = new Map<string, string[]>();
 
   /**
+   * The same membership as `#byKind`, as a set per kind. Retention is UNBOUNDED (only
+   * rendering is capped), so an `Array.includes` scan here is quadratic in exactly the
+   * case the class docstring invokes: a pathological sidecar of ~2,000 discards, re-read
+   * once per anchor by the backfill, is ~10⁹ string comparisons on a run a laptop-sleep
+   * timeout is already watching. The array stays — it owns ORDER — and this owns
+   * membership.
+   */
+  readonly #seenByKind = new Map<string, Set<string>>();
+
+  /**
    * File `messages` under `kind`. Repeats of a line already filed under that kind are
    * dropped; a kind with nothing to say files nothing and leaves no trace.
    */
@@ -52,12 +62,15 @@ export class RunReport {
       return;
     }
     const lines = this.#byKind.get(kind) ?? [];
+    const seen = this.#seenByKind.get(kind) ?? new Set<string>();
     for (const message of messages) {
-      if (!lines.includes(message)) {
+      if (!seen.has(message)) {
+        seen.add(message);
         lines.push(message);
       }
     }
     this.#byKind.set(kind, lines);
+    this.#seenByKind.set(kind, seen);
   }
 
   /** Every distinct line filed under `kind`, in first-appearance order. Unbounded. */
