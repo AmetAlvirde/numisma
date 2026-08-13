@@ -381,18 +381,36 @@ function requireAsOf(asOf: IsoDate, caller: string): void {
 }
 
 /**
- * The supersession comparison: the pair `(effectiveAt, line)`, lexicographic, with
- * **`effectiveAt` PRIMARY**.
+ * The supersession comparison, ONCE: the pair `(date, line)`, lexicographic, with
+ * **the DATE PRIMARY**.
  *
  * Inverting the keys breaks as-of replay outright: a back-dated correction appended
  * today would beat a plan appended last month, and every historical query would
  * answer with a policy that was not yet in effect.
+ *
+ * It is exported — and stated over a bare `date` rather than over `effectiveAt` —
+ * because the `reconciliations.jsonl` trail selects by the same pair, on its own
+ * `asOf`, and D8's "a later clean fill clears the mark" is exactly this comparison.
+ * A second comparator with the same semantics is the thing to avoid: two copies of
+ * "which line is newer" drift into a silently wrong ladder rather than a slow one.
+ * {@link isLater} is a naming adapter over it, not a second answer.
  */
+export function isLaterByDateThenLine(
+  a: { date: IsoDate; line: number },
+  b: { date: IsoDate; line: number },
+): boolean {
+  return a.date === b.date ? a.line > b.line : a.date > b.date;
+}
+
+/** {@link isLaterByDateThenLine}, spelled in the sidecar's own field name. */
 function isLater(
   a: { effectiveAt: IsoDate; line: number },
   b: { effectiveAt: IsoDate; line: number },
 ): boolean {
-  return a.effectiveAt === b.effectiveAt ? a.line > b.line : a.effectiveAt > b.effectiveAt;
+  return isLaterByDateThenLine(
+    { date: a.effectiveAt, line: a.line },
+    { date: b.effectiveAt, line: b.line },
+  );
 }
 
 /** File order — the operator's own reading order, and the only order a diagnostic list may take. */

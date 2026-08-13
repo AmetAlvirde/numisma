@@ -26,7 +26,7 @@
  * mirrors that. Moving these declarations "back" to the IO module would not compile.
  */
 import type { CapitalTier } from "./contracts.js";
-import type { IsoDate, PlanLookup } from "./plans.js";
+import { isIsoCalendarDate, isLaterByDateThenLine, type IsoDate, type PlanLookup } from "./plans.js";
 
 /**
  * D3's mismatch vocabulary, CLOSED at two members. It does not grow without a
@@ -341,6 +341,134 @@ export function classifyReconciliation(record: PlanReconciliation): Reconciliati
   return record.declared.status === "active" || record.declared.status === "pending"
     ? "clean"
     : "indeterminate";
+}
+
+/** File order — the operator's own reading order, and the only order a diagnostic list may take. */
+function byLine<T extends { line: number }>(entries: readonly T[]): T[] {
+  return [...entries].sort((a, b) => a.line - b.line);
+}
+
+/**
+ * S4's selector — WHAT THE TRAIL SAYS ABOUT ONE POSITION AT ONE DATE, mirroring
+ * `pickPlanAsOf` arm for arm.
+ *
+ * **It takes the WHOLE {@link LoadedReconciliations}, and that is the point.** "Not
+ * readable" is knowable only from the skips, so the skips are an INPUT TO SELECTION,
+ * not a warning channel riding alongside the answer. A selector handed only the
+ * records computes a confident CLEAN whenever the newest line failed to parse — which
+ * is D8's ⚠️ exactly: a gap displayed as clean is false assurance, and worse than not
+ * reading the trail at all.
+ *
+ * The rule, and F3's three tiers live HERE — the reader skips, the selector decides:
+ *
+ *   1. `absent` → `no-trail` for every position: the file is not there. Never
+ *      `no-line`, which would say the file read and simply named nobody.
+ *   2. `load-failed` → `trail-unreadable` for EVERY position. Direct mirror of
+ *      `pickPlanAsOf`: empty buckets alone would assert a fact about the fund that
+ *      nobody established.
+ *   3. The winner is the latest in-window (`asOf ≤` the query date) line for the
+ *      position by the pair `(asOf, line)` — {@link isLaterByDateThenLine}, reused
+ *      rather than re-derived. **`toldAt` is NOT the ordering key**: D8 orders by the
+ *      FILL, not by the telling, so a fill for the 4th recorded on the 6th must not
+ *      outrank a fill for the 5th recorded on the 5th. Making `toldAt` the key would
+ *      silently convert D8 into "the most recent thing the operator was told", which
+ *      is a different rule.
+ *   4. An ATTRIBUTABLE skip that is the newest in-window line for the position
+ *      supersedes the winner → `trail-unreadable`. An UNDATED skip is conservatively
+ *      in-window and compares by `line` alone, for `pickPlanAsOf`'s own stated
+ *      reason: the date it would have carried is exactly what could not be read.
+ *   5. Otherwise the winner decides, by {@link classifyReconciliation}'s two-field
+ *      rule: warned → `warned`; clean → `clean`; indeterminate →
+ *      `plans-were-unreadable`.
+ *
+ * **An UNATTRIBUTABLE skip is NOT a blackout** and is deliberately not consulted
+ * here. A skip whose envelope was too broken to name a position belongs to NO
+ * position; attaching it to one would turn a single broken line into a fund-wide
+ * blackout. It is counted file-globally by the report and exits 1 there — this file
+ * is machine-written, so it is a torn write rather than a typo, but it is still one
+ * line and not a verdict about anybody.
+ *
+ * `asOf` goes through the same predicate `pickPlanAsOf` uses, and for the same
+ * reason: both operands of every comparison here are strings compared with `<` and
+ * `>`, so a lax date does not merely look wrong, it SORTS wrong and silently selects
+ * a different line. This is the REPORT path, never the fill path — D6's no-throw
+ * discipline governs the writer, and the report has already been through
+ * `pickPlanAsOf`'s identical refusal before it reaches this call.
+ */
+export function pickReconciliationAsOf(
+  loaded: LoadedReconciliations,
+  positionId: string,
+  asOf: IsoDate,
+): ReconciliationVerdict {
+  if (!isIsoCalendarDate(asOf)) {
+    throw new Error(`pickReconciliationAsOf: ${JSON.stringify(asOf)} is not a calendar date`);
+  }
+
+  const skipped = byLine(
+    loaded.skipped.filter(
+      (entry) =>
+        entry.positionId === positionId &&
+        // Undated skips are conservatively in-window: the date they would have
+        // carried is exactly what could not be read.
+        (entry.asOf === undefined || entry.asOf <= asOf),
+    ),
+  );
+
+  if (loaded.load.status === "absent") {
+    return { status: "unknown", reason: "no-trail", skipped };
+  }
+  if (loaded.load.status === "load-failed") {
+    return { status: "unknown", reason: "trail-unreadable", skipped };
+  }
+
+  let winner: LoadedReconciliationRecord | undefined;
+  for (const record of loaded.reconciliations) {
+    if (record.positionId !== positionId || record.asOf > asOf) continue;
+    if (
+      winner === undefined ||
+      isLaterByDateThenLine(
+        { date: record.asOf, line: record.line },
+        { date: winner.asOf, line: winner.line },
+      )
+    ) {
+      winner = record;
+    }
+  }
+
+  if (winner === undefined) {
+    // No readable winner: any in-window skip is the newest thing known about this
+    // position, so the file DID name it and the line could not be read.
+    return skipped.length > 0
+      ? { status: "unknown", reason: "trail-unreadable", skipped }
+      : { status: "unknown", reason: "no-line", skipped };
+  }
+
+  const carrier = winner;
+  const superseded = skipped.some((entry) =>
+    entry.asOf === undefined
+      ? entry.line > carrier.line
+      : isLaterByDateThenLine(
+          { date: entry.asOf, line: entry.line },
+          { date: carrier.asOf, line: carrier.line },
+        ),
+  );
+  if (superseded) {
+    return { status: "unknown", reason: "trail-unreadable", record: winner, skipped };
+  }
+
+  switch (classifyReconciliation(winner)) {
+    case "warned":
+      return { status: "warned", record: winner, mismatches: [...winner.mismatches] };
+    case "clean":
+      return { status: "clean", record: winner };
+    case "indeterminate":
+      // `declared.status: "unreadable"` — the line itself read fine and recorded that
+      // the PLANS sidecar was broken at fill time. The other two indeterminate arms
+      // (`none`, `ended` with empty mismatches) are unreachable from a line this repo
+      // wrote — `reconcileAgainstPlan` always mints `noPlanInForce` for both — and if
+      // one ever arrives it lands here, unknown, which is the safe direction.
+      return { status: "unknown", reason: "plans-were-unreadable", record: winner, skipped };
+  }
 }
 
 /**

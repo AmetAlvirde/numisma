@@ -422,6 +422,7 @@ export {
   isRenderableRecordId,
   reconcileAgainstPlan,
   classifyReconciliation,
+  pickReconciliationAsOf,
   serializeReconciliationRecord,
 } from "./reconciliations.js";
 
