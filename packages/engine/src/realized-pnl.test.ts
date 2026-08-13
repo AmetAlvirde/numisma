@@ -17,9 +17,16 @@ const CLOSE_ALT: PortfolioEvent = {
   asOf: "2026-06-05",
   type: "PositionClosed",
   positionId: "alt-pos",
-  // Cost basis is 400 USD (c1 100 + c2 300); proceeds 360 → realized −40, a loss
+  // Cost basis is 400 USD (c1 100 + c2 300); proceeds 600 → realized +200, a gain
   // that falls per Tier on the same 25% / 75% mix it was risked on.
-  settlement: { reserveId: "tiered", proceeds: 360 },
+  //
+  // 600 is a fill the ingest gates would actually admit: the settlement-magnitude gate
+  // (crossReferenceClose) expects 20 units × alt-pos' last close 40 = 800 and allows
+  // ±50%, so the legal band is 400–1200 — whose floor IS the 400 cost basis. A closing
+  // LOSS on this position is therefore unreachable through ingest; the loss-absorption
+  // behavior is locked instead on the real-shaped gram fixture in
+  // cash-settlement-scenarios.test.ts, where proceeds 108 against a basis of 120 is legal.
+  settlement: { reserveId: "tiered", proceeds: 600 },
 };
 
 describe("realized P&L — closed book", () => {
@@ -35,8 +42,8 @@ describe("realized P&L — closed book", () => {
     expect(row.tempo).toBe("Pulse");
     expect(row.closedAsOf).toBe("2026-06-05");
     expect(row.costBasisUsd).toBeCloseTo(400, 6);
-    expect(row.proceedsUsd).toBeCloseTo(360, 6);
-    expect(row.realizedPnlUsd).toBeCloseTo(-40, 6);
+    expect(row.proceedsUsd).toBeCloseTo(600, 6);
+    expect(row.realizedPnlUsd).toBeCloseTo(200, 6);
   });
 
   it("attributes realized per Tier on the closed position's cost-basis mix", () => {
@@ -44,16 +51,16 @@ describe("realized P&L — closed book", () => {
     const byTier = new Map(
       data.closedPositions![0]!.tierAttribution.map((t) => [t.tier, t]),
     );
-    // 25% / 75% split: c1 gets 90 proceeds vs 100 cost (−10); c2 gets 270 vs 300 (−30).
-    expect(byTier.get("c1")!.realizedPnlUsd).toBeCloseTo(-10, 6);
-    expect(byTier.get("c2")!.realizedPnlUsd).toBeCloseTo(-30, 6);
+    // 25% / 75% split: c1 gets 150 proceeds vs 100 cost (+50); c2 gets 450 vs 300 (+150).
+    expect(byTier.get("c1")!.realizedPnlUsd).toBeCloseTo(50, 6);
+    expect(byTier.get("c2")!.realizedPnlUsd).toBeCloseTo(150, 6);
   });
 
   it("rolls realized up by Tempo and by Tier in the report blotter", () => {
     const report = buildCompositionReport(foldEvents(genesis(), [CLOSE_ALT]));
-    expect(report.closedBook.totalRealizedPnlUsd).toBeCloseTo(-40, 6);
-    expect(report.closedBook.byTempo.find((r) => r.key === "Pulse")!.realizedPnlUsd).toBeCloseTo(-40, 6);
-    expect(report.closedBook.byTier.find((r) => r.key === "c1")!.realizedPnlUsd).toBeCloseTo(-10, 6);
+    expect(report.closedBook.totalRealizedPnlUsd).toBeCloseTo(200, 6);
+    expect(report.closedBook.byTempo.find((r) => r.key === "Pulse")!.realizedPnlUsd).toBeCloseTo(200, 6);
+    expect(report.closedBook.byTier.find((r) => r.key === "c1")!.realizedPnlUsd).toBeCloseTo(50, 6);
   });
 
   it("is descriptive only: realized is NOT added to NAV", () => {
@@ -144,8 +151,8 @@ describe("closed book — as-of replay (fold invariant)", () => {
     expect(data.closedPositions![0]!.positionId).toBe("alt-pos");
     expect(data.positions.find((p) => p.id === "beta-pos")).toBeUndefined();
     const report = buildCompositionReport(data);
-    expect(report.closedBook.totalRealizedPnlUsd).toBeCloseTo(-40, 6);
-    expect(report.closedBook.byTempo.find((r) => r.key === "Pulse")!.realizedPnlUsd).toBeCloseTo(-40, 6);
+    expect(report.closedBook.totalRealizedPnlUsd).toBeCloseTo(200, 6);
+    expect(report.closedBook.byTempo.find((r) => r.key === "Pulse")!.realizedPnlUsd).toBeCloseTo(200, 6);
   });
 
   it("shows beta-pos still open (not yet on the blotter) mid-timeline", () => {
@@ -157,14 +164,14 @@ describe("closed book — as-of replay (fold invariant)", () => {
 
   it("reproduces the full two-row blotter as-of the second close, matching a live fold", () => {
     const asOf = foldEvents(genesis(), log, "2026-06-15");
-    // Both closes have landed by 06-15: alt-pos (−40) + beta-pos (+50) = +10 total.
+    // Both closes have landed by 06-15: alt-pos (+200) + beta-pos (+50) = +250 total.
     expect(asOf.closedPositions).toHaveLength(2);
-    expect(buildCompositionReport(asOf).closedBook.totalRealizedPnlUsd).toBeCloseTo(10, 6);
+    expect(buildCompositionReport(asOf).closedBook.totalRealizedPnlUsd).toBeCloseTo(250, 6);
 
     // Replay invariant: folding the whole log with NO as-of (current state) must
     // equal folding as-of the last event date — the blotter is stable once closed.
     const live = foldEvents(genesis(), log);
-    expect(buildCompositionReport(live).closedBook.totalRealizedPnlUsd).toBeCloseTo(10, 6);
+    expect(buildCompositionReport(live).closedBook.totalRealizedPnlUsd).toBeCloseTo(250, 6);
     expect(live.closedPositions!.map((r) => r.positionId).sort()).toEqual(
       asOf.closedPositions!.map((r) => r.positionId).sort(),
     );
