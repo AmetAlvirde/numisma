@@ -1,5 +1,6 @@
 /**
- * THE COMMITTED TEST HARNESS FOR `ops/price-feed/run-daily-fetch.sh` (PRD #314, slice #316).
+ * THE COMMITTED TEST HARNESS FOR `ops/price-feed/run-daily-fetch.sh` (PRD #314, slices
+ * #316 and #317).
  *
  * ⚠️ **THIS SUITE CAN NEVER RUN IN CI AS CI EXISTS TODAY. A GREEN CI RUN DOES NOT MEAN
  * THIS HARNESS PASSED — IT MEANS IT WAS NOT ATTEMPTED.** CI is a single `ubuntu-latest`
@@ -23,14 +24,22 @@
  * path set, so every `pnpm test` carries a line about this harness whether or not it ran.
  * `pnpm test:wrapper` runs it on demand. `NUMISMA_WRAPPER_TEST=never` mutes it and says so.
  *
- * ── WHAT SLICE 1 CLAIMS, AND WHAT IT DOES NOT ─────────────────────────────────────────
- * Claims: the launcher, the isolation refusal, the fake-tool bin and its sentinel, the
+ * ── WHAT SLICES 1-2 CLAIM, AND WHAT THEY DO NOT ───────────────────────────────────────
+ * Slice 1: the launcher, the isolation refusal, the fake-tool bin and its sentinel, the
  * assertion triple, 12-run repetition, the arming trigger and its three guard layers,
  * case 1 (healthy), case 7 (not a group leader) and the child-reap mutation control.
- * Does not: any timeout, external-stop or mark-window case — slices 2-4 — nor the `hangs`,
- * `exits 127` and TERM-deaf fakes those need. Case 7 here therefore proves the leader
- * DETECTION with a fast, succeeding run; slice 2 will additionally prove that a genuine
- * hang under a disabled watchdog does not time out, once the `hangs` behavior exists.
+ *
+ * Slice 2 — the TIMEOUT FAMILY: the `hangs`, `exits 127`, `ignores TERM` and TERM-deaf
+ * grandchild fakes; cases 2, 3 and 5; the grace-bounded settle assertion; and the
+ * `tee`-deafness mutation control. **It also completes case 7**, which slice 1 could only
+ * half-prove: with nothing but the `succeeds` fake, "the run does not time out" was
+ * unfalsifiable, because nothing could have timed out anyway. Case 7 now HANGS under a
+ * disabled watchdog, is observed still alive well past its own ceiling and grace with no
+ * calling card, and is then released to finish normally.
+ *
+ * Neither slice claims: the external-stop path and case 4 (slice 3) — nothing here asserts
+ * anything about exit 143 or about the calling card's absence as a discriminator — nor the
+ * mark window and cases 6 and 8 (slice 4).
  *
  * ── A BLIND SPOT THIS DESIGN CREATES, NAMED RATHER THAN IMPLIED ───────────────────────
  * The fake `pnpm` is what makes every case fast and safe, and it is therefore exactly what
@@ -64,9 +73,22 @@ import {
   mutateWrapper,
   type CaseOptions,
 } from "./case-dir.testkit.js";
-import { WRAPPER_PNPM_COMMANDS, installDecoyBin, sentinelNameFor } from "./fake-bin.testkit.js";
+import {
+  TERM_DEAF_CHILD_NAME,
+  TERM_DEAF_CHILD_SENTINEL,
+  WRAPPER_PNPM_COMMANDS,
+  installDecoyBin,
+  releaseFakeHang,
+  sentinelNameFor,
+  setFakeBehavior,
+} from "./fake-bin.testkit.js";
 import { IsolationRefusal, WRAPPER_ENV_VARS, assertIsolated } from "./isolation.testkit.js";
-import { launchWrapper, observedBashVersion, type RunRecord } from "./launcher.testkit.js";
+import {
+  launchWrapper,
+  observedBashVersion,
+  processesInPgid,
+  type RunRecord,
+} from "./launcher.testkit.js";
 import { REPETITION_FLOOR, resolveRunCount } from "./repetition.testkit.js";
 
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
@@ -469,6 +491,85 @@ const SETTLE_DEADLINE_MS = 2_000;
 const CASE_OPTIONS: CaseOptions = { maxRunSeconds: 30, watchdogGraceSeconds: 2 };
 
 /**
+ * A ceiling a case can actually WAIT OUT. Every timeout case pays it in full, twelve times,
+ * so it is as short as the wrapper's own arithmetic allows and no shorter: the watchdog
+ * clamps its poll to the ceiling when the ceiling is the smaller of the two, and a ceiling
+ * under a second would measure `sleep`'s rounding rather than the watchdog's decision.
+ */
+const TIMEOUT_CASE_OPTIONS: CaseOptions = { maxRunSeconds: 3, watchdogGraceSeconds: 2 };
+
+/** How long past its own ceiling AND grace case 7's hang is observed still alive. */
+const CASE_7_OBSERVE_MARGIN_MS = 1_000;
+
+/**
+ * THE WRAPPER'S OWN POLL LENGTH, READ OFF THE SUBJECT rather than guessed. The settle bound
+ * below is grace + one poll + a margin, so a poll that moved in the wrapper while a literal
+ * `5` sat here would silently loosen or tighten every timeout case's only bound. Fail-closed
+ * for the same reason `mutateWrapper` throws on a rotted anchor: a bound derived from text
+ * that has moved is not a bound.
+ */
+function wrapperPollSeconds(): number {
+  const match = /^\s*WATCHDOG_POLL_SECONDS=(\d+)\s*$/m.exec(readFileSync(WRAPPER_PATH, "utf8"));
+  if (match === null) {
+    throw new Error(
+      "wrapper harness: WATCHDOG_POLL_SECONDS could not be read out of the wrapper. Every " +
+        "timeout case's settle bound derives from it, and a guessed bound is not a bound.",
+    );
+  }
+  return Number(match[1]);
+}
+
+/**
+ * THE GRACE-BOUNDED SETTLE WINDOW, and it is wrong in BOTH directions if unbounded.
+ *
+ * On the timeout path the watchdog is DELIBERATELY left alive — `write_heartbeat` skips its
+ * own cancellation when `TIMED_OUT=true` — so that it can serve its grace and then group-
+ * SIGKILL whatever ignored the TERM. The run's pgid is therefore legitimately occupied for
+ * the whole grace AFTER the shell has exited. Asserting emptiness immediately is a false
+ * red; asserting it with unbounded patience is a false green, because the historical stray
+ * `sleep` DID eventually exit — after holding launchd's per-label job slot through the next
+ * fire.
+ *
+ * Grace + one watchdog poll + a margin: the grace is what the escalation waits, the poll is
+ * the most a `sleep` the watchdog forked can outlive it by (§ the wrapper's own bound on a
+ * lost child), and the margin is process teardown on a loaded machine. The observed settle
+ * time is printed on every case, so a regression from a fifth of the bound to nearly all of
+ * it is VISIBLE rather than merely passing.
+ */
+function timeoutSettleDeadlineMs(options: CaseOptions): number {
+  // The wrapper CLAMPS its poll to the ceiling when the ceiling is smaller, so that a small
+  // ceiling is still honoured rather than rounded up. Mirrored here rather than approximated
+  // by the unclamped 5: a bound that ignored the clamp would be seconds looser than the
+  // watchdog it is bounding, which is most of the way back to unbounded patience.
+  const pollSeconds = Math.min(wrapperPollSeconds(), options.maxRunSeconds);
+  return (options.watchdogGraceSeconds + pollSeconds) * 1_000 + 1_500;
+}
+
+/**
+ * WHICH STEPS MEAN THE DAY'S MARKS ACTUALLY LANDED — the wrapper's own `MARKS_LANDED_STEPS`,
+ * authored here as the oracle the heartbeat assertion needs. `pnpm spine` appends the marks,
+ * so every step after it implies they landed; a run that died at `prices-fetch` is in-window
+ * and marked NOTHING, and a harness that expected a stamp there would be demanding the
+ * wrapper record a failure as evidence the day was covered.
+ */
+const MARKS_LANDED_STEPS: readonly string[] = [
+  "commit",
+  "post-check",
+  "gap-report",
+  "backfill",
+  "complete",
+];
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((done) => setTimeout(done, ms));
+}
+
+/** Whether the watchdog has left its calling card in a case's log dir, read DURING a run. */
+function watchdogCardPresent(logDir: string): boolean {
+  return existsSync(logDir) && readdirSync(logDir).some((name) => name.endsWith(".watchdog-fired"));
+}
+
+/**
  * Whether this run was in the mark window, computed the way the CONTRACT computes it —
  * `America/Mexico_City`, hour ≥ 18 — rather than from the machine's local clock, which
  * would agree only by coincidence of an OS setting. Read off the heartbeat's own
@@ -497,17 +598,31 @@ function expectedMarkWindow(startedAt: string): boolean {
 function assertTriple(
   record: RunRecord,
   caseDir: string,
-  expected: { exitCode: number; lastStep: string; label: string },
+  expected: {
+    exitCode: number;
+    lastStep: string;
+    /**
+     * The `pnpm` sub-commands this case must have reached, as a PREFIX of
+     * {@link WRAPPER_PNPM_COMMANDS}. The ones after it are asserted ABSENT, which is how a
+     * case that dies at `prices-fetch` proves the wrapper's central contract — a non-zero
+     * fetch HALTS the run before `spine`, so a doomed mark is never appended.
+     */
+    pnpmReached: readonly string[];
+    label: string;
+  },
 ): void {
   const where = `${expected.label}: `;
 
   // (0) The fake won. Asserted first, because if it did not, everything below is a
   //     description of a live run against real, private data.
   for (const command of WRAPPER_PNPM_COMMANDS) {
+    const reached = expected.pnpmReached.includes(command);
     expect(
       existsSync(join(caseDir, "sentinels", sentinelNameFor(command))),
-      `${where}the fake pnpm never recorded \`${command}\` — the REAL pnpm may have run`,
-    ).toBe(true);
+      reached
+        ? `${where}the fake pnpm never recorded \`${command}\` — the REAL pnpm may have run`
+        : `${where}the fake pnpm recorded \`${command}\`, which this case must never reach`,
+    ).toBe(reached);
   }
   expect(
     existsSync(join(caseDir, "sentinels", "node-executed")),
@@ -527,14 +642,19 @@ function assertTriple(
   expect(heartbeat.lastStep, `${where}heartbeat lastStep`).toBe(expected.lastStep);
   const inWindow = expectedMarkWindow(heartbeat.startedAt);
   expect(heartbeat.markWindow, `${where}heartbeat markWindow`).toBe(inWindow);
-  if (inWindow) {
+  // IN-WINDOW ALONE IS NOT ENOUGH, and the decorated step name is not a step name: the
+  // wrapper compares the BARE `LAST_STEP` against its landed-steps list and only decorates
+  // at print time, so the oracle has to undecorate before it asks the same question.
+  const marksLanded = MARKS_LANDED_STEPS.includes(expected.lastStep.replace(/^timeout:/, ""));
+  if (inWindow && marksLanded) {
     // `complete` is in MARKS_LANDED_STEPS, so an in-window run that reached it stamps
     // ITSELF as the last in-window finish.
     expect(heartbeat.lastMarkWindowFinishedAt, `${where}lastMarkWindowFinishedAt`).toBe(
       heartbeat.finishedAt,
     );
   } else {
-    // A fresh case dir carries nothing forward, and the writer must INVENT nothing.
+    // A fresh case dir carries nothing forward, and the writer must INVENT nothing — least
+    // of all on a run that died before `spine` and therefore marked nothing at all.
     expect(heartbeat.lastMarkWindowFinishedAt, `${where}lastMarkWindowFinishedAt`).toBeUndefined();
   }
 
@@ -700,7 +820,12 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
         // name carries no `timeout:` decoration.
         expect(record.watchdogFired, `${label}: the watchdog's calling card was left behind`).toBe(false);
 
-        assertTriple(record, dirs.caseDir, { exitCode: 0, lastStep: "complete", label });
+        assertTriple(record, dirs.caseDir, {
+          exitCode: 0,
+          lastStep: "complete",
+          pnpmReached: WRAPPER_PNPM_COMMANDS,
+          label,
+        });
         settles.push(record.settleMs);
       }
       // Recorded, not merely passed: a regression from 0.1s to 1.9s is inside the window
@@ -712,37 +837,280 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
 
   // ── CASE 7 · THE ANTI-VACUITY CONTROL ─────────────────────────────────────────────
   it(
-    `case 7 — watchdog disabled because the wrapper is NOT a process-group leader, ${RUNS_PER_CASE} times`,
+    `case 7 — a HANG under a watchdog disabled for not leading its group, ${RUNS_PER_CASE} times`,
     async () => {
       // The inverse of the suite's most important line. If this case ever starts arming
-      // the watchdog, leader detection has changed; if the timeout cases in slice 2 stop
-      // timing out while this still passes, the suite has gone green-and-empty. Neither
-      // state is visible from any other case.
+      // the watchdog, leader detection has changed; if the timeout cases stop timing out
+      // while this still passes, the suite has gone green-and-empty. Neither state is
+      // visible from any other case.
+      //
+      // IT HANGS, and until slice 2 it could not. With only the `succeeds` fake, "a
+      // disabled watchdog does not time out" was unfalsifiable — nothing in the run could
+      // have timed out under an ARMED watchdog either, so the claim cost nothing to make.
+      // Now the same fake that drives case 2 to exit 124 at its ceiling drives this run,
+      // which is observed still alive well past that ceiling AND its grace with no calling
+      // card, and is then released to finish normally. A hang with no release would only
+      // ever reach the harness cap, which is a failure of the case rather than a proof of
+      // anything; a run killed from outside would be the external-stop path, which is a
+      // different slice's subject entirely.
+      const ceilingAndGraceMs =
+        (TIMEOUT_CASE_OPTIONS.maxRunSeconds + TIMEOUT_CASE_OPTIONS.watchdogGraceSeconds) * 1_000;
+      const observeAtMs = ceilingAndGraceMs + CASE_7_OBSERVE_MARGIN_MS;
+      const survivals: number[] = [];
+
       for (let run = 1; run <= RUNS_PER_CASE; run += 1) {
-        const dirs = makeCaseDir(CASE_OPTIONS);
+        const dirs = makeCaseDir(TIMEOUT_CASE_OPTIONS);
+        setFakeBehavior(dirs.caseDir, "prices:fetch", "hangs");
+        const label = `case 7 run ${run}/${RUNS_PER_CASE}`;
+
         const record = await launchWrapper({
           caseDir: dirs.caseDir,
           wrapperPath: WRAPPER_PATH,
-          env: caseEnv(dirs, CASE_OPTIONS),
+          env: caseEnv(dirs, TIMEOUT_CASE_OPTIONS),
           groupLeader: false,
           settleDeadlineMs: SETTLE_DEADLINE_MS,
-          maxWaitMs: 60_000,
+          maxWaitMs: 120_000,
+          duringRun: async (pgid) => {
+            await sleep(observeAtMs);
+            // STILL ALIVE, past a ceiling and a grace that would have ended case 2 twice.
+            const alive = processesInPgid(pgid);
+            expect(
+              alive.join(" | "),
+              `${label}: the wrapper was gone ${observeAtMs}ms in — a disabled watchdog killed it`,
+            ).toContain("run-daily-fetch.sh");
+            expect(
+              watchdogCardPresent(dirs.logDir),
+              `${label}: a DISABLED watchdog left a calling card`,
+            ).toBe(false);
+            releaseFakeHang(dirs.caseDir, "prices:fetch");
+          },
         });
-        const label = `case 7 run ${run}/${RUNS_PER_CASE}`;
 
         expect(record.logText, `${label}: the wrapper did not notice it was not the leader`).toContain(
           "watchdog DISABLED (not a process-group leader:",
         );
         expect(record.logText, `${label}: the watchdog armed anyway`).not.toContain("watchdog armed:");
-        // AND IT DOES NOT TIME OUT: no calling card, no 124, no `timeout:` decoration.
+        // AND IT DOES NOT TIME OUT: it outlived its own ceiling and grace, left no calling
+        // card, exited 0, and its step name carries no `timeout:` decoration.
+        expect(
+          record.durationMs,
+          `${label}: the run ended before it could outlive its own ceiling and grace`,
+        ).toBeGreaterThan(ceilingAndGraceMs);
         expect(record.watchdogFired, `${label}: a disabled watchdog left a calling card`).toBe(false);
         expect(record.exitCode, `${label}: a disabled watchdog produced a timeout exit`).not.toBe(124);
         expect(record.heartbeat?.lastStep ?? "", `${label}: decorated step`).not.toContain("timeout:");
 
-        assertTriple(record, dirs.caseDir, { exitCode: 0, lastStep: "complete", label });
+        assertTriple(record, dirs.caseDir, {
+          exitCode: 0,
+          lastStep: "complete",
+          pnpmReached: WRAPPER_PNPM_COMMANDS,
+          label,
+        });
+        survivals.push(record.durationMs);
       }
+      console.log(
+        `[wrapper harness] case 7 survived (ms, ceiling+grace=${ceilingAndGraceMs}): ${survivals.join(", ")}`,
+      );
     },
-    240_000,
+    600_000,
+  );
+
+  // ── THE TIMEOUT FAMILY · CASES 2, 3 AND 5 ─────────────────────────────────────────
+  //
+  // These are the racy ones. The historical `tee` defect reproduced on roughly three runs
+  // in five, and a single lucky green had already pronounced it fixed once — which is the
+  // entire argument for the 12-run floor being a floor and not a default.
+  //
+  // Each pays a real ceiling and a real grace, twelve times, and each asserts the fake-pnpm
+  // sentinel: a case that "hangs" because the REAL pnpm was slow, or that "exits 127"
+  // because a real binary was missing, is indistinguishable from a passing case without it.
+
+  /**
+   * The settle assertion, bounded in BOTH directions and recorded either way.
+   *
+   * LOWER: the watchdog is still serving its grace when the shell exits, so the pgid CANNOT
+   * be empty yet. A harness that found it empty there would be asserting emptiness before
+   * grace had been served — a false red waiting to happen, and the reason the launcher
+   * samples the group at the instant of exit as well as after the wait.
+   *
+   * UPPER: the launcher stops polling at the deadline this case passed it, so a pgid still
+   * occupied past grace + one poll + margin arrives at assertion 3 as residue and goes red.
+   * The bound is derived from the wrapper's own numbers, never guessed.
+   */
+  function assertGraceBoundedSettle(record: RunRecord, label: string, options: CaseOptions): void {
+    const graceMs = options.watchdogGraceSeconds * 1_000;
+    expect(
+      record.residueAtExit.length,
+      `${label}: the pgid was ALREADY empty when the shell exited — the watchdog is supposed ` +
+        "to outlive it and serve the grace, so either it was cancelled on the timeout path " +
+        "or this run never timed out at all",
+    ).toBeGreaterThan(0);
+    expect(
+      record.settleMs,
+      `${label}: the pgid emptied in ${record.settleMs}ms, far inside the ${graceMs}ms grace — ` +
+        "the escalation cannot have waited what it claims to wait",
+    ).toBeGreaterThanOrEqual(graceMs / 2);
+    expect(
+      record.settleMs,
+      `${label}: the pgid took ${record.settleMs}ms to empty, past the derived bound`,
+    ).toBeLessThan(timeoutSettleDeadlineMs(options));
+  }
+
+  it(
+    `case 2 — watchdog timeout with a REACTIVE child, ${RUNS_PER_CASE} consecutive times`,
+    async () => {
+      const settles: number[] = [];
+      for (let run = 1; run <= RUNS_PER_CASE; run += 1) {
+        const dirs = makeCaseDir(TIMEOUT_CASE_OPTIONS);
+        // The fake hangs at the fetch step, reactively: neither it nor its `sleep` traps
+        // anything, so the watchdog's group TERM is what ends it — and the wrapper's own
+        // TERM handler is what turns that into an orderly exit 124 with a breadcrumb.
+        setFakeBehavior(dirs.caseDir, "prices:fetch", "hangs");
+        const label = `case 2 run ${run}/${RUNS_PER_CASE}`;
+
+        const record = await launchWrapper({
+          caseDir: dirs.caseDir,
+          wrapperPath: WRAPPER_PATH,
+          env: caseEnv(dirs, TIMEOUT_CASE_OPTIONS),
+          groupLeader: true,
+          settleDeadlineMs: timeoutSettleDeadlineMs(TIMEOUT_CASE_OPTIONS),
+          maxWaitMs: 120_000,
+        });
+
+        expect(record.logText, `${label}: the watchdog did not arm — was the child detached?`).toContain(
+          "watchdog armed:",
+        );
+        expect(record.logText, `${label}: the watchdog never fired`).toContain(
+          `WATCHDOG: run exceeded ${TIMEOUT_CASE_OPTIONS.maxRunSeconds}s`,
+        );
+        // THE CALLING CARD. It is the TERM handler's only discriminator between the
+        // watchdog's signal and an operator's, and it is what makes the 124 honest.
+        expect(record.watchdogFired, `${label}: the watchdog left no calling card`).toBe(true);
+        assertGraceBoundedSettle(record, label, TIMEOUT_CASE_OPTIONS);
+
+        assertTriple(record, dirs.caseDir, {
+          exitCode: 124,
+          lastStep: "timeout:prices-fetch",
+          pnpmReached: ["prices:fetch"],
+          label,
+        });
+        settles.push(record.settleMs);
+      }
+      console.log(
+        `[wrapper harness] case 2 settle ms (bound ${timeoutSettleDeadlineMs(TIMEOUT_CASE_OPTIONS)}): ` +
+          settles.join(", "),
+      );
+    },
+    600_000,
+  );
+
+  it(
+    `case 3 — watchdog timeout with a TERM-DEAF grandchild, ${RUNS_PER_CASE} consecutive times`,
+    async () => {
+      const settles: number[] = [];
+      for (let run = 1; run <= RUNS_PER_CASE; run += 1) {
+        const dirs = makeCaseDir(TIMEOUT_CASE_OPTIONS);
+        // The historical shape verbatim: the grandchild ignores TERM and holds the
+        // inherited write end of the log pipe, so it survived the group TERM and kept `tee`
+        // alive with it — both sitting in the run's process group holding launchd's
+        // per-label job slot long after the run itself was gone.
+        setFakeBehavior(dirs.caseDir, "prices:fetch", "hangs-with-term-deaf-grandchild");
+        const label = `case 3 run ${run}/${RUNS_PER_CASE}`;
+
+        const record = await launchWrapper({
+          caseDir: dirs.caseDir,
+          wrapperPath: WRAPPER_PATH,
+          env: caseEnv(dirs, TIMEOUT_CASE_OPTIONS),
+          groupLeader: true,
+          settleDeadlineMs: timeoutSettleDeadlineMs(TIMEOUT_CASE_OPTIONS),
+          maxWaitMs: 120_000,
+        });
+
+        expect(record.logText, `${label}: the watchdog did not arm`).toContain("watchdog armed:");
+        expect(record.watchdogFired, `${label}: the watchdog left no calling card`).toBe(true);
+        expect(
+          existsSync(join(dirs.caseDir, "sentinels", TERM_DEAF_CHILD_SENTINEL)),
+          `${label}: the TERM-deaf grandchild never started — this case has silently become case 2`,
+        ).toBe(true);
+        // GONE, NOT MERELY ORPHANED. It has to be visible in the group at the instant the
+        // shell exited — it ignored the TERM — and absent once the SIGKILL escalation has
+        // run. Assertion 3 below is the half that says "absent"; this is the half that says
+        // there was something there to reap.
+        expect(
+          record.residueAtExit.join(" | "),
+          `${label}: the deaf grandchild was not in the pgid when the shell exited`,
+        ).toContain(TERM_DEAF_CHILD_NAME);
+        assertGraceBoundedSettle(record, label, TIMEOUT_CASE_OPTIONS);
+        expect(
+          record.pgidResidue.join(" | "),
+          `${label}: the deaf grandchild survived the SIGKILL escalation`,
+        ).not.toContain(TERM_DEAF_CHILD_NAME);
+
+        assertTriple(record, dirs.caseDir, {
+          exitCode: 124,
+          lastStep: "timeout:prices-fetch",
+          pnpmReached: ["prices:fetch"],
+          label,
+        });
+        settles.push(record.settleMs);
+      }
+      console.log(
+        `[wrapper harness] case 3 settle ms (bound ${timeoutSettleDeadlineMs(TIMEOUT_CASE_OPTIONS)}): ` +
+          settles.join(", "),
+      );
+    },
+    600_000,
+  );
+
+  it(
+    `case 5 — an early non-zero exit, ${RUNS_PER_CASE} consecutive times`,
+    async () => {
+      const settles: number[] = [];
+      for (let run = 1; run <= RUNS_PER_CASE; run += 1) {
+        // The FULL ceiling, deliberately: this run must end on its own terms long before
+        // any watchdog could touch it, and a short ceiling would blur those two endings.
+        const dirs = makeCaseDir(CASE_OPTIONS);
+        // Exit 127 is the shape a missing `pnpm` or an invisible `node` takes in
+        // production, and it is the case that justifies the heartbeat writer being pure
+        // bash: on this path nothing node-shaped can run.
+        setFakeBehavior(dirs.caseDir, "prices:fetch", "exits-127");
+        const label = `case 5 run ${run}/${RUNS_PER_CASE}`;
+
+        const record = await launchWrapper({
+          caseDir: dirs.caseDir,
+          wrapperPath: WRAPPER_PATH,
+          env: caseEnv(dirs, CASE_OPTIONS),
+          groupLeader: true,
+          settleDeadlineMs: SETTLE_DEADLINE_MS,
+          maxWaitMs: 60_000,
+        });
+
+        expect(record.logText, `${label}: the watchdog did not arm`).toContain("watchdog armed:");
+        expect(record.logText, `${label}: the wrapper did not report the failed fetch`).toContain(
+          "prices:fetch exited 127 — NOT running spine.",
+        );
+        // NOT A TIMEOUT, and the step name says so: no calling card, no `timeout:` prefix.
+        // The step is undecorated because the run ended on its own terms.
+        expect(record.watchdogFired, `${label}: a run that was never timed out left a calling card`).toBe(
+          false,
+        );
+        // AND THE SETTLE WINDOW STAYS THE SHORT ONE. This is not a timeout path, so the
+        // watchdog was cancelled — subshell and forked `sleep` both — before the shell left.
+        // Giving this case the grace-derived bound would let a watchdog left sleeping out
+        // its full ceiling over an already-dead run pass unnoticed, which is precisely the
+        // held-job-slot failure the wrapper's own cancellation exists to prevent.
+
+        assertTriple(record, dirs.caseDir, {
+          exitCode: 127,
+          lastStep: "prices-fetch",
+          pnpmReached: ["prices:fetch"],
+          label,
+        });
+        settles.push(record.settleMs);
+      }
+      console.log(`[wrapper harness] case 5 settle ms: ${settles.join(", ")}`);
+    },
+    600_000,
   );
 
   // ── S6 · THE CHILD-REAP MUTATION CONTROL ──────────────────────────────────────────

@@ -65,6 +65,16 @@ export interface RunRecord {
   readonly watchdogFired: boolean;
   /** `pid command` for anything still in the run's pgid when the settle window closed. */
   readonly pgidResidue: readonly string[];
+  /**
+   * `pid command` for the pgid sampled at the INSTANT the shell exited, before any settle
+   * wait. It is what makes the settle assertion bounded in BOTH directions: on the timeout
+   * path the watchdog is deliberately left alive to serve its grace and its group SIGKILL,
+   * so this must be NON-empty there — a case that found it empty would be asserting
+   * emptiness before grace had been served, which is a false red waiting to happen. It is
+   * also how case 3 tells "the deaf child was reaped" from "the deaf child was never
+   * there": it has to be visible here and gone from {@link pgidResidue}.
+   */
+  readonly residueAtExit: readonly string[];
   /** How long the pgid took to empty. Recorded so 0.1s → 4.9s is visible, not merely passing. */
   readonly settleMs: number;
   readonly durationMs: number;
@@ -83,6 +93,14 @@ export interface LaunchOptions {
   readonly settleDeadlineMs: number;
   /** A hard cap so a wedged run cannot wedge the suite. Exceeding it is a failure, not a pass. */
   readonly maxWaitMs: number;
+  /**
+   * Run concurrently with the launched wrapper, from just after the spawn. Case 7's hook,
+   * and it exists for one reason: proving a run does NOT time out requires observing it
+   * still alive past its own ceiling and grace and then letting it finish. If it throws,
+   * the group is SIGKILLed so a wedged run cannot outlive the failed observation, and the
+   * error is re-raised once the child is reaped.
+   */
+  readonly duringRun?: (pgid: number) => Promise<void>;
 }
 
 /** Read once per process: `/bin/bash --version`'s first line, verbatim. */
@@ -94,7 +112,11 @@ export function observedBashVersion(): string {
 export function processesInPgid(pgid: number): string[] {
   let table: string;
   try {
-    table = execFileSync("ps", ["-A", "-o", "pid=,pgid=,command="], { encoding: "utf8" });
+    // `-ww` because macOS `ps` truncates the command column to the terminal width — and to
+    // 80 columns when stdout is a pipe, which is exactly what this is. The residue of a run
+    // rooted in a temp dir is long-pathed by construction, so without this the one column
+    // that names WHAT survived is cut off precisely when it matters.
+    table = execFileSync("ps", ["-A", "-ww", "-o", "pid=,pgid=,command="], { encoding: "utf8" });
   } catch {
     return [];
   }
@@ -157,6 +179,22 @@ export async function launchWrapper(options: LaunchOptions): Promise<RunRecord> 
     throw new Error("wrapper harness: the launch produced no pid");
   }
 
+  // Started BEFORE the exit is awaited, so it genuinely overlaps the run. Its failure is
+  // held rather than thrown here: throwing out of an unawaited promise would escape the
+  // test that owns it, and leaving the group alive would poison every later case's residue.
+  let duringError: unknown;
+  const during: Promise<void> =
+    options.duringRun === undefined
+      ? Promise.resolve()
+      : options.duringRun(pgid).catch((error: unknown) => {
+          duringError = error;
+          try {
+            process.kill(-pgid, "SIGKILL");
+          } catch {
+            /* already gone */
+          }
+        });
+
   let captured = "";
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
@@ -192,6 +230,10 @@ export async function launchWrapper(options: LaunchOptions): Promise<RunRecord> 
     },
   );
   const durationMs = Date.now() - startedAt;
+  await during;
+  if (duringError !== undefined) {
+    throw duringError;
+  }
 
   // THE SETTLE WINDOW, bounded in BOTH directions. Asserting emptiness the instant the
   // shell exits gives a false red on the timeout path, where the watchdog is deliberately
@@ -201,6 +243,7 @@ export async function launchWrapper(options: LaunchOptions): Promise<RunRecord> 
   // what it cost.
   const settleStartedAt = Date.now();
   let residue = processesInPgid(pgid);
+  const residueAtExit = residue;
   while (residue.length > 0 && Date.now() - settleStartedAt < options.settleDeadlineMs) {
     await sleep(25);
     residue = processesInPgid(pgid);
@@ -222,6 +265,7 @@ export async function launchWrapper(options: LaunchOptions): Promise<RunRecord> 
     stdout: captured,
     watchdogFired,
     pgidResidue: residue,
+    residueAtExit,
     settleMs,
     durationMs,
   };
