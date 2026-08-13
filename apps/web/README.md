@@ -145,6 +145,7 @@ See `apps/web/.env.example` for the authoritative, commented list. Summary:
 | `AUTH_DATABASE_URL` | Better Auth | Runtime — deployed app (Production only) |
 | `BETTER_AUTH_SECRET` | Better Auth | Runtime — deployed app (Production only) |
 | `BETTER_AUTH_URL` | Better Auth | Runtime — deployed app (Production only) |
+| `DEV_TRUSTED_ORIGINS` | Better Auth | Local dev only — comma-separated extra origins (e.g. the LAN IP you open on a phone); ignored when `NODE_ENV=production` |
 | `PROJECTION_WRITE_DATABASE_URL` | `push`, `backfill`, `db:init` | Local/operator only — never in the web project's env |
 | `PROJECTION_ADMIN_DATABASE_URL` | `db:provision` | One-shot, local/operator only |
 | `PROJECTION_WRITER_ROLE` / `PROJECTION_READER_ROLE` | `db:provision` | Optional, default `numisma_push` / `numisma_web` |

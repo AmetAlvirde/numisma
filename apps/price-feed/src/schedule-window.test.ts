@@ -208,4 +208,88 @@ describe("the launchd fetch window", () => {
     const declared = /^MARKS_LANDED_STEPS="([^"]+)"$/m.exec(wrapper)?.[1]?.split(" ");
     expect(declared).toEqual(afterSpine);
   });
+
+  it("never rewrites LAST_STEP into a decorated value, which empties the landed-steps match", () => {
+    // The sibling test above pins WHICH names count as "the marks landed". This one
+    // pins that the variable those names are compared against still holds one of
+    // them. The comparison is an exact string match, so any assignment that turns
+    // `LAST_STEP` into a LABEL rather than a step name silently empties the whole
+    // predicate — every branch of the loop falls through and the run records itself
+    // as not having marked the day.
+    //
+    // That regression shipped once. The watchdog's TERM handler set
+    // `LAST_STEP="timeout:$LAST_STEP"`, so a run killed at `backfill` — after it had
+    // already appended, committed and VERIFIED the day's marks — stamped nothing,
+    // and the next morning claimed "nothing recorded for today" standing beside a
+    // true exit-124 line and a gap report that said the opposite. The `timeout:`
+    // label is still emitted; it is built at print time from a separate flag, which
+    // is what lets both facts be true at once.
+    //
+    // THE ANCHORED SCAN THE SIBLING USES CANNOT SEE THIS. That rewrite lived inside a
+    // single-quoted `trap` body on a `trap` line, so the `/^LAST_STEP="…"$/gm` list
+    // was still exactly the post-`spine` steps and the guard passed. This scan finds
+    // every assignment wherever it sits, and requires the two to agree — an
+    // assignment the anchored scan misses is itself the bug, because that scan is the
+    // oracle for `MARKS_LANDED_STEPS`.
+    const wrapper = readFileSync(WRAPPER_PATH, "utf8");
+    const everywhere = [...wrapper.matchAll(/\bLAST_STEP="([^"]*)"/g)].map((m) => m[1]!);
+    const anchored = [...wrapper.matchAll(/^LAST_STEP="([^"]+)"$/gm)].map((m) => m[1]!);
+    expect(everywhere).toEqual(anchored);
+    // A bare step name: no `$` (an expansion of itself), no `:` (a label prefix).
+    for (const value of everywhere) {
+      expect(value).toMatch(/^[a-z][a-z-]*$/);
+    }
+  });
+
+  it("bounds a wedged run inside the gap between fires, so the next one is not skipped", () => {
+    // THE ORACLE IS THE PLIST, WHICH IS WHY THIS LIVES HERE. The wrapper's watchdog
+    // ceiling is only meaningful relative to how often launchd actually fires: the
+    // whole point is that a hung run is dead and the job slot released BEFORE the
+    // next fire, so the hourly schedule's own retry still works.
+    //
+    // This is a real, observed failure, not a hypothetical. On 2026-08-11 the 22:01
+    // run wedged on a dead socket mid-backfill and was still alive twenty hours
+    // later; because launchd is a per-label singleton, it would have eaten the
+    // entire next evening's window too. Tightening the plist's intervals without
+    // tightening the ceiling silently restores that, and nothing else would catch it
+    // — the two files never reference each other.
+    const wrapper = readFileSync(WRAPPER_PATH, "utf8");
+    const ceiling = Number(
+      /^MAX_RUN_SECONDS="\$\{NUMISMA_PRICEFEED_MAX_RUN_SECONDS:-(\d+)\}"$/m.exec(wrapper)?.[1],
+    );
+    const grace = Number(
+      /^WATCHDOG_GRACE_SECONDS="\$\{NUMISMA_PRICEFEED_WATCHDOG_GRACE_SECONDS:-(\d+)\}"$/m.exec(
+        wrapper,
+      )?.[1],
+    );
+    expect(Number.isFinite(ceiling)).toBe(true);
+    expect(Number.isFinite(grace)).toBe(true);
+
+    // The SMALLEST gap between consecutive fires, not the nominal hour: if anyone
+    // ever adds a half-past interval, the tightest pair is what the ceiling has to
+    // clear. Sorted by minute-of-day; the day does not wrap because the schedule is
+    // pinned to a single 18:00-23:00 block by the assertions above.
+    const minutesOfDay = parseIntervals()
+      .map(({ Hour, Minute }) => Hour! * 60 + Minute!)
+      .sort((a, b) => a - b);
+    const smallestGapSeconds =
+      Math.min(...minutesOfDay.slice(1).map((m, i) => m - minutesOfDay[i]!)) * 60;
+
+    expect(ceiling + grace).toBeLessThan(smallestGapSeconds);
+
+    // AND THE FLOOR, because the bound is two-sided and only the ceiling had a test.
+    // "Tighten it to be safe" is the single most plausible edit anyone will make to
+    // this number, and it is the one edit with the worst consequence: a ceiling at or
+    // below a healthy run's duration TERMs EVERY fire, not only the wedged ones. All
+    // six fires of an evening then die identically, the CDMX date rolls, and the day
+    // is unrecoverable — total loss, from an edit that looks like prudence and that
+    // the assertion above waves through (600 passes it cleanly).
+    //
+    // THE ORACLE IS THE WRAPPER'S OWN MEASURED RUN LENGTH, stated at the watchdog:
+    // "a healthy run takes ~15 minutes". Weaker than DEFAULT_CONFIG or the plist, and
+    // named as such — but it is a real observation of the thing being bounded, and
+    // 20 minutes is that figure with a third of itself as margin. This asserts the
+    // ceiling leaves room for a healthy run; it does not pin 2700.
+    expect(ceiling).toBeGreaterThan(20 * 60);
+  });
 });
