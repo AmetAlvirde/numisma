@@ -26,7 +26,13 @@
  * mirrors that. Moving these declarations "back" to the IO module would not compile.
  */
 import type { CapitalTier } from "./contracts.js";
-import { isIsoCalendarDate, isLaterByDateThenLine, type IsoDate, type PlanLookup } from "./plans.js";
+import {
+  byLine,
+  isIsoCalendarDate,
+  isLaterByDateThenLine,
+  type IsoDate,
+  type PlanLookup,
+} from "./plans.js";
 
 /**
  * D3's mismatch vocabulary, CLOSED at two members. It does not grow without a
@@ -375,11 +381,6 @@ export function classifyReconciliation(record: PlanReconciliation): Reconciliati
   return record.declared.status === "active" || record.declared.status === "pending"
     ? "clean"
     : "indeterminate";
-}
-
-/** File order — the operator's own reading order, and the only order a diagnostic list may take. */
-function byLine<T extends { line: number }>(entries: readonly T[]): T[] {
-  return [...entries].sort((a, b) => a.line - b.line);
 }
 
 /**

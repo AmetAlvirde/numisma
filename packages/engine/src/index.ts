@@ -57,7 +57,7 @@ export type {
   RealizedRollupRow,
   InvalidationWatchRow,
 } from "./contracts.js";
-export { validationSeverityByCode } from "./contracts.js";
+export { validationSeverityByCode, CAPITAL_TIERS } from "./contracts.js";
 
 // Public functions: parse untrusted input, compose the read model, drill down.
 export { parseFundReview } from "./parse.js";
@@ -385,6 +385,7 @@ export type {
 export {
   PLAN_KINDS,
   DCA_CADENCES,
+  PULL_INSTRUCTION,
   isIsoCalendarDate,
   pickPlanAsOf,
   listPlansAsOf,

@@ -237,6 +237,20 @@ export type LoadedPlanRecord = PlanRecord & { line: number };
 export type PlanSkipReason = "unsupported" | "invalid";
 
 /**
+ * The instruction an `unsupported` skip carries — the whole reason the taxonomy above
+ * splits by INSTRUCTION rather than by parse stage: this line is fine and this
+ * checkout is behind.
+ *
+ * It lives beside the reason it explains rather than in each loader, because the two
+ * sidecars that emit it were carrying it word for word: `unsupported` means one thing
+ * across ADR-004's class, and an operator who reads a different instruction from
+ * `plans.jsonl` than from `reconciliations.jsonl` for the same bucket has been told
+ * the taxonomy means two things.
+ */
+export const PULL_INSTRUCTION =
+  "this checkout may be older than the file — pull and retry";
+
+/**
  * One line the loader could not turn into a record, REPORTED rather than swallowed.
  *
  * `detail` is PROSE-ONLY and never quotes the line. Plan bodies carry figures, and
@@ -413,8 +427,17 @@ function isLater(
   );
 }
 
-/** File order — the operator's own reading order, and the only order a diagnostic list may take. */
-function byLine<T extends { line: number }>(entries: readonly T[]): T[] {
+/**
+ * File order — the operator's own reading order, and the only order a diagnostic list
+ * may take.
+ *
+ * Exported for {@link isLaterByDateThenLine}'s reason, one notch weaker: the trail's
+ * diagnostics take the same order, and "file order is the operator's own reading
+ * order" has to keep meaning ONE thing across both files. A sort is a sort and two
+ * correct copies cost nothing today — but two copies is one more pair someone has to
+ * keep identical for a stated invariant to stay stated once.
+ */
+export function byLine<T extends { line: number }>(entries: readonly T[]): T[] {
   return [...entries].sort((a, b) => a.line - b.line);
 }
 

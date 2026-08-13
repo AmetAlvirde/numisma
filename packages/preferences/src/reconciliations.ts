@@ -80,6 +80,8 @@
  */
 import { readFile } from "node:fs/promises";
 import {
+  CAPITAL_TIERS,
+  PULL_INSTRUCTION,
   RECONCILIATION_MISMATCHES,
   isIsoCalendarDate,
   isRecordEventId,
@@ -94,7 +96,12 @@ import {
   type ReconciliationRecord,
   type SkippedReconciliationLine,
 } from "@numisma/engine";
-import { appendSidecarLines, resolveSidecarPath } from "./sidecar-io.js";
+import {
+  appendSidecarLines,
+  isRecordObject,
+  resolveSidecarPath,
+  stripBom,
+} from "./sidecar-io.js";
 
 /** The trail's name, used by the path resolver and by nothing else. */
 const RECONCILIATIONS_FILE_NAME = "reconciliations.jsonl";
@@ -112,25 +119,11 @@ export function resolveReconciliationsPath(dataDir?: string): string {
   return resolveSidecarPath(RECONCILIATIONS_FILE_NAME, dataDir);
 }
 
-/**
- * The CLOSED capital-tier vocabulary as a value, because `CapitalTier` is a type and
- * a runtime check needs a list. Mirrored from `plans.ts` for its stated reason:
- * adding a tier is an ADR-002 amendment — a fund-structure change, not a
- * forward-compatibility event — so an unrecognized tier makes the line corrupt.
- */
-const CAPITAL_TIERS: readonly CapitalTier[] = ["c1", "c2", "c3"];
-
 /** The two fill events D7 counts. Closed here for the same reason tiers are. */
 const FILL_KINDS: readonly ReconciliationFillKind[] = ["PositionOpened", "PositionAddedTo"];
 
 /** The plan kinds `declared` may copy. `noPlan` is carried by `status`, not by `kind`. */
 const DECLARED_PLAN_KINDS = ["dcaLadder", "dcaTime"] as const;
-
-/**
- * The instruction an `unsupported` skip carries, word for word as `plans.ts` states
- * it: this line is fine and this checkout is behind.
- */
-const PULL_INSTRUCTION = "this checkout may be older than the file — pull and retry";
 
 /**
  * `toldAt` — an instant with an EXPLICIT OFFSET.
@@ -145,10 +138,6 @@ const INSTANT_WITH_OFFSET =
 
 function isInstantWithOffset(value: unknown): value is string {
   return typeof value === "string" && INSTANT_WITH_OFFSET.test(value);
-}
-
-function isRecordObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** The reader's verdict on ONE untrusted value from the file. */
@@ -392,13 +381,6 @@ function readReconciliationLine(value: unknown, line: number): ReconciliationLin
 }
 
 /**
- * The UTF-8 byte-order mark. Nothing this repo writes emits one, but a file that has
- * been round-tripped through an editor during a repair can carry one, and it is
- * invisible to the operator and fatal to `JSON.parse` on line 1.
- */
-const BOM = "\uFEFF";
-
-/**
  * Read the trail into VALIDATED records — TOTALLY. No input throws.
  *
  * Totality is not a style choice here, it is what makes the return type expressible.
@@ -451,7 +433,7 @@ export async function loadReconciliations(path: string): Promise<LoadedReconcili
 
   const reconciliations: LoadedReconciliationRecord[] = [];
   const skipped: SkippedReconciliationLine[] = [];
-  const lines = (raw.startsWith(BOM) ? raw.slice(BOM.length) : raw).split("\n");
+  const lines = stripBom(raw).split("\n");
   for (let index = 0; index < lines.length; index += 1) {
     const trimmed = (lines[index] ?? "").trim();
     if (trimmed === "") {
