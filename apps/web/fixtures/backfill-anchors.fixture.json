@@ -813,12 +813,7 @@
             "missing": []
           },
           "suppressed": [],
-          "venueDark": [
-            {
-              "source": "binance",
-              "weekday": "Friday"
-            }
-          ]
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -1274,12 +1269,7 @@
             "tier:c1",
             "tier:c2"
           ],
-          "venueDark": [
-            {
-              "source": "binance",
-              "weekday": "Friday"
-            }
-          ]
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -1709,12 +1699,7 @@
             "instrument:nke-mxn",
             "tier:c1"
           ],
-          "venueDark": [
-            {
-              "source": "binance",
-              "weekday": "Friday"
-            }
-          ]
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",

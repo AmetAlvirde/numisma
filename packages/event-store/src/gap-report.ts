@@ -373,22 +373,42 @@ const EXPECTED_BY_SOURCE: Readonly<Partial<Record<PriceSource, number>>> =
  * difference.
  */
 export function formatGapReport(report: GapReport): string[] {
-  return [
-    ...report.lost.map(({ date, reason }) =>
-      reason === "no-anchor"
-        ? `Numisma: ${date} — NO DATA. No event of any kind carries this date; the day is lost.`
-        : `Numisma: ${date} — NO MARKS. The day is anchored but no price mark landed on it; the day is lost.`,
-    ),
-    // The WEEKDAY is not decoration — it is how the reader recognises the ~9-10
-    // market holidays a year this fires on (D7), which are the only false
-    // positives it has by design.
-    ...report.venueDark.map(
-      ({ date, source, expected }) =>
-        `Numisma: ${date} (${weekdayName(date)}) — VENUE DARK. ${source} owed ` +
-        `${expected} mark(s) and produced none. The day is not lost; the venue was ` +
-        `silent, or the market was closed for a holiday.`,
-    ),
-  ];
+  return [...formatLostDays(report), ...formatVenueDarkDays(report)];
+}
+
+/**
+ * The lost-day lines alone, ascending.
+ *
+ * SPLIT OUT BECAUSE A BOUNDED CHANNEL CANNOT SLICE THE CONCATENATION. The TUI prints
+ * at most seven lines; taking the tail of `formatGapReport`'s output withholds lost
+ * days first and, once the venue-dark lines alone fill the bound, withholds every
+ * lost day forever — a permanent, unfixable finding starved out by a transient,
+ * recurring one. The channel therefore reserves capacity per kind, and reserving
+ * requires the kinds to arrive separately. The rendering itself is unchanged, and
+ * {@link formatGapReport} still returns exactly what it always did.
+ */
+export function formatLostDays(report: GapReport): string[] {
+  return report.lost.map(({ date, reason }) =>
+    reason === "no-anchor"
+      ? `Numisma: ${date} — NO DATA. No event of any kind carries this date; the day is lost.`
+      : `Numisma: ${date} — NO MARKS. The day is anchored but no price mark landed on it; the day is lost.`,
+  );
+}
+
+/**
+ * The venue-dark lines alone, ascending by date then by venue. See
+ * {@link formatLostDays} for why the two kinds are separable.
+ */
+export function formatVenueDarkDays(report: GapReport): string[] {
+  // The WEEKDAY is not decoration — it is how the reader recognises the ~9-10
+  // market holidays a year this fires on (D7), which are the only false
+  // positives it has by design.
+  return report.venueDark.map(
+    ({ date, source, expected }) =>
+      `Numisma: ${date} (${weekdayName(date)}) — VENUE DARK. ${source} owed ` +
+      `${expected} mark(s) and produced none. The day is not lost; the venue was ` +
+      `silent, or the market was closed for a holiday.`,
+  );
 }
 
 /**

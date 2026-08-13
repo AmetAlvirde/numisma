@@ -16,6 +16,7 @@ import type { PortfolioEvent } from "@numisma/engine";
 // The engine's one declaring home for calendar arithmetic — never a private copy,
 // which `calendar-contract.test.ts` enforces repo-wide, test files included.
 import { addDays } from "@numisma/engine";
+import { LAUNCHD_ERA_START } from "@numisma/event-store";
 import { describe, expect, it } from "vitest";
 import {
   VENUE_DARK_WINDOW_DAYS,
@@ -135,6 +136,22 @@ describe("summarizeVenueDark — the wire narrowing", () => {
     // Far enough past the window that the Wednesday outage has aged out.
     const later = "2026-08-01";
     expect(summarizeVenueDark(events, later)).toEqual([]);
+  });
+
+  it("never reaches below the launchd era, however early the anchor", () => {
+    // The pre-scheduler week is HAND-RUN: `06-26, 06-28, 06-30, 07-03 …`, and whether
+    // a venue OWED marks on a day no job existed to produce them is not a question the
+    // log can answer. `computeGapReport` only DEFAULTS its floor, so a window walked
+    // back from an early anchor would otherwise sit partly — or, for the earliest
+    // anchors, wholly — below the era start and manufacture a dark venue out of the
+    // absence of a scheduler. Live pushes never hit this; `pnpm backfill` does.
+    //
+    // Authored: the crypto venue marks on Fri 2026-06-26 and nothing else ever does.
+    const events = marks("2026-06-26", DAILY_VENUE);
+    // A window that straddles the floor …
+    expect(summarizeVenueDark(events, "2026-06-28")).toEqual([]);
+    // … and one that sits entirely below it, ceiling included.
+    expect(summarizeVenueDark(events, LAUNCHD_ERA_START)).toEqual([]);
   });
 
   it("ages a dark day out of the window rather than carrying it forever", () => {

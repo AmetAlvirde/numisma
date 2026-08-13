@@ -24,6 +24,8 @@ export {
   dueThrough,
   formatGapReport,
   formatGapSummary,
+  formatLostDays,
+  formatVenueDarkDays,
   type GapReport,
   type GapWindow,
   type LostDay,

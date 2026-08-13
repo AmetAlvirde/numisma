@@ -47,7 +47,7 @@ import {
   lastExpectedMarkDate,
   weekdayName,
 } from "@numisma/engine";
-import { computeGapReport } from "@numisma/event-store";
+import { LAUNCHD_ERA_START, computeGapReport } from "@numisma/event-store";
 import type {
   GlanceBlock,
   GlanceMissingMark,
@@ -207,8 +207,19 @@ export function summarizeVenueDark(
   events: readonly PortfolioEvent[],
   asOf: string,
 ): GlanceVenueDarkDay[] {
+  const walkedBack = addDays(asOf, -VENUE_DARK_WINDOW_DAYS);
   const report = computeGapReport(events, {
-    since: addDays(asOf, -VENUE_DARK_WINDOW_DAYS),
+    // CLAMPED TO THE ERA FLOOR, not merely walked back. `computeGapReport` only
+    // DEFAULTS its floor to `LAUNCHD_ERA_START`; an explicit `since` is taken as
+    // given, so a window walked back from an early anchor reaches into the hand-run
+    // week that preceded the scheduler (`06-26, 06-28, 06-30, 07-03 …`). Whether a
+    // venue OWED marks on a day no job existed to produce them is not a question the
+    // log can answer, and the floor's own docstring rejects a lower one for exactly
+    // this reason: "a detector that opens with four unfixable findings trains you to
+    // skim it." Only `pnpm backfill` reaches these anchors — the daily push never
+    // does — and one floor is cheaper to keep true than two. Lexicographic `>` is
+    // date order on `YYYY-MM-DD`, the comparison this codebase uses throughout.
+    since: walkedBack > LAUNCHD_ERA_START ? walkedBack : LAUNCHD_ERA_START,
     until: addDays(asOf, -1),
     now: new Date(`${asOf}T18:00:00Z`),
   });

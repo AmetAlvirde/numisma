@@ -107,16 +107,24 @@ export const RESERVE_FLOOR_WIRE_KEY = "glance.reserveTargetPct" as const;
 export const NAV_MOVE_THRESHOLD_PCT = 1.5;
 
 /**
- * PRECEDENCE — `freshness > feedGap > reserveFloor > navMove`, ranked by *does this
- * invalidate what is below it*. Stale data invalidates every conclusion drawn from
- * it; a missing mark invalidates the numbers that descend from NAV; an under-reserved
- * fund is a standing condition that outranks a single day's move.
+ * PRECEDENCE — `freshness > feedGap > venueDark > reserveFloor > navMove`, ranked by
+ * *does this invalidate what is below it*. Stale data invalidates every conclusion
+ * drawn from it; a missing mark invalidates the numbers that descend from NAV; a dark
+ * venue names why they are missing and outranks the fund-condition rules for the same
+ * reason (see D6, below the array); an under-reserved fund is a standing condition
+ * that outranks a single day's move.
  *
  * CHOSEN, NOT MEASURED — and the code says so because a reader will otherwise assume
- * it was fitted to data. It cannot be measured: `feedGap` took 5 of the 6 *yes* days
- * in the fund's entire recorded history and `navMove` the 6th, so NO SAME-DAY
- * COLLISION HAS EVER BEEN OBSERVED. The only exercise this ordering gets is against
- * the synthesized collisions in `verdict.test.ts`.
+ * it was fitted to data. UNTIL #266 IT COULD NOT BE MEASURED AT ALL: `feedGap` took 5
+ * of the 6 *yes* days in the fund's entire recorded history and `navMove` the 6th, so
+ * no same-day collision had ever been observed and the only exercise this ordering got
+ * was against the synthesized collisions in `verdict.test.ts`. Adding `venueDark`
+ * produced the first real ones — `MEASURED_COLLISIONS` in `verdict-replay.test.ts`
+ * names the days on which `feedGap` and `venueDark` both fire and `feedGap` takes the
+ * line. That is the recorded history exercising ONE PAIR of this order, on live-outage
+ * days where both firings have the same cause; the other four positions remain chosen
+ * rather than fitted, and `freshness`, `reserveFloor` and `navMove` have still never
+ * collided with anything in real history.
  *
  * The verdict renders ONE line — `fired[0]` — and D6's "a freshness failure replaces
  * the verdict" is not a special case in the code: it is what being first in this
