@@ -85,6 +85,7 @@ import {
   resolveEventStorePaths,
   type EventStorePaths,
 } from "@numisma/event-store";
+import { unattendedPreferencesVerdict } from "@numisma/preferences";
 import {
   ANCHOR_FIXTURE_PATH,
   serializeAnchorFixture,
@@ -97,9 +98,11 @@ import {
   deriveSnapshot,
   loadCurrentFold,
   upsertSnapshot,
+  PREFERENCES_DIAGNOSTIC_KIND,
   type AnchorGlance,
   type SnapshotDerivation,
 } from "./push-core.ts";
+import type { RunReport } from "./unattended-report.ts";
 
 /** What the backfill shell's two flags decide, once argv has been read. */
 export interface BackfillArgs {
@@ -197,8 +200,10 @@ export interface BackfillOptions {
     | ((anchor: BackfilledAnchor, index: number, total: number) => void)
     | undefined;
   /**
-   * Called once per anchor with the preferences envelope that anchor's glance was
-   * derived from — spec #320 seam D.
+   * Called once per anchor, AFTER that anchor has been written, with the preferences
+   * envelope its glance was derived from — spec #320 seam D. The ordering is part of
+   * the contract, not an accident of the loop's shape: a callback that throws must not
+   * be able to withhold a row, and this one is invoked where it cannot.
    *
    * PER ANCHOR, BECAUSE THAT IS THE TRUTH: the sidecar is re-read on every anchor (see
    * this loop's docstring), so this loop genuinely rediscovers the same discards N
@@ -268,9 +273,6 @@ export async function runBackfill(
   const results: BackfilledAnchor[] = [];
   for (const [index, asOf] of anchors.entries()) {
     const { report, glance, dca } = await foldAnchor(asOf);
-    // AFTER the fold and BESIDE the write, never in place of it: the callback is told
-    // what this anchor's read discarded and cannot stop the anchor from being written.
-    options.onPreferencesLoad?.(glance.preferences);
     // One derivation either way: with a pool `upsertSnapshot` derives and writes
     // and hands the derivation back; without one `deriveSnapshot` is that same
     // pure call with the write removed. The payload captured in `results` — and
@@ -280,9 +282,105 @@ export async function runBackfill(
       : deriveSnapshot(report, glance.glance, dca);
     const anchor: BackfilledAnchor = { ...derived, written: !!options.pool };
     results.push(anchor);
+    // AFTER this anchor's write and BESIDE `onAnchor`, never before either: the
+    // callback is told what this anchor's read discarded and CANNOT stop the anchor
+    // from being written. Structurally, not by inspection of today's caller — the
+    // option's own name invites a caller to emit in it, and an emit onto a stderr the
+    // launchd watchdog has already closed raises EPIPE. Called before the upsert, that
+    // throw abandons the entire replay over a sidecar line. Pinned in
+    // `discard-channel.test.ts`; same guarantee `pushAnchorAndReport` gives the push.
+    options.onPreferencesLoad?.(glance.preferences);
     options.onAnchor?.(anchor, index, anchors.length);
   }
   return results;
+}
+
+/** What one reported backfill run produced, and how it should end. */
+export interface BackfillRun {
+  results: BackfilledAnchor[];
+  /**
+   * THE PREFERENCES KIND's verdict, folded across every anchor — reported, never
+   * exited on (see below). Kept because the policy stays a value a test can assert
+   * (spec #320 §4) and because a future caller with a different consequence composes
+   * from it; this run's process code is the field beside it.
+   */
+  preferencesExitCode: number;
+  /**
+   * THE PROCESS'S exit code. Zero for a preferences discard, and that is the
+   * DELIBERATE DIVERGENCE from {@link pushAnchorAndReport} — read the note below
+   * before "fixing" it back.
+   */
+  exitCode: number;
+}
+
+/** Everything a reported backfill needs beyond the replay's own options. */
+export interface BackfillAndReportInput extends Omit<BackfillOptions, "onPreferencesLoad"> {
+  /** The run's shared operator channel. Other kinds may already have filed into it. */
+  channel: RunReport;
+  /** Where the channel is written. Injected so the ORDERING below is assertable. */
+  emit?: ((line: string) => void) | undefined;
+  /**
+   * The run's OWN output — the fixture write and the summary line. Runs after every
+   * anchor and BEFORE the channel, because the diagnostic is the last thing a run says.
+   */
+  onComplete?: ((results: readonly BackfilledAnchor[]) => void | Promise<void>) | undefined;
+}
+
+/**
+ * REPLAY FIRST, REPORT AFTER — the backfill's half of spec #320 seam C/D, and the
+ * reason this function exists rather than five lines inside `backfill.ts`'s `main()`.
+ * `backfill.ts` is a self-executing script no test may import, so the ordering lives
+ * here where `discard-channel.test.ts` can drive it with a pool and an emitter sharing
+ * one sequence log: "after" is OBSERVED rather than read off the shell's line order.
+ *
+ * ONE REPORT PER RUN, NOT PER ANCHOR. The sidecar is re-read on every anchor, so the
+ * replay genuinely rediscovers the same discards N times. {@link RunReport} dedups
+ * within a kind, so all N are filed and one line is emitted — and it is emitted once,
+ * at the end, because a discard reported mid-replay is a discard positioned to abort
+ * one.
+ *
+ * ── IT EXITS ZERO ON A DISCARD, AND THE PUSH DOES NOT. DELIBERATE. ─────────────────
+ * `push.ts` keeps its non-zero exit: a launchd job's stderr goes to an unread log, so
+ * an exit code is the only checked value, and nothing folds the push's code into a
+ * shared health signal.
+ *
+ * This command's exit code has a LIVE CONSUMER with a different meaning.
+ * `ops/price-feed/run-daily-fetch.sh` runs `pnpm backfill` under `set -euo pipefail`,
+ * so a non-zero return aborts the script before it stamps `complete` and the heartbeat
+ * records `exitCode: 1, lastStep: "backfill"` — which the TUI renders on EVERY startup
+ * as "the daily price job FAILED". A malformed policy line is a STANDING FACT, not an
+ * errand: it does not extinguish on its own, so that channel would stay red from the
+ * night the typo landed until someone edited the sidecar, and would be retired for the
+ * next REAL failure. `gap-report-core.ts` settled the identical trade-off the same way
+ * — *a lost day is reported; a broken job is failed*, because a permanently red job is
+ * one nobody reads.
+ *
+ * So the VERDICT keeps its exit code (`preferencesExitCode`, still asserted) and this
+ * SHELL declines to fold it into the process's. A failed replay still exits non-zero:
+ * it throws, and `backfill.ts` catches. The report is what changes hands here, not the
+ * severity of a crash.
+ */
+export async function runBackfillAndReport(
+  input: BackfillAndReportInput,
+): Promise<BackfillRun> {
+  let preferencesExitCode = 0;
+  const results = await runBackfill({
+    pool: input.pool,
+    paths: input.paths,
+    onAnchor: input.onAnchor,
+    // The co-tenancy seam, deliberately not collapsed into a helper: derive one kind's
+    // verdict, file its PROSE under its own kind, accumulate its EXIT CODE separately.
+    // A second kind is three more lines in the same shape, with its own exit policy.
+    onPreferencesLoad: (loaded) => {
+      const verdict = unattendedPreferencesVerdict(loaded);
+      input.channel.add(PREFERENCES_DIAGNOSTIC_KIND, verdict.messages);
+      preferencesExitCode = Math.max(preferencesExitCode, verdict.exitCode);
+    },
+  });
+
+  await input.onComplete?.(results);
+  input.channel.emit(input.emit ?? ((line) => console.error(line)));
+  return { results, preferencesExitCode, exitCode: 0 };
 }
 
 /** Project derived anchors into the `SnapshotAnchor` shape the reader returns. */

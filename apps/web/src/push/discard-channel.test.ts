@@ -8,6 +8,12 @@
  * from withholding the push; the ordering is asserted here rather than assumed from
  * the shape of `push.ts`.
  *
+ * BOTH SHELLS ARE DRIVEN THROUGH THEIR IMPORTABLE FUNCTIONS — `pushAnchorAndReport` and
+ * `runBackfillAndReport` — never by re-typing their lines into a test. A test that
+ * copies a shell's body asserts the copy, and keeps passing after the shell moves. And
+ * the two shells DIVERGE on the exit code they hand their process; that divergence has
+ * a test of its own, so a future reader cannot mistake it for an oversight.
+ *
  * NO DATABASE and NO private data: a throwaway store on disk plus a fake pool that
  * records the SQL it is handed, exactly like `backfill-core.test.ts`. Every sidecar
  * line below is AUTHORED — invented policy for an invented reserve, never a copy of
@@ -16,11 +22,8 @@
 import { rm, writeFile } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Pool } from "pg";
-import {
-  resolvePreferencesPath,
-  unattendedPreferencesVerdict,
-} from "@numisma/preferences";
-import { runBackfill } from "./backfill-core.ts";
+import { resolvePreferencesPath } from "@numisma/preferences";
+import { runBackfill, runBackfillAndReport } from "./backfill-core.ts";
 import {
   buildDcaForAnchor,
   buildGlanceForAnchor,
@@ -278,24 +281,101 @@ describe("CO-TENANCY — this report claims the channel, not the surface", () =>
 describe("THE BACKFILL LOOPS, SO THE REPORT MUST NOT", () => {
   it("reports each distinct skip once per RUN, not once per anchor", async () => {
     await useStore(TWO_ANCHORS, `${ACCEPTED_POLICY}\n${REJECTED_POLICY}\n`);
-    const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
+    const run = recordingRun();
     const channel = new RunReport();
-    let exitCode = 0;
 
-    const results = await runBackfill({
-      pool,
-      // Exactly the three lines `backfill.ts` runs: verdict, prose to the channel,
-      // exit code accumulated SEPARATELY from the prose.
-      onPreferencesLoad: (loaded) => {
-        const verdict = unattendedPreferencesVerdict(loaded);
-        channel.add(PREFERENCES_DIAGNOSTIC_KIND, verdict.messages);
-        exitCode = Math.max(exitCode, verdict.exitCode);
-      },
+    // The SHELL's own function, not a re-implementation of its lines here: a test that
+    // copies the three lines out of `backfill.ts` still passes after someone moves them.
+    const { results, preferencesExitCode } = await runBackfillAndReport({
+      pool: run.pool,
+      channel,
+      emit: run.emit,
     });
 
     // Two anchors, each of which re-read the sidecar and re-found the same bad line.
     expect(results).toHaveLength(2);
     expect(channel.linesFor(PREFERENCES_DIAGNOSTIC_KIND)).toHaveLength(1);
-    expect(exitCode).not.toBe(0);
+    expect(run.emitted).toHaveLength(1);
+    // The KIND's verdict is still non-zero and still a value a test can assert. What
+    // the run does with it is the divergence pinned two tests below.
+    expect(preferencesExitCode).toBe(1);
+  });
+
+  it("emits ONCE, after the LAST anchor has been upserted", async () => {
+    await useStore(TWO_ANCHORS, `${ACCEPTED_POLICY}\n${REJECTED_POLICY}\n`);
+    const run = recordingRun();
+
+    await runBackfillAndReport({
+      pool: run.pool,
+      channel: new RunReport(),
+      emit: run.emit,
+      // The run's OWN output — the fixture write and the summary line in `backfill.ts`.
+      // It lands before the channel too; the diagnostic is the last thing the run says.
+      onComplete: () => {
+        run.sequence.push("summary");
+      },
+    });
+
+    // Observed, not inferred from `backfill.ts`'s line order — that file is a
+    // self-executing script no test may import. A `channel.emit` moved inside the loop
+    // (or into the per-anchor callback) breaks this equality and nothing else.
+    expect(run.sequence).toEqual(["upsert", "upsert", "summary", "emit"]);
+  });
+
+  it("EXITS ZERO on a discarded policy line, while still reporting it", async () => {
+    // THE DIVERGENCE FROM THE PUSH, PINNED. The push's non-zero exit reaches nothing
+    // but its own launchd job; the backfill's reaches `run-daily-fetch.sh`, which runs
+    // it under `set -euo pipefail` and stamps the heartbeat `exitCode: 1, lastStep:
+    // "backfill"` — rendered on EVERY TUI startup as "the daily price job FAILED".
+    // A malformed policy line is a standing fact, not an errand: it does not extinguish
+    // on its own, so a non-zero exit would redden the errand channel permanently and
+    // retire it for the next REAL failure. Reported, not failed.
+    await useStore(TWO_ANCHORS, `${ACCEPTED_POLICY}\n${REJECTED_POLICY}\n`);
+    const run = recordingRun();
+
+    const { exitCode, preferencesExitCode } = await runBackfillAndReport({
+      pool: run.pool,
+      channel: new RunReport(),
+      emit: run.emit,
+    });
+
+    expect(exitCode).toBe(0);
+    // …and the report is NOT the thing traded away for it. Both conjuncts, or the test
+    // would pass on a backfill that had simply stopped reporting.
+    expect(preferencesExitCode).toBe(1);
+    expect(run.emitted).toHaveLength(1);
+    expect(run.emitted[0]).toContain("line 2");
+  });
+});
+
+describe("THE REPLAY OUTRANKS THE DIAGNOSTIC — a report cannot withhold an anchor", () => {
+  it("hands the envelope over only AFTER that anchor's upsert has landed", async () => {
+    await useStore(TWO_ANCHORS, `${ACCEPTED_POLICY}\n${REJECTED_POLICY}\n`);
+    const sequence: string[] = [];
+    const pool = {
+      query: async () => {
+        sequence.push("upsert");
+        return { rows: [] };
+      },
+    } as unknown as Pool;
+
+    await expect(
+      runBackfill({
+        pool,
+        onPreferencesLoad: () => {
+          sequence.push("report");
+          // The failure the option's own name invites: a caller that EMITS in here, on
+          // a stderr already closed by the launchd watchdog's SIGTERM path, raises
+          // EPIPE. Authored, and it stands for any throwing callback.
+          throw new Error("authored EPIPE: the operator channel's sink is gone");
+        },
+      }),
+    ).rejects.toThrow("authored EPIPE");
+
+    // Called before the upsert, this throws away the whole replay before a single
+    // anchor is written — a diagnostic about a sidecar aborting the fund's history,
+    // which is precisely what the loop's own contract says it cannot do. Anchor 1's
+    // row is on disk by the time the callback can misbehave.
+    expect(sequence).toEqual(["upsert", "report"]);
   });
 });
