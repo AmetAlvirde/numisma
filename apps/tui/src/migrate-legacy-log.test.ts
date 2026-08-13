@@ -17,7 +17,9 @@
  * `main()` with a trailing `.catch`. Importing it RUNS THE MIGRATION against whatever
  * data dir the test process inherits. Spawning is the only door, and it is the same
  * `spawnSync(tsx, …)` shape `record-fill-cli.test.ts` and `durable-log-guards.test.ts`
- * already use. `input: ""` closes stdin so a shell can never hang on a read.
+ * already use. `input: ""` closes stdin so a shell can never hang on a read, and every
+ * spawn carries an explicit `timeout` — vitest's `testTimeout` cannot preempt a blocking
+ * `spawnSync`, so without it a shell that waited would hang the worker rather than fail.
  *
  * THE CWD/ENV SPLIT THIS FILE EXISTS TO NAME. The log is read from
  * `$NUMISMA_DATA_DIR/events.jsonl`, but `MAPPING_PATH` is the CWD-relative literal
@@ -28,8 +30,10 @@
  *
  * EVERY FIXTURE IS AUTHORED HERE — invented ids, an invented instrument, round decade
  * prices and round balances. Nothing is copied or seeded from real log output, and the
- * real ledger is unreachable: `NUMISMA_DATA_DIR` is a throwaway `mkdtemp` dir in every
- * single run.
+ * real ledger is unreachable: the runner's `dataDir` is REQUIRED and becomes
+ * `NUMISMA_DATA_DIR` verbatim, so every run names a throwaway `mkdtemp` dir (or, in the
+ * one relative-path case, the relative string under test). There is no default — an empty
+ * value would resolve to the real accumulus ledger.
  */
 import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
@@ -101,8 +105,9 @@ const CASH_LEGS_MAPPING = JSON.stringify({
   [LEGACY_CLOSE_ID]: { settlement: { reserveId: "reserve-vault", proceeds: 1000 } },
 });
 
-interface RunResult {
+interface ShellRun {
   status: number | null;
+  signal: NodeJS.Signals | null;
   stdout: string;
   stderr: string;
 }
@@ -151,10 +156,15 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
 
   /**
    * Run the real `migrate-legacy-log.ts` under tsx, with stdin closed. Both knobs are
-   * explicit and independent: `dataDir` becomes `NUMISMA_DATA_DIR` (where the log is),
-   * `cwd` is where the CWD-relative mapping is looked up.
+   * explicit and independent: `dataDir` becomes `NUMISMA_DATA_DIR` VERBATIM (where the log
+   * is, or the relative string a case is putting under test), `cwd` is where the
+   * CWD-relative mapping is looked up. Both are REQUIRED — there is no default, because an
+   * empty `NUMISMA_DATA_DIR` resolves to the real accumulus ledger.
+   *
+   * EVERY spawn in this file goes through here, including the relative-path case, so the
+   * timeout below covers all of them.
    */
-  function runMigrate(options: { dataDir: string; cwd: string }): RunResult {
+  function runMigrate(options: { dataDir: string; cwd: string }): ShellRun {
     const script = join(REPO_ROOT, "apps", "tui", "src", "migrate-legacy-log.ts");
     const tsx = join(REPO_ROOT, "node_modules", ".bin", "tsx");
     const env = { ...process.env, NUMISMA_DATA_DIR: options.dataDir };
@@ -163,14 +173,35 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
       env,
       cwd: options.cwd,
       input: "",
+      // `vi.setConfig({ testTimeout })` cannot cover a blocking `spawnSync`: it is a timer
+      // on the same thread and cannot preempt the call. Without this, a shell that grew a
+      // confirmation prompt — the obvious next change to the one tool that rewrites the
+      // durable log — would block the worker indefinitely with no diagnostic instead of
+      // failing. The timeout turns that into a KILLED process, which `expectExited` reads.
+      timeout: 20_000,
     });
-    return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+    return {
+      status: result.status,
+      signal: result.signal,
+      stdout: result.stdout ?? "",
+      stderr: result.stderr ?? "",
+    };
   }
 
-  /** Every `.tmp` entry in the log's own directory — the scheme stages under a UNIQUE name. */
-  async function tempLitter(logPath: string): Promise<string[]> {
-    const entries = await readdir(dirname(logPath));
-    return entries.filter((entry) => entry.endsWith(".tmp"));
+  /**
+   * Asserted on EVERY path: the process ended on its own rather than being killed by the
+   * runner's timeout. `migrate:log` reads no input, so a run that waits is already a bug.
+   */
+  function expectExited(run: ShellRun): void {
+    expect(run.signal).toBeNull();
+    expect(typeof run.status).toBe("number");
+  }
+
+  /** Every `.tmp`/`.lock` entry in a directory — the scheme stages under a UNIQUE name. */
+  async function litter(dir: string): Promise<string[]> {
+    return (await readdir(dir)).filter(
+      (entry) => entry.endsWith(".tmp") || entry.endsWith(".lock"),
+    );
   }
 
   async function exists(path: string): Promise<boolean> {
@@ -189,6 +220,7 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
 
       const result = runMigrate({ dataDir: dir, cwd: await workingDir() });
 
+      expectExited(result);
       expect(result.status).toBe(0);
       expect(result.stdout).toBe(
         `Migration complete: 0 legacy record(s) migrated, 2 unchanged. Log rewritten at ${logPath}.\n`,
@@ -199,7 +231,7 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
       const rewritten = (await readFile(logPath, "utf8")).trim().split("\n");
       expect(rewritten).toHaveLength(2);
       expect(rewritten.every((line) => JSON.parse(line).schemaVersion === 2)).toBe(true);
-      expect(await tempLitter(logPath)).toEqual([]);
+      expect(await litter(dir)).toEqual([]);
     });
 
     it("counts a migrated legacy record separately from the unchanged ones (exit 0)", async () => {
@@ -207,6 +239,7 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
 
       const result = runMigrate({ dataDir: dir, cwd: await workingDir(CASH_LEGS_MAPPING) });
 
+      expectExited(result);
       expect(result.status).toBe(0);
       expect(result.stdout).toBe(
         `Migration complete: 1 legacy record(s) migrated, 1 unchanged. Log rewritten at ${logPath}.\n`,
@@ -217,7 +250,7 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
       const lines = (await readFile(logPath, "utf8")).trim().split("\n");
       const closed = lines.map((line) => JSON.parse(line)).find((event) => event.id === LEGACY_CLOSE_ID);
       expect(closed.settlement).toEqual({ reserveId: "reserve-vault", proceeds: 1000 });
-      expect(await tempLitter(logPath)).toEqual([]);
+      expect(await litter(dir)).toEqual([]);
     });
 
     it("says 'No durable log to migrate' and writes nothing when the log is absent (exit 0)", async () => {
@@ -225,6 +258,7 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
 
       const result = runMigrate({ dataDir: dir, cwd: await workingDir(CASH_LEGS_MAPPING) });
 
+      expectExited(result);
       expect(result.status).toBe(0);
       expect(result.stdout).toBe(`No durable log to migrate at ${logPath}.\n`);
       expect(result.stderr).toBe("");
@@ -234,7 +268,12 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
     });
 
     /**
-     * KNOWN DEFECT — CHARACTERIZED HERE, NOT BLESSED. A FOLLOW-UP ISSUE IS OWED.
+     * KNOWN DEFECT — CHARACTERIZED HERE, NOT BLESSED.
+     *
+     * NO TRACKER ISSUE EXISTS FOR THIS YET, and this comment deliberately cites none
+     * rather than a number that would not resolve. One is owed: the fix is a behavior
+     * change, so filing it is the next step, and whoever files it should put the number
+     * here and on the sibling case below.
      *
      * This test asserts what the tool OBSERVABLY DOES today, and what it does is wrong:
      * it reports "No durable log to migrate" about a log it has just OVERWRITTEN.
@@ -252,26 +291,30 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
      * one tool in the repo that rewrites the durable log, and the same `undefined`-only
      * ENOENT check is what stands between "empty" and "unreadable". Fixing it is a
      * behavior change and this increment is tests only; the fix belongs in its own
-     * increment, with this test inverted to assert the log is left untouched.
+     * increment (see the follow-up owed above), with this test INVERTED to assert the log
+     * is left untouched.
      */
     it("KNOWN DEFECT: rewrites an EMPTY log to a single newline while reporting 'No durable log'", async () => {
       const { dir, logPath } = await syntheticDataDir("");
 
       const result = runMigrate({ dataDir: dir, cwd: await workingDir() });
 
+      expectExited(result);
       expect(result.status).toBe(0);
       // What the operator is told:
       expect(result.stdout).toBe(`No durable log to migrate at ${logPath}.\n`);
       // What actually happened to the file it just told them it did not migrate:
       expect(await readFile(logPath, "utf8")).toBe("\n");
-      expect(await tempLitter(logPath)).toEqual([]);
+      expect(await litter(dir)).toEqual([]);
     });
 
+    // KNOWN DEFECT, same seam and the same unfiled follow-up as the case above.
     it("KNOWN DEFECT (same seam): a blank-lines-only log is collapsed to a single newline", async () => {
       const { dir, logPath } = await syntheticDataDir("\n\n\n");
 
       const result = runMigrate({ dataDir: dir, cwd: await workingDir() });
 
+      expectExited(result);
       expect(result.status).toBe(0);
       expect(result.stdout).toBe(`No durable log to migrate at ${logPath}.\n`);
       // Blank lines are records to neither half, so the loop yields nothing and the
@@ -299,6 +342,7 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
       // Wrong CWD: the mapping exists on disk, but not under THIS process's CWD.
       const lost = await syntheticDataDir(`${LEGACY_CLOSE}\n`);
       const lostRun = runMigrate({ dataDir: lost.dir, cwd: barrenCwd });
+      expectExited(lostRun);
       expect(lostRun.status).toBe(1);
       expect(lostRun.stderr).toMatch(/no supplied cash leg/i);
       expect(lostRun.stdout).toBe("");
@@ -308,6 +352,7 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
       // the refusal above could be a shell that never starts at all.
       const found = await syntheticDataDir(`${LEGACY_CLOSE}\n`);
       const foundRun = runMigrate({ dataDir: found.dir, cwd: mappingCwd });
+      expectExited(foundRun);
       expect(foundRun.status).toBe(0);
       expect(foundRun.stdout).toMatch(/1 legacy record\(s\) migrated/);
     });
@@ -322,6 +367,7 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
       // ENOENT is deliberately swallowed into an empty Map: the shell does not invent a
       // "mapping file missing" error, it delegates the better message — which ids need a
       // leg — to `migrateLegacyLog`.
+      expectExited(result);
       expect(result.status).toBe(1);
       expect(result.stderr).toMatch(/Migration aborted: 1 legacy record\(s\) have no supplied cash leg/);
       expect(result.stderr).toContain(LEGACY_CLOSE_ID);
@@ -330,7 +376,7 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
       expect(result.stdout).toBe("");
       // Byte-identical: a refusal writes nothing at all.
       expect(await readFile(logPath, "utf8")).toBe(`${LEGACY_CLOSE}\n`);
-      expect(await tempLitter(logPath)).toEqual([]);
+      expect(await litter(dir)).toEqual([]);
     });
 
     it("surfaces malformed mapping JSON as the RAW SyntaxError — no wrapper, no filename", async () => {
@@ -339,6 +385,7 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
 
       const result = runMigrate({ dataDir: dir, cwd: await workingDir("{ not json") });
 
+      expectExited(result);
       expect(result.status).toBe(1);
       // `JSON.parse` throws and the trailing `.catch` prints `error.message` verbatim.
       expect(result.stderr).toMatch(/JSON/);
@@ -350,7 +397,7 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
       expect(result.stdout).toBe("");
       // It throws BEFORE the log is touched, so the log is byte-identical.
       expect(await readFile(logPath, "utf8")).toBe(log);
-      expect(await tempLitter(logPath)).toEqual([]);
+      expect(await litter(dir)).toEqual([]);
     });
 
     it("does not validate a well-formed-but-wrong mapping at all — garbage flows downstream", async () => {
@@ -366,6 +413,7 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
         // No complaint about the mapping; the run completes as if none were supplied.
         // (`"x"` even becomes the entry `"0" -> "x"`, and `{"id": 42}` the entry
         // `"id" -> 42` — a number where a cash leg belongs — with nobody looking.)
+        expectExited(result);
         expect(result.status).toBe(0);
         expect(result.stdout).toBe(
           `Migration complete: 0 legacy record(s) migrated, 1 unchanged. Log rewritten at ${logPath}.\n`,
@@ -383,6 +431,7 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
       // The refusal that arrives is the DOWNSTREAM one about a missing leg, not a shell
       // "your mapping is malformed" — because the shell never checks. A mapping with a
       // typo'd key is indistinguishable here from no mapping at all.
+      expectExited(result);
       expect(result.status).toBe(1);
       expect(result.stderr).toMatch(/no supplied cash leg/i);
       expect(await readFile(logPath, "utf8")).toBe(`${LEGACY_CLOSE}\n`);
@@ -391,28 +440,27 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
 
   describe("NUMISMA_DATA_DIR plumbing and the exit-code mapping", () => {
     it("rejects a RELATIVE NUMISMA_DATA_DIR as a split-brain ledger (exit 1)", async () => {
-      const log = `${markZzz(200)}\n`;
-      const { logPath } = await syntheticDataDir(log);
+      // `$CWD/data` really exists here and holds the mapping, so the relative value names
+      // a directory the tool could plausibly have used.
       const cwd = await workingDir(CASH_LEGS_MAPPING);
 
-      const script = join(REPO_ROOT, "apps", "tui", "src", "migrate-legacy-log.ts");
-      const tsx = join(REPO_ROOT, "node_modules", ".bin", "tsx");
-      const result = spawnSync(tsx, [script], {
-        encoding: "utf8",
-        env: { ...process.env, NUMISMA_DATA_DIR: "data" },
-        cwd,
-        input: "",
-      });
+      // Through the file's own runner — `dataDir` is the LITERAL env value, so the
+      // relative string goes in here rather than being hand-rolled around the helper and
+      // silently missing its timeout.
+      const result = runMigrate({ dataDir: "data", cwd });
 
+      expectExited(result);
       expect(result.status).toBe(1);
       expect(result.stderr).toMatch(/split-brain ledger/i);
       expect(result.stderr).toMatch(/must be an absolute path/i);
       expect(result.stdout).toBe("");
-      // It refuses at resolution time, so neither the ledger it would have guessed at
-      // (`$CWD/data`, which really exists here and holds the mapping) nor the real
-      // fixture log is touched.
-      expect(await exists(join(cwd, "data", "events.jsonl"))).toBe(false);
-      expect(await readFile(logPath, "utf8")).toBe(log);
+      // The refusal at resolution time IS the whole assertion, and there is deliberately
+      // no "and nothing was written" check beside it: none is available here. If the
+      // relative value WERE accepted, `$CWD/data` holds no `events.jsonl`, so
+      // `readOptional` returns undefined and `migrateLegacyLog` early-returns at
+      // `event-store.ts:209-211` — nothing is written anywhere. An absent-file probe or a
+      // byte-comparison against a fixture log would therefore both pass under the very
+      // mutation they read as guarding. `status === 1` is what actually catches it.
     });
 
     it("exits 1 with the abort message on stderr when the migration itself refuses", async () => {
@@ -429,13 +477,14 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
 
       const result = runMigrate({ dataDir: dir, cwd: await workingDir() });
 
+      expectExited(result);
       expect(result.status).toBe(1);
       expect(result.stderr).toMatch(/Migration aborted: 2 legacy record\(s\) have no supplied cash leg/);
       expect(result.stderr).toContain("line 1");
       expect(result.stderr).toContain("line 2");
       expect(result.stdout).toBe("");
       expect(await readFile(logPath, "utf8")).toBe(log);
-      expect(await tempLitter(logPath)).toEqual([]);
+      expect(await litter(dir)).toEqual([]);
     });
 
     it("exits 1 on an unparseable log line, leaving the log byte-identical", async () => {
@@ -444,11 +493,12 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
 
       const result = runMigrate({ dataDir: dir, cwd: await workingDir(CASH_LEGS_MAPPING) });
 
+      expectExited(result);
       expect(result.status).toBe(1);
       expect(result.stderr).toMatch(/line 2 is not valid JSON/);
       expect(result.stdout).toBe("");
       expect(await readFile(logPath, "utf8")).toBe(log);
-      expect(await tempLitter(logPath)).toEqual([]);
+      expect(await litter(dir)).toEqual([]);
     });
 
     it("exits 1 when the data dir has no genesis to migrate against", async () => {
@@ -461,6 +511,7 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
 
       // `loadGenesis` reads AFTER the log read, so this is the shell's `.catch` carrying
       // an fs error through the same one exit path — not a bespoke branch.
+      expectExited(result);
       expect(result.status).toBe(1);
       expect(result.stderr).toMatch(/genesis\.json/);
       expect(result.stdout).toBe("");
