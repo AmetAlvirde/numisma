@@ -503,15 +503,29 @@ export async function reconcileRecordedFill(
  * gets no signal, so this line is the only trace that the trail is now missing one. It
  * quotes no line and names no figure — the resolved path and the failure's own message
  * are the whole of what travels.
+ *
+ * **IT CANNOT THROW, and that is a correctness property rather than defensiveness.**
+ * This is the LAST RESORT on a path whose whole contract is "returns normally on every
+ * path": {@link reconcileRecordedFill}'s `catch` calls it, and the sink it writes to is
+ * often the very thing that threw. `pnpm record-fill 2>&1 | head` with the pager closed
+ * makes `err` throw EPIPE, and an unguarded warn there would re-throw out of the catch,
+ * out of `recordFill`, and exit the CLI 1 — for a fill already durable on both files.
+ * So a dead sink is swallowed: there is nowhere left to say anything, and failing the
+ * act to complain about it is the one outcome `D1` forbids outright.
  */
 function warnTrail(io: ReconcileTrailIo, what: string, cause?: unknown): void {
   const detail =
     cause === undefined ? "" : `: ${cause instanceof Error ? cause.message : String(cause)}`;
-  io.err(
-    `TRAIL NOT RECORDED — ${what}${detail}. The fill is durable and unchanged; only the ` +
-      `reconciliation trail line is missing (${io.reconciliationsPath}). A reader that finds ` +
-      `no line for this fill reports UNKNOWN, never clean.`,
-  );
+  try {
+    io.err(
+      `TRAIL NOT RECORDED — ${what}${detail}. The fill is durable and unchanged; only the ` +
+        `reconciliation trail line is missing (${io.reconciliationsPath}). A reader that finds ` +
+        `no line for this fill reports UNKNOWN, never clean.`,
+    );
+  } catch {
+    // The error sink is gone. There is nowhere left to report that, and reporting it
+    // is not worth failing an act that already landed.
+  }
 }
 
 /**

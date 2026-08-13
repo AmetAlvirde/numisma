@@ -596,6 +596,94 @@ describe("`S1a` — the calendar guard is cleared BEFORE the selector, never by 
   });
 });
 
+describe("a DEAD error sink still returns normally — the fill is already durable", () => {
+  /**
+   * The scenario: `pnpm record-fill 2>&1 | head`. The operator closes the pager after
+   * the confirmation, so `process.stderr.write` starts throwing EPIPE. The fill is on
+   * disk already. If the reconcile's last-resort warn re-enters the dead sink and lets
+   * that throw escape, `recordFill` never returns and the CLI exits 1 for a fill that
+   * fully landed — which is exactly the outcome `D1` exists to make unreachable.
+   */
+  const deadSink = () => {
+    throw new Error("EPIPE: broken pipe, write");
+  };
+
+  it("returns rather than rejecting when `err` throws on a WARNED fill", async () => {
+    // The mismatch warn is the first `io.err`, and it throws; the catch then reaches
+    // for the same sink to say so.
+    await expect(
+      reconcileRecordedFill(
+        {
+          plansPath: PLANS_PATH,
+          reconciliationsPath: TRAIL_PATH,
+          loadPlans: async () => loadedPlans([]),
+          appendReconciliation: async () => undefined,
+          toldAt: () => TOLD_AT,
+          err: deadSink,
+        },
+        {
+          positionId: "position-synthetic",
+          eventId: "evt-synthetic-0003",
+          fillKind: "PositionOpened",
+          asOf: "2026-01-31",
+          lotTier: "c1",
+          existingPositionIds: new Set<string>(),
+        },
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("returns when `err` throws on the unrenderable-positionId path too", async () => {
+    // That path calls the warn DIRECTLY rather than through the catch, so a guard
+    // placed only in the catch handler would leave this one throwing.
+    await expect(
+      reconcileRecordedFill(
+        {
+          plansPath: PLANS_PATH,
+          reconciliationsPath: TRAIL_PATH,
+          loadPlans: async () => loadedPlans([]),
+          appendReconciliation: async () => undefined,
+          toldAt: () => TOLD_AT,
+          err: deadSink,
+        },
+        {
+          positionId: "position\nsynthetic",
+          eventId: "evt-synthetic-0004",
+          fillKind: "PositionOpened",
+          asOf: "2026-01-31",
+          lotTier: "c1",
+          existingPositionIds: new Set<string>(),
+        },
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("returns when `err` throws and the APPEND throws as well", async () => {
+    await expect(
+      reconcileRecordedFill(
+        {
+          plansPath: PLANS_PATH,
+          reconciliationsPath: TRAIL_PATH,
+          loadPlans: async () => loadedPlans([ladderPlan("position-synthetic", ["c1"])]),
+          appendReconciliation: async () => {
+            throw new Error("the volume is full");
+          },
+          toldAt: () => TOLD_AT,
+          err: deadSink,
+        },
+        {
+          positionId: "position-synthetic",
+          eventId: "evt-synthetic-0005",
+          fillKind: "PositionAddedTo",
+          asOf: "2026-01-31",
+          lotTier: "c1",
+          existingPositionIds: new Set(["position-synthetic"]),
+        },
+      ),
+    ).resolves.toBeUndefined();
+  });
+});
+
 describe("the trail carries NO figures, on the line or in the warning", () => {
   it("keeps every price, size and balance out of the record and the stderr warn", async () => {
     const harness = new Harness({

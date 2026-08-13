@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import {
   RECONCILIATION_MISMATCHES,
   classifyReconciliation,
+  isRecordEventId,
   isRenderableRecordId,
   reconcileAgainstPlan,
   serializeReconciliationRecord,
@@ -362,5 +363,29 @@ describe("`positionId` is held to the renderable-id rule", () => {
     expect(() =>
       serializeReconciliationRecord(recordFrom(clean, { positionId: "ladder\ndemo-01" })),
     ).not.toThrow(/ladder/);
+  });
+});
+
+describe("`eventId` is held to the SAME rule minus the length bound", () => {
+  it("accepts an id past 64 characters — the only shape a real fill produces", () => {
+    // The bound protects the plans report page's id column, and `eventId` is not on
+    // that page. Keeping it here refused every id the fill path can compose.
+    expect(isRecordEventId("x".repeat(65))).toBe(true);
+    expect(isRecordEventId("x".repeat(4096))).toBe(true);
+  });
+
+  it("still refuses empty and control characters — identity, and it reaches stderr", () => {
+    expect(isRecordEventId("evt-demo-0007")).toBe(true);
+    expect(isRecordEventId("")).toBe(false);
+    expect(isRecordEventId("fill:demo\nfill:other")).toBe(false);
+    expect(isRecordEventId("fill:demo\rfill:other")).toBe(false);
+    expect(isRecordEventId("fill:demo\u007ffill:other")).toBe(false);
+    expect(isRecordEventId(undefined)).toBe(false);
+  });
+
+  it("differs from the renderable rule on LENGTH and on nothing else", () => {
+    for (const value of ["", "x", "a\nb", "a\u0000b", "x".repeat(64), undefined, 7]) {
+      expect(isRecordEventId(value)).toBe(isRenderableRecordId(value));
+    }
   });
 });

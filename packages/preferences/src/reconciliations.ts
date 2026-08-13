@@ -82,6 +82,7 @@ import { readFile } from "node:fs/promises";
 import {
   RECONCILIATION_MISMATCHES,
   isIsoCalendarDate,
+  isRecordEventId,
   isRenderableRecordId,
   serializeReconciliationRecord,
   type CapitalTier,
@@ -305,11 +306,17 @@ function readReconciliationLine(value: unknown, line: number): ReconciliationLin
       scraped,
     );
   }
-  if (!isRenderableRecordId(value.eventId)) {
+  // `isRecordEventId`, NOT `isRenderableRecordId`: the renderable rule's 64-character
+  // bound is about the plans report page's id column, and `eventId` never travels
+  // there. A real `fillEventId` — `fill:` + a synthesized order id + `@` + a stamp —
+  // clears 64 for any plausible rung, so holding this field to the renderable rule
+  // refused every id the fill path can actually produce. Non-empty and control-free
+  // stay: it is identity, and it reaches a stderr diagnostic.
+  if (!isRecordEventId(value.eventId)) {
     return invalid(
       line,
-      "eventId must be a non-empty string of at most 64 characters, holding no control " +
-        "characters — it is the fill's dedup identity and one line per fill is checked by it",
+      "eventId must be a non-empty string holding no control characters — it is the " +
+        "fill's dedup identity and one line per fill is checked by it",
       scraped,
     );
   }

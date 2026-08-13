@@ -112,7 +112,12 @@ export type ReconciliationFillKind = "PositionOpened" | "PositionAddedTo";
 export interface ReconciliationRecord {
   /** D2's join key. Held to {@link isRenderableRecordId}'s rule. */
   positionId: string;
-  /** `BaseEvent.id` of the fill. D7's "one line per fill" is one line per event id. */
+  /**
+   * `BaseEvent.id` of the fill. D7's "one line per fill" is one line per event id.
+   * Held to {@link isRecordEventId}'s rule — the renderable rule WITHOUT its length
+   * bound, because a real `fillEventId` is longer than 64 characters and this id
+   * never reaches the page the bound protects.
+   */
   eventId: string;
   fillKind: ReconciliationFillKind;
   /** The fill's own `asOf`, and the date `pickPlanAsOf` selected on. Strict ISO. */
@@ -243,10 +248,39 @@ const POSITION_ID_MAX_LENGTH = 64;
  * the fill path can check without catching: D6 forbids a throw there.
  */
 export function isRenderableRecordId(value: unknown): value is string {
+  return isPlainRecordId(value) && value.length <= POSITION_ID_MAX_LENGTH;
+}
+
+/**
+ * `eventId`'s rule — {@link isRenderableRecordId}'s WITHOUT the length bound, and the
+ * omission is the point rather than a relaxation someone got away with.
+ *
+ * The bound exists for ONE reason, stated above: a rendered id sets the id column
+ * width for every row on the plans report page. `eventId` never reaches that page —
+ * it is the fill's dedup identity, read by D7 and printed nowhere — so the bound buys
+ * nothing there, and it costs everything: `fillEventId` composes `fill:` + a
+ * `synthesizeOrderId` (`venue:symbol:side:price:observedAt`) + `@` + a stamp, which
+ * clears 64 characters for any plausible rung. Holding this field to the renderable
+ * rule refused EVERY id this repo can produce, so the trail was never written at all
+ * — an increment inert behind a green suite.
+ *
+ * The rest of the rule stays, and is not optional. The id is identity, so an empty
+ * one names nothing; and it reaches a stderr diagnostic, so a `\n` in it could still
+ * forge a second log line. Non-empty and control-free are exactly what that needs.
+ */
+export function isRecordEventId(value: unknown): value is string {
+  return isPlainRecordId(value);
+}
+
+/**
+ * The half both id rules share: non-empty, and free of anything that moves a cursor.
+ * Written once so the two rules can differ ONLY in the bound, which is the single
+ * axis they are meant to differ on.
+ */
+function isPlainRecordId(value: unknown): value is string {
   return (
     typeof value === "string" &&
     value.length > 0 &&
-    value.length <= POSITION_ID_MAX_LENGTH &&
     // C0 controls plus DEL. `\n` and `\r` are the forging pair; the rest join them
     // because none of them belongs in an identifier and every one moves a cursor.
     // eslint-disable-next-line no-control-regex -- matching control chars is the point

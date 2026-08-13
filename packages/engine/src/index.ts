@@ -420,6 +420,7 @@ export type {
 export {
   RECONCILIATION_MISMATCHES,
   isRenderableRecordId,
+  isRecordEventId,
   reconcileAgainstPlan,
   classifyReconciliation,
   pickReconciliationAsOf,

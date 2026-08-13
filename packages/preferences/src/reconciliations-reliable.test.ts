@@ -15,6 +15,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { fillEventId, synthesizeOrderId } from "@numisma/engine";
 import type {
   DeclaredAsShown,
   LoadedReconciliations,
@@ -220,7 +221,7 @@ describe("loadReconciliations is TOTAL — no input throws", () => {
 
   it("reads a file of pure garbage as LOADED, with every line reported", async () => {
     const path = await tempPath();
-    await writeRaw(path, "not json at all\n \n{ oh no\n");
+    await writeRaw(path, "not json at all\n\u0000\u0001\u0002\n{ oh no\n");
 
     const loaded = await loadReconciliations(path);
 
@@ -258,7 +259,7 @@ describe("loadReconciliations is TOTAL — no input throws", () => {
 
   it("tolerates a BOM and CRLF terminators without calling line 1 corrupt", async () => {
     const path = await tempPath();
-    await writeRaw(path, `﻿${SPEC_EXAMPLE_LINES[0]}\r\n${SPEC_EXAMPLE_LINES[1]}\r\n`);
+    await writeRaw(path, `\uFEFF${SPEC_EXAMPLE_LINES[0]}\r\n${SPEC_EXAMPLE_LINES[1]}\r\n`);
 
     const loaded = await loadReconciliations(path);
 
@@ -503,6 +504,89 @@ describe("appendReconciliation NEVER throws", () => {
 
     const { readdir } = await import("node:fs/promises");
     expect(await readdir(dirname(path))).toEqual(["reconciliations.jsonl"]);
+  });
+});
+
+/**
+ * The event id a REAL fill carries, composed exactly the way the fill path composes
+ * it — the engine's own `fillEventId` over its own `synthesizeOrderId` — from
+ * INVENTED order components. No real trade is involved and none may be: the venue,
+ * symbol, side, price and stamp below are authored, and the only thing this id is
+ * used for is its SHAPE and its LENGTH.
+ *
+ * That length is the whole point. Every other `eventId` fixture in this file is 13
+ * characters, so none of them can catch a rule that binds above 64 — and the rule
+ * that did bind above 64 rejected every id the repo can actually produce, silently,
+ * for every real fill.
+ */
+const AUTHORED_FILL_EVENT_ID = fillEventId(
+  synthesizeOrderId({
+    venue: "demovenue",
+    symbol: "ZZZUSDT",
+    side: "buy",
+    price: "1234.5",
+    observedAt: "2026-09-11T18:00:00",
+  }),
+  "2026-09-11T18:00:00",
+);
+
+describe("a REAL fill's eventId survives the writer and the loader", () => {
+  it("is longer than a RENDERABLE id may be — the shape every fixture here lacks", () => {
+    // Not an incidental property of the components above: `fill:` + a synthesized
+    // order id + `@` + a stamp clears 64 for any plausible rung, so a 64-character
+    // bound on this field is a bound on the whole population rather than an edge.
+    expect(AUTHORED_FILL_EVENT_ID.length).toBeGreaterThan(64);
+  });
+
+  it("writes the line and reads it back — real appender, real loader, no warn", async () => {
+    const path = await tempPath();
+
+    const warns = await warnsDuring(async () => {
+      await appendReconciliation(path, { ...CLEAN, eventId: AUTHORED_FILL_EVENT_ID });
+    });
+
+    // A warn here means the echo refused and NOTHING was written — the trail would
+    // never come into existence, on every real fill, forever.
+    expect(warns).toEqual([]);
+    const loaded = await loadReconciliations(path);
+    expect(loaded.load.status).toBe("loaded");
+    expect(loaded.skipped).toEqual([]);
+    expect(loaded.reconciliations.map((record) => record.eventId)).toEqual([
+      AUTHORED_FILL_EVENT_ID,
+    ]);
+  });
+
+  it("still refuses an empty eventId — identity, and length is the only rule dropped", async () => {
+    const path = await tempPath();
+    await writeRaw(path, `${JSON.stringify({ ...CLEAN, eventId: "" })}\n`);
+
+    const loaded = await loadReconciliations(path);
+
+    expect(loaded.reconciliations).toEqual([]);
+    expect(loaded.skipped[0]?.reason).toBe("invalid");
+  });
+
+  it("still refuses an eventId holding a control character — it reaches diagnostics", async () => {
+    const path = await tempPath();
+    await writeRaw(path, `${JSON.stringify({ ...CLEAN, eventId: "fill:demo\nfill:other" })}\n`);
+
+    const loaded = await loadReconciliations(path);
+
+    expect(loaded.reconciliations).toEqual([]);
+    expect(loaded.skipped[0]?.reason).toBe("invalid");
+  });
+
+  it("writes nothing when the WRITER is handed a control-character eventId", async () => {
+    const path = await tempPath();
+
+    const warns = await warnsDuring(async () => {
+      await appendReconciliation(path, { ...CLEAN, eventId: "fill:demo\nfill:other" });
+    });
+
+    // Writer and loader hold the SAME rule: what one refuses the other refuses.
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toContain("could not read the line back");
+    expect(await loadReconciliations(path)).toMatchObject({ load: { status: "absent" } });
   });
 });
 
