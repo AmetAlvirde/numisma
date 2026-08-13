@@ -245,11 +245,46 @@ export interface EventReference {
    * expected proceeds (quantity × last close) and the Tier mix proceeds inherit.
    * Mirrors `lastClose` existing solely to feed the PriceMarked guard.
    *
-   * The fold's surviving `positions`, and only those: a retired id is caught by
-   * {@link closedPositionIds} before either magnitude gate reaches this map, so the
-   * lots of a closed position are never needed and are not carried.
+   * The fold's surviving `positions`, and only those: a retired id has NO ENTRY HERE.
+   * For every verb but one that is harmless — a retired id is caught by
+   * {@link closedPositionIds} before either magnitude gate reaches this map. The
+   * exception is ADR-017's backdated trim, which is now admitted against a position the
+   * fold has retired; it reads {@link worldAsOf}'s map instead of this one, for the two
+   * reasons that field records.
    */
   positionLots: Map<string, { instrumentId: string; lots: PositionLot[] }>;
+  /**
+   * THE SAME REFERENCE, REBUILT FROM THE EVENTS DATED STRICTLY BEFORE `asOf` — the world
+   * the fold will actually place a backdated verb in, rather than the world as it stands
+   * after everything the log has accepted. ADR-015's doctrine one level deeper: the gate
+   * judges against the fold, and for a BACKDATED verb the relevant fold is the one at
+   * the verb's own date.
+   *
+   * ADR-017 needs this, and needs it for TWO reasons, only the first of which is
+   * visible. {@link crossReferenceTrim} now admits a trim dated before its target's
+   * close, and that target is RETIRED in this reference, so:
+   *
+   *   1. {@link positionLots} has no entry for it and the position-lot-sufficiency gate
+   *      would see `available = 0` — refusing every backdated trim anyway, with a
+   *      message ("holds only 0") that misdescribes the fund's own history; and
+   *   2. THE SETTLEMENT-MAGNITUDE GATE WOULD SILENTLY STOP FIRING. It is guarded on
+   *      `if (held && last !== undefined)`, so an absent `held` does not weaken the
+   *      check — it DELETES it, with no error, no warning and nothing going red. A
+   *      backdated trim would be the one class of trim admitted with no proceeds sanity
+   *      check at all. Restoring `held` from the as-of world fixes this structurally,
+   *      which is why the fix belongs here and not in a patched conditional.
+   *
+   * LAZY AND MEMOISED BY DATE: nothing is folded until a guard asks, and today only a
+   * trim aimed at an already-retired position asks. The ordinary path — every trim, mark
+   * and close on an open position — costs exactly nothing. When it does fire it is one
+   * additional `foldEvents` over a strict prefix of the log, on top of the one this
+   * reference was built from; see this function's own cost note.
+   *
+   * The returned reference is a FULL {@link EventReference}, not a fragment, so a future
+   * as-of question (reserve balances at a date — the follow-up ADR-017 names) has the
+   * whole world to ask rather than needing this shape widened.
+   */
+  worldAsOf: (asOf: string) => EventReference;
 }
 
 /**
