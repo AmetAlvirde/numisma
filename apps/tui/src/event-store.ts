@@ -157,10 +157,12 @@ export async function ingestInbox(
   // the ingest. `paths.log` is `<dataDir>/events.jsonl`, so its dirname is the dataDir.
   try {
     const dataDir = dirname(paths.log);
-    // SLICE-A SHIM — replaced in PRD #323 slice D, where the digest derives from the
-    // full envelope and records the discard count. Until then the committed
-    // `head-digest.json` still reads as an unqualified clean head.
-    const foldedHead = foldEvents(genesis, [...existing, ...toAppend]).data;
+    // The WHOLE envelope goes to the capture, never `.data`: `head-digest.json` is
+    // committed into accumulus as a head a reader trusts WITHOUT replaying the log, so a
+    // silently dropped event here would be laundered into a permanent artifact nobody
+    // re-checks. The digest carries the discard count (ADR-020, `HeadDigest` v2); the
+    // records themselves reach the operator through the surfaces that can act on them.
+    const foldedHead = foldEvents(genesis, [...existing, ...toAppend]);
     const appVersion = readAppVersion(resolveWorkspaceRoot());
     await captureIngestCommit({ dataDir, folded: foldedHead, appendedEvents: toAppend, appVersion });
   } catch (error) {

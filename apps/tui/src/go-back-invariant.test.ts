@@ -41,11 +41,11 @@ function parse(event: Record<string, unknown>): PortfolioEvent {
   return result.value;
 }
 
-/** Fold the fixture genesis over `events`. */
-function fold(events: PortfolioEvent[]): ReturnType<typeof foldEvents>["data"] {
+/** Fold the fixture genesis over `events`, keeping the whole envelope. */
+function fold(events: PortfolioEvent[]): ReturnType<typeof foldEvents> {
   const parsedGenesis = parseFundReview(JSON.stringify(GENESIS));
   if (parsedGenesis.kind !== "ok") throw new Error("bad genesis fixture");
-  return foldEvents(parsedGenesis.value, events).data;
+  return foldEvents(parsedGenesis.value, events);
 }
 
 // A SECOND PriceMarked that is structurally valid and folds cleanly, but carries a
