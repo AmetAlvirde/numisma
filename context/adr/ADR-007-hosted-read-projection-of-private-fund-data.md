@@ -225,11 +225,17 @@ report. It is now:
 Pick<CompositionReport, "totals" | "dashboard"> & { glance: GlanceBlock }
 ```
 
-`GlanceBlock` carries three things, all of them **derived**: the Reserve floor in
+`GlanceBlock` carries these, all of them **derived**: the Reserve floor in
 force on that anchor (a policy percentage from the ADR-004 preferences sidecar), a
 `feedGap` block of two counts plus the row ids and labels of the instruments whose
-mark did not arrive, and `suppressed` — a list of the keys whose underlying number
-would be wrong and is therefore not rendered.
+mark did not arrive, `suppressed` — a list of the keys whose underlying number
+would be wrong and is therefore not rendered — and `venueDark`, naming a venue
+that quoted nothing on a day it owed marks, by venue name and weekday.
+
+_This enumeration deliberately states no total. It said "three things" until
+`venueDark` made it four, which is a sentence that goes stale on the block's
+**growth** rather than on any decision this ADR records — the failure the
+amendment note above already names, repeated one level down._
 
 **This does not re-open the blast radius; it stays inside it.** Every item above
 is a *derived dashboard value* in the blast-radius paragraph's own terms:
