@@ -1,6 +1,6 @@
 /**
  * THE COMMITTED TEST HARNESS FOR `ops/price-feed/run-daily-fetch.sh` (PRD #314, slices
- * #316 and #317).
+ * #316, #317 and #318).
  *
  * ⚠️ **THIS SUITE CAN NEVER RUN IN CI AS CI EXISTS TODAY. A GREEN CI RUN DOES NOT MEAN
  * THIS HARNESS PASSED — IT MEANS IT WAS NOT ATTEMPTED.** CI is a single `ubuntu-latest`
@@ -24,7 +24,7 @@
  * path set, so every `pnpm test` carries a line about this harness whether or not it ran.
  * `pnpm test:wrapper` runs it on demand. `NUMISMA_WRAPPER_TEST=never` mutes it and says so.
  *
- * ── WHAT SLICES 1-2 CLAIM, AND WHAT THEY DO NOT ───────────────────────────────────────
+ * ── WHAT SLICES 1-3 CLAIM, AND WHAT THEY DO NOT ───────────────────────────────────────
  * Slice 1: the launcher, the isolation refusal, the fake-tool bin and its sentinel, the
  * assertion triple, 12-run repetition, the arming trigger and its three guard layers,
  * case 1 (healthy), case 7 (not a group leader) and the child-reap mutation control.
@@ -37,9 +37,32 @@
  * disabled watchdog, is observed still alive well past its own ceiling and grace with no
  * calling card, and is then released to finish normally.
  *
- * Neither slice claims: the external-stop path and case 4 (slice 3) — nothing here asserts
- * anything about exit 143 or about the calling card's absence as a discriminator — nor the
- * mark window and cases 6 and 8 (slice 4).
+ * Slice 3 — case 4 and THE DISCRIMINATION THE TERM HANDLER MAKES: the same `hangs` fake as
+ * case 2, signalled by the harness with a bare group SIGTERM BEFORE the ceiling can fire,
+ * and the pair-comparison test that holds cases 2 and 4 against each other. **Cases 2 and 4
+ * run inside ONE suite run, and that is a requirement rather than an accident of layout**
+ * (#312): watchdog-TERM and external-TERM are the two halves of a single branch, and split
+ * across two suites or two gates they drift apart silently — a handler that stopped
+ * discriminating would leave each half green on its own. Do not separate them.
+ *
+ * ── WHAT SLICE 3 DOES NOT PROVE, SAID PLAINLY ─────────────────────────────────────────
+ * **This harness delivers the SIGNAL, not the SENDER.** A bare SIGTERM to the run's pgid is
+ * signal-identical to what `launchctl stop`, `launchctl unload`, a logout and a shutdown all
+ * deliver, and signal-identical is exactly what the TERM handler branches on — its whole
+ * discriminator is whether the watchdog's calling card is on disk. So case 4 proves the
+ * HANDLER'S DISCRIMINATION soundly, and it proves nothing whatever about launchd. Therefore:
+ *
+ * - `launchctl stop` and `launchctl unload` mid-run each remain worth ONE MANUAL
+ *   confirmation against the real installed LaunchAgent, recorded in #312. This suite makes
+ *   them cheap to trust; it does not replace them. Nothing here drives `launchctl`.
+ * - **Logout or shutdown mid-run is inherently manual and automatable by nobody.** The
+ *   failure mode is the filesystem going away underneath a single `printf` from an EXIT
+ *   trap; no in-process harness reproduces a real session teardown, and no future harness
+ *   work should be scheduled against it.
+ *
+ * Anyone about to write "the external-stop path is covered" should read this paragraph first.
+ *
+ * No slice yet claims the mark window, or cases 6 and 8 (slice 4).
  *
  * ── A BLIND SPOT THIS DESIGN CREATES, NAMED RATHER THAN IMPLIED ───────────────────────
  * The fake `pnpm` is what makes every case fast and safe, and it is therefore exactly what
@@ -54,6 +77,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFil
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { JobHeartbeat } from "@numisma/event-store";
 import { describe, expect, it } from "vitest";
 import {
   HARNESS_PLATFORM,
@@ -571,6 +595,67 @@ function watchdogCardPresent(logDir: string): boolean {
 }
 
 /**
+ * How long case 4 will wait for the run to actually be INSIDE the fetch step before it
+ * signals. Bounded well under the timeout cases' 3s ceiling on purpose: the whole claim of
+ * case 4 is that its signal arrives before the watchdog's, so a wait that could run into the
+ * ceiling would be a wait that could silently turn case 4 into a second copy of case 2.
+ */
+const REACH_STEP_BOUND_MS = 2_000;
+
+/**
+ * Block until the fake has recorded `command`, so a signal aimed at a step lands while the
+ * run is genuinely IN that step rather than somewhere earlier by luck — the step name in the
+ * heartbeat is half of what case 4 asserts, and `LAST_STEP` is set just before the call the
+ * sentinel proves happened.
+ *
+ * FAIL-CLOSED AND BOUNDED. A sentinel that never arrives means the run never reached the
+ * step this signal is aimed at, which is a failure of the case; waiting for it with
+ * unbounded patience would be indistinguishable from a run that hung before it got there.
+ */
+async function waitForFakeToReach(
+  caseDir: string,
+  command: string,
+  label: string,
+): Promise<number> {
+  const sentinel = join(caseDir, "sentinels", sentinelNameFor(command));
+  const startedAt = Date.now();
+  while (!existsSync(sentinel)) {
+    if (Date.now() - startedAt >= REACH_STEP_BOUND_MS) {
+      throw new Error(
+        `${label}: the fake never recorded \`${command}\` within ${REACH_STEP_BOUND_MS}ms — ` +
+          "the run never reached the step this signal is aimed at",
+      );
+    }
+    await sleep(25);
+  }
+  return Date.now() - startedAt;
+}
+
+/**
+ * ONE HALF OF THE PAIR CASES 2 AND 4 FORM — kept so the two can be compared against each
+ * other rather than only against their own expectations. Two independent per-case assertions
+ * cannot see a change that moves BOTH cases in the same direction; the comparison can.
+ */
+interface TermPathObservation {
+  readonly label: string;
+  readonly heartbeat: JobHeartbeat;
+  /** The watchdog's calling card — the TERM handler's entire discriminator. */
+  readonly watchdogCard: boolean;
+}
+
+let watchdogTermObserved: TermPathObservation | undefined;
+let externalTermObserved: TermPathObservation | undefined;
+
+/** Snapshot a finished run for the pair comparison, refusing a run with no heartbeat. */
+function observeTermPath(record: RunRecord, label: string): TermPathObservation {
+  const heartbeat = record.heartbeat;
+  if (heartbeat === undefined) {
+    throw new Error(`${label}: no heartbeat to compare — ${record.heartbeatRaw ?? "(absent)"}`);
+  }
+  return { label, heartbeat, watchdogCard: record.watchdogFired };
+}
+
+/**
  * Whether this run was in the mark window, computed the way the CONTRACT computes it —
  * `America/Mexico_City`, hour ≥ 18 — rather than from the machine's local clock, which
  * would agree only by coincidence of an OS setting. Read off the heartbeat's own
@@ -1035,6 +1120,9 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
           pnpmReached: ["prices:fetch"],
           label,
         });
+        // KEPT FOR THE PAIR COMPARISON below, which is how the watchdog-TERM and
+        // external-TERM halves of one branch are held against each other.
+        watchdogTermObserved = observeTermPath(record, label);
         settles.push(record.settleMs);
       }
       console.log(
@@ -1153,6 +1241,241 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
     },
     600_000,
   );
+
+  // ── CASE 4 · THE EXTERNAL STOP ────────────────────────────────────────────────────
+  //
+  // THE SAME FAKE, THE SAME CEILING AND THE SAME STEP AS CASE 2. Everything about this run
+  // is case 2 except WHO SIGNALLED IT, which is the only variable the TERM handler branches
+  // on — so the two cases are a matched pair by construction, and the comparison below can
+  // therefore mean something.
+  //
+  // IT DELIVERS THE SIGNAL, NOT THE SENDER, and that limit is not a hedge. `launchctl stop`,
+  // `launchctl unload`, a logout and a shutdown all deliver this same bare SIGTERM to this
+  // same process group; the handler cannot tell them apart and does not try. What it asks is
+  // whether the watchdog left its calling card first. So this case proves the handler's
+  // discrimination and says nothing about launchd — see the file header before writing that
+  // the external-stop path is covered anywhere.
+  //
+  // WHY THE SIGNAL IS SENT ON A SENTINEL RATHER THAN A TIMER. The run must be INSIDE the
+  // fetch step when it arrives (that is the step name half of the assertion) and the signal
+  // must beat the ceiling (that is the calling-card half). Waiting for the fake's own
+  // sentinel gets both without racing a clock: the sentinel is written by the process the
+  // wrapper is blocked on, so it cannot appear early, and it appears in a fraction of the
+  // 3-second ceiling.
+  it(
+    `case 4 — an EXTERNAL stop before the ceiling, ${RUNS_PER_CASE} consecutive times`,
+    async () => {
+      const settles: number[] = [];
+      const reaches: number[] = [];
+      const durations: number[] = [];
+      const ceilingMs = TIMEOUT_CASE_OPTIONS.maxRunSeconds * 1_000;
+
+      for (let run = 1; run <= RUNS_PER_CASE; run += 1) {
+        const dirs = makeCaseDir(TIMEOUT_CASE_OPTIONS);
+        setFakeBehavior(dirs.caseDir, "prices:fetch", "hangs");
+        const label = `case 4 run ${run}/${RUNS_PER_CASE}`;
+
+        const record = await launchWrapper({
+          caseDir: dirs.caseDir,
+          wrapperPath: WRAPPER_PATH,
+          env: caseEnv(dirs, TIMEOUT_CASE_OPTIONS),
+          groupLeader: true,
+          // The SHORT window, as on every non-timeout path: this run never sets `TIMED_OUT`,
+          // so its EXIT trap cancels the watchdog — subshell and forked `sleep` both — before
+          // the shell leaves. Handing it the grace-derived bound would let a watchdog left
+          // sleeping over an already-dead run pass unnoticed, which is the held-job-slot
+          // failure the cancellation exists to prevent.
+          settleDeadlineMs: SETTLE_DEADLINE_MS,
+          // A REAL CAP, and it matters more here than anywhere else: this is the one case
+          // whose premise is that the wrapper's own watchdog has NOT fired, so the watchdog
+          // cannot be its bound. A TERM that failed to be delivered must arrive as a red
+          // test, never as a wedged worker.
+          maxWaitMs: 60_000,
+          duringRun: async (pgid) => {
+            reaches.push(await waitForFakeToReach(dirs.caseDir, "prices:fetch", label));
+            // BEFORE THE CEILING, ASSERTED RATHER THAN ASSUMED. If the watchdog got there
+            // first this is case 2 wearing case 4's name — a run that would still exit 124
+            // and still pass an exit-code-only test of "something stopped it".
+            expect(
+              watchdogCardPresent(dirs.logDir),
+              `${label}: the watchdog fired BEFORE the harness could signal — this run is a ` +
+                "second copy of case 2, not an external stop",
+            ).toBe(false);
+            // THE EXTERNAL STOP ITSELF: a bare SIGTERM to the run's own process group, with
+            // no calling card, from outside the run. Byte-for-byte what `launchctl stop`
+            // delivers; nothing here goes near `launchctl`.
+            process.kill(-pgid, "SIGTERM");
+          },
+        });
+
+        expect(record.logText, `${label}: the watchdog did not arm — was the child detached?`).toContain(
+          "watchdog armed:",
+        );
+        // THE DISCRIMINATOR, ASSERTED DIRECTLY AND NOT INFERRED FROM THE EXIT CODE. The
+        // calling card is the only thing the TERM handler reads, so its ABSENCE is the fact
+        // that makes the 143 honest. A handler that had stopped discriminating entirely
+        // would still satisfy an exit-code assertion on one side of the pair.
+        expect(
+          record.watchdogFired,
+          `${label}: a calling card was left on a run the watchdog never timed out`,
+        ).toBe(false);
+        expect(record.logText, `${label}: the watchdog fired after all`).not.toContain(
+          "WATCHDOG: run exceeded",
+        );
+        expect(
+          record.durationMs,
+          `${label}: the run outlived its own ${ceilingMs}ms ceiling, so the ending it recorded ` +
+            "may be the watchdog's rather than the harness's",
+        ).toBeLessThan(ceilingMs);
+
+        assertTriple(record, dirs.caseDir, {
+          exitCode: 143,
+          // UNDECORATED, and the bareness is the payload: `timeout:` here would be the
+          // wrapper telling the next morning's TUI that a run someone stopped by hand had
+          // hung, spending the credibility the breadcrumb exists to hold.
+          lastStep: "prices-fetch",
+          pnpmReached: ["prices:fetch"],
+          label,
+        });
+        externalTermObserved = observeTermPath(record, label);
+        settles.push(record.settleMs);
+        durations.push(record.durationMs);
+      }
+      console.log(
+        `[wrapper harness] case 4 reached the step in (ms): ${reaches.join(", ")} · ran for (ms, ` +
+          `ceiling ${ceilingMs}): ${durations.join(", ")} · settle ms: ${settles.join(", ")}`,
+      );
+    },
+    600_000,
+  );
+
+  // ── THE PAIR · CASES 2 AND 4 HELD AGAINST EACH OTHER ──────────────────────────────
+  //
+  // #312's explicit requirement is that these two run inside ONE suite run, and this is
+  // where that requirement is written down rather than merely satisfied by layout. They are
+  // the two branches of a single `if` in the wrapper's TERM handler. Split across two suites
+  // or two gates they drift apart in silence: each half keeps passing on its own while the
+  // handler stops telling them apart. Do not separate them, and do not let one of them be
+  // skipped while the other runs — the guard below turns that into a red test rather than a
+  // quiet one.
+  it("cases 2 and 4 differ in EXACTLY three things — and the same suite run proves it", () => {
+    const timeout = watchdogTermObserved;
+    const external = externalTermObserved;
+    expect(
+      timeout,
+      "case 2 left no observation — the watchdog-TERM half of the pair did not run in THIS " +
+        "suite run, so the comparison would be vacuous",
+    ).toBeDefined();
+    expect(
+      external,
+      "case 4 left no observation — the external-TERM half of the pair did not run in THIS " +
+        "suite run, so the comparison would be vacuous",
+    ).toBeDefined();
+    if (timeout === undefined || external === undefined) {
+      return;
+    }
+
+    // ── THE THREE THINGS THAT MUST DIFFER ───────────────────────────────────────────
+    // (1) The exit code. `not.toBe` as well as the two literals, because the literals alone
+    //     would still pass if a future handler collapsed both paths onto whichever number
+    //     each side happens to expect — the point of a comparison is to see them MOVE APART.
+    expect(timeout.heartbeat.exitCode, "case 2's exit code").toBe(124);
+    expect(external.heartbeat.exitCode, "case 4's exit code").toBe(143);
+    expect(
+      timeout.heartbeat.exitCode,
+      "the two TERM paths recorded the SAME exit code — the handler is no longer discriminating",
+    ).not.toBe(external.heartbeat.exitCode);
+
+    // (2) The step DECORATION, and nothing else about the step. Undecorating case 2's step
+    //     must yield case 4's exactly: same fake, same step, so any difference beyond the
+    //     `timeout:` prefix means the two runs did not die in the same place and the rest of
+    //     this comparison is between two things that were never comparable.
+    expect(
+      timeout.heartbeat.lastStep,
+      "the two TERM paths recorded the SAME step name — one of them lost its decoration, or " +
+        "the other gained one",
+    ).not.toBe(external.heartbeat.lastStep);
+    expect(timeout.heartbeat.lastStep, "case 2's step is decorated").toMatch(/^timeout:/);
+    expect(external.heartbeat.lastStep, "case 4's step is BARE").not.toMatch(/^timeout:/);
+    expect(
+      timeout.heartbeat.lastStep.replace(/^timeout:/, ""),
+      "the pair died at DIFFERENT steps, so they are not a matched pair at all",
+    ).toBe(external.heartbeat.lastStep);
+
+    // (3) The calling card — the fact the handler actually branches on, and the reason the
+    //     other two differences are what they are.
+    expect(timeout.watchdogCard, "case 2's calling card").toBe(true);
+    expect(external.watchdogCard, "case 4's calling card").toBe(false);
+    expect(
+      timeout.watchdogCard,
+      "both TERM paths agreed about the calling card — the discriminator has stopped " +
+        "discriminating, and the exit codes above are then true only by coincidence",
+    ).not.toBe(external.watchdogCard);
+
+    // ── AND NO OTHERS, WHICH IS THE HALF THAT NEEDS CARE ────────────────────────────
+    // "No others" cannot mean "every field is equal": two runs minutes apart legitimately
+    // carry different clocks. So every field is CLASSIFIED, and an unclassified one is a
+    // failure rather than a default — a field added to the heartbeat later must be placed in
+    // one of these three buckets deliberately, not slip past a comparison that is silent
+    // about it.
+    const MUST_DIFFER: readonly string[] = ["exitCode", "lastStep"];
+    /**
+     * Wall-clock, or derived from wall-clock. These CANNOT be compared across the pair
+     * without being either vacuous or permanently red, so each is pinned individually below
+     * instead — `markWindow` in particular is a function of the run's own `startedAt` read in
+     * `America/Mexico_City`, so a suite straddling 18:00 CDMX legitimately produces one of
+     * each, and demanding they match would go red once a day for a correct wrapper.
+     */
+    const MAY_VARY: readonly string[] = ["startedAt", "finishedAt", "markWindow"];
+    /** Everything else: identical across the pair, presence and value alike. */
+    const MUST_MATCH: readonly string[] = ["schemaVersion", "lastMarkWindowFinishedAt"];
+
+    const timeoutKeys = Object.keys(timeout.heartbeat).sort();
+    const externalKeys = Object.keys(external.heartbeat).sort();
+    expect(
+      timeoutKeys,
+      "the two heartbeats do not even carry the same FIELDS — one of them recorded something " +
+        "the other omitted",
+    ).toEqual(externalKeys);
+    const classified = new Set([...MUST_DIFFER, ...MAY_VARY, ...MUST_MATCH]);
+    for (const key of timeoutKeys) {
+      expect(
+        classified.has(key),
+        `\`${key}\` is a heartbeat field this comparison never classified — classify it as ` +
+          "MUST_DIFFER, MAY_VARY or MUST_MATCH rather than leaving the comparison silent about it",
+      ).toBe(true);
+    }
+    for (const key of MUST_MATCH) {
+      const left = (timeout.heartbeat as unknown as Record<string, unknown>)[key];
+      const right = (external.heartbeat as unknown as Record<string, unknown>)[key];
+      expect(left, `\`${key}\` diverged across the pair, and only these three may`).toEqual(right);
+    }
+
+    // The fields that may vary are pinned individually, so "may vary" never becomes
+    // "unchecked". Each run's window is judged against the CONTRACT's zone, the same oracle
+    // the per-case triple uses, rather than against the other run's clock.
+    for (const observed of [timeout, external]) {
+      expect(
+        Number.isNaN(Date.parse(observed.heartbeat.startedAt)),
+        `${observed.label}: unparseable startedAt`,
+      ).toBe(false);
+      expect(
+        Date.parse(observed.heartbeat.finishedAt),
+        `${observed.label}: finished before it started`,
+      ).toBeGreaterThanOrEqual(Date.parse(observed.heartbeat.startedAt));
+      expect(
+        observed.heartbeat.markWindow,
+        `${observed.label}: markWindow disagrees with the contract's own zone`,
+      ).toBe(expectedMarkWindow(observed.heartbeat.startedAt));
+    }
+
+    console.log(
+      `[wrapper harness] the pair — ${timeout.label}: exit ${timeout.heartbeat.exitCode} at ` +
+        `\`${timeout.heartbeat.lastStep}\`, card ${timeout.watchdogCard} · ${external.label}: ` +
+        `exit ${external.heartbeat.exitCode} at \`${external.heartbeat.lastStep}\`, card ` +
+        `${external.watchdogCard}`,
+    );
+  });
 
   // ── S6 · THE CHILD-REAP MUTATION CONTROL ──────────────────────────────────────────
   describe("the child-reap mutation — assertion 3 is seen RED before it is trusted", () => {
