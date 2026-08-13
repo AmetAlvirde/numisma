@@ -51,6 +51,39 @@ const SKIP_DETAIL: Record<FoldSkipReason, string> = {
     "read and then dropped. No balance moved.",
 };
 
+/**
+ * Distinct skips by (`eventId`, `reason`), in first-appearance order — the Discard
+ * Channel's dedup key (ADR-020; PRD #323 R5).
+ *
+ * IT EXISTS BECAUSE THE FOLD IS RE-RUN, NOT BECAUSE LISTS ARE LONG. Any caller that
+ * folds the same log more than once per run sees the same standing drop once per fold:
+ * `walkPendingInbox` re-folds on every accept (ADR-015), so a 13-event batch is 14 folds
+ * and one dropped prior arrives 14 times; the legacy migration folds once per line. That
+ * is one FINDING reported N times, and N is an artifact of the caller's loop rather than
+ * anything about the log. Deduping is therefore structural — without it, an operator
+ * counts folds and believes they are counting damage.
+ *
+ * THE KEY IS THE PAIR, never the id alone: one event can be dropped for two different
+ * reasons and that is two findings. A `Transfer` whose BOTH legs name absent reserves is
+ * one event dropped twice for ONE reason and collapses to one finding, correctly.
+ *
+ * FIRST APPEARANCE WINS, so the fold's own deterministic ordering (application order,
+ * with the post-loop invalidation records appended) survives the dedup. Pure; the input
+ * is never mutated.
+ */
+export function dedupeFoldSkips(skipped: readonly SkippedFoldEvent[]): SkippedFoldEvent[] {
+  const seen = new Set<string>();
+  const distinct: SkippedFoldEvent[] = [];
+  for (const skip of skipped) {
+    const key = `${skip.eventId} ${skip.reason}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      distinct.push(skip);
+    }
+  }
+  return distinct;
+}
+
 /** Cost-basis weight of each Tier in a position's lots (the provenance the cash
  * leg inherits). Returns signed `amount` per present Tier summing exactly to
  * `total`, with any float residual folded into the last Tier so the reserve's

@@ -73,6 +73,7 @@ import {
   type PortfolioEvent,
   type ProposedVerdict,
 } from "@numisma/engine";
+import { formatFoldDiscards } from "@numisma/event-store";
 import type { OrdersLoad } from "@numisma/preferences";
 import { nextLogImage, serializeEvent } from "./event-store.js";
 import { resolveFunding } from "./record-fill-funding.js";
@@ -603,7 +604,18 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
   if (parsed.kind !== "ok") {
     return reject(io, "invalid-event", `the fill's event does not parse (${parsed.path}: ${parsed.message})`);
   }
-  const crossRef = crossReferenceEvent(parsed.value, buildEventReference(genesis, priorEvents));
+  // THE GATE'S OWN FOLD, AND WHAT IT DROPPED BUILDING THE WORLD IT JUDGES THIS FILL
+  // AGAINST (ADR-020; PRD #323 seam C). A fill recorded onto damaged history is exactly
+  // when the epistemic marker is worth the most, and this is the enumeration rather than
+  // a count because an operator is at the keyboard right now — the locator is what makes
+  // it actionable. It NEVER blocks the fill: the log is append-only, so a drop already in
+  // it can never be repaired, and refusing here would make one damaged historical event
+  // permanently un-recordable-over (R2).
+  const reference = buildEventReference(genesis, priorEvents);
+  for (const line of formatFoldDiscards(reference)) {
+    io.out(`${line}\n`);
+  }
+  const crossRef = crossReferenceEvent(parsed.value, reference);
   if (crossRef.kind !== "ok") {
     return reject(
       io,

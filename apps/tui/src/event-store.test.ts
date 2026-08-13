@@ -530,6 +530,15 @@ describe("durable-log migration — legacy-shape events fail loud, then migrate 
     const { data } = await loadFoldedReview(paths);
     expect(data.positions.some((position) => position.id === "aapl-core")).toBe(false);
     expect(data.reserves.find((reserve) => reserve.id === "cash-core")?.amount).toBe(1290);
+
+    // AND IT CARRIES THE DISCARD CHANNEL OUT (PRD #323 slice C; ADR-020). The migration
+    // cross-references every line, and building each reference RUNS the fold — so what
+    // that fold dropped leaves on the report instead of dying with the loop iteration
+    // that saw it. This log is clean, and empty is what clean means: a clean migration's
+    // operator-facing output is byte-identical to before the channel existed. The
+    // non-empty case is pinned at the seam itself, where the reference can be built over
+    // priors the ingest gates never saw (`gate-carries-discards.test.ts`).
+    expect(report.discarded).toEqual([]);
   });
 
   it("numbers lines the way the reader does, so both halves name the SAME line", async () => {
