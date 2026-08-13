@@ -16,7 +16,7 @@ import {
   resolveEventStorePaths,
   type EventStorePaths,
 } from "@numisma/event-store";
-import { ingestInbox, migrateLegacyLog } from "./event-store.js";
+import { ingestInbox, migrateLegacyLog, writeLogImage } from "./event-store.js";
 import type { SuppliedCashLeg } from "@numisma/engine";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -372,6 +372,45 @@ describe("appendEvents — atomic append (temp + rename)", () => {
     }
     // The temp image is renamed away, never left behind.
     expect(await exists(`${paths.log}.tmp`)).toBe(false);
+  });
+});
+
+describe("writeLogImage — concurrent writers cannot corrupt each other", () => {
+  it("leaves the log byte-identical to exactly one writer's image, never a blend", async () => {
+    const paths = await makeStore({});
+    const dir = dirname(paths.log);
+
+    // Multi-megabyte images on purpose: with a tiny payload the write completes inside
+    // one turn and the writers never really overlap. At this size the open/write/rename
+    // steps genuinely interleave, so a SHARED temp name loses the race deterministically
+    // — one writer truncating another's half-written temp, or renaming it out from under
+    // it. Every byte here is authored filler: a distinct marker line per writer, repeated.
+    const WRITERS = 4;
+    const LINES = 60_000; // ~4 MB per image at 68 bytes/line.
+    const images = Array.from(
+      { length: WRITERS },
+      (_, index) => `${`writer-${index}`.padEnd(66, String.fromCharCode(97 + index))}\n`.repeat(LINES),
+    );
+
+    const results = await Promise.allSettled(images.map((image) => writeLogImage(paths.log, image)));
+    // Every writer must SUCCEED: a rejection here is the shared-temp collision itself
+    // (the sibling renamed the source away), not an incidental failure.
+    const rejected = results.filter((result) => result.status === "rejected");
+    expect(rejected.map((result) => String((result as PromiseRejectedResult).reason))).toEqual([]);
+
+    const content = await readFile(paths.log, "utf8");
+
+    // No blend: a surviving image is one writer's marker line, repeated — nothing else.
+    const distinctLines = new Set(content.split("\n").filter((line) => line.length > 0));
+    expect([...distinctLines]).toHaveLength(1);
+    // No truncation: full length, and byte-identical to one of the inputs. Compared as a
+    // boolean so a failure reports a flag rather than dumping megabytes of diff.
+    expect(content.length).toBe(images[0]!.length);
+    expect(images.some((image) => image === content)).toBe(true);
+
+    // And no litter: every temp image was renamed away or cleaned up.
+    const leftovers = (await readdir(dir)).filter((name) => name.includes(".tmp"));
+    expect(leftovers).toEqual([]);
   });
 });
 
