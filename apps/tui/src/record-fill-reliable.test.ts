@@ -13,8 +13,8 @@
 //
 // Every fixture is a SYNTHETIC ladder (`O7`). Invented ids, round decade prices, round
 // balances — no real price, quantity, balance or rung enters this repository.
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import {
   foldEvents,
@@ -203,6 +203,20 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
+/**
+ * Every `.tmp` entry left in a file's OWN directory — the litter guard for BOTH writers.
+ *
+ * Over the directory rather than over one guessed name: both `writeLogImage` and
+ * `appendOrders` now name their temp uniquely per call (`<path>.<pid>.<n>.tmp`), so
+ * asserting the absence of a single `${path}.tmp` passes vacuously — the name it probes
+ * is one neither writer can ever produce. The events log and the orders sidecar share
+ * one data dir, so a single sweep covers both halves of the fill act.
+ */
+async function tempLitter(path: string): Promise<string[]> {
+  const entries = await readdir(dirname(path));
+  return entries.filter((entry) => entry.endsWith(".tmp"));
+}
+
 describe("`O2` on a real filesystem — the rollback restores real bytes", () => {
   it("guards against a vacuous pass: a clean act really writes BOTH files", async () => {
     // Without this, every rollback case below could be passing because the flow never
@@ -219,9 +233,9 @@ describe("`O2` on a real filesystem — the rollback restores real bytes", () =>
     expect(log.startsWith(PRIOR_LOG_LINE)).toBe(true);
     expect(log).toContain("fill:rung-400@2026-01-05T12:00:00");
     expect(await readFile(ordersPath, "utf8")).toContain(`"kind":"orderFilled"`);
-    // The temp files both writers rename FROM are gone, not left behind.
-    expect(await exists(`${eventsPath}.tmp`)).toBe(false);
-    expect(await exists(`${ordersPath}.tmp`)).toBe(false);
+    // The temp files both writers rename FROM are gone, not left behind — one sweep of
+    // the shared data dir catches either writer's litter, whatever it named it.
+    expect(await tempLitter(eventsPath)).toEqual([]);
   });
 
   it("restores a PRE-EXISTING log BYTE-FOR-BYTE when the sidecar write fails", async () => {
@@ -249,7 +263,7 @@ describe("`O2` on a real filesystem — the rollback restores real bytes", () =>
     // rewriting every line of the durable record of fact.
     expect(await readFile(eventsPath, "utf8")).toBe(PRIOR_LOG_LINE);
     expect(await readFile(ordersPath, "utf8")).toBe(ordersImage);
-    expect(await exists(`${eventsPath}.tmp`)).toBe(false);
+    expect(await tempLitter(eventsPath)).toEqual([]);
   });
 
   it("restores a log that had a TORN final line byte-for-byte, terminator and all", async () => {

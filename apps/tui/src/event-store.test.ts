@@ -177,6 +177,20 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
+/**
+ * Every `.tmp` entry sitting in a file's OWN directory.
+ *
+ * Over the directory, not over one guessed name: `writeLogImage` names its temp
+ * uniquely per write (`<log>.<pid>.<tick>.tmp`), so asserting the absence of a single
+ * `${path}.tmp` passes vacuously while a whole generation of temps piles up beside the
+ * durable log — and nothing on the durability path would surface them, because
+ * accumulus ignores `/data/*.tmp`.
+ */
+async function tempLitter(path: string): Promise<string[]> {
+  const entries = await readdir(dirname(path));
+  return entries.filter((entry) => entry.endsWith(".tmp"));
+}
+
 async function readOrUndefined(path: string): Promise<string | undefined> {
   try {
     return await readFile(path, "utf8");
@@ -371,7 +385,7 @@ describe("appendEvents — atomic append (temp + rename)", () => {
       expect(() => JSON.parse(line)).not.toThrow();
     }
     // The temp image is renamed away, never left behind.
-    expect(await exists(`${paths.log}.tmp`)).toBe(false);
+    expect(await tempLitter(paths.log)).toEqual([]);
   });
 });
 
@@ -380,13 +394,23 @@ describe("writeLogImage — concurrent writers cannot corrupt each other", () =>
     const paths = await makeStore({});
     const dir = dirname(paths.log);
 
-    // Multi-megabyte images on purpose: with a tiny payload the write completes inside
-    // one turn and the writers never really overlap. At this size the open/write/rename
-    // steps genuinely interleave, so a SHARED temp name loses the race deterministically
-    // — one writer truncating another's half-written temp, or renaming it out from under
-    // it. Every byte here is authored filler: a distinct marker line per writer, repeated.
+    // Multi-megabyte images on purpose, but NOT because small ones fail to overlap —
+    // measured against a faithful copy of the pre-fix shared-temp implementation, the
+    // `rejected` assertion below is red 10/10 at ONE line (67 bytes) just as it is here.
+    // `fs/promises.writeFile` always yields, so all four writers open the shared temp
+    // before any rename fires and three then hit ENOENT at any size: the LOST-IMAGE mode
+    // reproduces for free.
+    //
+    // What the size buys is the OTHER mode — a BLENDED image, one writer's bytes
+    // interleaved into another's, which survives the rename and fails only byte-identity.
+    // That one needs the write to span many turns: 4/10 runs at 60_000 lines against the
+    // old code, 0/10 small. So the payload is sized for `distinctLines` and the
+    // byte-identity check, not for the rejection check. The whole case runs in ~38ms and
+    // is 10/10 clean under the fix — do not shrink it to save a cost that isn't there.
+    //
+    // Every byte here is authored filler: a distinct marker line per writer, repeated.
     const WRITERS = 4;
-    const LINES = 60_000; // ~4 MB per image at 68 bytes/line.
+    const LINES = 60_000; // ~4 MB per image at 67 bytes/line (66 + "\n").
     const images = Array.from(
       { length: WRITERS },
       (_, index) => `${`writer-${index}`.padEnd(66, String.fromCharCode(97 + index))}\n`.repeat(LINES),
@@ -596,7 +620,7 @@ describe("durable-log migration — legacy-shape events fail loud, then migrate 
     await migrateLegacyLog(paths, cashLegs);
 
     // The temp image is renamed away, never left behind (the writeLogImage contract).
-    expect(await exists(`${paths.log}.tmp`)).toBe(false);
+    expect(await tempLitter(paths.log)).toEqual([]);
 
     // And structurally: the migration holds no writer of its own. `writeLogImage` is
     // documented as "the only way the log is written" — any hardening landed there
