@@ -8,7 +8,14 @@
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
-import { pickPolicyAsOf, resolveDataDir, type ProfitPolicyEntry } from "@numisma/engine";
+// The pure contract types come from `@numisma/engine`, not `@numisma/preferences` —
+// that package deliberately does not re-export them (its barrel records the rule).
+import {
+  pickPolicyAsOf,
+  resolveDataDir,
+  type PreferenceSkipReason,
+  type ProfitPolicyEntry,
+} from "@numisma/engine";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadPreferences, resolvePreferencesPath, seedDefaultPreferences } from "./preferences.js";
 
@@ -73,7 +80,10 @@ describe("seedDefaultPreferences — the only writer, and genuinely append-only"
     const after = await readFile(path, "utf8");
     expect(after.startsWith(garbage)).toBe(true); // the corrupt history is a PREFIX, not a casualty
     const loaded = await loadPreferences(path);
-    expect(loaded.map((e) => e.effectiveAt)).toEqual(["2026-06-01"]);
+    expect(loaded.entries.map((e) => e.effectiveAt)).toEqual(["2026-06-01"]);
+    // And the state the docstring used to leave inferable is now stated: the two
+    // pre-existing lines are reported as discards, not silently absent.
+    expect(loaded.skipped.map((s) => s.reason)).toEqual(["not-json", "split-basis"]);
   });
 
   it("does not overwrite an existing valid policy", async () => {
@@ -87,13 +97,31 @@ describe("seedDefaultPreferences — the only writer, and genuinely append-only"
   });
 });
 
-describe("loadPreferences — validating loader (quarantine, not throw)", () => {
-  it("returns [] for a missing sidecar (log folds standalone)", async () => {
+describe("loadPreferences — validating loader (discard, not throw)", () => {
+  it("a MISSING sidecar loads empty — the normal starting state, not a failure", async () => {
     const path = await tempPath();
-    await expect(loadPreferences(path)).resolves.toEqual([]);
+    const loaded = await loadPreferences(path);
+    expect(loaded.load.status).toBe("loaded"); // NOT load-failed: nothing to read is fine
+    expect(loaded.entries).toEqual([]);
+    expect(loaded.skipped).toEqual([]);
   });
 
-  it("quarantines a malformed-JSON line but keeps the valid ones, and never throws", async () => {
+  it("an UNREADABLE sidecar is load-failed with its message, and does not throw", async () => {
+    // A directory where a file is expected: readFile fails with EISDIR, not ENOENT.
+    // The loader used to rethrow this; it must now report it, so that "no policy" and
+    // "the policy file could not be read" stay distinguishable downstream.
+    const path = await tempPath();
+    await mkdir(path, { recursive: true });
+    const loaded = await loadPreferences(path);
+    expect(loaded.load.status).toBe("load-failed");
+    if (loaded.load.status === "load-failed") {
+      expect(loaded.load.message.length).toBeGreaterThan(0);
+    }
+    expect(loaded.entries).toEqual([]);
+    expect(loaded.skipped).toEqual([]);
+  });
+
+  it("discards a malformed-JSON line but keeps the valid ones, and never throws", async () => {
     const path = await tempPath();
     const contents = [
       JSON.stringify(entry("2026-06-01", "highWaterMark")),
@@ -105,42 +133,58 @@ describe("loadPreferences — validating loader (quarantine, not throw)", () => 
     await writeFile(path, `${contents}\n`, "utf8");
 
     const loaded = await loadPreferences(path);
-    expect(loaded.map((e) => e.effectiveAt)).toEqual(["2026-06-01", "2026-06-10"]);
+    expect(loaded.entries.map((e) => e.effectiveAt)).toEqual(["2026-06-01", "2026-06-10"]);
+    // The bad line is on line 2; the two blanks after it are NOT discards.
+    expect(loaded.skipped).toEqual([
+      { line: 2, reason: "not-json", detail: expect.any(String) },
+    ]);
   });
 
-  it("quarantines an invalid split RATIO (negative Reserve)", async () => {
+  it("discards an invalid split RATIO (negative Reserve)", async () => {
     const path = await tempPath();
     const bad = { ...entry("2026-06-05"), split: { wealth: 60, reserve: -40 } };
     await writeFile(path, `${JSON.stringify(entry("2026-06-01"))}\n${JSON.stringify(bad)}\n`, "utf8");
     const loaded = await loadPreferences(path);
-    expect(loaded).toHaveLength(1);
-    expect(loaded[0]?.effectiveAt).toBe("2026-06-01");
+    expect(loaded.entries).toHaveLength(1);
+    expect(loaded.entries[0]?.effectiveAt).toBe("2026-06-01");
+    expect(loaded.skipped.map((s) => [s.line, s.reason])).toEqual([[2, "split-parts"]]);
   });
 
-  it("quarantines a zero-denominator split (wealth + reserve === 0)", async () => {
+  it("discards a zero-denominator split (wealth + reserve === 0)", async () => {
     const path = await tempPath();
     const bad = { ...entry("2026-06-05"), split: { wealth: 0, reserve: 0 } };
     await writeFile(path, `${JSON.stringify(bad)}\n`, "utf8");
-    await expect(loadPreferences(path)).resolves.toEqual([]);
+    const loaded = await loadPreferences(path);
+    expect(loaded.entries).toEqual([]);
+    expect(loaded.skipped.map((s) => [s.line, s.reason])).toEqual([[1, "split-denominator"]]);
   });
 
-  it("quarantines a bad splitBasis outside the enum", async () => {
+  it("discards a bad splitBasis outside the enum", async () => {
     const path = await tempPath();
     const bad = { ...entry("2026-06-05"), splitBasis: "lifetime" };
     await writeFile(path, `${JSON.stringify(bad)}\n`, "utf8");
-    await expect(loadPreferences(path)).resolves.toEqual([]);
+    const loaded = await loadPreferences(path);
+    expect(loaded.entries).toEqual([]);
+    expect(loaded.skipped.map((s) => [s.line, s.reason])).toEqual([[1, "split-basis"]]);
+    // The unrecognized token never rides in the prose.
+    expect(loaded.skipped[0]?.detail).not.toContain("lifetime");
   });
 
-  it("quarantines a missing or unparseable effectiveAt", async () => {
+  it("discards a missing or unparseable effectiveAt", async () => {
     const path = await tempPath();
     const missing = { ...entry("2026-06-05") } as Record<string, unknown>;
     delete missing.effectiveAt;
     const unparseable = { ...entry("2026-06-06"), effectiveAt: "not-a-date" };
     await writeFile(path, `${JSON.stringify(missing)}\n${JSON.stringify(unparseable)}\n`, "utf8");
-    await expect(loadPreferences(path)).resolves.toEqual([]);
+    const loaded = await loadPreferences(path);
+    expect(loaded.entries).toEqual([]);
+    expect(loaded.skipped.map((s) => [s.line, s.reason])).toEqual([
+      [1, "effective-at"],
+      [2, "effective-at"],
+    ]);
   });
 
-  it("quarantines a Date.parse-able but non-ISO effectiveAt (would sort wrong under string as-of)", async () => {
+  it("discards a Date.parse-able but non-ISO effectiveAt (would sort wrong under string as-of)", async () => {
     const path = await tempPath();
     // Both parse via Date.parse but are NOT lexicographically-chronological ISO dates:
     // a US-format date and an ISO date-TIME. `pickPolicyAsOf` compares strings, so
@@ -148,7 +192,12 @@ describe("loadPreferences — validating loader (quarantine, not throw)", () => 
     const usFormat = { ...entry("2026-06-05"), effectiveAt: "06/05/2026" };
     const dateTime = { ...entry("2026-06-06"), effectiveAt: "2026-06-06T00:00:00Z" };
     await writeFile(path, `${JSON.stringify(usFormat)}\n${JSON.stringify(dateTime)}\n`, "utf8");
-    await expect(loadPreferences(path)).resolves.toEqual([]);
+    const loaded = await loadPreferences(path);
+    expect(loaded.entries).toEqual([]);
+    expect(loaded.skipped.map((s) => [s.line, s.reason])).toEqual([
+      [1, "effective-at"],
+      [2, "effective-at"],
+    ]);
   });
 
   /**
@@ -159,12 +208,17 @@ describe("loadPreferences — validating loader (quarantine, not throw)", () => 
    * March 1st, a month before the operator intended, on the live push path and with no
    * warning anywhere. Only the round trip (`isIsoCalendarDate`) rejects it.
    */
-  it("quarantines a Date.parse-able CALENDAR OVERFLOW that would sort a month early", async () => {
+  it("discards a Date.parse-able CALENDAR OVERFLOW that would sort a month early", async () => {
     const path = await tempPath();
     const feb30 = { ...entry("2026-06-05"), effectiveAt: "2026-02-30" };
     const feb29NonLeap = { ...entry("2026-06-06"), effectiveAt: "2025-02-29" };
     await writeFile(path, `${JSON.stringify(feb30)}\n${JSON.stringify(feb29NonLeap)}\n`, "utf8");
-    await expect(loadPreferences(path)).resolves.toEqual([]);
+    const loaded = await loadPreferences(path);
+    expect(loaded.entries).toEqual([]);
+    expect(loaded.skipped.map((s) => [s.line, s.reason])).toEqual([
+      [1, "effective-at"],
+      [2, "effective-at"],
+    ]);
   });
 
   it("admits a genuine end-of-month date — the round trip rejects overflow, not February", async () => {
@@ -177,23 +231,227 @@ describe("loadPreferences — validating loader (quarantine, not throw)", () => 
       "utf8",
     );
     const loaded = await loadPreferences(path);
-    expect(loaded.map((e) => e.effectiveAt)).toEqual(["2026-01-31", "2024-02-29"]);
+    expect(loaded.entries.map((e) => e.effectiveAt)).toEqual(["2026-01-31", "2024-02-29"]);
+    expect(loaded.skipped).toEqual([]);
   });
 
-  it("quarantines an out-of-range reserveTargetPct (a NAV share must be a percentage in [0, 100])", async () => {
+  it("discards an out-of-range reserveTargetPct (a NAV share must be a percentage in [0, 100])", async () => {
     const path = await tempPath();
     const overHundred = { ...entry("2026-06-05"), reserveTargetPct: 500 };
     await writeFile(path, `${JSON.stringify(entry("2026-06-01"))}\n${JSON.stringify(overHundred)}\n`, "utf8");
     const loaded = await loadPreferences(path);
-    expect(loaded.map((e) => e.effectiveAt)).toEqual(["2026-06-01"]);
+    expect(loaded.entries.map((e) => e.effectiveAt)).toEqual(["2026-06-01"]);
+    expect(loaded.skipped.map((s) => [s.line, s.reason])).toEqual([[2, "reserve-target-pct"]]);
   });
 
-  it("quarantines a wrong-shape line (missing routingReserveId / non-object)", async () => {
+  it("discards a wrong-shape line (missing routingReserveId / non-object)", async () => {
     const path = await tempPath();
     const noRoute = { ...entry("2026-06-05") } as Record<string, unknown>;
     delete noRoute.routingReserveId;
     await writeFile(path, `42\n${JSON.stringify(noRoute)}\n`, "utf8");
-    await expect(loadPreferences(path)).resolves.toEqual([]);
+    const loaded = await loadPreferences(path);
+    expect(loaded.entries).toEqual([]);
+    // Two DIFFERENT reasons, which the old bare `[]` could not tell apart.
+    expect(loaded.skipped.map((s) => [s.line, s.reason])).toEqual([
+      [1, "not-an-object"],
+      [2, "routing-reserve-id"],
+    ]);
+  });
+});
+
+/**
+ * THE VERDICT PARITY TABLE — acceptance criterion 5 of the discard-channel slice.
+ *
+ * `validateProfitPolicyEntry` changed SHAPE (it now returns which guard fired) and must
+ * NOT have changed STRICTNESS. This table enumerates the accept/reject boundary of each
+ * of its eight guards and pins the verdict that held BEFORE the reshape — so tightening
+ * or loosening a guard later has to argue with a test instead of slipping past a
+ * docstring. The `reason` column is the new information; the `accepts` column is the old
+ * contract, and it is the column this test exists for.
+ *
+ * Every value here is authored for this table.
+ */
+const VERDICTS: ReadonlyArray<{
+  readonly what: string;
+  readonly value: unknown;
+  readonly accepts: boolean;
+  readonly reason?: PreferenceSkipReason;
+}> = [
+  // gate 0 — the JSON parse is exercised separately (a value cannot be "not JSON").
+  // guard 1 — non-object
+  { what: "a bare number", value: 42, accepts: false, reason: "not-an-object" },
+  { what: "null", value: null, accepts: false, reason: "not-an-object" },
+  { what: "a string", value: "policy", accepts: false, reason: "not-an-object" },
+  // guard 2 — effectiveAt, strict ISO calendar date
+  { what: "a plain valid entry", value: entry("2026-06-01"), accepts: true },
+  { what: "a real end-of-month date", value: entry("2026-01-31"), accepts: true },
+  { what: "a real leap day", value: entry("2024-02-29"), accepts: true },
+  {
+    what: "a calendar overflow (Feb 30)",
+    value: { ...entry("2026-06-01"), effectiveAt: "2026-02-30" },
+    accepts: false,
+    reason: "effective-at",
+  },
+  {
+    what: "a non-leap Feb 29",
+    value: { ...entry("2026-06-01"), effectiveAt: "2025-02-29" },
+    accepts: false,
+    reason: "effective-at",
+  },
+  {
+    what: "a US-format date",
+    value: { ...entry("2026-06-01"), effectiveAt: "06/05/2026" },
+    accepts: false,
+    reason: "effective-at",
+  },
+  {
+    what: "an ISO date-TIME",
+    value: { ...entry("2026-06-01"), effectiveAt: "2026-06-06T00:00:00Z" },
+    accepts: false,
+    reason: "effective-at",
+  },
+  {
+    what: "a missing effectiveAt",
+    value: { ...entry("2026-06-01"), effectiveAt: undefined },
+    accepts: false,
+    reason: "effective-at",
+  },
+  // guard 3 — splitBasis in the enum
+  { what: "the perClose basis", value: entry("2026-06-01", "perClose"), accepts: true },
+  {
+    what: "a basis outside the enum",
+    value: { ...entry("2026-06-01"), splitBasis: "lifetime" },
+    accepts: false,
+    reason: "split-basis",
+  },
+  // guard 4 — routingReserveId a non-blank string
+  {
+    what: "an empty routingReserveId",
+    value: { ...entry("2026-06-01"), routingReserveId: "" },
+    accepts: false,
+    reason: "routing-reserve-id",
+  },
+  {
+    what: "a whitespace-only routingReserveId",
+    value: { ...entry("2026-06-01"), routingReserveId: "   " },
+    accepts: false,
+    reason: "routing-reserve-id",
+  },
+  {
+    what: "a non-string routingReserveId",
+    value: { ...entry("2026-06-01"), routingReserveId: 7 },
+    accepts: false,
+    reason: "routing-reserve-id",
+  },
+  // guard 5 — reserveTargetPct a finite percentage in [0, 100]
+  { what: "a 0% floor", value: { ...entry("2026-06-01"), reserveTargetPct: 0 }, accepts: true },
+  { what: "a 100% floor", value: { ...entry("2026-06-01"), reserveTargetPct: 100 }, accepts: true },
+  {
+    what: "a floor just over 100",
+    value: { ...entry("2026-06-01"), reserveTargetPct: 100.0001 },
+    accepts: false,
+    reason: "reserve-target-pct",
+  },
+  {
+    what: "a negative floor",
+    value: { ...entry("2026-06-01"), reserveTargetPct: -0.0001 },
+    accepts: false,
+    reason: "reserve-target-pct",
+  },
+  {
+    what: "a non-numeric floor",
+    value: { ...entry("2026-06-01"), reserveTargetPct: "10" },
+    accepts: false,
+    reason: "reserve-target-pct",
+  },
+  // guard 6 — split is an object
+  {
+    what: "a missing split",
+    value: { ...entry("2026-06-01"), split: undefined },
+    accepts: false,
+    reason: "split-shape",
+  },
+  {
+    what: "a null split",
+    value: { ...entry("2026-06-01"), split: null },
+    accepts: false,
+    reason: "split-shape",
+  },
+  {
+    what: "a scalar split",
+    value: { ...entry("2026-06-01"), split: 60 },
+    accepts: false,
+    reason: "split-shape",
+  },
+  // guard 7 — both parts finite and non-negative
+  {
+    what: "a zero wealth part with positive reserve",
+    value: { ...entry("2026-06-01"), split: { wealth: 0, reserve: 1 } },
+    accepts: true,
+  },
+  {
+    what: "a negative reserve part",
+    value: { ...entry("2026-06-01"), split: { wealth: 60, reserve: -40 } },
+    accepts: false,
+    reason: "split-parts",
+  },
+  {
+    what: "a missing wealth part",
+    value: { ...entry("2026-06-01"), split: { reserve: 40 } },
+    accepts: false,
+    reason: "split-parts",
+  },
+  // guard 8 — positive denominator
+  {
+    what: "a 0/0 split",
+    value: { ...entry("2026-06-01"), split: { wealth: 0, reserve: 0 } },
+    accepts: false,
+    reason: "split-denominator",
+  },
+];
+
+describe("validateProfitPolicyEntry — the SHAPE changed, the VERDICT did not", () => {
+  it.each(VERDICTS)("$what → $accepts", async ({ value, accepts, reason }) => {
+    const path = await tempPath();
+    await writeFile(path, `${JSON.stringify(value)}\n`, "utf8");
+    const loaded = await loadPreferences(path);
+    expect(loaded.entries).toHaveLength(accepts ? 1 : 0);
+    expect(loaded.skipped.map((s) => s.reason)).toEqual(reason === undefined ? [] : [reason]);
+  });
+
+  it("the JSON gate rejects a line that does not parse", async () => {
+    const path = await tempPath();
+    await writeFile(path, "{ not valid json\n", "utf8");
+    const loaded = await loadPreferences(path);
+    expect(loaded.entries).toEqual([]);
+    expect(loaded.skipped.map((s) => s.reason)).toEqual(["not-json"]);
+  });
+});
+
+describe("loadPreferences — the discard channel reports every skip it makes", () => {
+  it("reports one addressable, categorized record per discarded line", async () => {
+    const path = await tempPath();
+    // Line 1 valid, line 2 not JSON, line 3 JSON but outside the splitBasis enum.
+    const contents = [
+      JSON.stringify(entry("2026-06-01")),
+      "{ not valid json",
+      JSON.stringify({ ...entry("2026-06-05"), splitBasis: "lifetime" }),
+    ].join("\n");
+    await writeFile(path, `${contents}\n`, "utf8");
+
+    const loaded = await loadPreferences(path);
+
+    expect(loaded.load.status).toBe("loaded");
+    expect(loaded.entries.map((e) => e.effectiveAt)).toEqual(["2026-06-01"]);
+    expect(loaded.skipped).toHaveLength(2);
+    expect(loaded.skipped.map((s) => s.line)).toEqual([2, 3]); // 1-BASED
+    expect(loaded.skipped.map((s) => s.reason)).toEqual(["not-json", "split-basis"]);
+    // Prose only — no substring of the rejected line ever rides in the detail.
+    for (const skip of loaded.skipped) {
+      expect(skip.detail.length).toBeGreaterThan(0);
+      expect(skip.detail).not.toContain("lifetime");
+      expect(skip.detail).not.toContain("not valid json");
+    }
   });
 });
 
@@ -205,11 +463,11 @@ describe("non-monotonic file — deterministic as-of replay through the selector
     await appendLine(path, entry("2026-06-01", "highWaterMark"));
 
     const loaded = await loadPreferences(path);
-    expect(loaded.map((e) => e.effectiveAt)).toEqual(["2026-06-10", "2026-06-01"]); // append order kept
+    expect(loaded.entries.map((e) => e.effectiveAt)).toEqual(["2026-06-10", "2026-06-01"]); // append order kept
 
-    expect(pickPolicyAsOf(loaded, "2026-06-05")?.splitBasis).toBe("highWaterMark");
-    expect(pickPolicyAsOf(loaded, "2026-06-20")?.splitBasis).toBe("perClose");
-    expect(pickPolicyAsOf(loaded)?.splitBasis).toBe("perClose");
+    expect(pickPolicyAsOf(loaded.entries, "2026-06-05")?.splitBasis).toBe("highWaterMark");
+    expect(pickPolicyAsOf(loaded.entries, "2026-06-20")?.splitBasis).toBe("perClose");
+    expect(pickPolicyAsOf(loaded.entries)?.splitBasis).toBe("perClose");
   });
 });
 

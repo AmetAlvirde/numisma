@@ -18,9 +18,12 @@
  *     no whole-file overwrite, so prior bytes survive even when every line is quarantined.
  *   - The loader VALIDATES every line on read (`loadPreferences`): shape, a present &
  *     parseable `effectiveAt`, a split whose Reserve fraction lands in [0, 1], and a
- *     `splitBasis` in the enum. Malformed/garbage lines are QUARANTINED (dropped from
- *     the result) rather than thrown through or allowed to corrupt as-of replay; blank
- *     lines are tolerated.
+ *     `splitBasis` in the enum. A malformed/garbage line is discarded rather than thrown
+ *     through or allowed to corrupt as-of replay — and the discard is REPORTED, not
+ *     swallowed: `loadPreferences` returns a `LoadedPreferences` envelope carrying the
+ *     load outcome, the accepted entries, and one addressable `skipped` record per
+ *     discarded line. Blank lines are tolerated and are not discards. The loader is
+ *     TOTAL: an unreadable file is a `load-failed` outcome, never a thrown error.
  *   - Ordering contract: the loader preserves the file's append order; the pure engine
  *     selector `pickPolicyAsOf` owns as-of ordering (it sorts by `effectiveAt`, so a
  *     non-monotonic file replays deterministically).
@@ -31,7 +34,10 @@ import {
   defaultProfitPolicyEntry,
   isIsoCalendarDate,
   resolveDataDir,
+  type LoadedPreferences,
+  type PreferenceSkipReason,
   type ProfitPolicyEntry,
+  type SkippedPreferenceLine,
   type SplitBasis,
 } from "@numisma/engine";
 
@@ -61,16 +67,52 @@ function isFiniteNonNegative(value: unknown): value is number {
 }
 
 /**
- * Validate ONE untrusted sidecar value into a well-formed `ProfitPolicyEntry`, or
- * return `undefined` so the loader can quarantine the line. Rejects: a non-object;
- * an `effectiveAt` that is not a strict ISO `YYYY-MM-DD` calendar date; a `splitBasis`
- * outside the enum; a non-string `routingReserveId`; a `reserveTargetPct` that is not
- * a finite percentage in [0, 100]; and any split whose parts are non-finite/negative
- * or whose denominator (wealth + reserve) is not positive.
+ * The validator's answer: the entry it accepted, or the CLOSED-vocabulary reason the
+ * line was rejected. A discriminated result rather than `ProfitPolicyEntry | undefined`
+ * because `undefined` erases WHICH of the eight guards fired, and the Discard Channel's
+ * whole point is that a discard is a value the caller receives.
  */
-function validateProfitPolicyEntry(value: unknown): ProfitPolicyEntry | undefined {
+type ValidatedEntry =
+  | { ok: true; entry: ProfitPolicyEntry }
+  | { ok: false; reason: Exclude<PreferenceSkipReason, "not-json"> };
+
+/**
+ * Fixed prose for each rejection reason — the operator-facing half of a discard.
+ *
+ * PROSE-ONLY, and never built by interpolating the rejected line: a diagnostic that
+ * echoes file content launders it into terminals, log files and CI output. The `line`
+ * number is the addressability; this is the category in words.
+ */
+const SKIP_DETAIL: Record<PreferenceSkipReason, string> = {
+  "not-json": "line is not JSON",
+  "not-an-object": "line is JSON but not an object",
+  "effective-at": "effectiveAt is not a strict ISO YYYY-MM-DD calendar date",
+  "split-basis": "splitBasis is not one of the supported bases",
+  "routing-reserve-id": "routingReserveId is missing, blank, or not a string",
+  "reserve-target-pct": "reserveTargetPct is not a finite percentage in [0, 100]",
+  "split-shape": "split is missing or not an object",
+  "split-parts": "a split part is not a finite, non-negative number",
+  "split-denominator": "split denominator (wealth + reserve) is not positive",
+};
+
+/**
+ * Validate ONE untrusted sidecar value into a well-formed `ProfitPolicyEntry`, or
+ * return the reason the loader must record. Rejects: a non-object; an `effectiveAt`
+ * that is not a strict ISO `YYYY-MM-DD` calendar date; a `splitBasis` outside the enum;
+ * a non-string `routingReserveId`; a `reserveTargetPct` that is not a finite percentage
+ * in [0, 100]; and any split whose parts are non-finite/negative or whose denominator
+ * (wealth + reserve) is not positive.
+ *
+ * The SET OF ACCEPTED VALUES IS EXACTLY WHAT IT WAS before this function started
+ * naming its reasons — the shape changed, the verdict did not. Every guard below is
+ * byte-for-byte the predicate it was; only the `return` grew a reason. The
+ * accept/reject parity test in `preferences-reliable.test.ts` is what makes that
+ * checkable rather than promised, so a future edit that tightens or loosens a guard
+ * here has to argue with a test rather than slip past a docstring.
+ */
+function validateProfitPolicyEntry(value: unknown): ValidatedEntry {
   if (typeof value !== "object" || value === null) {
-    return undefined;
+    return { ok: false, reason: "not-an-object" };
   }
   const entry = value as Record<string, unknown>;
 
@@ -91,83 +133,118 @@ function validateProfitPolicyEntry(value: unknown): ProfitPolicyEntry | undefine
   // legitimate `"2026-01-31"` alone. The amendment cited this file as the precedent
   // for the class; it is applied here now rather than only claimed.
   if (!isIsoCalendarDate(entry.effectiveAt)) {
-    return undefined;
+    return { ok: false, reason: "effective-at" };
   }
   const effectiveAt = entry.effectiveAt;
 
   if (!isSplitBasis(entry.splitBasis)) {
-    return undefined;
+    return { ok: false, reason: "split-basis" };
   }
 
   if (typeof entry.routingReserveId !== "string" || entry.routingReserveId.trim() === "") {
-    return undefined;
+    return { ok: false, reason: "routing-reserve-id" };
   }
 
   // A NAV-share target is a percentage: finite and in [0, 100]. An absurd 150%/500%
   // target would otherwise flow verbatim into the "vs X% target" dashboard line.
   if (!isFiniteNonNegative(entry.reserveTargetPct) || entry.reserveTargetPct > 100) {
-    return undefined;
+    return { ok: false, reason: "reserve-target-pct" };
   }
 
   const split = entry.split;
   if (typeof split !== "object" || split === null) {
-    return undefined;
+    return { ok: false, reason: "split-shape" };
   }
   const { wealth, reserve } = split as Record<string, unknown>;
   if (!isFiniteNonNegative(wealth) || !isFiniteNonNegative(reserve)) {
-    return undefined;
+    return { ok: false, reason: "split-parts" };
   }
   // denominator > 0 with both parts non-negative already forces the Reserve fraction
   // reserve / (wealth + reserve) into [0, 1]; the positive-denominator check is the
   // only ratio guard needed (a zero split like 0/0 is the degenerate case rejected).
   if (wealth + reserve <= 0) {
-    return undefined;
+    return { ok: false, reason: "split-denominator" };
   }
 
   return {
-    effectiveAt,
-    split: { wealth, reserve },
-    splitBasis: entry.splitBasis,
-    routingReserveId: entry.routingReserveId,
-    reserveTargetPct: entry.reserveTargetPct,
+    ok: true,
+    entry: {
+      effectiveAt,
+      split: { wealth, reserve },
+      splitBasis: entry.splitBasis,
+      routingReserveId: entry.routingReserveId,
+      reserveTargetPct: entry.reserveTargetPct,
+    },
   };
 }
 
 /**
- * Read the append-only sidecar into ordered, VALIDATED entries. A missing file = no
- * policy (`[]`). Blank lines are tolerated; a line that is not JSON, or is JSON of the
- * wrong shape / range, is QUARANTINED (skipped) so a single corrupt line can neither
- * throw through nor silently corrupt as-of replay. Append order is preserved.
+ * Read the append-only sidecar into ordered, VALIDATED entries AND the report of every
+ * line it had to discard — the Discard Channel: the discard is not a side effect and
+ * never nothing at all, it is a value the caller receives whether or not it looks.
+ *
+ * TOTAL — it does not throw. Discarding is a normal outcome of reading untrusted input:
+ *
+ *   - **The file is absent (`ENOENT`) → `loaded`, empty buckets.** The NORMAL STARTING
+ *     STATE for a fund that has not set a policy yet, not a failure.
+ *   - **Any other read error → `load-failed`, empty buckets.** This REPLACES the rethrow
+ *     this loader used to do, and the distinction it buys is load-bearing: empty
+ *     `entries` alone would assert "this fund has no policy" when the truth is "the
+ *     policy file could not be read", and downstream that difference is a Reserve floor
+ *     suppressed on the phone for a reason nobody can see.
+ *   - **A bad line → one `skipped` record, and the read continues.** One 1-based line
+ *     number, one closed-vocabulary reason, fixed prose that never quotes the line.
+ *
+ * Blank (and whitespace-only) lines are the one DELIBERATE drop and produce no record —
+ * a trailing newline is not something an operator did wrong. Append order is preserved
+ * in `entries`; `pickPolicyAsOf` owns as-of ordering.
  */
-export async function loadPreferences(path: string): Promise<ProfitPolicyEntry[]> {
+export async function loadPreferences(path: string): Promise<LoadedPreferences> {
   let raw: string;
   try {
     raw = await readFile(path, "utf8");
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return [];
+      return { load: { status: "loaded", sourcePath: path }, entries: [], skipped: [] };
     }
-    throw error;
+    return {
+      load: {
+        status: "load-failed",
+        sourcePath: path,
+        message: error instanceof Error ? error.message : String(error),
+      },
+      entries: [],
+      skipped: [],
+    };
   }
   const entries: ProfitPolicyEntry[] = [];
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim();
+  const skipped: SkippedPreferenceLine[] = [];
+  const lines = raw.split("\n");
+  for (let index = 0; index < lines.length; index += 1) {
+    const lineNumber = index + 1; // 1-BASED, so the operator can go look at it
+    const trimmed = (lines[index] ?? "").trim();
     if (!trimmed) {
-      continue; // tolerate blank lines
+      continue; // tolerate blank lines — the one deliberate drop, and not a discard
     }
     let parsed: unknown;
     try {
       parsed = JSON.parse(trimmed);
     } catch {
-      continue; // quarantine: not valid JSON
+      skipped.push({ line: lineNumber, reason: "not-json", detail: SKIP_DETAIL["not-json"] });
+      continue;
     }
-    const entry = validateProfitPolicyEntry(parsed);
-    if (entry) {
-      entries.push(entry);
+    const validated = validateProfitPolicyEntry(parsed);
+    if (validated.ok) {
+      entries.push(validated.entry);
+    } else {
+      skipped.push({
+        line: lineNumber,
+        reason: validated.reason,
+        detail: SKIP_DETAIL[validated.reason],
+      });
     }
-    // else quarantine: valid JSON but not a well-formed policy entry
   }
-  return entries;
+  return { load: { status: "loaded", sourcePath: path }, entries, skipped };
 }
 
 /**
@@ -182,7 +259,13 @@ export async function loadPreferences(path: string): Promise<ProfitPolicyEntry[]
  * lock + temp + rename contract of `orders.ts`, instead of inheriting the rejected shape.
  *
  * Seeding still preserves history: it appends rather than rewriting, so the one file it
- * can meet non-empty — every line quarantined by the loader — keeps its bytes for repair.
+ * can meet non-empty — every line discarded by the loader — keeps its bytes for repair.
+ * That state is now VISIBLE rather than inferred: the same load whose `entries` are
+ * empty carries a `skipped` record per discarded line, so "no policy yet" and "a policy
+ * file every line of which was rejected" are distinguishable at the call site. This
+ * seeder deliberately does not act on that distinction — it reads `entries` and nothing
+ * else. It is a writer, not a reporting surface, and its own return stays
+ * `ProfitPolicyEntry[]`.
  *
  * This is a SEED FOR A NEW SIDECAR, and it is NOT a read-gap fallback — the distinction
  * is load-bearing. It writes `defaultProfitPolicyEntry`, whose `reserveTargetPct` is
@@ -198,8 +281,8 @@ export async function seedDefaultPreferences(
   routingReserveId: string,
 ): Promise<ProfitPolicyEntry[]> {
   const existing = await loadPreferences(path);
-  if (existing.length > 0) {
-    return existing;
+  if (existing.entries.length > 0) {
+    return existing.entries;
   }
   const seeded = defaultProfitPolicyEntry(effectiveAt, routingReserveId);
   await mkdir(dirname(path), { recursive: true });
