@@ -184,7 +184,7 @@ describe("the quiet Sunday (the case V1 exists to protect)", () => {
       return;
     }
 
-    const data = await loadFoldedReview(resolveEventStorePaths(), QUIET_SUNDAY);
+    const { data } = await loadFoldedReview(resolveEventStorePaths(), QUIET_SUNDAY);
     const report = buildCompositionReport(data);
     // Guard against the fold silently answering a different question than the one
     // asked: every assertion below is about THIS anchor.
@@ -243,7 +243,7 @@ describe("the quiet Sunday (the case V1 exists to protect)", () => {
     const previous = anchors[anchors.findIndex((a) => a.asOf === QUIET_SUNDAY) - 1];
     expect(previous).toBeDefined();
     const priorFold = buildCompositionReport(
-      await loadFoldedReview(resolveEventStorePaths(), previous!.asOf),
+      (await loadFoldedReview(resolveEventStorePaths(), previous!.asOf)).data,
     );
     const recordedRatio =
       anchorAt(anchors, QUIET_SUNDAY).report.totals.fundValueUsd /
@@ -268,7 +268,7 @@ describe("the quiet Sunday (the case V1 exists to protect)", () => {
       skip();
       return;
     }
-    const data = await loadFoldedReview(resolveEventStorePaths(), QUIET_SUNDAY);
+    const { data } = await loadFoldedReview(resolveEventStorePaths(), QUIET_SUNDAY);
     const marked = new Set(
       (data.closes ?? [])
         .filter((c) => c.asOf === QUIET_SUNDAY)

@@ -102,7 +102,7 @@ async function exists(path: string): Promise<boolean> {
 }
 
 async function navOf(paths: EventStorePaths): Promise<number> {
-  return buildCompositionReport(await loadFoldedReview(paths)).totals.fundValueUsd;
+  return buildCompositionReport((await loadFoldedReview(paths)).data).totals.fundValueUsd;
 }
 
 describe("ReserveOpened through the real ingest path", () => {
@@ -115,7 +115,7 @@ describe("ReserveOpened through the real ingest path", () => {
       duplicateCount: 0,
     });
 
-    const data = await loadFoldedReview(paths);
+    const { data } = await loadFoldedReview(paths);
     const born = data.reserves.find((reserve) => reserve.id === "capital-cash");
     expect(born?.amount).toBe(400);
     // The tier rides across: a real c2 lot, not an untiered amount.
@@ -160,7 +160,7 @@ describe("ReserveOpened through the real ingest path", () => {
     expect(await exists(paths.inbox)).toBe(true);
 
     // And the cash never moved: NAV is 1000, to the last digit, not 600.
-    const data = await loadFoldedReview(paths);
+    const { data } = await loadFoldedReview(paths);
     expect(data.reserves.map((reserve) => reserve.id)).toEqual(["pulse-cash"]);
     expect(data.reserves.find((reserve) => reserve.id === "pulse-cash")?.amount).toBe(1000);
     expect(await navOf(paths)).toBe(1000);

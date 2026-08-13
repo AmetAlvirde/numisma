@@ -51,6 +51,17 @@ function markAapl(price: number, id = "mark-aapl") {
   return { id, asOf: "2026-06-06", type: "PriceMarked", instrumentId: "aapl-usd", price };
 }
 
+/** A close whose target the fold has no record of — one silent drop, authored here. */
+function closeGhost(id = "close-ghost") {
+  return {
+    id,
+    asOf: "2026-06-07",
+    type: "PositionClosed",
+    positionId: "ghost-core",
+    settlement: { reserveId: "cash-core", proceeds: 300 },
+  };
+}
+
 const createdDirs: string[] = [];
 
 afterEach(async () => {
@@ -129,6 +140,31 @@ describe("loadEventLog — log-line quarantine", () => {
     // The bad line is still surfaced to the side lane for the operator to fix.
     const lane = await readFile(quarantineLogPath(paths.log), "utf8");
     expect(lane).toContain("{ broken");
+  });
+
+  it("refuses what could not be read, reports what was read and then dropped", async () => {
+    // PRD #323 seam B, the pair in one test because the pair is the point: the shell
+    // REFUSES a log it could not fully read, and REPORTS what it read and then dropped.
+    // The first is remediable (fix the line, the next run is clean); the second is a
+    // standing fact about an append-only log, so it reports and never refuses (#320 §4).
+    const dropped = `${JSON.stringify(openBtc())}\n${JSON.stringify(closeGhost())}\n`;
+
+    // REPORT: the drop rides out on the envelope, unmodified — the shell is a pipe.
+    const clean = await makeStore({ log: dropped });
+    const folded = await loadFoldedReview(clean);
+    expect(folded.skipped).toHaveLength(1);
+    expect(folded.skipped[0]).toMatchObject({
+      eventId: "close-ghost",
+      index: 1,
+      verb: "PositionClosed",
+      reason: "position-absent",
+    });
+    // And the fold itself is untouched: the open still applied.
+    expect(folded.data.positions.map((position) => position.id)).toContain("btc-core");
+
+    // REFUSE: the same log with one unloadable line throws BEFORE any envelope exists.
+    const partial = await makeStore({ log: `${dropped}{ broken\n` });
+    await expect(loadFoldedReview(partial)).rejects.toThrow(/unloadable line/i);
   });
 
   it("self-heals: a clean log removes a stale quarantine lane", async () => {

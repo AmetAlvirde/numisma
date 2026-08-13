@@ -103,6 +103,9 @@ export async function prepareStartup(
   return {
     asOf,
     sourcePath,
-    loadData: () => loadFoldedReview(paths, asOf),
+    // `.data` is the render half of the fold's envelope. The thunk stays
+    // `FundReviewData`-shaped for now because widening it is the TUI enumeration, which
+    // is PRD #323 slice E's work — not a shim for this seam, which ends at the shell.
+    loadData: async () => (await loadFoldedReview(paths, asOf)).data,
   };
 }

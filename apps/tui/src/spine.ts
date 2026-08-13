@@ -46,7 +46,9 @@ try {
       "\n\n",
   );
 
-  const data = await loadFoldedReview(paths, asOf);
+  // `.data` is the render half of the fold's envelope; the `skipped` half reaches this
+  // surface in PRD #323 slice E.
+  const { data } = await loadFoldedReview(paths, asOf);
   const report = buildCompositionReport(data, {
     load: {
       status: "loaded",

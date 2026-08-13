@@ -50,7 +50,10 @@ try {
       assertLogFullyLoaded(load, paths.log);
       return load.events;
     },
-    loadFolded: () => loadFoldedReview(paths),
+    // `.data` is the render half of the fold's envelope. This CLI renders the discard
+    // summary line before it acts in PRD #323 slice E (R7 — recording a fill over a
+    // damaged-history fold is when the marker is worth the most); it is silent for now.
+    loadFolded: async () => (await loadFoldedReview(paths)).data,
     ask: (question) => rl.question(question),
     out: (message) => process.stdout.write(message),
     err: (message) => process.stderr.write(`${message}\n`),

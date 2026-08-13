@@ -44,7 +44,9 @@ if (!csvPath) {
         // different reserve set than the rendered report reads, and stripped the
         // currency it needed to refuse a cross-currency rung (#172). Admission is the
         // engine's policy, not this wiring's.
-        fundReview: () => loadFoldedReview(resolveEventStorePaths()),
+        // `.data` is the render half of the fold's envelope; this CLI renders the
+        // discard summary line in PRD #323 slice E and is silent for now.
+        fundReview: async () => (await loadFoldedReview(resolveEventStorePaths())).data,
         // THE PLANS SIDECAR, READ-ONLY (#286): the import proposes a rung against the
         // ladders in force and never writes a plan line. `loadPlans` is TOTAL — it reports
         // an unreadable file rather than throwing — and the flow decides what an

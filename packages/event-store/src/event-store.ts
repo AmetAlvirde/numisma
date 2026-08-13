@@ -26,6 +26,7 @@ import {
   parseEvent,
   parseFundReview,
   resolveDataDir,
+  type FoldedReview,
   type FundReviewData,
   type PortfolioEvent,
 } from "@numisma/engine";
@@ -186,18 +187,39 @@ async function surfaceQuarantine(logPath: string, quarantined: QuarantinedLine[]
  * (or current state) for rendering. A pure READ: it does NOT ingest — the inbox is
  * never consulted and the durable log is never written (only `loadEventLog`'s
  * quarantine sidecar moves).
+ *
+ * THE REFUSE/REPORT PAIR — the shell's whole epistemic split, and the reason this
+ * function is worth reading before touching either half:
+ *
+ *  - **Refuse what could not be read.** {@link assertLogFullyLoaded} throws on a
+ *    quarantined line, so a partial log never becomes a fold. That failure is
+ *    REMEDIABLE: the operator fixes or migrates the line and the next run is clean,
+ *    so refusing is an errand that extinguishes itself.
+ *  - **Report what was read and then dropped.** `foldEvents` returns
+ *    {@link FoldedReview} — `{data, skipped}` — and every event it read but could not
+ *    apply (a verb naming a position or reserve it has no record of) rides out in
+ *    `skipped`. That fact is IMMUTABLE: the locator points into an append-only durable
+ *    log, so there is no line to fix and the report never extinguishes. Refusing on it
+ *    would brick every future read over one damaged historical event.
+ *
+ * That pair IS the Discard Channel's remediable/immutable distinction rendered in code
+ * (the idiom's clause 3, #320 §4; PRD #323 seam B, implementing #293).
+ *
+ * IT RETURNS THE ENVELOPE AND UNWRAPS NOTHING. Returning `.data` here would reproduce
+ * #293 exactly one layer up — the caller would again hold a `FundReviewData`
+ * indistinguishable from one folded off a complete log. THE SHELL IS A PIPE, NOT A
+ * FILTER: it adds, removes and reorders nothing in `skipped`. And there is deliberately
+ * no `loadFoldedReviewWithDiscards` beside a bare-data original: a side channel a caller
+ * must remember to ask for is the failure mode #320 §4 rules out (PRD #323 R4).
  */
 export async function loadFoldedReview(
   paths: EventStorePaths,
   asOf?: string,
-): Promise<FundReviewData> {
+): Promise<FoldedReview> {
   const genesis = await loadGenesis(paths.genesis);
   const load = await loadEventLog(paths.log);
   assertLogFullyLoaded(load, paths.log);
-  // SLICE-A SHIM — replaced in PRD #323 slice B, which makes this function return the
-  // envelope so the shell propagates the fold's discards instead of swallowing them
-  // (unwrapping here reproduces #293 one layer up). Signature unchanged for now.
-  return foldEvents(genesis, load.events, asOf).data;
+  return foldEvents(genesis, load.events, asOf);
 }
 
 /**
