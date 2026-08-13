@@ -29,6 +29,7 @@ import {
   runBackfill,
   writeAnchorFixture,
 } from "./backfill-core.ts";
+import { projectionPoolConfig } from "./projection-pool.ts";
 
 async function main(): Promise<void> {
   // `argv.slice(2)` drops the node binary and this script's own path; the parser and
@@ -44,8 +45,15 @@ async function main(): Promise<void> {
     throw new Error("PROJECTION_WRITE_DATABASE_URL is not set");
   }
 
+  // `projectionPoolConfig`, never a bare `{ connectionString }`: this command runs
+  // unattended under launchd, and a pool with no client-side query deadline wedged
+  // the 2026-08-11 22:01 run for twenty hours when the laptop slept mid-backfill.
+  // The full account, and why `query_timeout` is the only setting that covers it,
+  // is in projection-pool.ts.
   const pool =
-    fixtureOnly || !connectionString ? undefined : new Pool({ connectionString });
+    fixtureOnly || !connectionString
+      ? undefined
+      : new Pool(projectionPoolConfig(connectionString));
   try {
     const results = await runBackfill({
       pool,
