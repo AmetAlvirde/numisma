@@ -208,4 +208,41 @@ describe("the launchd fetch window", () => {
     const declared = /^MARKS_LANDED_STEPS="([^"]+)"$/m.exec(wrapper)?.[1]?.split(" ");
     expect(declared).toEqual(afterSpine);
   });
+
+  it("bounds a wedged run inside the gap between fires, so the next one is not skipped", () => {
+    // THE ORACLE IS THE PLIST, WHICH IS WHY THIS LIVES HERE. The wrapper's watchdog
+    // ceiling is only meaningful relative to how often launchd actually fires: the
+    // whole point is that a hung run is dead and the job slot released BEFORE the
+    // next fire, so the hourly schedule's own retry still works.
+    //
+    // This is a real, observed failure, not a hypothetical. On 2026-08-11 the 22:01
+    // run wedged on a dead socket mid-backfill and was still alive twenty hours
+    // later; because launchd is a per-label singleton, it would have eaten the
+    // entire next evening's window too. Tightening the plist's intervals without
+    // tightening the ceiling silently restores that, and nothing else would catch it
+    // — the two files never reference each other.
+    const wrapper = readFileSync(WRAPPER_PATH, "utf8");
+    const ceiling = Number(
+      /^MAX_RUN_SECONDS="\$\{NUMISMA_PRICEFEED_MAX_RUN_SECONDS:-(\d+)\}"$/m.exec(wrapper)?.[1],
+    );
+    const grace = Number(
+      /^WATCHDOG_GRACE_SECONDS="\$\{NUMISMA_PRICEFEED_WATCHDOG_GRACE_SECONDS:-(\d+)\}"$/m.exec(
+        wrapper,
+      )?.[1],
+    );
+    expect(Number.isFinite(ceiling)).toBe(true);
+    expect(Number.isFinite(grace)).toBe(true);
+
+    // The SMALLEST gap between consecutive fires, not the nominal hour: if anyone
+    // ever adds a half-past interval, the tightest pair is what the ceiling has to
+    // clear. Sorted by minute-of-day; the day does not wrap because the schedule is
+    // pinned to a single 18:00-23:00 block by the assertions above.
+    const minutesOfDay = parseIntervals()
+      .map(({ Hour, Minute }) => Hour! * 60 + Minute!)
+      .sort((a, b) => a - b);
+    const smallestGapSeconds =
+      Math.min(...minutesOfDay.slice(1).map((m, i) => m - minutesOfDay[i]!)) * 60;
+
+    expect(ceiling + grace).toBeLessThan(smallestGapSeconds);
+  });
 });

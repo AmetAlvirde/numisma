@@ -27,6 +27,7 @@
  * and recovery paths it is for.
  */
 import { Pool } from "pg";
+import { projectionPoolConfig } from "./projection-pool.ts";
 import { readSchemaDdl } from "../projection/provision.ts";
 import {
   buildDcaForAnchor,
@@ -81,7 +82,11 @@ async function main(): Promise<void> {
   const glance = fold ? await buildGlanceForAnchor(fold) : undefined;
   const dca = fold ? await buildDcaForAnchor(fold) : undefined;
 
-  const pool = new Pool({ connectionString });
+  // Same deadlines as `backfill`, and for the same reason — this command is the
+  // other unattended projection writer, so it is exposed to the identical dead-socket
+  // hang (projection-pool.ts). It was not the command that wedged on 2026-08-11 only
+  // because the wrapper calls `backfill`; nothing about `push` made it safe.
+  const pool = new Pool(projectionPoolConfig(connectionString));
   try {
     if (doInit) {
       await initSchema(pool);

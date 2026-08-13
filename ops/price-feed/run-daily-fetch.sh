@@ -57,6 +57,12 @@ PATH_PREPEND="${NUMISMA_PATH_PREPEND:-$HOME/.asdf/shims:$HOME/Library/pnpm:/opt/
 # commit, because the heartbeat trap below must know where to write BEFORE the
 # exit-127 checks — which are the very failures the heartbeat exists to record.
 DATA_DIR="${NUMISMA_DATA_DIR:-$HOME/Dev/accumulus/data}"
+# Wall-clock ceiling on the WHOLE run, enforced by the watchdog below. Must stay
+# comfortably under the 3600s gap between scheduled fires; the reasoning and the
+# guard are at the watchdog itself. 0 disables it (manual debugging only).
+MAX_RUN_SECONDS="${NUMISMA_PRICEFEED_MAX_RUN_SECONDS:-2700}"
+# How long the watchdog waits after SIGTERM before escalating to SIGKILL.
+WATCHDOG_GRACE_SECONDS="${NUMISMA_PRICEFEED_WATCHDOG_GRACE_SECONDS:-30}"
 # ----------------------------------------------------------------------------
 
 # Give the scheduled (non-login) job a deterministic PATH that can find pnpm. This
@@ -141,9 +147,28 @@ if [[ -f "$HEARTBEAT_FILE" ]]; then
     's/.*"lastMarkWindowFinishedAt"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
     "$HEARTBEAT_FILE" 2>/dev/null | head -n1)" || CARRIED_MARK_WINDOW_AT=""
   # A schemaVersion-1 file predates this field, and every v1 run was treated as
-  # in-window — so its `finishedAt` IS the last in-window finish. Only fall back
-  # when the previous run did not explicitly declare itself out-of-window.
-  if [[ -z "$CARRIED_MARK_WINDOW_AT" ]] && ! grep -q '"markWindow"[[:space:]]*:[[:space:]]*false' "$HEARTBEAT_FILE" 2>/dev/null; then
+  # in-window — so its `finishedAt` IS the last in-window finish.
+  #
+  # GATED POSITIVELY ON v1, and the negative gate it replaces was a real bug. That
+  # version fell back whenever the file did not say `"markWindow": false`, which is
+  # true of a perfectly ordinary v2 file: an IN-WINDOW run that died before `spine`
+  # correctly omits `lastMarkWindowFinishedAt` (it marked nothing) while carrying
+  # `"markWindow": true`. The old condition read that omission as "v1" and promoted
+  # the failure's own `finishedAt` into a marked-day stamp — manufacturing evidence
+  # that the day was covered out of a run that covered nothing, and silencing the
+  # staleness warning on exactly the morning it was needed. That is the same failure
+  # the `MARKS_LANDED_STEPS` comment above is at pains to avoid, re-entered through
+  # the compatibility path.
+  #
+  # LATENT BEFORE, REACHABLE NOW. It needed an in-window run that failed before
+  # `spine` and left a v2 file — uncommon. The watchdog makes exactly that shape
+  # routine (a timed-out run is in-window and unmarked by construction), so it is
+  # fixed here rather than left for the fix to start tripping.
+  #
+  # Matching v1 EXPLICITLY rather than "not v2" keeps a future v3 on the correct
+  # side by default: an unrecognised newer file declines the fallback, which fails
+  # closed to an unset carry — the same direction every other guard here leans.
+  if [[ -z "$CARRIED_MARK_WINDOW_AT" ]] && grep -q '"schemaVersion"[[:space:]]*:[[:space:]]*1[[:space:]]*,' "$HEARTBEAT_FILE" 2>/dev/null; then
     CARRIED_MARK_WINDOW_AT="$(sed -n \
       's/.*"finishedAt"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
       "$HEARTBEAT_FILE" 2>/dev/null | head -n1)" || CARRIED_MARK_WINDOW_AT=""
@@ -184,6 +209,45 @@ fi
 # already run, so it can never dirty the tree it just verified.
 write_heartbeat() {
   HEARTBEAT_STATUS=$?
+  # Never let a dead stdout kill the writer. The EXIT path reaches here from the
+  # watchdog's TERM (where `tee` is already gone) as well as from a clean finish,
+  # and a SIGPIPE partway through would lose the whole breadcrumb. Set here TOO, not
+  # only in the TERM handler, because this trap also runs on paths that never passed
+  # through it. Cheap, idempotent, and the failure it prevents is silent.
+  trap '' PIPE
+  # CANCEL THE WATCHDOG FIRST — before the early `return 0` below, and before any
+  # work that could fail. A watchdog left sleeping is not a harmless stray: it sits
+  # in this run's process group, so launchd's per-label singleton still considers
+  # the job RUNNING and skips the next fire. That is precisely the failure the
+  # watchdog was added to prevent, re-created by the fix for it.
+  #
+  # SIGKILL, not SIGTERM, and it is not brutality: the watchdog holds `trap '' TERM`
+  # so it can outlive the group-TERM it sends, which also makes it deaf to a polite
+  # request from here. `:-` because the EXIT trap is installed BEFORE the watchdog is
+  # armed and must survive the exit-127 paths, where this variable does not exist yet.
+  #
+  # KILL THE SUBSHELL *AND ITS `sleep`*, because killing the subshell alone does not
+  # stop it. `sleep` is a separate child process, so a bare `kill $WATCHDOG_PID`
+  # reaps the subshell and leaves the timer orphaned to init — and that orphan is
+  # not inert. It stays in this run's process group (so launchd's per-label
+  # singleton still counts the job as RUNNING and skips the next fire) and it still
+  # holds the inherited write end of the log pipe (so `tee` never sees EOF and never
+  # exits, keeping yet another group member alive). Observed exactly that way: a
+  # HEALTHY run reported "complete", then sat there with a stray `sleep`, a live
+  # `tee`, and a held job slot — the very failure this watchdog was added to end,
+  # re-created by the watchdog itself.
+  #
+  # Children are enumerated BEFORE the parent dies, while `pgrep -P` can still see
+  # them; once orphaned they reparent to init and that link is gone.
+  if [[ -n "${WATCHDOG_PID:-}" ]]; then
+    WATCHDOG_KIDS="$(pgrep -P "$WATCHDOG_PID" 2>/dev/null | tr '\n' ' ')"
+    kill -KILL "$WATCHDOG_PID" 2>/dev/null || true
+    # Unquoted ON PURPOSE: this is a space-separated PID list that must word-split,
+    # and it is empty on the ordinary path where the subshell had no live child.
+    # shellcheck disable=SC2086
+    [[ -n "$WATCHDOG_KIDS" ]] && kill -KILL $WATCHDOG_KIDS 2>/dev/null
+  fi
+  true
   [[ -d "$DATA_DIR" ]] || return 0
   HEARTBEAT_FINISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" || HEARTBEAT_FINISHED_AT="$STARTED_AT"
   # A run stamps itself as the last in-window run only if it was in the window AND
@@ -230,9 +294,123 @@ mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/price-feed-$STAMP.log"
 
 # Everything from here is tee'd to the per-run log AND the scheduler's stdout.
-exec > >(tee -a "$LOG_FILE") 2>&1
+#
+# THE `trap '' TERM PIPE` INSIDE THE SUBSTITUTION IS NOT DECORATION — it is what
+# makes the watchdog's teardown survivable. This `tee` is an ordinary member of the
+# run's process group, so the watchdog's group-TERM would otherwise kill it FIRST,
+# leaving the shell writing into a dead pipe while it tries to run its EXIT trap.
+# Measured, not feared: with `tee` killable, the heartbeat was lost on 3 of 5
+# timeout runs (the shell died of SIGPIPE partway through `exit`, before the trap
+# body was even entered) — losing the one breadcrumb the whole watchdog exists to
+# leave. Deaf to TERM, `tee` outlives the group signal, the pipe stays open through
+# teardown, and it then exits on its own when the shell closes the pipe at exit.
+# PIPE is ignored for the same defensive reason on its far side.
+#
+# The SIGKILL escalation still takes it, which is correct: that path is the hard
+# stop for a run that ignored TERM, and by then there is no orderly teardown left
+# to protect.
+exec > >(trap '' TERM PIPE; tee -a "$LOG_FILE") 2>&1
 
 echo "[$STAMP] price-feed daily run starting (repo=$REPO_DIR)"
+
+# --- the watchdog (#308 follow-up) ------------------------------------------
+# A WEDGED RUN IS A WORSE FAILURE THAN A RED ONE, and until 2026-08-11 nothing here
+# bounded it. That evening the 22:01 run reached step 6, opened a pool against Neon,
+# upserted 11 of 43 anchors, and the laptop slept. The TCP connection died silently
+# and node-postgres had no client-side deadline, so the query never settled. The run
+# was still sitting there twenty hours later.
+#
+# THE COST IS NOT THE LOST RUN, IT IS EVERY RUN AFTER IT. Three separate mechanisms
+# in this file assume a run ENDS:
+#   - the EXIT trap never fires, so job-heartbeat.json still describes the PREVIOUS
+#     run and reads perfectly healthy — the staleness channel goes quiet exactly
+#     when it is needed;
+#   - launchd is a per-label singleton (see this file's header, which relies on that
+#     fact to justify having no lock), so the wedged process HOLDS THE JOB SLOT and
+#     every remaining fire in the 18:00-23:00 window is skipped;
+#   - and per the plist header, once the CDMX date rolls `isFreshBar` refuses
+#     yesterday's bar, so each skipped evening is unrecoverable.
+# One dead socket therefore costs an unbounded run of days, with no signal at all.
+#
+# The pool now gives up on its own (apps/web/src/push/projection-pool.ts), which
+# covers the observed cause. THIS COVERS THE CATEGORY: any step that can block
+# forever — a provider socket, a git credential prompt, an NFS stall — is bounded
+# here without this file having to enumerate them.
+#
+# WHY THE CEILING IS 2700s. It has to beat the next fire, not the end of the window:
+# the point is that launchd's slot is free at the top of the next hour, so the
+# schedule's own hourly retry still works. Fires are 3600s apart, a healthy run
+# takes ~15 minutes, and 2700 + 30s grace leaves ~14 minutes of margin.
+# apps/price-feed/src/schedule-window.test.ts pins this against the plist's actual
+# interval, so shortening the interval without shortening this fails a test.
+#
+# WHY A HAND-ROLLED WATCHDOG. macOS ships no `timeout(1)` (that is GNU coreutils),
+# and this file's whole design principle is to depend on nothing that could itself
+# be the missing thing. A subshell and `sleep` are always there.
+#
+# THE SELF-TERM IS THE SUBTLE PART. The watchdog signals the PROCESS GROUP, because
+# the thing to kill is usually not this script — it is the node process three levels
+# down holding the dead socket, and TERMing only the parent would orphan it and
+# leave the slot held. But the watchdog is itself in that group, so it would kill
+# itself before it could escalate to SIGKILL; `trap '' TERM` makes it immune to the
+# signal it sends. The parent must therefore use SIGKILL to cancel it (below).
+#
+# GROUP-KILL ONLY WHEN WE ARE THE GROUP LEADER. Under launchd this script is its own
+# process group leader, which is what makes `kill -- -$$` safe. Run some other way
+# (sourced, or without job control) it may share its parent's group, and signalling
+# that group would kill the caller's whole session. In that case the watchdog is
+# DISABLED AND SAYS SO, rather than silently becoming a hazard: the unattended path
+# is the one that needs it, and that path always qualifies.
+RUN_PGID="$(ps -o pgid= -p $$ 2>/dev/null | tr -d '[:space:]')" || RUN_PGID=""
+WATCHDOG_PID=""
+
+# Turn the watchdog's SIGTERM into an ordinary `exit`, so the EXIT trap still runs
+# and the heartbeat records the timeout instead of the run dying by signal with no
+# breadcrumb. `LAST_STEP` is rewritten first, so the file names the step that hung —
+# "timeout:backfill" is the whole diagnosis in one field. 124 is the exit code GNU
+# `timeout` uses for this, borrowed so the number means something to a reader.
+#
+# `trap '' PIPE` FIRST, AND IT IS LOAD-BEARING. Stdout here is a pipe into the `tee`
+# that writes the per-run log, and that `tee` is in the process group the watchdog
+# signals — so by the time this handler runs, the far end of our own stdout is
+# usually already dead. Without this, the next write earns SIGPIPE and the shell
+# dies by signal 13 with the EXIT trap half-run, losing the heartbeat: the run
+# vanishes exactly as silently as the hang it was killed for. Observed directly —
+# two identical runs during development exited 124 and -13 respectively, on nothing
+# but timing. Ignoring PIPE turns that write into a harmless EPIPE.
+#
+# Ignoring PIPE here is the SECOND half of a two-part fix and does not stand alone:
+# the first half is the `trap '' TERM` inside the logging `tee` above, which is what
+# actually keeps this shell's stdout alive through teardown. With `tee` killable,
+# ignoring PIPE was measurably not enough — the shell still died partway through
+# `exit`, before this trap's body ran, on 3 of 5 timeout runs. Keep both; this one
+# costs nothing and covers any writer the group signal reaches first.
+trap 'trap "" PIPE; LAST_STEP="timeout:$LAST_STEP"; exit 124' TERM
+
+if [[ "$MAX_RUN_SECONDS" -le 0 ]]; then
+  echo "[$STAMP] watchdog DISABLED (NUMISMA_PRICEFEED_MAX_RUN_SECONDS=$MAX_RUN_SECONDS)"
+elif [[ -z "$RUN_PGID" || "$RUN_PGID" != "$$" ]]; then
+  echo "[$STAMP] watchdog DISABLED (not a process-group leader: pgid=${RUN_PGID:-unknown} pid=$$)"
+else
+  (
+    # TERM so it survives the group signal it is about to send (see above); PIPE so
+    # its own progress lines cannot kill it. The second one is not cosmetic: these
+    # echoes go to the same `tee` the group-TERM just killed, so without it the
+    # watchdog dies of SIGPIPE on the "escalating" line and THE SIGKILL IS NEVER
+    # SENT — the escalation path would be dead in precisely the case that needs it,
+    # a child that ignored TERM.
+    trap '' TERM PIPE
+    sleep "$MAX_RUN_SECONDS"
+    echo "[$STAMP] WATCHDOG: run exceeded ${MAX_RUN_SECONDS}s — terminating process group $RUN_PGID"
+    kill -TERM -- "-$RUN_PGID" 2>/dev/null || true
+    sleep "$WATCHDOG_GRACE_SECONDS"
+    echo "[$STAMP] WATCHDOG: escalating to SIGKILL after ${WATCHDOG_GRACE_SECONDS}s grace"
+    kill -KILL -- "-$RUN_PGID" 2>/dev/null || true
+  ) &
+  WATCHDOG_PID=$!
+  echo "[$STAMP] watchdog armed: ${MAX_RUN_SECONDS}s ceiling (pid $WATCHDOG_PID, pgid $RUN_PGID)"
+fi
+# ----------------------------------------------------------------------------
 
 # Load provider tokens from the private file if it exists. Nothing secret lives in
 # the repo (transaction-data-is-private); the file is machine-local, chmod 600.
