@@ -57,7 +57,13 @@ Sidecar", "Profit Split / Obligation", "Split Basis") lands separately in slice 
   on-load-validation disciplines. The sidecar loader validates each line on load — shape,
   `effectiveAt`, ratio, and the `splitBasis` enum — and rejects/quarantines malformed
   lines rather than throwing through or silently corrupting as-of replay (the ADR-003
-  fail-loud-on-a-bad-line posture, applied to the second file). The append-only write is
+  fail-loud-on-a-bad-line posture, applied to the second file). *(**Sharpened 2026-08-13
+  — spec #320, ADR-020.** "Rejects/quarantines" was only half of it, and the missing half
+  was the defect: the rejection was invisible to the caller. `loadPreferences` now
+  **reports** every discard as part of its own result, so the loud half of the ADR-003
+  posture this bullet claims is real rather than aspirational. The set of lines it
+  accepts is byte-for-byte unchanged — the shape moved, the verdict did not.)* The
+  append-only write is
   a genuine append (no truncating overwrite), so a later policy change never destroys the
   prior policy an earlier as-of view depends on. **This append-only + on-load-validation
   discipline *is* the architectural contract** — it is what makes the sidecar a durable
@@ -83,7 +89,17 @@ Sidecar", "Profit Split / Obligation", "Split Basis") lands separately in slice 
   (`packages/preferences/src/preferences.ts`). The **split** this bullet asserts is
   intact and is the part that mattered: the pure selector is still engine, the file IO
   is still outside it, and no engine code touches a file. Only the runtime package's
-  name changed.)*
+  name changed.)* *(**Two further corrections, 2026-08-13 — spec #320.** (a) *"the
+  append helper"* no longer exists: the exported `appendPreference` was deleted rather
+  than hardened (audit finding 34), leaving `seedDefaultPreferences`' inline one-line
+  append as the sidecar's only writer. (b) *"the validating `loadPreferences`"* still
+  validates, and now also **reports**: it returns a `LoadedPreferences` envelope —
+  load outcome, accepted entries, and one addressable record per discarded line —
+  under **ADR-020, the Discard Channel**, whose fourth clause puts the consequence in
+  `unattendedPreferencesVerdict` rather than in the loader. The ADR-001 split this
+  bullet asserts is untouched by both: the envelope and skip-record types are pure
+  contracts and live in `@numisma/engine` beside `ProfitPolicyEntry`; only the IO and
+  the verdict live outside it.)*
 
 ### The three SDP tests
 
@@ -195,7 +211,17 @@ Each was verified against the code before being corrected here.
    hazard is therefore **live, not hypothetical**, and the resolver is load-bearing
    today. The claim is corrected here; **the comment itself is left untouched by
    this increment**, which changes no code at all — it is a one-line fix owed to
-   the next change that opens that file.
+   the next change that opens that file. *(**The debt is PAID, 2026-08-13 — spec
+   #320.** Slice 1 opened `preferences.ts` for a reason of its own and rewrote
+   that docstring: it now states the read path is already wired and the
+   split-brain hazard live, not latent. Nothing above is withdrawn — the chain it
+   names still holds and is still the reason the resolver is load-bearing — but
+   the line numbers this item cites have all moved since it was written, so read
+   the chain by its function names: `loadPreferences(resolvePreferencesPath())`
+   inside `loadReserveFloorAsOf`, reached from `buildGlanceForAnchor`, which the
+   push and the backfill both call. That chain is now also where the sidecar's
+   discards are carried out to the run's operator channel and emitted **after**
+   the upsert lands — ADR-020's fifth clause.)*
 
 3. **ADR-003's body only ever reaches NINE verbs**, so *"ADR-003 stays at ten
    verbs"* cites the wrong document. The count is genuinely **ten**. But ADR-003's
