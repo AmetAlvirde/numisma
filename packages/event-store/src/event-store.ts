@@ -194,7 +194,10 @@ export async function loadFoldedReview(
   const genesis = await loadGenesis(paths.genesis);
   const load = await loadEventLog(paths.log);
   assertLogFullyLoaded(load, paths.log);
-  return foldEvents(genesis, load.events, asOf);
+  // SLICE-A SHIM — replaced in PRD #323 slice B, which makes this function return the
+  // envelope so the shell propagates the fold's discards instead of swallowing them
+  // (unwrapping here reproduces #293 one layer up). Signature unchanged for now.
+  return foldEvents(genesis, load.events, asOf).data;
 }
 
 /**

@@ -99,7 +99,7 @@ function excludedPopulationGenesis(): FundReviewData {
 
 describe("deriveHeadDigest", () => {
   it("summarizes a folded read model, sourcing fundValueUsd from the canonical fold", () => {
-    const folded = foldEvents(genesis(), []);
+    const folded = foldEvents(genesis(), []).data;
     const report = buildCompositionReport(folded);
 
     const headDigest = deriveHeadDigest(folded, "evt-42", "0.7.2");
@@ -126,7 +126,7 @@ describe("deriveHeadDigest", () => {
       positionId: "alt-pos",
       settlement: { reserveId: "tiered", proceeds: 800 },
     };
-    const folded = foldEvents(genesis(), [close]);
+    const folded = foldEvents(genesis(), [close]).data;
 
     const headDigest = deriveHeadDigest(folded, "close-alt", "0.7.2");
 
@@ -138,7 +138,7 @@ describe("deriveHeadDigest", () => {
   });
 
   it("carries a null headEventId for the genesis-only state", () => {
-    const folded = foldEvents(genesis(), []);
+    const folded = foldEvents(genesis(), []).data;
     const headDigest = deriveHeadDigest(folded, null, "0.7.2");
     expect(headDigest.headEventId).toBeNull();
     expect(headDigest.schemaVersion).toBe(1);
@@ -148,7 +148,7 @@ describe("deriveHeadDigest", () => {
 
   it("keeps a non-round-float value byte-identical to the report total (the anti-drift guard)", () => {
     // 3 × 0.1 === 0.30000000000000004 — a value a stray toFixed/round would mangle.
-    const folded = foldEvents(nonRoundFloatGenesis(), []);
+    const folded = foldEvents(nonRoundFloatGenesis(), []).data;
     const report = buildCompositionReport(folded);
     const headDigest = deriveHeadDigest(folded, "h", "v");
 
@@ -161,7 +161,7 @@ describe("deriveHeadDigest", () => {
   });
 
   it("reports a zero fund value and zero counts for the empty/zero fold, still equal to the report total", () => {
-    const folded = foldEvents(emptyGenesis(), []);
+    const folded = foldEvents(emptyGenesis(), []).data;
     const report = buildCompositionReport(folded);
     const headDigest = deriveHeadDigest(folded, null, "v");
 
@@ -184,7 +184,7 @@ describe("deriveHeadDigest", () => {
   it("counts ALL open positions incl. non-live while fundValueUsd stays the report total (D1 divergence)", () => {
     // Two positions on the book: one live, one paper. fundValueUsd values only the
     // live one; openPositionCount counts both. The two intentionally diverge.
-    const folded = foldEvents(excludedPopulationGenesis(), []);
+    const folded = foldEvents(excludedPopulationGenesis(), []).data;
     const report = buildCompositionReport(folded);
     const headDigest = deriveHeadDigest(folded, "h", "v");
 

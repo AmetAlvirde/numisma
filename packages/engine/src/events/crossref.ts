@@ -324,7 +324,10 @@ export function buildEventReference(
   genesis: FundReviewData,
   priorEvents: readonly PortfolioEvent[] = [],
 ): EventReference {
-  const folded = foldEvents(genesis, [...priorEvents]);
+  // SLICE-A SHIM — replaced in PRD #323 slice C. The fold now returns `{data, skipped}`;
+  // this unwrap keeps the gate compiling while its own carry (`EventReference.skipped`)
+  // is still to be built. An unwrap is a temporary shim, never a rendering.
+  const folded = foldEvents(genesis, [...priorEvents]).data;
   const genesisAsOf = genesis.review.asOf;
 
   // A Reserve's birth date is the one fact the folded record does not carry: a seeded

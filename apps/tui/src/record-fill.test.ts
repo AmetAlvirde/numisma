@@ -147,7 +147,7 @@ class Harness {
       },
       loadGenesis: async () => genesisSeed(),
       loadLogEvents: async () => this.logEvents(),
-      loadFolded: async () => foldEvents(genesisSeed(), this.logEvents()),
+      loadFolded: async () => foldEvents(genesisSeed(), this.logEvents()).data,
       ask: async (question) => {
         this.asked.push(question);
         return this.answers.shift() ?? "";
@@ -189,12 +189,12 @@ class Harness {
   }
 
   reserveAmount(reserveId: string): number {
-    const folded = foldEvents(genesisSeed(), this.logEvents());
+    const folded = foldEvents(genesisSeed(), this.logEvents()).data;
     return folded.reserves.find((reserve) => reserve.id === reserveId)?.amount ?? 0;
   }
 
   navUsd(): number {
-    const folded = foldEvents(genesisSeed(), this.logEvents());
+    const folded = foldEvents(genesisSeed(), this.logEvents()).data;
     return buildCompositionReport(folded).totals.fundValueUsd;
   }
 }
@@ -379,7 +379,7 @@ describe("one Position per ladder — first fill OPENS, every fill after APPENDS
     expect(outcome.act.event.positionId).toBe("position-synthetic");
     expect(outcome.act.event.funding.amount).toBe(300 * 10);
     // Still ONE Position on the ladder — a Position is one decision.
-    const folded = foldEvents(genesisSeed(), second.logEvents());
+    const folded = foldEvents(genesisSeed(), second.logEvents()).data;
     expect(folded.positions.map((position) => position.id)).toEqual(["position-synthetic"]);
   });
 });

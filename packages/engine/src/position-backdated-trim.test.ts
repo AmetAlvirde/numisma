@@ -204,7 +204,7 @@ describe("ADR-017 — a PositionTrimmed dated STRICTLY BEFORE its target's close
     // basis on 06-08, so the 06-10 close books 100 against the 50 that remained.
     // REFUSED, the trim never enters the log and the close books 100 against the full
     // 100 — one row, at full size, realized 0 on a position that made 50.
-    const folded = foldEvents(genesis(), ingestBatch(closeThenTrim(BACKDATED_AS_OF)).committed);
+    const folded = foldEvents(genesis(), ingestBatch(closeThenTrim(BACKDATED_AS_OF)).committed).data;
     const rows = (folded.closedPositions ?? []).filter((row) => row.positionId === "btc-late");
 
     expect(rows.map((row) => row.closedAsOf)).toEqual([BACKDATED_AS_OF, CLOSED_AS_OF]);
@@ -212,7 +212,7 @@ describe("ADR-017 — a PositionTrimmed dated STRICTLY BEFORE its target's close
     expect(rows.reduce((sum, row) => sum + (row.realizedPnlUsd ?? 0), 0)).toBe(50);
 
     // The counterfactual, joined rather than asserted beside: what the refusal booked.
-    const refused = foldEvents(genesis(), [accepted(openLate()), accepted(closePayload("c", CLOSED_AS_OF))]);
+    const refused = foldEvents(genesis(), [accepted(openLate()), accepted(closePayload("c", CLOSED_AS_OF))]).data;
     const refusedRows = (refused.closedPositions ?? []).filter((row) => row.positionId === "btc-late");
     expect(refusedRows).toHaveLength(1);
     expect(refusedRows[0]).toMatchObject({ costBasisUsd: 100, realizedPnlUsd: 0 });

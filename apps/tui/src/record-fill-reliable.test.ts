@@ -186,7 +186,7 @@ function realIo(
       restoreLogImage: (prior) => restoreLogImage(eventsPath, prior),
       loadGenesis: async () => genesisSeed(),
       loadLogEvents: logEvents,
-      loadFolded: async () => foldEvents(genesisSeed(), await logEvents()),
+      loadFolded: async () => foldEvents(genesisSeed(), await logEvents()).data,
       ask: async () => remaining.shift() ?? "",
       out: () => undefined,
       err: (message) => err.push(message),
