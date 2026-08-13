@@ -34,12 +34,14 @@ import { captureIngestCommit, readAppVersion, resolveWorkspaceRoot } from "./ing
 import {
   buildEventReference,
   crossReferenceEvent,
+  dedupeFoldSkips,
   EVENT_SCHEMA_VERSION,
   foldEvents,
   migrateLegacyEvent,
   parseEvent,
   walkPendingInbox,
   type PortfolioEvent,
+  type SkippedFoldEvent,
   type SuppliedCashLeg,
 } from "@numisma/engine";
 import {
@@ -182,6 +184,23 @@ export interface MigrationReport {
   /** Already-loadable records re-written unchanged (now schemaVersion-stamped). */
   unchangedCount: number;
   outputPath: string;
+  /**
+   * Every event the migration's OWN cross-reference folds read and could not apply,
+   * deduped on (`eventId`, `reason`) — the Discard Channel carried out of the one path
+   * #293 names as UNGATEABLE (ADR-020; PRD #323 seam C). Empty on a clean log.
+   *
+   * IT MATTERS MOST HERE. Every other reader of this channel is looking at history that
+   * at least passed the ingest gates once; this rewrite is the path that never did, and
+   * it is also the one moment the whole log is read start to finish. Reported, never
+   * acted on: a drop is a fact about history the migration is faithfully preserving, and
+   * aborting a one-shot rewrite over one long-dead event would leave the operator with a
+   * log they can neither migrate nor repair (#323 R2).
+   *
+   * DEDUPED BECAUSE THE LOOP FOLDS PER LINE. The walk re-folds the output prefix once
+   * per line, so a drop at line 3 of a 400-line log is reported ~397 times — a count of
+   * the loop, not of the damage.
+   */
+  discarded: SkippedFoldEvent[];
 }
 
 /**
@@ -205,6 +224,12 @@ export interface MigrationReport {
  * never left behind by a second hand-rolled copy. This is a
  * deliberate one-time reconstruction, NOT a runtime append path — append-only still
  * holds going forward. Idempotent: re-running a clean log migrates nothing.
+ *
+ * IT ALSO REPORTS WHAT THE FOLD DROPPED, and this is the path where that matters most:
+ * #293 names the legacy migration as the one the ingest gates cannot cover. The
+ * cross-reference below runs the fold (`buildEventReference`), so its discards are in
+ * hand here and leave on {@link MigrationReport.discarded}. Reported, never acted on —
+ * this rewrite preserves history including its damage (ADR-020, report never refuse).
  */
 export async function migrateLegacyLog(
   paths: EventStorePaths,
@@ -212,12 +237,14 @@ export async function migrateLegacyLog(
 ): Promise<MigrationReport> {
   const raw = await readOptional(paths.log);
   if (raw === undefined) {
-    return { migratedCount: 0, unchangedCount: 0, outputPath: paths.log };
+    return { migratedCount: 0, unchangedCount: 0, outputPath: paths.log, discarded: [] };
   }
 
   const genesis = await loadGenesis(paths.genesis);
   const migrated: PortfolioEvent[] = [];
   const unresolved: string[] = [];
+  // The union over every per-line fold below; deduped once on the way out.
+  const foldSkips: SkippedFoldEvent[] = [];
   let migratedCount = 0;
 
   // Number lines EXACTLY as the read half does (`loadEventLog`): a blank line is a
@@ -291,7 +318,12 @@ export async function migrateLegacyLog(
     // At these magnitudes the price is worth paying to judge each line against the real
     // book; if the log ever grows to where that bites, fold incrementally here rather
     // than reintroducing a shadow.
-    const crossRef = crossReferenceEvent(event, buildEventReference(genesis, migrated));
+    // The reference's own fold is the ONLY read of the whole log this path makes, so
+    // what it dropped leaves on the report (see `MigrationReport.discarded`) rather than
+    // dying with the loop iteration that saw it. It never changes the verdict below.
+    const reference = buildEventReference(genesis, migrated);
+    foldSkips.push(...reference.skipped);
+    const crossRef = crossReferenceEvent(event, reference);
     if (crossRef.kind !== "ok") {
       throw new Error(
         `Migration aborted: line ${lineNumber} fails cross-reference after migration ` +
@@ -310,7 +342,12 @@ export async function migrateLegacyLog(
 
   await writeLogImage(paths.log, `${migrated.map((event) => serializeEvent(event)).join("\n")}\n`);
 
-  return { migratedCount, unchangedCount: migrated.length - migratedCount, outputPath: paths.log };
+  return {
+    migratedCount,
+    unchangedCount: migrated.length - migratedCount,
+    outputPath: paths.log,
+    discarded: dedupeFoldSkips(foldSkips),
+  };
 }
 
 /**

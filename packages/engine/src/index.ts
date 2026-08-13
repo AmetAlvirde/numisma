@@ -107,6 +107,9 @@ export type { EventReference } from "./events/crossref.js";
 export { parseEvent, migrateLegacyEvent, EVENT_SCHEMA_VERSION } from "./events/parse.js";
 export {
   foldEvents,
+  // The Discard Channel's dedup key, shared so no caller re-derives it: any caller that
+  // folds the same log more than once per run sees one standing drop once per fold.
+  dedupeFoldSkips,
   applyReserveDelta,
   reserveDeltasForOpen,
   reserveDeltasForClose,
