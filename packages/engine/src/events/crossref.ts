@@ -254,7 +254,7 @@ export interface EventReference {
    */
   positionLots: Map<string, { instrumentId: string; lots: PositionLot[] }>;
   /**
-   * THE SAME REFERENCE, REBUILT FROM THE EVENTS DATED STRICTLY BEFORE `asOf` — the world
+   * THE SAME REFERENCE, REBUILT FROM THE EVENTS DATED ON OR BEFORE `asOf` — the world
    * the fold will actually place a backdated verb in, rather than the world as it stands
    * after everything the log has accepted. ADR-015's doctrine one level deeper: the gate
    * judges against the fold, and for a BACKDATED verb the relevant fold is the one at
@@ -274,11 +274,18 @@ export interface EventReference {
    *      check at all. Restoring `held` from the as-of world fixes this structurally,
    *      which is why the fix belongs here and not in a patched conditional.
    *
-   * LAZY AND MEMOISED BY DATE: nothing is folded until a guard asks, and today only a
-   * trim aimed at an already-retired position asks. The ordinary path — every trim, mark
-   * and close on an open position — costs exactly nothing. When it does fire it is one
-   * additional `foldEvents` over a strict prefix of the log, on top of the one this
-   * reference was built from; see this function's own cost note.
+   * THE PREFIX IS INCLUSIVE OF `asOf` because the fold orders by (`asOf`, then LOG
+   * INDEX) and every event in this reference was logged BEFORE the one being checked —
+   * so a same-dated prior really is applied first, and belongs in the world the verb
+   * lands in. The event under check is never in its own prefix. The exclusive boundary
+   * lives on the other side, in the guards' `>=`: a verb dated ON its target's close is
+   * refused before this is ever called, so the retiring close can never enter the world.
+   *
+   * LAZY: nothing is folded until a guard asks, and today only a trim aimed at an
+   * already-retired position asks. The ordinary path — every trim, mark and close on an
+   * open position — costs exactly nothing. When it does fire it is one additional
+   * `foldEvents` over a prefix of the log, on top of the one this reference was built
+   * from; see this function's own cost note.
    *
    * The returned reference is a FULL {@link EventReference}, not a fragment, so a future
    * as-of question (reserve balances at a date — the follow-up ADR-017 names) has the
@@ -513,31 +520,32 @@ export function buildEventReference(
     });
   }
 
-  // ADR-017's as-of world, LAZY AND MEMOISED BY DATE. Nothing folds until a guard asks,
-  // and today the only caller is a trim aimed at an already-retired position — so every
-  // trim, mark and close on an OPEN position pays exactly one closure allocation and no
-  // fold. The memo is keyed by date, not by event, because that is the whole of the
-  // question: two backdated verbs sharing a date share a world.
+  // ADR-017's as-of world, LAZY. Nothing folds until a guard asks, and today the only
+  // caller is a trim aimed at an already-retired position — so every trim, mark and
+  // close on an OPEN position pays exactly one closure allocation and no fold.
   //
-  // The prefix is STRICTLY BEFORE `asOf`, mirroring the fold's own placement of a
-  // backdated verb: everything dated earlier is already in the world it lands in, and
-  // its same-dated siblings are not (the fold's (`asOf`, then log index) order settles
-  // those, and a gate that pre-applied them would judge against a world the fold has not
-  // built yet). Recursion is not a hazard: the returned reference is built by this same
-  // constructor and its own `worldAsOf` is equally lazy.
-  const worldsAsOf = new Map<string, EventReference>();
-  const worldAsOf = (asOf: string): EventReference => {
-    const memoised = worldsAsOf.get(asOf);
-    if (memoised !== undefined) {
-      return memoised;
-    }
-    const world = buildEventReference(
+  // THE PREFIX IS `<=`, INCLUSIVE OF SAME-DATED SIBLINGS, because that is the world the
+  // fold will actually build under the backdated verb. `foldEvents` orders by (`asOf`,
+  // THEN LOG INDEX), and every event in `priorEvents` has a LOWER log index than the
+  // event being cross-referenced — the walk rebuilds this reference from
+  // `[...priorEvents, ...accepted]` and the candidate joins `accepted` only after it is
+  // admitted, so it is never in its own prefix and `<=` cannot make a trim judge against
+  // itself. A same-dated prior is therefore applied BEFORE the verb under check, and a
+  // strict `<` would hide it: it judged against a world the fold does not build, which
+  // both let same-dated siblings oversell a position (each seeing the others' lots
+  // intact) and falsely refused a trim that a same-dated add had made room for — and
+  // refused a trim dated on its position's own OPEN date with the `holds only 0` message
+  // this ADR exists to eliminate. `<=` here and the guard's `>=` above are one boundary
+  // read from its two ends: reaching this call means `event.asOf < retiredAsOf` strictly,
+  // so no prefix dated `<= event.asOf` can ever pull the retiring close into the world.
+  //
+  // Recursion is not a hazard: the returned reference is built by this same constructor
+  // and its own `worldAsOf` is equally lazy.
+  const worldAsOf = (asOf: string): EventReference =>
+    buildEventReference(
       genesis,
-      priorEvents.filter((event) => event.asOf < asOf),
+      priorEvents.filter((event) => event.asOf <= asOf),
     );
-    worldsAsOf.set(asOf, world);
-    return world;
-  };
 
   return {
     positionIds,
@@ -1132,7 +1140,11 @@ function crossReferenceTrim(
   if (retiredAsOf !== undefined && event.asOf >= retiredAsOf) {
     return eventError(
       "positionId",
-      `PositionTrimmed targets position id '${event.positionId}', which is already closed.`,
+      `PositionTrimmed targets position id '${event.positionId}', which is already closed ` +
+        `as of ${retiredAsOf} — and this trim is dated ${event.asOf}. The fold applies events ` +
+        `in date order, so this one would land on a position the close has already ` +
+        `consumed and its removal would vanish silently. A trim dated BEFORE ${retiredAsOf} ` +
+        `is accepted; redate it if the sale really happened while the position was open.`,
     );
   }
   // AND THE COMPARISON IS NOT THE WORK. Reaching here with `retiredAsOf` set means the

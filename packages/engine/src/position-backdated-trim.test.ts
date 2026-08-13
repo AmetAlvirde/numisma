@@ -123,6 +123,20 @@ const trimPayload = (
   settlement: { reserveId: "pulse-cash", proceeds },
 });
 
+const addToPayload = (
+  id: string,
+  asOf: string,
+  quantity = 1,
+  cost = 100,
+): Record<string, unknown> => ({
+  id,
+  asOf,
+  type: "PositionAddedTo",
+  positionId: "btc-late",
+  lot: { quantity, cost, tier: "c1" },
+  funding: { reserveId: "pulse-cash", amount: cost },
+});
+
 const closePayload = (id: string, asOf: string, proceeds = 100): Record<string, unknown> => ({
   id,
   asOf,
@@ -299,6 +313,91 @@ describe("ADR-017 — the trim boundary", () => {
   it("admits the day before and refuses the day of — the same batch, one day apart", () => {
     expect(ingestBatch(closeThenTrim("2026-06-09")).rejection).toBeNull();
     expect(ingestBatch(closeThenTrim(CLOSED_AS_OF)).rejection).not.toBeNull();
+  });
+});
+
+// THE PREFIX BOUNDARY IS `<=`, NOT `<` — the four cases a strict prefix got wrong.
+//
+// `worldAsOf(d)` folds the events the fold will have applied BEFORE the backdated verb.
+// The fold orders by (`asOf`, THEN LOG INDEX) (`fold.ts:250`), and every event in the
+// reference has a LOWER log index than the event under check — `ingest-walk.ts:191`
+// rebuilds the reference from `[...priorEvents, ...accepted]` and the candidate joins
+// `accepted` only once it is admitted. So a same-dated prior is applied BEFORE the trim
+// and belongs in its world; a strict `<` prefix judges against a world the fold will
+// never build. The guard's `>=` keeps `<=` safe from the close itself: reaching the
+// world means `event.asOf < retiredAsOf` strictly, so no prefix dated `<= event.asOf`
+// can ever contain the retiring close.
+//
+// THE FIRST TEST BELOW MUST FAIL LOUDLY if the strict `<` ever returns: under it, each
+// same-dated sibling sees the untrimmed position and 1.2 units are sold out of 1.
+describe("ADR-017 — the as-of world contains the trim's same-dated siblings", () => {
+  it("refuses the third of three same-dated trims that would together oversell the position", () => {
+    // 3 × 0.4 out of 1 unit held. Under a strict `<` prefix all three are COMMITTED —
+    // each sees the whole unit — and the fold books 1.2 units sold out of 1.
+    const result = ingestBatch([
+      openLate(),
+      closePayload("evt-close", CLOSED_AS_OF),
+      trimPayload("evt-trim-1", BACKDATED_AS_OF, 0.4, 40),
+      trimPayload("evt-trim-2", BACKDATED_AS_OF, 0.4, 40),
+      trimPayload("evt-trim-3", BACKDATED_AS_OF, 0.4, 40),
+    ]);
+
+    expect(result.rejection?.path).toBe("removals");
+    expect(result.rejection?.message).toContain("removes 0.4");
+    expect(result.rejection?.message).toContain("holds only 0.19999999999999996");
+    expect(result.committed).toEqual([]);
+  });
+
+  it("and the full-retirement refusal is not bypassed by splitting it across siblings", () => {
+    // 0.5 + 0.5 empties the position. The rule the reject exists for — "the position
+    // ALWAYS survives a trim" — must hold across same-dated siblings, not just within
+    // one event's removals.
+    const result = ingestBatch([
+      openLate(),
+      closePayload("evt-close", CLOSED_AS_OF),
+      trimPayload("evt-trim-1", BACKDATED_AS_OF, 0.5, 50),
+      trimPayload("evt-trim-2", BACKDATED_AS_OF, 0.5, 50),
+    ]);
+
+    expect(result.rejection?.path).toBe("removals");
+    expect(result.rejection?.message).toContain("full retirement");
+    expect(result.committed).toEqual([]);
+  });
+
+  it("admits a trim that only fits because a same-dated add is already accepted", () => {
+    // The false-reject direction: the add lands first (lower log index, same date), so
+    // the position really holds 2 at that instant and 1.5 fits. A strict `<` prefix
+    // drops the add and refuses with "holds only 1".
+    const result = ingestBatch([
+      openLate(),
+      closePayload("evt-close", CLOSED_AS_OF),
+      addToPayload("evt-add", BACKDATED_AS_OF),
+      trimPayload("evt-trim", BACKDATED_AS_OF, 1.5, 150),
+    ]);
+
+    expect(result.rejection).toBeNull();
+    expect(result.committed.map((event) => event.id)).toEqual([
+      "evt-open-late",
+      "evt-close",
+      "evt-add",
+      "evt-trim",
+    ]);
+  });
+
+  it("admits a trim dated on the position's own open date, without the 'holds only 0' message", () => {
+    // `requirePositionBornBy` accepts a verb dated ON the birth date, so the open is a
+    // same-dated sibling of this trim. Under a strict `<` prefix its world is empty and
+    // the refusal reads `which holds only 0` — the exact message ADR-017 exists to
+    // eliminate. The identical trim without the close was always accepted.
+    const result = ingestBatch(closeThenTrim(OPENED_AS_OF));
+
+    expect(result.rejection).toBeNull();
+    expect(result.committed.map((event) => event.id)).toEqual([
+      "evt-open-late",
+      "evt-close",
+      "evt-trim",
+    ]);
+    expect(ingestBatch([openLate(), trimPayload("evt-trim", OPENED_AS_OF)]).rejection).toBeNull();
   });
 });
 
