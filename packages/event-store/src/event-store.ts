@@ -29,6 +29,7 @@ import {
   type FoldedReview,
   type FundReviewData,
   type PortfolioEvent,
+  type SkippedFoldEvent,
 } from "@numisma/engine";
 
 export interface EventStorePaths {
@@ -203,14 +204,15 @@ async function surfaceQuarantine(logPath: string, quarantined: QuarantinedLine[]
  *    would brick every future read over one damaged historical event.
  *
  * That pair IS the Discard Channel's remediable/immutable distinction rendered in code
- * (the idiom's clause 3, #320 §4; PRD #323 seam B, implementing #293).
+ * (ADR-020's clause 3, `context/adr/ADR-020-the-discard-channel-report-never-refuse.md`;
+ * PRD #323 seam B, implementing #293).
  *
  * IT RETURNS THE ENVELOPE AND UNWRAPS NOTHING. Returning `.data` here would reproduce
  * #293 exactly one layer up — the caller would again hold a `FundReviewData`
  * indistinguishable from one folded off a complete log. THE SHELL IS A PIPE, NOT A
  * FILTER: it adds, removes and reorders nothing in `skipped`. And there is deliberately
  * no `loadFoldedReviewWithDiscards` beside a bare-data original: a side channel a caller
- * must remember to ask for is the failure mode #320 §4 rules out (PRD #323 R4).
+ * must remember to ask for is the failure mode ADR-020 rules out (PRD #323 R4).
  */
 export async function loadFoldedReview(
   paths: EventStorePaths,
@@ -220,6 +222,162 @@ export async function loadFoldedReview(
   const load = await loadEventLog(paths.log);
   assertLogFullyLoaded(load, paths.log);
   return foldEvents(genesis, load.events, asOf);
+}
+
+/**
+ * THE FOLD'S CLAUSE-4 VERDICT — the policy over {@link FoldedReview}, as a value a test
+ * can assert (ADR-020, clause 4: the component reports, the caller decides).
+ *
+ * IT HAS NO `exitCode` MEMBER, AND THE ABSENCE IS THE POINT. `UnattendedPlansVerdict`
+ * and `unattendedPreferencesVerdict` both carry one, because a malformed sidecar line is
+ * an ERRAND: the operator edits the line and the next run is clean, so a checked value
+ * that goes red and then goes green again is the honest signal. A fold discard is a
+ * STANDING FACT — its locator points into an append-only durable log, so there is no
+ * line to fix and the report never extinguishes (ADR-020's clause 3; spec #323 §3).
+ * Folding it into an exit code would leave the errand channel permanently red from the
+ * night the damaged event was written, which retires that channel for the next REAL
+ * failure. `gap-report-core.ts` settled the identical trade-off in the identical words:
+ * *a lost day is reported; a broken job is failed*, because a permanently red job is one
+ * nobody reads.
+ *
+ * So the type itself makes "the exit code is the verdict" INEXPRESSIBLE here. Do not add
+ * the member back; a consumer that wants a non-zero exit for a fold discard is asking
+ * for something this increment ruled out, not for a field.
+ */
+export interface UnattendedFoldVerdict {
+  /** Prose for the run's operator channel. Empty on a clean fold. */
+  messages: string[];
+}
+
+/**
+ * The fold discard summary, as it reaches an UNATTENDED surface: at most ONE line,
+ * carrying a COUNT and nothing else that varies.
+ *
+ * ONE LINE, NEVER AN ENUMERATION — a ruling that binds future edits, not a threshold
+ * (spec #323 R7). This line prints from launchd every evening, forever. An enumeration
+ * is three lines today and forty in a year on the only channel that is genuinely read
+ * daily, and PR #322's `formatGapReport` starvation finding is that same failure one
+ * surface over: the transient, recurring kind fills the surface and the permanent
+ * finding beside it is never seen again. A count is stable, cannot grow, and cannot
+ * starve a co-tenant. The ENUMERATION exists — {@link formatFoldDiscards} — and its home
+ * is the interactive surfaces, where a human is at the keyboard and asked to see it.
+ *
+ * IT NAMES NO EVENT CONTENT. No id, no verb, no target, no figure: the count is the only
+ * thing that varies between two runs of this line. Ids are locators and belong on the
+ * enumeration; a figure on a daily-printed channel is a fund detail laundered into log
+ * files and CI output (ADR-020 clause 3).
+ *
+ * DEDUPED ON (`eventId`, `reason`), WHICH IS WHY THE COUNT IS A RUN'S COUNT AND NOT A
+ * LOOP'S. The backfill folds once per anchor and re-reads the same log each time, so a
+ * ten-anchor replay rediscovers one damaged event ten times; the shell concatenates
+ * every anchor's `skipped` and calls this ONCE, and the dedup is what turns that into
+ * "one event was dropped". `RunReport`'s own dedup cannot do it — two anchors legitimately
+ * produce two DIFFERENT counts, so it would keep both lines. (Extends spec #320 seam D's
+ * once-per-run ruling to this channel.)
+ *
+ * The parameter is `Pick<FoldedReview, "skipped">` rather than the whole envelope for
+ * exactly that caller: the union of N anchors' skips is not any one anchor's `data`, and
+ * requiring one would force a shell to nominate an arbitrary fold to carry a verdict
+ * about all of them. A `FoldedReview` is assignable, so the ordinary call is unchanged.
+ */
+export function unattendedFoldVerdict(
+  folded: Pick<FoldedReview, "skipped">,
+): UnattendedFoldVerdict {
+  const distinct = dedupeSkips(folded.skipped);
+  if (distinct.length === 0) {
+    // A CLEAN FOLD SAYS NOTHING, so the daily run's output is byte-identical to the one
+    // before this channel existed. Silence here is what buys the line its meaning.
+    return { messages: [] };
+  }
+  return {
+    messages: [
+      `fold: ${distinct.length} event(s) were read from the durable log and could not be ` +
+        `applied, so the fold's totals omit them. The log is append-only, so this is a ` +
+        `standing fact about history and not a failure of this run — run \`pnpm report\` ` +
+        `to see each dropped event's id, index, verb and reason.`,
+    ],
+  };
+}
+
+/**
+ * The most fold-discard lines {@link formatFoldDiscards} renders before it summarizes
+ * the rest.
+ *
+ * PER KIND, AND THAT IS THE WHOLE MECHANISM (ADR-020, "the kind and its reserved
+ * capacity"). This bound is computed over the fold's lines ALONE — never over a
+ * concatenation with whatever else a surface prints — so no co-tenant diagnostic can
+ * take the fold's share and the fold cannot take a co-tenant's. It is the same shape as
+ * `RunReport`'s `MAX_LINES_PER_KIND` and `gap-lines.ts`'s reserved floor, and it exists
+ * for the same reason both do: a bounded surface that slices a concatenation withholds
+ * whichever kind sorts last, forever.
+ *
+ * Exported so the test DRIVES the bound rather than restating it.
+ */
+export const MAX_FOLD_DISCARD_LINES = 12;
+
+/**
+ * THE ENUMERATION, for a surface with a human at the keyboard: one line per distinct
+ * dropped event, carrying its LOCATOR (`eventId` + `index`), its VERB and its REASON.
+ *
+ * THE OPPOSITE TRADE-OFF FROM {@link unattendedFoldVerdict}, deliberately. The
+ * unattended line is a count because it prints unasked, daily, forever. These lines
+ * print when an operator ran `pnpm report`, `pnpm spine` or `pnpm plans` — they are the
+ * answer to a question just asked, and a count would be an answer that cannot be acted
+ * on. The id is greppable in `events.jsonl`, which is the whole reason the locator is an
+ * id and an index rather than a line number: the log is append-only, so a line number
+ * would rot and an id will not.
+ *
+ * BOUNDED, WITH THE TRUNCATION ANNOUNCED. A bound that renders as an all-clear is the
+ * same defect wearing a cap, so the withheld count gets its own line under this kind's
+ * own name. `detail` is fixed prose off the closed reason vocabulary and quotes nothing.
+ */
+export function formatFoldDiscards(
+  folded: Pick<FoldedReview, "skipped">,
+  limit: number = MAX_FOLD_DISCARD_LINES,
+): string[] {
+  const distinct = dedupeSkips(folded.skipped);
+  if (distinct.length === 0) {
+    // EMPTY MEANS CLEAN — the caller stays quiet, exactly as `formatGapReport` does, and
+    // that is what bounds the noise by construction on every surface this feeds.
+    return [];
+  }
+  const shown = distinct.slice(0, limit);
+  const lines = shown.map(
+    (skip) =>
+      `Numisma: DROPPED EVENT ${skip.eventId} (index ${skip.index}) — ${skip.verb}, ` +
+      `${skip.reason}. ${skip.detail}`,
+  );
+  const withheld = distinct.length - shown.length;
+  if (withheld > 0) {
+    lines.push(
+      `Numisma: …and ${withheld} further dropped event(s) not shown ` +
+        `(fold cap ${limit}).`,
+    );
+  }
+  return lines;
+}
+
+/**
+ * Distinct skips by (`eventId`, `reason`), in first-appearance order.
+ *
+ * FIRST APPEARANCE, so the fold's own deterministic ordering (application order, with
+ * the post-loop invalidation records appended) survives the dedup. The pair is the key
+ * rather than the whole record because one event can be dropped for two different
+ * reasons and that is two findings — a `Transfer` whose destination reserve is absent is
+ * one record; one whose BOTH legs are absent is genuinely one finding about one event
+ * and collapses, which is the ruling spec #323 R7 states.
+ */
+function dedupeSkips(skipped: readonly SkippedFoldEvent[]): SkippedFoldEvent[] {
+  const seen = new Set<string>();
+  const distinct: SkippedFoldEvent[] = [];
+  for (const skip of skipped) {
+    const key = `${skip.eventId} ${skip.reason}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      distinct.push(skip);
+    }
+  }
+  return distinct;
 }
 
 /**

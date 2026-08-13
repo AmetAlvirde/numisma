@@ -58,8 +58,10 @@ try {
 
   // 2 + 4. Render current state through the real wiring; cross-check the fund value
   // against the Node tracer rendering the SAME fold (two formatters, one number).
-  // `.data` is the render half of the fold's envelope (PRD #323 seam B); the smoke
-  // harness cross-checks the rendered number, and nothing renders a skip until slice E.
+  // `.data` is the render half of the fold's envelope. This harness cross-checks the
+  // rendered NUMBER against the tracer's; the `skipped` half is reported on the startup
+  // channel by `pnpm dev` alone (`foldLines`), which this harness deliberately omits —
+  // it is verifying the render, not the operator channel.
   const { data: current } = await loadFoldedReview(paths)
   const tracer = formatCompositionReport(buildCompositionReport(current))
   const fundValue = formatUsd(buildCompositionReport(current).totals.fundValueUsd)
@@ -112,14 +114,22 @@ try {
  * two renders of identical data are byte-identical (the restart-survival check).
  */
 async function renderFrame(
-  loadData: () => Promise<import("@numisma/engine").FundReviewData>,
+  loadData: () => Promise<import("@numisma/engine").FoldedReview>,
   sourcePath: string,
 ): Promise<string> {
   const { renderer, renderOnce, captureCharFrame } = await testing.createTestRenderer({
     width: 120,
     height: 140,
   })
-  await mountApp(renderer, { core, loadData, sourcePath, now: () => FIXED_NOW })
+  // The envelope is unwrapped HERE, at this harness's own composition root, exactly as
+  // `app.ts` unwraps it at the real one: the renderer draws the fund and is not where a
+  // diagnostic goes.
+  await mountApp(renderer, {
+    core,
+    loadData: async () => (await loadData()).data,
+    sourcePath,
+    now: () => FIXED_NOW,
+  })
   await renderOnce()
   const frame = captureCharFrame()
   renderer.destroy()

@@ -1,5 +1,7 @@
 export {
+  MAX_FOLD_DISCARD_LINES,
   assertLogFullyLoaded,
+  formatFoldDiscards,
   loadEventLog,
   loadFoldedReview,
   loadGenesis,
@@ -7,9 +9,11 @@ export {
   readOptional,
   resolveDataDirDefault,
   resolveEventStorePaths,
+  unattendedFoldVerdict,
   type EventLogLoad,
   type EventStorePaths,
   type QuarantinedLine,
+  type UnattendedFoldVerdict,
 } from "./event-store.js";
 
 // The gap report (#186, #266): which calendar days in the launchd era did the price

@@ -17,7 +17,11 @@ import {
   resolveOrdersPath,
   resolvePlansPath,
 } from "@numisma/preferences";
-import { loadFoldedReview, resolveEventStorePaths } from "@numisma/event-store";
+import {
+  loadFoldedReview,
+  resolveEventStorePaths,
+  unattendedFoldVerdict,
+} from "@numisma/event-store";
 import { importBitgetOpenOrders } from "./import-orders.js";
 
 const csvPath = process.argv[2];
@@ -27,6 +31,16 @@ if (!csvPath) {
 } else {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
+    // THE FOLD IS TAKEN, AND ITS DISCARD SUMMARY RENDERED, BEFORE THE IMPORT BEGINS —
+    // the same placement and the same argument as `record-fill-cli.ts`. `fundReview()`
+    // is reached partway through the flow, at the funding-coverage check; the marker
+    // belongs on the near side of the operator's decision, not inside it. Counted rather
+    // than enumerated (PRD #323 R7), and it never refuses: `pnpm report` is where the
+    // per-event answer lives, and the line names it.
+    const folded = await loadFoldedReview(resolveEventStorePaths());
+    for (const line of unattendedFoldVerdict(folded).messages) {
+      process.stderr.write(`${line}\n`);
+    }
     const outcome = await importBitgetOpenOrders({
       csvPath,
       io: {
@@ -39,14 +53,13 @@ if (!csvPath) {
         ordersPath: resolveOrdersPath(),
         loadOrders,
         appendOrders,
-        // The folded review goes over WHOLE. This used to map `data.reserves` into
-        // `{ id, amount }` pairs here — three lines that quietly gave the `O1` guard a
-        // different reserve set than the rendered report reads, and stripped the
-        // currency it needed to refuse a cross-currency rung (#172). Admission is the
-        // engine's policy, not this wiring's.
-        // `.data` is the render half of the fold's envelope; this CLI renders the
-        // discard summary line in PRD #323 slice E and is silent for now.
-        fundReview: async () => (await loadFoldedReview(resolveEventStorePaths())).data,
+        // The fold read above, whose discards the operator was told about before the
+        // import started. It goes over WHOLE — this used to map `data.reserves` into
+        // `{ id, amount }` pairs here, three lines that quietly gave the `O1` guard a
+        // different reserve set than the rendered report reads and stripped the currency
+        // it needed to refuse a cross-currency rung (#172). Admission is the engine's
+        // policy, not this wiring's.
+        fundReview: async () => folded.data,
         // THE PLANS SIDECAR, READ-ONLY (#286): the import proposes a rung against the
         // ladders in force and never writes a plan line. `loadPlans` is TOTAL — it reports
         // an unreadable file rather than throwing — and the flow decides what an

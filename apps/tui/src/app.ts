@@ -4,6 +4,7 @@ import { loadOrders, resolveOrdersPath } from "@numisma/preferences";
 import { loadAvailableCapital } from "./available-capital.js";
 import { prepareStartup, type StartupPlan } from "./startup.js";
 import { loadLivenessLines } from "./liveness-lines.js";
+import { loadFoldLines } from "./fold-lines.js";
 
 // The openTUI entry point. The surface renders the FOLD over the event log, not
 // a hand-edited snapshot: on startup it ingests any dropped inbox, then folds
@@ -29,7 +30,12 @@ const ordersPath = resolveOrdersPath();
 
 await mountApp(renderer, {
   core,
-  loadData: plan.loadData,
+  // `.data` — the RENDER half of the fold's envelope, unwrapped here at the composition
+  // root and nowhere earlier. The `skipped` half has already reached the operator on the
+  // startup channel above (`foldLines`), which is the only surface `pnpm dev` has: once
+  // `renderer.start()` opens the alternate screen, anything written to stderr is painted
+  // over. The renderer draws the fund; it is not where a diagnostic goes.
+  loadData: async () => (await plan.loadData()).data,
   sourcePath: plan.sourcePath,
   // `S7` — the orders sidecar joined to the fold at READ time, as of the same date the
   // fold rendered. Never merged: the two files stay two files.
@@ -49,6 +55,11 @@ async function runStartup(): Promise<StartupPlan> {
       // pre-alternate-screen channel as the ingest report — the surface that
       // reaches you without you going to look for it.
       livenessLines: () => loadLivenessLines(paths, new Date()),
+      // THE ONLY ENTRY POINT THAT ASKS, for the same reason: `report`, `spine` and
+      // `plans` enumerate their own fold's discards inline, and the smoke harness stays
+      // silent. This is the co-tenant on the liveness lines' channel — each kind
+      // bounded over its own lines, so neither starves the other (PRD #323 seam E).
+      foldLines: (asOf) => loadFoldLines(paths, asOf),
     });
   } catch (error) {
     failStartup(error);
