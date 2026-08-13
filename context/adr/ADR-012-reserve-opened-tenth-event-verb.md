@@ -65,7 +65,16 @@ movement verb — it was the destination container.**
   container already there, so the verb needs a silent create-or-don't branch.
   That is the same species as this repo's two named ingest hazards
   (`parseEvent`'s unknown-verb drop, `loadPreferences`'s quarantine lane): a
-  thing that either happened or didn't, with no signal either way. It also
+  thing that either happened or didn't, with no signal either way. *(**The
+  second citation is stale as written and is corrected here, not withdrawn.**
+  `loadPreferences`'s quarantine lane no longer discards without a signal —
+  spec #320 made it return a `LoadedPreferences` envelope carrying one
+  addressable record per discarded line, under ADR-020's Discard Channel. The
+  rejection above is unaffected: the species it names — an outcome that either
+  happened or didn't with nothing recording which — is exactly what ADR-020
+  exists to forbid, so the corrected example now argues the rejection harder
+  than the stale one did. `parseEvent`'s unknown-verb drop stands unchanged.
+  Nothing else in this ADR is reopened.)* It also
   cannot express **open now, fund later** — the real path for a genuinely new
   venue, where the Reserve should exist before there is any cash to move into
   it.

@@ -3,8 +3,10 @@
 // whole-file overwrite — a seed onto a file of quarantined lines preserves them). The
 // validating loader QUARANTINES malformed/garbage lines (bad JSON/shape, invalid ratio,
 // bad splitBasis, unparseable effectiveAt) instead of throwing through or corrupting
-// as-of replay; blank lines are tolerated; a non-monotonic file replays deterministically
-// through `pickPolicyAsOf`. Prior art: #90/#93.
+// as-of replay — AND REPORTS EVERY ONE OF THEM: the discard rides back in the
+// `LoadedPreferences` envelope as an addressable record, never as silence (ADR-020, the
+// Discard Channel). Blank lines are tolerated and are not discards; a non-monotonic file
+// replays deterministically through `pickPolicyAsOf`. Prior art: #90/#93.
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
@@ -74,8 +76,11 @@ describe("seedDefaultPreferences — the only writer, and genuinely append-only"
 
   it("seeding a file whose every line is QUARANTINED appends — it never truncates them", async () => {
     // The only reachable path on which the writer meets a non-empty file: `loadPreferences`
-    // returns [] (all lines quarantined) so the seed proceeds. A whole-file overwrite here
-    // would destroy the very bytes an operator needs to repair the corrupt sidecar.
+    // returns EMPTY `entries` (every line discarded) so the seed proceeds. The same load
+    // now also carries one `skipped` record per discarded line, so that state is visible
+    // rather than inferred — the seeder deliberately does not read it (it is a writer, not
+    // a reporting surface). A whole-file overwrite here would destroy the very bytes an
+    // operator needs to repair the corrupt sidecar.
     const path = await tempPath();
     const garbage = `{ not valid json\n${JSON.stringify({ ...entry("2026-06-05"), splitBasis: "lifetime" })}\n`;
     await writeFile(path, garbage, "utf8");
@@ -478,8 +483,12 @@ describe("non-monotonic file — deterministic as-of replay through the selector
 
 // R-M3: `resolvePreferencesPath` with NO argument must resolve under the shared engine
 // `resolveDataDir` (the accumulus default), NEVER a CWD-relative `./data/preferences.jsonl`.
-// Latent today (no runtime caller), but silent split-brain the moment the sidecar is wired
-// into the read path (ADR-004). This guards the closure of the third resolver copy.
+// NOT latent — the read path is already wired, so the split-brain this guards is live:
+// `push-core.ts` calls `loadPreferences(resolvePreferencesPath())` inside
+// `loadReserveFloorAsOf`, reached from `buildGlanceForAnchor`, which the push and the
+// backfill both call (ADR-004, correction 2). A CWD-relative read here would serve the
+// phone a Reserve floor from a different file than the one the fund appends to. This also
+// guards the closure of the third resolver copy.
 describe("resolvePreferencesPath — R-M3 no-arg resolves under accumulus, never a bare `data`", () => {
   function withoutEnvOverride<T>(fn: () => T): T {
     const saved = process.env.NUMISMA_DATA_DIR;
