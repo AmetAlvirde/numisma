@@ -12,7 +12,7 @@
  * obligation is layered on top faithfully as-of. Nothing here is added to NAV —
  * blanking this block leaves NAV unchanged (extends #90's descriptive-only lock).
  */
-import type { FundReviewData } from "../contracts.js";
+import type { FundReviewData, LoadOutcome } from "../contracts.js";
 
 /**
  * Loss behavior of the split obligation. `highWaterMark` (default): the obligation
@@ -48,6 +48,73 @@ export interface ProfitPolicy {
 /** One append-only sidecar entry: a policy stamped with the date it takes effect. */
 export interface ProfitPolicyEntry extends ProfitPolicy {
   effectiveAt: string;
+}
+
+/**
+ * Why ONE line of `preferences.jsonl` was discarded — a CLOSED vocabulary, one member
+ * per gate the reading loader applies: the JSON parse, then each of the validator's
+ * eight guards. It is closed at nine on purpose. A tenth member is a contract change,
+ * not an implementation detail, because a consumer switching exhaustively over these
+ * is the whole reason the reason is typed rather than prose.
+ *
+ * `"not-json"` the line does not parse · `"not-an-object"` it parses to a non-object ·
+ * `"effective-at"` no strict ISO `YYYY-MM-DD` calendar date · `"split-basis"` outside
+ * the enum · `"routing-reserve-id"` missing/blank/non-string · `"reserve-target-pct"`
+ * not a finite percentage in [0, 100] · `"split-shape"` `split` is not an object ·
+ * `"split-parts"` a part is non-finite or negative · `"split-denominator"` wealth +
+ * reserve is not positive.
+ */
+export type PreferenceSkipReason =
+  | "not-json"
+  | "not-an-object"
+  | "effective-at"
+  | "split-basis"
+  | "routing-reserve-id"
+  | "reserve-target-pct"
+  | "split-shape"
+  | "split-parts"
+  | "split-denominator";
+
+/**
+ * One preferences line the loader could not turn into an entry, REPORTED rather than
+ * swallowed — the Discard Channel's per-discard record, mirroring
+ * `SkippedPlanLine`.
+ *
+ * `detail` is PROSE-ONLY and never quotes the line. `preferences.jsonl` is tracked
+ * fund policy rather than secret transaction data, so the laundering argument is
+ * weaker here than it is for plans — but a class rule with one member exempted is a
+ * rule every reader has to re-check, so the rule holds unexempted. Where a diagnostic
+ * would genuinely need to name an unrecognized token, that token gets its own
+ * sanitized, length-capped field; it is never interpolated into the prose. No such
+ * field is needed today: `reason` already names which gate fired.
+ */
+export interface SkippedPreferenceLine {
+  /** 1-based line number, so the operator can go look at it. */
+  line: number;
+  reason: PreferenceSkipReason;
+  /** Fixed prose. Never interpolates file content. */
+  detail: string;
+}
+
+/**
+ * The preferences loader's TOTAL outcome — the envelope, not a bare payload.
+ *
+ * `load` reuses the engine's existing two-arm {@link LoadOutcome} under the same rule
+ * recorded on `LoadedPlans`: reuse when joining is free; refuse when joining
+ * widens a closed exhaustive union.
+ *
+ * A missing file is `loaded` with empty buckets — the NORMAL STARTING STATE for a fund
+ * that has not set a policy yet, not a failure. Any other read error is `load-failed`
+ * with empty buckets, and collapsing the two would let a permissions error render as
+ * an empty policy — which downstream is an ABSENT Reserve floor on the phone, a
+ * plausible absence with nothing anywhere recording why.
+ *
+ * `entries` preserves the file's APPEND order; `pickPolicyAsOf` owns as-of ordering.
+ */
+export interface LoadedPreferences {
+  load: LoadOutcome;
+  entries: ProfitPolicyEntry[];
+  skipped: SkippedPreferenceLine[];
 }
 
 /**

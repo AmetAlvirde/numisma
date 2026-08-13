@@ -160,11 +160,16 @@ export async function loadCurrentFold(asOf?: string): Promise<FoldedAnchor> {
  * the push's second privileged input, and the only place in `apps/web` allowed to
  * touch it (`preferences-import-guard.test.ts`).
  *
- * R1 — NO FLOOR IS EVER INVENTED. `loadPreferences` quarantines a malformed line
- * (dropping it) and returns `[]` for a missing file; `pickPolicyAsOf` returns
+ * R1 — NO FLOOR IS EVER INVENTED. `loadPreferences` discards a malformed line and
+ * returns empty `entries` for a missing or unreadable file; `pickPolicyAsOf` returns
  * `undefined` when nothing is in effect as-of the anchor. Every one of those paths
  * ends here as `undefined`, which the glance block encodes as an ABSENT
  * `reserveTargetPct` and the reader renders as a suppressed Reserve slot.
+ *
+ * The load's `skipped` records are AVAILABLE HERE AND CONSUMED BY NOBODY. That is this slice's
+ * deliberate resting point, not an oversight: the loader now reports its discards, and
+ * threading them out to an emission point after the snapshot lands is the next slice's
+ * work. Until then the discard is available at this seam and consumed by nobody.
  *
  * `defaultProfitPolicyEntry` (which is 10) is deliberately NOT imported. It is a
  * SEED FOR A NEW SIDECAR, not a read-gap filler, and `seedDefaultPreferences` sits
@@ -179,7 +184,7 @@ export async function loadReserveFloorAsOf(
   asOf: string,
 ): Promise<number | undefined> {
   const prefs = await loadPreferences(resolvePreferencesPath());
-  return pickPolicyAsOf(prefs, asOf)?.reserveTargetPct;
+  return pickPolicyAsOf(prefs.entries, asOf)?.reserveTargetPct;
 }
 
 /**

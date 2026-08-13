@@ -1,3 +1,9 @@
+// The `preferences.jsonl` sidecar's IO half. `loadPreferences` returns a
+// `LoadedPreferences` envelope — its load outcome, the accepted entries, and one record
+// per discarded line. Those types are PURE contracts and live in `@numisma/engine`
+// beside `ProfitPolicyEntry` (ADR-001), and per the house rule recorded below they are
+// NOT re-exported here: call sites import them from `@numisma/engine`, exactly as
+// `LoadedPlans` is imported.
 export {
   loadPreferences,
   resolvePreferencesPath,
