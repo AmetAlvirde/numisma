@@ -151,13 +151,22 @@ describe("detectChangedClaims compares against the LATEST observation (#181)", (
 
   it("ignores `orderFilled` and `orderCancelled` — they are not observations", () => {
     // What the FUND booked is not what the VENUE showed. A fill line moves `consumed`,
-    // which is the partition's business downstream, and must not move the figure the
-    // export is compared against.
+    // and a cancellation retires the rung — both are the partition's business downstream,
+    // and neither must move the figure the export is compared against.
     const stream: OrderRecord[] = [
       placed("2026-01-01T10:00:00", 10, 6),
       { id: RUNG, observedAt: "2026-01-02T09:00:00", kind: "orderFilled", currency: "USD", filledQuantity: 4 },
+      { id: RUNG, observedAt: "2026-01-03T09:00:00", kind: "orderCancelled", currency: "USD" },
     ];
     expect(detectChangedClaims(stream, [exported(10, 6)])).toEqual([]);
+
+    // BOTH DIRECTIONS, so neither line can go unread. The `[]` above stays `[]` whether
+    // the cancellation is ignored (correct) or swallows the rung entirely (wrong), so it
+    // alone cannot tell the two apart: the placement line must still be the basis AFTER a
+    // cancellation, and a venue figure past it must still be reported.
+    expect(detectChangedClaims(stream, [exported(10, 9)])).toEqual([
+      { id: RUNG, differences: [{ field: "observedFilledQuantity", known: 6, observed: 9 }] },
+    ]);
   });
 });
 
