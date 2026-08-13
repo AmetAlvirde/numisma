@@ -247,6 +247,63 @@ export async function loadPreferences(path: string): Promise<LoadedPreferences> 
   return { load: { status: "loaded", sourcePath: path }, entries, skipped };
 }
 
+/** What an unattended caller must do about a preferences load. */
+export interface UnattendedPreferencesVerdict {
+  /** `0` iff the file was read AND every line in it was readable. */
+  exitCode: 0 | 1;
+  /** Prose-only lines to print loudly. Never quotes the file. */
+  messages: string[];
+}
+
+/** The file's own name, as the diagnostic addresses it. Never a full path. */
+const SIDECAR_NAME = "preferences.jsonl";
+
+/**
+ * The UNATTENDED-CALLER POLICY over a preferences load, as a value a test can assert
+ * instead of a convention a reviewer must notice — the Discard Channel's fourth
+ * clause (spec #320 §4): the discarding component never picks the consequence.
+ * `loadPreferences` reports; this decides; and per the fifth clause the decision may
+ * never be to withhold the push.
+ *
+ * DELIBERATELY THE SAME SHAPE AS {@link unattendedPlansVerdict}, down to the message
+ * grammar, and for the same warrant — recorded in that function's docstring and
+ * governing here: *a launchd job's stderr goes to an unread log, so a "loud warning"
+ * reaches no one.* An exit code is a checked value; a warning is a thing someone must
+ * happen to read. The two are separate functions rather than one generic because the
+ * sidecars' skip records are different types and a shared one would have to erase
+ * them; three compliant implementations of a stated contract is the goal (§10).
+ *
+ * A MISSING FILE IS ZERO. `loadPreferences` renders `ENOENT` as `loaded` with empty
+ * buckets, which is the normal starting state of a fund that has not set a policy —
+ * not an anomaly, and marking the run for it would train the operator to ignore the
+ * mark. `load-failed` is the opposite: the file exists and could not be read, which
+ * suppresses the Reserve slot for a reason nobody can see unless this says so.
+ *
+ * EXIT CODE AND MESSAGES ARE COMPUTED INDEPENDENTLY AND RETURNED SEPARATELY, and that
+ * is a seam rather than a style: this run's operator channel is shared with other
+ * diagnostic kinds whose exit policies differ (a fold locator's verdict is prose-only
+ * and exits zero, by its own ruling). A caller composes the prose of every kind into
+ * one channel and the exit codes of every kind into one code, which it can only do if
+ * nothing here fuses them.
+ */
+export function unattendedPreferencesVerdict(
+  loaded: LoadedPreferences,
+): UnattendedPreferencesVerdict {
+  const messages: string[] = [];
+  if (loaded.load.status === "load-failed") {
+    messages.push(`${SIDECAR_NAME} could not be read: ${loaded.load.message}`);
+  }
+  for (const skip of loaded.skipped) {
+    // The 1-based line is the addressability and `detail` is the fixed prose the
+    // loader already chose; NOTHING from the line itself is interpolated. Read
+    // `skip.detail` rather than re-deriving it from `reason` — one table, one owner.
+    messages.push(
+      `${SIDECAR_NAME} line ${skip.line} skipped (${skip.reason}): ${skip.detail}`,
+    );
+  }
+  return { exitCode: messages.length === 0 ? 0 : 1, messages };
+}
+
 /**
  * Seed a NEW sidecar with this fund's locked default policy if it holds no valid entry
  * yet. The one-line append is INLINE here on purpose: this package exposes no general

@@ -17,7 +17,12 @@ import {
   type ProfitPolicyEntry,
 } from "@numisma/engine";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadPreferences, resolvePreferencesPath, seedDefaultPreferences } from "./preferences.js";
+import {
+  loadPreferences,
+  resolvePreferencesPath,
+  seedDefaultPreferences,
+  unattendedPreferencesVerdict,
+} from "./preferences.js";
 
 const createdDirs: string[] = [];
 
@@ -525,5 +530,91 @@ describe("resolvePreferencesPath — R-M3 no-arg resolves under accumulus, never
   it("still honors an EXPLICIT dataDir argument verbatim (unchanged for callers/tests)", () => {
     const explicit = join(homedir(), "explicit-store");
     expect(resolvePreferencesPath(explicit)).toBe(join(explicit, "preferences.jsonl"));
+  });
+});
+
+/**
+ * The UNATTENDED-CALLER POLICY (spec #320 seam C). It is a NAMED FUNCTION over the
+ * envelope rather than a convention, precisely so these assertions are possible: the
+ * discarding component never picks the consequence, so the consequence has to be a
+ * value somebody can hold. Every fixture below is authored.
+ */
+describe("unattendedPreferencesVerdict — the policy, as a value a test can assert", () => {
+  it("a clean load is zero messages and a zero exit", async () => {
+    const path = await tempPath();
+    await appendLine(path, entry("2026-06-01"));
+    expect(unattendedPreferencesVerdict(await loadPreferences(path))).toEqual({
+      exitCode: 0,
+      messages: [],
+    });
+  });
+
+  it("a MISSING sidecar is zero — the normal starting state, not an anomaly", async () => {
+    // A fund that has not set a policy has nothing wrong with it. Marking the run on
+    // day one would teach the operator that the mark means nothing.
+    const path = await tempPath();
+    expect(unattendedPreferencesVerdict(await loadPreferences(path))).toEqual({
+      exitCode: 0,
+      messages: [],
+    });
+  });
+
+  it("names the file, the 1-based line and the reason — and never the line's content", async () => {
+    const path = await tempPath();
+    const rejected = { ...entry("2026-06-05"), routingReserveId: 17 };
+    await writeFile(
+      path,
+      `${JSON.stringify(entry("2026-06-01"))}\n${JSON.stringify(rejected)}\n`,
+      "utf8",
+    );
+
+    const { exitCode, messages } = unattendedPreferencesVerdict(await loadPreferences(path));
+
+    expect(exitCode).toBe(1);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toContain("preferences.jsonl");
+    expect(messages[0]).toContain("line 2");
+    expect(messages[0]).toContain("routing-reserve-id");
+    // The rejected line, and the values inside it, stay out of the prose. Fund figures
+    // echoed into a diagnostic are laundered into terminals, log files and CI output.
+    expect(messages[0]).not.toContain(JSON.stringify(rejected));
+    expect(messages[0]).not.toContain("sink-usdt");
+  });
+
+  it("addresses the sidecar by NAME, never by path", async () => {
+    // A full path names the operator's home directory and their data store's location.
+    // The file has exactly one name in ADR-004's class, and that is what is printed.
+    const path = await tempPath();
+    await writeFile(path, "authored garbage, not JSON\n", "utf8");
+    const { messages } = unattendedPreferencesVerdict(await loadPreferences(path));
+    expect(messages[0]).not.toContain(path);
+  });
+
+  it("one message per discard, in file order, and a blank line is not a discard", async () => {
+    const path = await tempPath();
+    await writeFile(
+      path,
+      `authored garbage\n\n${JSON.stringify({ ...entry("2026-06-05"), split: 4 })}\n`,
+      "utf8",
+    );
+    const { exitCode, messages } = unattendedPreferencesVerdict(await loadPreferences(path));
+    expect(exitCode).toBe(1);
+    // Line 2 is blank and contributes nothing; line 3 keeps its own number regardless.
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toContain("line 1");
+    expect(messages[1]).toContain("line 3");
+  });
+
+  it("a load-failed outcome is non-zero and says which half failed", async () => {
+    // A DIRECTORY where the sidecar should be: a real read error that is not ENOENT,
+    // which the loader renders as `load-failed` rather than throwing. Empty entries
+    // alone would assert "this fund has no policy" when the truth is "the policy could
+    // not be read" — downstream, a suppressed Reserve slot nobody can explain.
+    const path = await tempPath();
+    await mkdir(path, { recursive: true });
+    const { exitCode, messages } = unattendedPreferencesVerdict(await loadPreferences(path));
+    expect(exitCode).toBe(1);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toContain("preferences.jsonl could not be read");
   });
 });

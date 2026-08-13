@@ -78,7 +78,7 @@
  */
 import { writeFile } from "node:fs/promises";
 import type { Pool } from "pg";
-import type { CompositionReport } from "@numisma/engine";
+import type { CompositionReport, LoadedPreferences } from "@numisma/engine";
 import {
   loadEventLog,
   loadGenesis,
@@ -90,13 +90,14 @@ import {
   serializeAnchorFixture,
 } from "./anchor-fixture.ts";
 import { synthesizeAnchors } from "./fixture-synthesis.ts";
-import type { DcaBlock, GlanceBlock, SnapshotAnchor } from "../projection/contract.ts";
+import type { DcaBlock, SnapshotAnchor } from "../projection/contract.ts";
 import {
   buildDcaForAnchor,
   buildGlanceForAnchor,
   deriveSnapshot,
   loadCurrentFold,
   upsertSnapshot,
+  type AnchorGlance,
   type SnapshotDerivation,
 } from "./push-core.ts";
 
@@ -195,6 +196,22 @@ export interface BackfillOptions {
   onAnchor?:
     | ((anchor: BackfilledAnchor, index: number, total: number) => void)
     | undefined;
+  /**
+   * Called once per anchor with the preferences envelope that anchor's glance was
+   * derived from — spec #320 seam D.
+   *
+   * PER ANCHOR, BECAUSE THAT IS THE TRUTH: the sidecar is re-read on every anchor (see
+   * this loop's docstring), so this loop genuinely rediscovers the same discards N
+   * times and saying so once is a fact about the run, not about the loop. Collapsing
+   * them to once per RUN is the CALLER's job and belongs there — `RunReport` dedups
+   * within a kind, so the shell files all N and the channel keeps one. Deduping here
+   * instead would bake one consumer's rendering policy into the replay loop.
+   *
+   * THE LOOP STILL DECIDES NOTHING. It hands the envelope over and reads no exit code
+   * back: a discarded policy line must never stop a backfill mid-history, which would
+   * leave the projection with a partial replay for a sidecar problem.
+   */
+  onPreferencesLoad?: ((loaded: LoadedPreferences) => void) | undefined;
 }
 
 /**
@@ -211,7 +228,7 @@ export interface BackfillOptions {
  */
 export async function foldAnchor(asOf: string): Promise<{
   report: CompositionReport;
-  glance: GlanceBlock;
+  glance: AnchorGlance;
   dca: DcaBlock;
 }> {
   const fold = await loadCurrentFold(asOf);
@@ -224,6 +241,8 @@ export async function foldAnchor(asOf: string): Promise<{
   }
   return {
     report: fold.report,
+    // The BLOCK plus the envelopes it was read from. Only `glance.glance` reaches the
+    // upsert; the envelopes go to the command's operator channel and no further.
     glance: await buildGlanceForAnchor(fold),
     // As-of, per anchor, exactly like the floor beside it: an anchor that predates a
     // plan's `effectiveAt` resolves `none` and lands an honestly empty branch. No
@@ -249,13 +268,16 @@ export async function runBackfill(
   const results: BackfilledAnchor[] = [];
   for (const [index, asOf] of anchors.entries()) {
     const { report, glance, dca } = await foldAnchor(asOf);
+    // AFTER the fold and BESIDE the write, never in place of it: the callback is told
+    // what this anchor's read discarded and cannot stop the anchor from being written.
+    options.onPreferencesLoad?.(glance.preferences);
     // One derivation either way: with a pool `upsertSnapshot` derives and writes
     // and hands the derivation back; without one `deriveSnapshot` is that same
     // pure call with the write removed. The payload captured in `results` — and
     // therefore in the fixture — is byte-for-byte what a write would have stored.
     const derived = options.pool
-      ? await upsertSnapshot(options.pool, report, glance, dca)
-      : deriveSnapshot(report, glance, dca);
+      ? await upsertSnapshot(options.pool, report, glance.glance, dca)
+      : deriveSnapshot(report, glance.glance, dca);
     const anchor: BackfilledAnchor = { ...derived, written: !!options.pool };
     results.push(anchor);
     options.onAnchor?.(anchor, index, anchors.length);

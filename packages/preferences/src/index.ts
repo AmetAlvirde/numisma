@@ -4,10 +4,15 @@
 // beside `ProfitPolicyEntry` (ADR-001), and per the house rule recorded below they are
 // NOT re-exported here: call sites import them from `@numisma/engine`, exactly as
 // `LoadedPlans` is imported.
+// `UnattendedPreferencesVerdict` IS exported here, unlike the envelope types above: it
+// is this package's own contract over them, not a pure engine contract, exactly as
+// `UnattendedPlansVerdict` is below.
+export type { UnattendedPreferencesVerdict } from "./preferences.js";
 export {
   loadPreferences,
   resolvePreferencesPath,
   seedDefaultPreferences,
+  unattendedPreferencesVerdict,
 } from "./preferences.js";
 export type { OrderSkip, OrdersLoad, LoadOrdersOptions } from "./orders.js";
 export { resolveOrdersPath, loadOrders, appendOrders } from "./orders.js";
