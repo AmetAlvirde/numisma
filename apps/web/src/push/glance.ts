@@ -14,12 +14,14 @@
  * pushed. Following that rule is what makes the verdict module pure by
  * construction.
  *
- * R5 — THE CALENDAR'S NAMED BLIND SPOT. The venue cadence below is weekday-only:
- * it has NO holiday awareness. A US market holiday that falls on a weekday is still
- * a day this file expects a mark on, so the alarm can ring on a day the venue was
- * legitimately closed. Under carry-forward (below) that false *yes* does not last a
- * single day — it PERSISTS until the venue next marks, because an unfilled
- * expectation is only cleared by a fill.
+ * R5 — THE CALENDAR'S NAMED BLIND SPOT. The venue cadence — now
+ * `@numisma/engine`'s `VENUE_CADENCE`, moved down in #266 D4 so this file and the
+ * durable log's gap report share ONE definition — is weekday-only: it has NO
+ * holiday awareness. A US market holiday that falls on a weekday is still a day
+ * this file expects a mark on, so the alarm can ring on a day the venue was
+ * legitimately closed. Under carry-forward that false *yes* does not last a single
+ * day — it PERSISTS until the venue next marks, because an unfilled expectation is
+ * only cleared by a fill.
  *
  * That is accepted for v1 on R3's own logic — a false *yes* costs a glance at the
  * desk; a false *no* is the one failure a triage surface cannot have. And
@@ -35,78 +37,32 @@ import type {
   CompositionReport,
   FundReviewData,
   InstrumentRegistryEntry,
-  PriceSource,
+  PortfolioEvent,
 } from "@numisma/engine";
-import { addDays, composeRowDependencies, instrumentsForSource } from "@numisma/engine";
-import type { GlanceBlock, GlanceMissingMark } from "../projection/contract.ts";
+import {
+  PRICE_SOURCES,
+  addDays,
+  composeRowDependencies,
+  instrumentsForSource,
+  lastExpectedMarkDate,
+  weekdayName,
+} from "@numisma/engine";
+import { LAUNCHD_ERA_START, computeGapReport } from "@numisma/event-store";
+import type {
+  GlanceBlock,
+  GlanceMissingMark,
+  GlanceVenueDarkDay,
+} from "../projection/contract.ts";
 import { SUPPRESSION_KEYS } from "../projection/contract.ts";
 
-/** How often a venue is expected to produce a mark. */
-type VenueCadence = "daily" | "weekdays";
-
 /**
- * THE VENUE CALENDAR — keyed on the registry's OWN `source` property, which is the
- * only reason this covers all thirteen instruments.
+ * Every registered instrument, across every source — the union, built from `source`.
  *
- * READ THIS BEFORE EDITING: the non-crypto instruments are TWO registry groups, not
- * one. `EQUITY_ENTRIES` (3 US equities) and `MXN_DERIVED_ENTRIES` (6 SIC entries
- * priced off a US-listed underlying) are BOTH `source: "twelvedata"`. Keying on
- * `source` unions them for free; hand-listing "the equities" instead would
- * under-count the expectation by six and go silent on a real outage — a false *no*.
- *
- * `satisfies Record<PriceSource, VenueCadence>` is the compile-time latch: the day
- * the engine adds a third price source, this object stops compiling and somebody has
- * to state that venue's cadence rather than have it default to "never expected".
+ * `PRICE_SOURCES` is the engine's own key list for `VENUE_CADENCE`, so a venue
+ * cannot be enumerated here without having declared its cadence there.
  */
-const VENUE_CADENCE = {
-  binance: "daily",
-  twelvedata: "weekdays",
-} as const satisfies Record<PriceSource, VenueCadence>;
-
-/** Every registered instrument, across every source — the union, built from `source`. */
 function allRegisteredInstruments(): InstrumentRegistryEntry[] {
-  return (Object.keys(VENUE_CADENCE) as PriceSource[]).flatMap((source) =>
-    instrumentsForSource(source),
-  );
-}
-
-/**
- * The weekday is read in UTC from the plain `YYYY-MM-DD` anchor. A local-time
- * `new Date("2026-07-26")` is parsed as UTC midnight and then rendered in local
- * time, which west of Greenwich lands on the PREVIOUS day — enough to call a Monday
- * a Sunday and silently expect nothing.
- */
-function isWeekend(asOf: string): boolean {
-  const weekday = new Date(`${asOf}T00:00:00Z`).getUTCDay();
-  return weekday === 0 || weekday === 6;
-}
-
-/**
- * The most recent date <= `asOf` on which this venue was expected to mark.
- *
- * CARRY-FORWARD, AND WHY IT REPLACED A SAME-DATE TEST. The original builder asked
- * "is a mark expected TODAY, and did one arrive TODAY" — so an obligation that went
- * unfilled on its due day simply EVAPORATED the next morning. Against the real log
- * the equity feed marked on 2026-06-26 and went dark until 07-06; on Sat 07-04 and
- * Sun 07-05 nothing is expected of a weekday venue, so the builder emitted
- * `{expected: 4, arrived: 4, missing: []}` with nothing suppressed and rendered a
- * full NAV whose nine of thirteen legs were priced eight days earlier. That is a
- * false *no* — the one failure a triage surface cannot have.
- *
- * An unfilled expectation now PERSISTS UNTIL IT IS FILLED. The question asked of each
- * instrument is not "did you quote today" but "is your newest mark at least as recent
- * as the last mark you owed me". The weekend walk is bounded by a guard rather than
- * unbounded, so a malformed anchor cannot spin.
- */
-function lastExpectedMarkDate(source: PriceSource, asOf: string): string {
-  if (VENUE_CADENCE[source] === "daily") {
-    return asOf;
-  }
-  let cursor = asOf;
-  for (let guard = 0; guard < 10 && isWeekend(cursor); guard += 1) {
-    cursor = addDays(cursor, -1);
-  }
-  return cursor;
+  return PRICE_SOURCES.flatMap((source) => instrumentsForSource(source));
 }
 
 /**
@@ -121,6 +77,7 @@ export function buildGlanceBlock(
   data: FundReviewData,
   report: CompositionReport,
   reserveTargetPct?: number,
+  venueDark?: GlanceVenueDarkDay[],
 ): GlanceBlock {
   const asOf = report.dashboard.summary.asOf;
 
@@ -195,7 +152,115 @@ export function buildGlanceBlock(
       ...suppressionKeysFor(missing.length > 0, reserveTargetPct === undefined),
       ...suppressedRowIds(data, report, missing),
     ],
+    // ABSENT, NOT EMPTY, when the caller had no answer — the same conditional-spread
+    // discipline `reserveTargetPct` uses above and for a sharper reason: `[]` is a
+    // real answer here ("checked, nothing dark"), so a defaulted empty array would
+    // manufacture an all-clear out of the absence of any answer at all.
+    ...(venueDark === undefined ? {} : { venueDark }),
   };
+}
+
+/**
+ * HOW FAR BACK THE VENUE-DARK VERDICT LOOKS, in calendar days ending the day before
+ * the anchor.
+ *
+ * A WINDOW IS WHAT MAKES "MOST RECENT" MEAN "RECENT". The wire carries one entry per
+ * venue — its most recent dark day — so an unbounded window would keep reporting a
+ * venue that recovered in June as though it were dark today, which is a false *yes*
+ * with no expiry and the kind that trains an operator to ignore the surface. Seven
+ * days is chosen, not measured: it spans a full weekly cadence, so a weekday venue's
+ * outage is visible on every day of the week that follows it, and it drops off before
+ * anyone could mistake it for current.
+ *
+ * THE COST, SAID PLAINLY: an outage older than a week is invisible on the phone. That
+ * is deliberate — the durable gap report keeps the full history, and this surface's
+ * job is *does anything need me before I next sit at the desk*, not the archive.
+ */
+export const VENUE_DARK_WINDOW_DAYS = 7;
+
+/**
+ * THE WIRE NARROWING (#266 D6) — the durable log's venue-dark verdict, computed AS OF
+ * one anchor and reduced to what may leave the machine.
+ *
+ * PURE, and a pure function of `asOf` rather than of the wall clock, which is the
+ * property `pnpm backfill` rests on: it replays every historical anchor, and each one
+ * must get the verdict that was true on ITS OWN date rather than today's. The
+ * discipline is the plans sidecar's, one file over — "selected as-of each anchor's own
+ * date, so historical backfill resolves plans honestly rather than stamping today's
+ * ladder onto last month".
+ *
+ * THE WINDOW ENDS THE DAY BEFORE THE ANCHOR, which is D2's accepted cost restated in
+ * this file: `computeGapReport` pins its ceiling to "yesterday" measured from the
+ * injected `now`, so a Monday outage surfaces in Tuesday's push. `now` is therefore
+ * synthesized as NOON CDMX ON THE ANCHOR'S OWN DAY — `18:00Z` is `12:00` at UTC-6 —
+ * which is the instant that makes `dueThrough(now)` land on `asOf - 1`. For the daily
+ * push that reproduces exactly what the real clock would have given; for a backfilled
+ * anchor it is the only honest reading.
+ *
+ * MOST RECENT PER VENUE, in `PRICE_SOURCES` order. See {@link GlanceBlock.venueDark}
+ * for why the wire carries the conclusion rather than every dark day.
+ *
+ * THROWS on a malformed `asOf` (the calendar helpers refuse it). Callers on the push
+ * path must go through {@link venueDarkOrOmit}, never this directly.
+ */
+export function summarizeVenueDark(
+  events: readonly PortfolioEvent[],
+  asOf: string,
+): GlanceVenueDarkDay[] {
+  const walkedBack = addDays(asOf, -VENUE_DARK_WINDOW_DAYS);
+  const report = computeGapReport(events, {
+    // CLAMPED TO THE ERA FLOOR, not merely walked back. `computeGapReport` only
+    // DEFAULTS its floor to `LAUNCHD_ERA_START`; an explicit `since` is taken as
+    // given, so a window walked back from an early anchor reaches into the hand-run
+    // week that preceded the scheduler (`06-26, 06-28, 06-30, 07-03 …`). Whether a
+    // venue OWED marks on a day no job existed to produce them is not a question the
+    // log can answer, and the floor's own docstring rejects a lower one for exactly
+    // this reason: "a detector that opens with four unfixable findings trains you to
+    // skim it." Only `pnpm backfill` reaches these anchors — the daily push never
+    // does — and one floor is cheaper to keep true than two. Lexicographic `>` is
+    // date order on `YYYY-MM-DD`, the comparison this codebase uses throughout.
+    since: walkedBack > LAUNCHD_ERA_START ? walkedBack : LAUNCHD_ERA_START,
+    until: addDays(asOf, -1),
+    now: new Date(`${asOf}T18:00:00Z`),
+  });
+
+  // `report.venueDark` is ascending by date, so the LAST entry a venue appears in is
+  // its most recent dark day. One pass, last-write-wins, and the emission order comes
+  // from `PRICE_SOURCES` rather than from insertion order — a stable order the
+  // committed fixture can be diffed against.
+  const latest = new Map<string, string>();
+  for (const day of report.venueDark) {
+    latest.set(day.source, day.date);
+  }
+  return PRICE_SOURCES.flatMap((source) => {
+    const date = latest.get(source);
+    return date === undefined ? [] : [{ source, weekday: weekdayName(date) }];
+  });
+}
+
+/**
+ * {@link summarizeVenueDark}, DEGRADED TO ABSENCE rather than allowed to throw.
+ *
+ * ADR-007's third amendment, "Degrade the branch, never the anchor": an observability
+ * finding must not be able to cost the phone its NAV. The precedent beside it is
+ * `dca.source: "unreadable"` — a read that failed produces a field that says so
+ * instead of a push that did not happen. Here the field simply goes absent, which the
+ * contract already defines as "this build could not answer" and which no surface may
+ * render as an all-clear.
+ *
+ * The catch is deliberately blind. Every failure this can see is the same failure —
+ * *the verdict could not be computed* — and there is no branch a caller could take on
+ * the difference that would be better than pushing the anchor anyway.
+ */
+export function venueDarkOrOmit(
+  events: readonly PortfolioEvent[],
+  asOf: string,
+): GlanceVenueDarkDay[] | undefined {
+  try {
+    return summarizeVenueDark(events, asOf);
+  } catch {
+    return undefined;
+  }
 }
 
 /**

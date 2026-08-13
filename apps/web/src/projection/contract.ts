@@ -134,6 +134,57 @@ export interface GlanceBlock {
    * that extension (C5).
    */
   suppressed: string[];
+  /**
+   * #266 D6 — WHICH VENUE WENT DARK, on a day it owed marks and produced none.
+   *
+   * WHAT THIS EXISTS FOR. A venue that goes dark while still serving stale bars is
+   * signalled by nothing: every instrument self-skips as INFO, the run exits 0, the
+   * heartbeat reads healthy. The durable log's gap report now answers that question,
+   * but its only automatic channel is the TUI's startup line — which speaks only when
+   * the operator opens it, the same delivery failure the detector was written to fix.
+   * This field is what makes the verdict reach a phone.
+   *
+   * IT DISCLOSES STRICTLY LESS THAN {@link GlanceBlock.feedGap} ALREADY DOES. That
+   * block ships the row id AND label of every instrument whose mark did not arrive; a
+   * venue name plus a weekday name is a coarser statement over the same event. ZERO
+   * NEW CLASSES OF DATA — the same phrase `feedGap` above is admitted under.
+   *
+   * NO DATE, AND THAT IS THE WHOLE REASON IT SAYS `weekday`. `VenueDarkDay` in
+   * `@numisma/event-store` carries the ISO date, because the gap report is a LOCAL
+   * artifact — stdout, a git-ignored sidecar, the TUI. This is the hosted payload,
+   * where `$.dashboard.summary.asOf` is the only date-shaped value that may exist
+   * (`push/projection-payload.test.ts`, `push/anchor-fixture.test.ts`, ADR-007's prose
+   * form). D7 already ruled the message shape — it "names venue and weekday so a
+   * holiday reads as one" — so the weekday is what the surface wanted anyway.
+   *
+   * THREE STATES, AND ALL THREE ARE LOAD-BEARING:
+   *
+   *  - ABSENT — this build could not answer. Either the row predates v6, or the
+   *    derivation failed and the push degraded the branch rather than withholding the
+   *    anchor. It is NEVER an all-clear, and no surface may render it as one: a false
+   *    *no* is the one failure a triage surface cannot have.
+   *  - `[]` — checked, and no venue was dark in the window.
+   *  - non-empty — the MOST RECENT dark day per venue inside the window, in
+   *    `PRICE_SOURCES` order. Deduped rather than enumerated: a three-day outage
+   *    carried whole would put three indistinguishable weekday names on the wire,
+   *    which is a worse conclusion than one. Ship the conclusion, not the inputs.
+   *
+   * `source` is a bare `string`, unlike the DCA branch's narrowed unions. The venue
+   * roster is registry-owned and grows without a schema change; nothing branches on
+   * this value, it is rendered as a name.
+   */
+  venueDark?: GlanceVenueDarkDay[];
+}
+
+/**
+ * One venue's most recent dark day inside the glance window — a CONCLUSION, and the
+ * whole of what crosses. See {@link GlanceBlock.venueDark}.
+ */
+export interface GlanceVenueDarkDay {
+  /** The venue that produced no marks — the registry's own `source` id. */
+  source: string;
+  /** The English weekday name of the day it owed them on. Never a date. */
+  weekday: string;
 }
 
 /**
@@ -554,12 +605,23 @@ export type ProjectionKeyAllowList = {
    * place a reviewer sees the block's shape declared as closed.
    */
   glance: Assert<
-    KeysAreExactly<GlanceBlock, "reserveTargetPct" | "feedGap" | "suppressed">
+    KeysAreExactly<
+      GlanceBlock,
+      | "reserveTargetPct"
+      | "feedGap"
+      | "suppressed"
+      // #266 D6 — ENUMERATED, like every growth before it. A second block-root field
+      // is the most expensive kind of addition this branch can take, so it is spelled
+      // out here rather than absorbed into an existing key the way row ids were
+      // absorbed into `suppressed` (C5).
+      | "venueDark"
+    >
   >;
   glanceFeedGap: Assert<
     KeysAreExactly<GlanceBlock["feedGap"], "expected" | "arrived" | "missing">
   >;
   glanceMissing: Assert<KeysAreExactly<GlanceMissingMark, "rowId" | "label">>;
+  glanceVenueDark: Assert<KeysAreExactly<GlanceVenueDarkDay, "source" | "weekday">>;
   /**
    * The DCA branch. Projection-owned like the glance block above, with the same
    * compile-time weakness and the same runtime backstop — `push/projection-payload
@@ -719,8 +781,28 @@ export function toProjectionReport(
  *
  * AND THIS BUMP COSTS NO CUTOVER WINDOW, which every bump before it did. See
  * {@link MIN_SUPPORTED_SNAPSHOT_SCHEMA_VERSION}.
+ *
+ *  - v6 — the venue-dark verdict (#266 D6): an optional {@link GlanceBlock.venueDark},
+ *    naming the venue and the weekday of each venue's most recent dark day, INSIDE the
+ *    existing `glance` branch. No new top-level branch, and therefore no ADR-007
+ *    amendment: the carve-out reasoning above applies unchanged, and what crosses
+ *    discloses strictly less than `feedGap.missing[]` — which already ships the row id
+ *    and label of every instrument whose mark did not arrive — so it adds zero new
+ *    classes of data. The deletion test still passes cleanly: delete the venue-dark
+ *    field and the branch reverts to its v5 shape.
+ *
+ * WHY THIS IS A BUMP AT ALL, in v5's own terms. It is not the reader's safety that
+ * forces it — a v5 reader handed a v6 row would simply not look at the new field, the
+ * C5 carve-out exactly. It is the WRITER'S contract: the version is what tells a reader
+ * whether an absent `venueDark` means "this build could not have written one" or "no
+ * venue was dark in the window". Both are absences, only the version tells them apart,
+ * and the surface must say nothing at all about the first — an all-clear rendered off a
+ * build that never checked is the false *no* this whole issue exists to remove.
+ *
+ * AND IT COSTS NO CUTOVER WINDOW EITHER, for v5's reason: the field is optional and its
+ * absence on a v4 or v5 row is a TRUE statement about that build.
  */
-export const COMPOSITION_SNAPSHOT_SCHEMA_VERSION = 5;
+export const COMPOSITION_SNAPSHOT_SCHEMA_VERSION = 6;
 
 /**
  * THE OLDEST STORED VERSION THIS BUILD WILL RENDER (spec #285 / G-D9) — the decision
@@ -741,6 +823,9 @@ export const COMPOSITION_SNAPSHOT_SCHEMA_VERSION = 5;
  * FOUR IS THE FLOOR BECAUSE V4 IS RENDERABLE, and that is the whole test. Everything v5
  * added is optional, and its absence on a v4 row is a TRUE statement about that day:
  * no fill was recorded, because the anchor predates the plumbing that could record one.
+ * v6 (#266) leaves the floor where it is for exactly the same reason: an absent
+ * `venueDark` on a v4 or v5 row truthfully says that build could not have written one,
+ * and the surface renders NOTHING there — never an all-clear.
  * A v3 row is a different case and is still REFUSED — it carries no `dca` branch at
  * all, so rendering it would show a fund with no visible strategy rather than a fund
  * whose strategy has not moved.

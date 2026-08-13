@@ -559,7 +559,7 @@ describe("the committed anchor fixture", () => {
     // does choose, and letting it sit at the floor would let a stale fixture replay
     // forever under a range that was widened for a different reason.
     await expect(loadAnchorFixture()).resolves.toBeDefined();
-    expect(COMPOSITION_SNAPSHOT_SCHEMA_VERSION).toBe(5);
+    expect(COMPOSITION_SNAPSHOT_SCHEMA_VERSION).toBe(6);
   });
 
   it("is not STRUCTURALLY STALE against the emitter that is supposed to produce it", async () => {

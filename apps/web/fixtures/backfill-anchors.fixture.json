@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "anchors": [
     {
       "fundId": "sanitized-exploratory-fund",
@@ -419,7 +419,8 @@
             "instrument:render",
             "tier:c1",
             "tier:c2"
-          ]
+          ],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -811,7 +812,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -1266,7 +1268,8 @@
             "instrument:nke-mxn",
             "tier:c1",
             "tier:c2"
-          ]
+          ],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -1695,7 +1698,8 @@
             "instrument:eww-mxn",
             "instrument:nke-mxn",
             "tier:c1"
-          ]
+          ],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -2124,6 +2128,12 @@
             "instrument:eww-mxn",
             "instrument:nke-mxn",
             "tier:c1"
+          ],
+          "venueDark": [
+            {
+              "source": "twelvedata",
+              "weekday": "Friday"
+            }
           ]
         },
         "dca": {
@@ -2553,6 +2563,12 @@
             "instrument:eww-mxn",
             "instrument:nke-mxn",
             "tier:c1"
+          ],
+          "venueDark": [
+            {
+              "source": "twelvedata",
+              "weekday": "Friday"
+            }
           ]
         },
         "dca": {
@@ -2927,7 +2943,13 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": [
+            {
+              "source": "twelvedata",
+              "weekday": "Friday"
+            }
+          ]
         },
         "dca": {
           "source": "loaded",
@@ -3301,7 +3323,13 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": [
+            {
+              "source": "twelvedata",
+              "weekday": "Friday"
+            }
+          ]
         },
         "dca": {
           "source": "loaded",
@@ -3675,7 +3703,13 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": [
+            {
+              "source": "twelvedata",
+              "weekday": "Friday"
+            }
+          ]
         },
         "dca": {
           "source": "loaded",
@@ -4049,7 +4083,13 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": [
+            {
+              "source": "twelvedata",
+              "weekday": "Friday"
+            }
+          ]
         },
         "dca": {
           "source": "loaded",
@@ -4423,7 +4463,13 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": [
+            {
+              "source": "twelvedata",
+              "weekday": "Friday"
+            }
+          ]
         },
         "dca": {
           "source": "loaded",
@@ -4797,7 +4843,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -5171,7 +5218,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -5545,7 +5593,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -5919,7 +5968,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -6293,7 +6343,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -6667,7 +6718,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -7041,7 +7093,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -7415,7 +7468,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -7789,7 +7843,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -8163,7 +8218,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -8537,7 +8593,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -8911,7 +8968,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -9285,7 +9343,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -9659,7 +9718,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -10033,7 +10093,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -10407,7 +10468,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -10781,7 +10843,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -11155,7 +11218,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -11529,7 +11593,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -11903,7 +11968,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -12277,7 +12343,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -12651,7 +12718,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -13025,7 +13093,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -13399,7 +13468,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -13773,7 +13843,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -14147,7 +14218,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -14521,7 +14593,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -14895,7 +14968,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -15269,7 +15343,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -15643,7 +15718,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -16017,7 +16093,8 @@
             "arrived": 13,
             "missing": []
           },
-          "suppressed": []
+          "suppressed": [],
+          "venueDark": []
         },
         "dca": {
           "source": "loaded",
@@ -16138,6 +16215,1022 @@
                 {
                   "id": "rung-8",
                   "priceUsd": 6457.95,
+                  "sizeUsd": 250,
+                  "venueAxis": "resting",
+                  "bookAxis": "not-recorded",
+                  "label": "waiting",
+                  "joinProvenance": "price-matched",
+                  "declaredPriceMismatch": false,
+                  "placedQuantity": 2,
+                  "venueConsumedQuantity": 0,
+                  "bookedQuantity": 0,
+                  "venueFilledFraction": 0,
+                  "resting": true
+                }
+              ],
+              "figures": {
+                "waitingDeclaredUsd": 2000,
+                "waitingRestingUsd": 2000
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fundId": "sanitized-exploratory-fund",
+      "asOf": "2026-08-11",
+      "report": {
+        "totals": {
+          "baseCurrency": "USD",
+          "fundValueUsd": 100662.86630443265,
+          "usdMxn": 17.1092
+        },
+        "dashboard": {
+          "summary": {
+            "fundName": "Sanitized Exploratory Fund",
+            "asOf": "2026-08-11",
+            "fundValueUsd": 100662.86630443265,
+            "usdMxn": 17.1092,
+            "totalUnrealizedPnlUsd": 12079.543956531918,
+            "largestPortfolio": {
+              "rowId": "portfolio:accumulus",
+              "kind": "portfolio",
+              "label": "Accumulus",
+              "usdValue": 100662.86630443265,
+              "percentOfFund": 100
+            },
+            "largestTempo": {
+              "rowId": "tempo:Capital",
+              "kind": "tempo",
+              "label": "Capital",
+              "usdValue": 34980.49426793854,
+              "percentOfFund": 34.750147251070466
+            },
+            "largestAccount": {
+              "rowId": "account:coldwallet",
+              "kind": "account",
+              "label": "Cold Storage: Cold Wallet",
+              "usdValue": 31216.490388787104,
+              "percentOfFund": 31.010929387188032
+            },
+            "largestInstrument": {
+              "rowId": "instrument:reserve",
+              "kind": "instrument",
+              "label": "Reserve",
+              "usdValue": 28979.765270032553,
+              "percentOfFund": 28.78893313288898
+            },
+            "reserve": {
+              "rowId": "tempo:Reserve",
+              "kind": "tempo",
+              "label": "Reserve",
+              "usdValue": 20267.184977680925,
+              "percentOfFund": 20.133725296861
+            },
+            "dataSafety": {
+              "nonLiveExcluded": 0,
+              "invalidExcluded": 0,
+              "shortDeferredExcluded": 0,
+              "hasWarnings": false
+            }
+          },
+          "sections": [
+            {
+              "id": "portfolios",
+              "title": "Portfolio Composition",
+              "rows": [
+                {
+                  "id": "portfolio:accumulus",
+                  "kind": "portfolio",
+                  "label": "Accumulus",
+                  "usdValue": 100662.86630443265,
+                  "percentOfFund": 100,
+                  "costBasisUsd": 59603.557077868194,
+                  "unrealizedPnlUsd": 12079.54395653192
+                }
+              ]
+            },
+            {
+              "id": "tempos",
+              "title": "Tempo Composition",
+              "rows": [
+                {
+                  "id": "tempo:Capital",
+                  "kind": "tempo",
+                  "label": "Capital",
+                  "usdValue": 34980.49426793854,
+                  "percentOfFund": 34.750147251070466,
+                  "costBasisUsd": 25957.00313172366,
+                  "unrealizedPnlUsd": 8371.462600866578
+                },
+                {
+                  "id": "tempo:Reserve",
+                  "kind": "tempo",
+                  "label": "Reserve",
+                  "usdValue": 20267.184977680925,
+                  "percentOfFund": 20.133725296861
+                },
+                {
+                  "id": "tempo:Liquid",
+                  "kind": "tempo",
+                  "label": "Liquid",
+                  "usdValue": 17329.77419663779,
+                  "percentOfFund": 17.215657404616024,
+                  "costBasisUsd": 18981.256717305492,
+                  "unrealizedPnlUsd": -2342.592552333247
+                },
+                {
+                  "id": "tempo:Wealth",
+                  "kind": "tempo",
+                  "label": "Wealth",
+                  "usdValue": 12716.948642164785,
+                  "percentOfFund": 12.63320736735747,
+                  "costBasisUsd": 8371.793069613883,
+                  "unrealizedPnlUsd": 3692.161427498302
+                },
+                {
+                  "id": "tempo:Pulse",
+                  "kind": "tempo",
+                  "label": "Pulse",
+                  "usdValue": 8965.961062072676,
+                  "percentOfFund": 8.906920090033104,
+                  "costBasisUsd": 6293.504159225148,
+                  "unrealizedPnlUsd": 2358.512480500281
+                },
+                {
+                  "id": "tempo:Foresight",
+                  "kind": "tempo",
+                  "label": "Foresight",
+                  "usdValue": 6402.503157937927,
+                  "percentOfFund": 6.3603425900619275
+                }
+              ]
+            },
+            {
+              "id": "accounts",
+              "title": "Account Composition",
+              "rows": [
+                {
+                  "id": "account:coldwallet",
+                  "kind": "account",
+                  "label": "Cold Storage: Cold Wallet",
+                  "usdValue": 31216.490388787104,
+                  "percentOfFund": 31.010929387188032,
+                  "costBasisUsd": 29398.754765401038,
+                  "unrealizedPnlUsd": 1817.735623386068
+                },
+                {
+                  "id": "account:bitget-usd",
+                  "kind": "account",
+                  "label": "Bitget: Crypto (USD)",
+                  "usdValue": 21575.42284691464,
+                  "percentOfFund": 21.43334840244319,
+                  "costBasisUsd": 14793.501739603185,
+                  "unrealizedPnlUsd": 6468.452843936699
+                },
+                {
+                  "id": "account:bitso-mxn",
+                  "kind": "account",
+                  "label": "Bitso: Cash (MXN)",
+                  "usdValue": 14365.703577701437,
+                  "percentOfFund": 14.271105229862552
+                },
+                {
+                  "id": "account:bingx-usd",
+                  "kind": "account",
+                  "label": "BingX: Spot (USD)",
+                  "usdValue": 10438.96230216728,
+                  "percentOfFund": 10.370221597502438
+                },
+                {
+                  "id": "account:binance-usd",
+                  "kind": "account",
+                  "label": "Binance: Crypto (USD)",
+                  "usdValue": 8195.684329268694,
+                  "percentOfFund": 8.141715639690462,
+                  "costBasisUsd": 4871.775752930156,
+                  "unrealizedPnlUsd": 2962.105072469379
+                },
+                {
+                  "id": "account:xtb-usd",
+                  "kind": "account",
+                  "label": "XTB: Broker (USD)",
+                  "usdValue": 5771.342349276698,
+                  "percentOfFund": 5.733337983663753,
+                  "costBasisUsd": 5503.890133642275,
+                  "unrealizedPnlUsd": -199.57948376057172
+                },
+                {
+                  "id": "account:gbm-mxn",
+                  "kind": "account",
+                  "label": "GBM: SIC (MXN)",
+                  "usdValue": 4174.073718449601,
+                  "percentOfFund": 4.146587387871547,
+                  "costBasisUsd": 3228.8184683862564,
+                  "unrealizedPnlUsd": 577.6157221357635
+                },
+                {
+                  "id": "account:bingx-futures",
+                  "kind": "account",
+                  "label": "BingX: Futures (USD)",
+                  "usdValue": 2665.156395597336,
+                  "percentOfFund": 2.6476063055239836
+                },
+                {
+                  "id": "account:bitso-usd",
+                  "kind": "account",
+                  "label": "Bitso: Crypto (USD)",
+                  "usdValue": 2260.030396269864,
+                  "percentOfFund": 2.2451480662540444,
+                  "costBasisUsd": 1806.8162179052833,
+                  "unrealizedPnlUsd": 453.21417836458056
+                }
+              ]
+            },
+            {
+              "id": "instruments",
+              "title": "Instrument Composition",
+              "rows": [
+                {
+                  "id": "instrument:reserve",
+                  "kind": "instrument",
+                  "label": "Reserve",
+                  "usdValue": 28979.765270032553,
+                  "percentOfFund": 28.78893313288898
+                },
+                {
+                  "id": "instrument:btc",
+                  "kind": "instrument",
+                  "label": "BTC (Bitcoin)",
+                  "usdValue": 20961.12879363506,
+                  "percentOfFund": 20.823099483619657,
+                  "costBasisUsd": 18906.555412933252,
+                  "unrealizedPnlUsd": 2054.5733807018064
+                },
+                {
+                  "id": "instrument:eth",
+                  "kind": "instrument",
+                  "label": "ETH (Ethereum)",
+                  "usdValue": 14939.692672357105,
+                  "percentOfFund": 14.841314598747166,
+                  "costBasisUsd": 10936.170195496452,
+                  "unrealizedPnlUsd": 4003.5224768606527
+                },
+                {
+                  "id": "instrument:aapl",
+                  "kind": "instrument",
+                  "label": "AAPL (Apple Inc.)",
+                  "usdValue": 10425.66171223669,
+                  "percentOfFund": 10.35700859213225,
+                  "costBasisUsd": 9045.61605726578,
+                  "unrealizedPnlUsd": 1380.0456549709104
+                },
+                {
+                  "id": "instrument:intc-mxn",
+                  "kind": "instrument",
+                  "label": "INTC (Intel Corp. (SIC))",
+                  "usdValue": 7759.237852017395,
+                  "percentOfFund": 7.708143168257588,
+                  "costBasisUsd": 6318.179153402029,
+                  "unrealizedPnlUsd": 1441.0586986153655
+                },
+                {
+                  "id": "instrument:rivn-mxn",
+                  "kind": "instrument",
+                  "label": "RIVN (Rivian (SIC))",
+                  "usdValue": 5454.245426192791,
+                  "percentOfFund": 5.4183291480073965,
+                  "costBasisUsd": 3769.286400676057,
+                  "unrealizedPnlUsd": 1684.9590255167336
+                },
+                {
+                  "id": "instrument:tsla",
+                  "kind": "instrument",
+                  "label": "TSLA (Tesla Inc.)",
+                  "usdValue": 3882.6047863151985,
+                  "percentOfFund": 3.8570377825057314,
+                  "costBasisUsd": 3705.7773867684314,
+                  "unrealizedPnlUsd": 176.82739954676697
+                },
+                {
+                  "id": "instrument:sbux-mxn",
+                  "kind": "instrument",
+                  "label": "SBUX (Starbucks (SIC))",
+                  "usdValue": 2884.3729858008646,
+                  "percentOfFund": 2.8653793515850365,
+                  "costBasisUsd": 2255.048119609216,
+                  "unrealizedPnlUsd": 629.3248661916489
+                },
+                {
+                  "id": "instrument:googl",
+                  "kind": "instrument",
+                  "label": "GOOGL (Alphabet Inc.)",
+                  "usdValue": 2043.7956019190021,
+                  "percentOfFund": 2.030337180880577,
+                  "costBasisUsd": 1692.7354201526873,
+                  "unrealizedPnlUsd": 351.0601817663148
+                },
+                {
+                  "id": "instrument:nu-mxn",
+                  "kind": "instrument",
+                  "label": "NU (Nu Holdings (SIC))",
+                  "usdValue": 1507.113871195963,
+                  "percentOfFund": 1.4971895064442426,
+                  "costBasisUsd": 1634.1946427605942,
+                  "unrealizedPnlUsd": -127.08077156463129
+                },
+                {
+                  "id": "instrument:eww-mxn",
+                  "kind": "instrument",
+                  "label": "EWW (iShares Mexico ETF (SIC))",
+                  "usdValue": 1060.9544865257653,
+                  "percentOfFund": 1.053968087216136,
+                  "costBasisUsd": 755.8387530554838,
+                  "unrealizedPnlUsd": 305.1157334702815
+                },
+                {
+                  "id": "instrument:nke-mxn",
+                  "kind": "instrument",
+                  "label": "NKE (Nike (SIC))",
+                  "usdValue": 764.2928462042842,
+                  "percentOfFund": 0.7592599677152535,
+                  "costBasisUsd": 584.1555357482149,
+                  "unrealizedPnlUsd": 180.1373104560693
+                }
+              ]
+            },
+            {
+              "id": "tiers",
+              "title": "Capital Tier Composition",
+              "rows": [
+                {
+                  "id": "tier:c1",
+                  "kind": "tier",
+                  "label": "c1",
+                  "usdValue": 32744.9014246232,
+                  "percentOfFund": 32.5292758161619,
+                  "costBasisUsd": 22821.717761577194,
+                  "unrealizedPnlUsd": 9923.183663046006
+                },
+                {
+                  "id": "tier:c2",
+                  "kind": "tier",
+                  "label": "c2",
+                  "usdValue": 23420.7087715981,
+                  "percentOfFund": 23.266483094935257,
+                  "costBasisUsd": 21264.348478112188,
+                  "unrealizedPnlUsd": 2156.3602934859114
+                },
+                {
+                  "id": "tier:c3",
+                  "kind": "tier",
+                  "label": "c3",
+                  "usdValue": 17027.433832745308,
+                  "percentOfFund": 16.915307956013876,
+                  "costBasisUsd": 15517.49083817882
+                }
+              ]
+            }
+          ]
+        },
+        "glance": {
+          "reserveTargetPct": 10,
+          "feedGap": {
+            "expected": 13,
+            "arrived": 13,
+            "missing": []
+          },
+          "suppressed": [],
+          "venueDark": []
+        },
+        "dca": {
+          "source": "loaded",
+          "unattributable": 0,
+          "tornActs": 0,
+          "positions": [
+            {
+              "positionId": "synthetic-position-1",
+              "state": "pending",
+              "kind": "dcaLadder",
+              "planId": "00000000-0000-4000-8000-000000000001",
+              "rungs": [
+                {
+                  "id": "rung-1",
+                  "priceUsd": 10001.02,
+                  "sizeUsd": 250,
+                  "venueAxis": "resting",
+                  "bookAxis": "not-recorded",
+                  "label": "waiting",
+                  "joinProvenance": "price-matched",
+                  "declaredPriceMismatch": false,
+                  "placedQuantity": 2,
+                  "venueConsumedQuantity": 0,
+                  "bookedQuantity": 0,
+                  "venueFilledFraction": 0,
+                  "resting": true
+                },
+                {
+                  "id": "rung-2",
+                  "priceUsd": 9400.23,
+                  "sizeUsd": 250,
+                  "venueAxis": "resting",
+                  "bookAxis": "not-recorded",
+                  "label": "waiting",
+                  "joinProvenance": "price-matched",
+                  "declaredPriceMismatch": false,
+                  "placedQuantity": 2,
+                  "venueConsumedQuantity": 0,
+                  "bookedQuantity": 0,
+                  "venueFilledFraction": 0,
+                  "resting": true
+                },
+                {
+                  "id": "rung-3",
+                  "priceUsd": 8835.52,
+                  "sizeUsd": 250,
+                  "venueAxis": "resting",
+                  "bookAxis": "not-recorded",
+                  "label": "waiting",
+                  "joinProvenance": "price-matched",
+                  "declaredPriceMismatch": false,
+                  "placedQuantity": 2,
+                  "venueConsumedQuantity": 0,
+                  "bookedQuantity": 0,
+                  "venueFilledFraction": 0,
+                  "resting": true
+                },
+                {
+                  "id": "rung-4",
+                  "priceUsd": 8304.74,
+                  "sizeUsd": 250,
+                  "venueAxis": "resting",
+                  "bookAxis": "not-recorded",
+                  "label": "waiting",
+                  "joinProvenance": "price-matched",
+                  "declaredPriceMismatch": false,
+                  "placedQuantity": 2,
+                  "venueConsumedQuantity": 0,
+                  "bookedQuantity": 0,
+                  "venueFilledFraction": 0,
+                  "resting": true
+                },
+                {
+                  "id": "rung-5",
+                  "priceUsd": 7810.73,
+                  "sizeUsd": 250,
+                  "venueAxis": "resting",
+                  "bookAxis": "not-recorded",
+                  "label": "waiting",
+                  "joinProvenance": "price-matched",
+                  "declaredPriceMismatch": false,
+                  "placedQuantity": 2,
+                  "venueConsumedQuantity": 0,
+                  "bookedQuantity": 0,
+                  "venueFilledFraction": 0,
+                  "resting": true
+                },
+                {
+                  "id": "rung-6",
+                  "priceUsd": 7341.51,
+                  "sizeUsd": 250,
+                  "venueAxis": "resting",
+                  "bookAxis": "not-recorded",
+                  "label": "waiting",
+                  "joinProvenance": "price-matched",
+                  "declaredPriceMismatch": false,
+                  "placedQuantity": 2,
+                  "venueConsumedQuantity": 0,
+                  "bookedQuantity": 0,
+                  "venueFilledFraction": 0,
+                  "resting": true
+                },
+                {
+                  "id": "rung-7",
+                  "priceUsd": 6900.48,
+                  "sizeUsd": 250,
+                  "venueAxis": "resting",
+                  "bookAxis": "not-recorded",
+                  "label": "waiting",
+                  "joinProvenance": "price-matched",
+                  "declaredPriceMismatch": false,
+                  "placedQuantity": 2,
+                  "venueConsumedQuantity": 0,
+                  "bookedQuantity": 0,
+                  "venueFilledFraction": 0,
+                  "resting": true
+                },
+                {
+                  "id": "rung-8",
+                  "priceUsd": 6485.95,
+                  "sizeUsd": 250,
+                  "venueAxis": "resting",
+                  "bookAxis": "not-recorded",
+                  "label": "waiting",
+                  "joinProvenance": "price-matched",
+                  "declaredPriceMismatch": false,
+                  "placedQuantity": 2,
+                  "venueConsumedQuantity": 0,
+                  "bookedQuantity": 0,
+                  "venueFilledFraction": 0,
+                  "resting": true
+                }
+              ],
+              "figures": {
+                "waitingDeclaredUsd": 2000,
+                "waitingRestingUsd": 2000
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fundId": "sanitized-exploratory-fund",
+      "asOf": "2026-08-12",
+      "report": {
+        "totals": {
+          "baseCurrency": "USD",
+          "fundValueUsd": 100602.82997655307,
+          "usdMxn": 17.0627
+        },
+        "dashboard": {
+          "summary": {
+            "fundName": "Sanitized Exploratory Fund",
+            "asOf": "2026-08-12",
+            "fundValueUsd": 100602.82997655307,
+            "usdMxn": 17.0627,
+            "totalUnrealizedPnlUsd": 12072.339597186368,
+            "largestPortfolio": {
+              "rowId": "portfolio:accumulus",
+              "kind": "portfolio",
+              "label": "Accumulus",
+              "usdValue": 100602.82997655307,
+              "percentOfFund": 100
+            },
+            "largestTempo": {
+              "rowId": "tempo:Capital",
+              "kind": "tempo",
+              "label": "Capital",
+              "usdValue": 34541.01113958596,
+              "percentOfFund": 34.33403528274129
+            },
+            "largestAccount": {
+              "rowId": "account:coldwallet",
+              "kind": "account",
+              "label": "Cold Storage: Cold Wallet",
+              "usdValue": 30619.86831096504,
+              "percentOfFund": 30.43638863648412
+            },
+            "largestInstrument": {
+              "rowId": "instrument:reserve",
+              "kind": "instrument",
+              "label": "Reserve",
+              "usdValue": 29165.976179800877,
+              "percentOfFund": 28.991208484491366
+            },
+            "reserve": {
+              "rowId": "tempo:Reserve",
+              "kind": "tempo",
+              "label": "Reserve",
+              "usdValue": 20306.270823367402,
+              "percentOfFund": 20.184592051834
+            },
+            "dataSafety": {
+              "nonLiveExcluded": 0,
+              "invalidExcluded": 0,
+              "shortDeferredExcluded": 0,
+              "hasWarnings": false
+            }
+          },
+          "sections": [
+            {
+              "id": "portfolios",
+              "title": "Portfolio Composition",
+              "rows": [
+                {
+                  "id": "portfolio:accumulus",
+                  "kind": "portfolio",
+                  "label": "Accumulus",
+                  "usdValue": 100602.82997655307,
+                  "percentOfFund": 100,
+                  "costBasisUsd": 59364.51419956585,
+                  "unrealizedPnlUsd": 12072.339597186368
+                }
+              ]
+            },
+            {
+              "id": "tempos",
+              "title": "Tempo Composition",
+              "rows": [
+                {
+                  "id": "tempo:Capital",
+                  "kind": "tempo",
+                  "label": "Capital",
+                  "usdValue": 34541.01113958596,
+                  "percentOfFund": 34.33403528274129,
+                  "costBasisUsd": 25524.91194302441,
+                  "unrealizedPnlUsd": 8333.388656101406
+                },
+                {
+                  "id": "tempo:Reserve",
+                  "kind": "tempo",
+                  "label": "Reserve",
+                  "usdValue": 20306.270823367402,
+                  "percentOfFund": 20.184592051834
+                },
+                {
+                  "id": "tempo:Liquid",
+                  "kind": "tempo",
+                  "label": "Liquid",
+                  "usdValue": 17332.08814756288,
+                  "percentOfFund": 17.2282312054267,
+                  "costBasisUsd": 13780.985281379582,
+                  "unrealizedPnlUsd": 2902.771611924589
+                },
+                {
+                  "id": "tempo:Wealth",
+                  "kind": "tempo",
+                  "label": "Wealth",
+                  "usdValue": 12852.913926917892,
+                  "percentOfFund": 12.775896990088102,
+                  "costBasisUsd": 12815.40179746403,
+                  "unrealizedPnlUsd": -347.8168117119374
+                },
+                {
+                  "id": "tempo:Pulse",
+                  "kind": "tempo",
+                  "label": "Pulse",
+                  "usdValue": 9146.753257296275,
+                  "percentOfFund": 9.091944291654675,
+                  "costBasisUsd": 7243.215177697824,
+                  "unrealizedPnlUsd": 1183.996140872312
+                },
+                {
+                  "id": "tempo:Foresight",
+                  "kind": "tempo",
+                  "label": "Foresight",
+                  "usdValue": 6423.792681822649,
+                  "percentOfFund": 6.385300178255229
+                }
+              ]
+            },
+            {
+              "id": "accounts",
+              "title": "Account Composition",
+              "rows": [
+                {
+                  "id": "account:coldwallet",
+                  "kind": "account",
+                  "label": "Cold Storage: Cold Wallet",
+                  "usdValue": 30619.86831096504,
+                  "percentOfFund": 30.43638863648412,
+                  "costBasisUsd": 26094.982568694326,
+                  "unrealizedPnlUsd": 4524.885742270714
+                },
+                {
+                  "id": "account:bitget-usd",
+                  "kind": "account",
+                  "label": "Bitget: Crypto (USD)",
+                  "usdValue": 22205.346166138912,
+                  "percentOfFund": 22.07228779877682,
+                  "costBasisUsd": 17112.220743877824,
+                  "unrealizedPnlUsd": 4819.709928278088
+                },
+                {
+                  "id": "account:bitso-mxn",
+                  "kind": "account",
+                  "label": "Bitso: Cash (MXN)",
+                  "usdValue": 14457.655748546369,
+                  "percentOfFund": 14.371022914480568
+                },
+                {
+                  "id": "account:bingx-usd",
+                  "kind": "account",
+                  "label": "BingX: Spot (USD)",
+                  "usdValue": 10377.371976014112,
+                  "percentOfFund": 10.315188925035914
+                },
+                {
+                  "id": "account:binance-usd",
+                  "kind": "account",
+                  "label": "Binance: Crypto (USD)",
+                  "usdValue": 7884.408055171469,
+                  "percentOfFund": 7.837163285574613,
+                  "costBasisUsd": 6950.272755881356,
+                  "unrealizedPnlUsd": 634.5945591098052
+                },
+                {
+                  "id": "account:xtb-usd",
+                  "kind": "account",
+                  "label": "XTB: Broker (USD)",
+                  "usdValue": 5906.217179792499,
+                  "percentOfFund": 5.8708260803091,
+                  "costBasisUsd": 4070.1207060192564,
+                  "unrealizedPnlUsd": 1328.718282272074
+                },
+                {
+                  "id": "account:gbm-mxn",
+                  "kind": "account",
+                  "label": "GBM: SIC (MXN)",
+                  "usdValue": 4126.316357369227,
+                  "percentOfFund": 4.101590738879736,
+                  "costBasisUsd": 2830.6422640188252,
+                  "unrealizedPnlUsd": 866.9660693665741
+                },
+                {
+                  "id": "account:bingx-futures",
+                  "kind": "account",
+                  "label": "BingX: Futures (USD)",
+                  "usdValue": 2821.9060055920736,
+                  "percentOfFund": 2.8049966449748576
+                },
+                {
+                  "id": "account:bitso-usd",
+                  "kind": "account",
+                  "label": "Bitso: Crypto (USD)",
+                  "usdValue": 2203.7401769633684,
+                  "percentOfFund": 2.19053497548427,
+                  "costBasisUsd": 2306.275161074257,
+                  "unrealizedPnlUsd": -102.5349841108885
+                }
+              ]
+            },
+            {
+              "id": "instruments",
+              "title": "Instrument Composition",
+              "rows": [
+                {
+                  "id": "instrument:reserve",
+                  "kind": "instrument",
+                  "label": "Reserve",
+                  "usdValue": 29165.976179800877,
+                  "percentOfFund": 28.991208484491366
+                },
+                {
+                  "id": "instrument:btc",
+                  "kind": "instrument",
+                  "label": "BTC (Bitcoin)",
+                  "usdValue": 20783.371466701898,
+                  "percentOfFund": 20.658833823606912,
+                  "costBasisUsd": 16798.263366902487,
+                  "unrealizedPnlUsd": 3985.108099799412
+                },
+                {
+                  "id": "instrument:eth",
+                  "kind": "instrument",
+                  "label": "ETH (Ethereum)",
+                  "usdValue": 14472.414041851564,
+                  "percentOfFund": 14.385692773478208,
+                  "costBasisUsd": 13347.960221198042,
+                  "unrealizedPnlUsd": 1124.4538206535208
+                },
+                {
+                  "id": "instrument:aapl",
+                  "kind": "instrument",
+                  "label": "AAPL (Apple Inc.)",
+                  "usdValue": 10552.802826467856,
+                  "percentOfFund": 10.48956856276045,
+                  "costBasisUsd": 9833.142482794612,
+                  "unrealizedPnlUsd": 719.6603436732437
+                },
+                {
+                  "id": "instrument:intc-mxn",
+                  "kind": "instrument",
+                  "label": "INTC (Intel Corp. (SIC))",
+                  "usdValue": 7676.557844947323,
+                  "percentOfFund": 7.630558550625719,
+                  "costBasisUsd": 6437.531205425673,
+                  "unrealizedPnlUsd": 1239.0266395216506
+                },
+                {
+                  "id": "instrument:rivn-mxn",
+                  "kind": "instrument",
+                  "label": "RIVN (Rivian (SIC))",
+                  "usdValue": 5604.0525806866535,
+                  "percentOfFund": 5.570472105002174,
+                  "costBasisUsd": 3625.187874346471,
+                  "unrealizedPnlUsd": 1978.8647063401827
+                },
+                {
+                  "id": "instrument:tsla",
+                  "kind": "instrument",
+                  "label": "TSLA (Tesla Inc.)",
+                  "usdValue": 4056.7308863363687,
+                  "percentOfFund": 4.032422236314672,
+                  "costBasisUsd": 2668.930477331989,
+                  "unrealizedPnlUsd": 1387.8004090043798
+                },
+                {
+                  "id": "instrument:sbux-mxn",
+                  "kind": "instrument",
+                  "label": "SBUX (Starbucks (SIC))",
+                  "usdValue": 2875.5827731719405,
+                  "percentOfFund": 2.8583517718558578,
+                  "costBasisUsd": 2044.4695149328454,
+                  "unrealizedPnlUsd": 831.1132582390952
+                },
+                {
+                  "id": "instrument:googl",
+                  "kind": "instrument",
+                  "label": "GOOGL (Alphabet Inc.)",
+                  "usdValue": 2121.248479632624,
+                  "percentOfFund": 2.10853758301532,
+                  "costBasisUsd": 1662.6421226534987,
+                  "unrealizedPnlUsd": 458.6063569791252
+                },
+                {
+                  "id": "instrument:nu-mxn",
+                  "kind": "instrument",
+                  "label": "NU (Nu Holdings (SIC))",
+                  "usdValue": 1463.3635796979393,
+                  "percentOfFund": 1.4545948459292817,
+                  "costBasisUsd": 1280.7538251354051,
+                  "unrealizedPnlUsd": 182.6097545625342
+                },
+                {
+                  "id": "instrument:eww-mxn",
+                  "kind": "instrument",
+                  "label": "EWW (iShares Mexico ETF (SIC))",
+                  "usdValue": 1073.559881268575,
+                  "percentOfFund": 1.0671269203051084,
+                  "costBasisUsd": 781.4582578636168,
+                  "unrealizedPnlUsd": 292.10162340495816
+                },
+                {
+                  "id": "instrument:nke-mxn",
+                  "kind": "instrument",
+                  "label": "NKE (Nike (SIC))",
+                  "usdValue": 757.1694359894595,
+                  "percentOfFund": 0.752632342614943,
+                  "costBasisUsd": 884.1748509811952,
+                  "unrealizedPnlUsd": -127.00541499173565
+                }
+              ]
+            },
+            {
+              "id": "tiers",
+              "title": "Capital Tier Composition",
+              "rows": [
+                {
+                  "id": "tier:c1",
+                  "kind": "tier",
+                  "label": "c1",
+                  "usdValue": 33020.72903396926,
+                  "percentOfFund": 32.82286297678228,
+                  "costBasisUsd": 27467.969741643596,
+                  "unrealizedPnlUsd": 5552.759292325666
+                },
+                {
+                  "id": "tier:c2",
+                  "kind": "tier",
+                  "label": "c2",
+                  "usdValue": 23552.81634685733,
+                  "percentOfFund": 23.411683699500948,
+                  "costBasisUsd": 17033.236041996628,
+                  "unrealizedPnlUsd": 6519.580304860702
+                },
+                {
+                  "id": "tier:c3",
+                  "kind": "tier",
+                  "label": "c3",
+                  "usdValue": 16372.350865573913,
+                  "percentOfFund": 16.27424483922542,
+                  "costBasisUsd": 14863.308415925625
+                }
+              ]
+            }
+          ]
+        },
+        "glance": {
+          "reserveTargetPct": 10,
+          "feedGap": {
+            "expected": 13,
+            "arrived": 13,
+            "missing": []
+          },
+          "suppressed": [],
+          "venueDark": []
+        },
+        "dca": {
+          "source": "loaded",
+          "unattributable": 0,
+          "tornActs": 0,
+          "positions": [
+            {
+              "positionId": "synthetic-position-1",
+              "state": "pending",
+              "kind": "dcaLadder",
+              "planId": "00000000-0000-4000-8000-000000000001",
+              "rungs": [
+                {
+                  "id": "rung-1",
+                  "priceUsd": 9912.82,
+                  "sizeUsd": 250,
+                  "venueAxis": "resting",
+                  "bookAxis": "not-recorded",
+                  "label": "waiting",
+                  "joinProvenance": "price-matched",
+                  "declaredPriceMismatch": false,
+                  "placedQuantity": 2,
+                  "venueConsumedQuantity": 0,
+                  "bookedQuantity": 0,
+                  "venueFilledFraction": 0,
+                  "resting": true
+                },
+                {
+                  "id": "rung-2",
+                  "priceUsd": 9318.79,
+                  "sizeUsd": 250,
+                  "venueAxis": "resting",
+                  "bookAxis": "not-recorded",
+                  "label": "waiting",
+                  "joinProvenance": "price-matched",
+                  "declaredPriceMismatch": false,
+                  "placedQuantity": 2,
+                  "venueConsumedQuantity": 0,
+                  "bookedQuantity": 0,
+                  "venueFilledFraction": 0,
+                  "resting": true
+                },
+                {
+                  "id": "rung-3",
+                  "priceUsd": 8760.35,
+                  "sizeUsd": 250,
+                  "venueAxis": "resting",
+                  "bookAxis": "not-recorded",
+                  "label": "waiting",
+                  "joinProvenance": "price-matched",
+                  "declaredPriceMismatch": false,
+                  "placedQuantity": 2,
+                  "venueConsumedQuantity": 0,
+                  "bookedQuantity": 0,
+                  "venueFilledFraction": 0,
+                  "resting": true
+                },
+                {
+                  "id": "rung-4",
+                  "priceUsd": 8235.38,
+                  "sizeUsd": 250,
+                  "venueAxis": "resting",
+                  "bookAxis": "not-recorded",
+                  "label": "waiting",
+                  "joinProvenance": "price-matched",
+                  "declaredPriceMismatch": false,
+                  "placedQuantity": 2,
+                  "venueConsumedQuantity": 0,
+                  "bookedQuantity": 0,
+                  "venueFilledFraction": 0,
+                  "resting": true
+                },
+                {
+                  "id": "rung-5",
+                  "priceUsd": 7741.87,
+                  "sizeUsd": 250,
+                  "venueAxis": "resting",
+                  "bookAxis": "not-recorded",
+                  "label": "waiting",
+                  "joinProvenance": "price-matched",
+                  "declaredPriceMismatch": false,
+                  "placedQuantity": 2,
+                  "venueConsumedQuantity": 0,
+                  "bookedQuantity": 0,
+                  "venueFilledFraction": 0,
+                  "resting": true
+                },
+                {
+                  "id": "rung-6",
+                  "priceUsd": 7277.93,
+                  "sizeUsd": 250,
+                  "venueAxis": "resting",
+                  "bookAxis": "not-recorded",
+                  "label": "waiting",
+                  "joinProvenance": "price-matched",
+                  "declaredPriceMismatch": false,
+                  "placedQuantity": 2,
+                  "venueConsumedQuantity": 0,
+                  "bookedQuantity": 0,
+                  "venueFilledFraction": 0,
+                  "resting": true
+                },
+                {
+                  "id": "rung-7",
+                  "priceUsd": 6841.79,
+                  "sizeUsd": 250,
+                  "venueAxis": "resting",
+                  "bookAxis": "not-recorded",
+                  "label": "waiting",
+                  "joinProvenance": "price-matched",
+                  "declaredPriceMismatch": false,
+                  "placedQuantity": 2,
+                  "venueConsumedQuantity": 0,
+                  "bookedQuantity": 0,
+                  "venueFilledFraction": 0,
+                  "resting": true
+                },
+                {
+                  "id": "rung-8",
+                  "priceUsd": 6431.79,
                   "sizeUsd": 250,
                   "venueAxis": "resting",
                   "bookAxis": "not-recorded",

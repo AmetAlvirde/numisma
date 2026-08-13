@@ -55,6 +55,30 @@ function deposit(date: string): PortfolioEvent {
   return { id: `dep-${date}`, asOf: date, type: "Deposit", reserveId: "cash-core", amount: 500, tier: "c1" };
 }
 
+/**
+ * A day on which BOTH venues reported — the registry's own ids. Since #266 the
+ * report also asks whether a whole venue went dark, so "clean" means every venue
+ * that owed a mark produced one; a single made-up mark leaves nine unquoted.
+ * Elsewhere in this file `mark(date, "cx-a")` is used only to make the log
+ * NON-EMPTY, and those cases assert exit codes and paths rather than lines.
+ */
+const CRYPTO = ["btc", "eth", "render", "gram"];
+const EQUITIES = [
+  "aapl",
+  "googl",
+  "tsla",
+  "eww-mxn",
+  "intc-mxn",
+  "nke-mxn",
+  "nu-mxn",
+  "rivn-mxn",
+  "sbux-mxn",
+];
+
+function healthyDay(date: string): PortfolioEvent[] {
+  return [...CRYPTO, ...EQUITIES].map((instrumentId) => mark(date, instrumentId));
+}
+
 /** A throwaway store holding exactly these events. */
 async function storeWith(events: readonly PortfolioEvent[]): Promise<EventStorePaths> {
   const dataDir = await mkdtemp(join(tmpdir(), "numisma-gap-cli-"));
@@ -277,13 +301,33 @@ describe("runGapReport — the exit contract", () => {
   });
 
   it("exits 0 on a clean window too, and still prints the summary", async () => {
-    const paths = await storeWith([mark(YESTERDAY, "cx-a")]);
+    const paths = await storeWith(healthyDay(YESTERDAY));
     const run = await runGapReport({ argv: ["--since", YESTERDAY], now: NOW, paths });
     expect(run.report.lost).toEqual([]);
+    expect(run.report.venueDark).toEqual([]);
     expect(run.exitCode).toBe(0);
     expect(run.lines).toEqual([
       "[gap-report] Numisma: no lost days in 2026-08-04…2026-08-04 (1 day(s), 1 anchor(s) checked).",
     ]);
+  });
+
+  it("exits 0 on a VENUE-DARK day, and says so — warn only (#266 D8)", async () => {
+    // The exit code does not move, and that is mandatory rather than merely
+    // preferable: with no market-holiday calendar (D7) this fires on ~9-10 weekday
+    // holidays a year, so a non-zero exit would fail the daily automation ten times
+    // a year and train the operator to ignore it.
+    const paths = await storeWith(CRYPTO.map((id) => mark(YESTERDAY, id)));
+    const run = await runGapReport({ argv: ["--since", YESTERDAY], now: NOW, paths });
+
+    expect(run.report.lost).toEqual([]);
+    expect(run.report.venueDark).toEqual([
+      { date: YESTERDAY, source: "twelvedata", expected: 9 },
+    ]);
+    expect(run.exitCode).toBe(0);
+    expect(run.lines.some((line) => line.includes("VENUE DARK"))).toBe(true);
+    expect(run.lines.some((line) => line.includes("Tuesday"))).toBe(true);
+    // The lost-day count is untouched: a venue-dark day is not a lost day.
+    expect(run.lines.some((line) => line.includes("no lost days"))).toBe(true);
   });
 
   it("throws — so the shell exits non-zero — when the derivation cannot run", async () => {
