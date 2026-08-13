@@ -44,7 +44,9 @@ import { parseAsOfArg } from "./spine-args.js";
 try {
   const asOfFlag = parseAsOfArg(process.argv);
   const asOf = asOfFlag ?? tradingDayAsOf(new Date(), REPORT_TIME_ZONE);
-  const data = await loadFoldedReview(resolveEventStorePaths(), asOfFlag);
+  // `.data` is the render half of the fold's envelope; the `skipped` half reaches this
+  // surface in PRD #323 slice E.
+  const { data } = await loadFoldedReview(resolveEventStorePaths(), asOfFlag);
 
   // BORN-NESS, from the fold: open positions and closed ones alike. A position that
   // has been closed was realized — it is not a declaration awaiting its first fill —

@@ -19,7 +19,9 @@ import { parseAsOfArg } from "./spine-args.js";
 try {
   const paths = resolveEventStorePaths();
   const asOf = parseAsOfArg(process.argv);
-  const data = await loadFoldedReview(paths, asOf);
+  // `.data` is the render half of the fold's envelope; the `skipped` half reaches this
+  // surface in PRD #323 slice E.
+  const { data } = await loadFoldedReview(paths, asOf);
   const sourcePath = asOf ? `${paths.log} as-of ${asOf}` : paths.log;
   const report = buildCompositionReport(data, {
     load: {

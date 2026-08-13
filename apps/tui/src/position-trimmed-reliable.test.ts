@@ -143,7 +143,7 @@ describe("PositionTrimmed round-trip through event-store (T1)", () => {
 
     // Folds correctly: a partial closed-book row on the removed portion, the position
     // survives with only its c1 lot, and the settlement reserve is credited.
-    const data = await loadFoldedReview(paths);
+    const { data } = await loadFoldedReview(paths);
     const book = buildCompositionReport(data);
     const row = book.closedBook.rows.find((r) => r.positionId === "btc-pos");
     expect(row?.partial).toBe(true);
@@ -170,7 +170,7 @@ describe("PositionTrimmed batch-aware sufficiency on the real ingest loop (T3)",
     const report = await ingestInbox(paths);
     expect(report).toMatchObject({ newCount: 2, duplicateCount: 0 });
 
-    const data = await loadFoldedReview(paths);
+    const { data } = await loadFoldedReview(paths);
     const survivor = data.positions.find((p) => p.id === "btc-pos");
     expect(survivor?.lots).toEqual([{ quantity: 2, cost: 50, tier: "c1" }]);
     // Two partial rows, one lineage id.
@@ -208,7 +208,7 @@ describe("PositionTrimmed full-retirement REJECT at ingest (T4)", () => {
     expect(await exists(paths.inbox)).toBe(true);
 
     // The position survives untouched: a fresh fold still shows all 8 units open.
-    const data = await loadFoldedReview(paths);
+    const { data } = await loadFoldedReview(paths);
     const survivor = data.positions.find((p) => p.id === "btc-pos");
     expect(survivor?.lots.reduce((s, l) => s + l.quantity, 0)).toBeCloseTo(8, 9);
   });

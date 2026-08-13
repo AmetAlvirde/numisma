@@ -144,7 +144,9 @@ export interface FoldedAnchor {
  */
 export async function loadCurrentFold(asOf?: string): Promise<FoldedAnchor> {
   const paths = resolveEventStorePaths();
-  const data = await loadFoldedReview(paths, asOf);
+  // `.data` — the render half of the fold's envelope. The `skipped` half reaches the
+  // unattended surface in PRD #323 slice E; nothing prints one yet.
+  const { data } = await loadFoldedReview(paths, asOf);
   const report = buildCompositionReport(data, {
     load: {
       status: "loaded",

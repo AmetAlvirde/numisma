@@ -58,7 +58,9 @@ try {
 
   // 2 + 4. Render current state through the real wiring; cross-check the fund value
   // against the Node tracer rendering the SAME fold (two formatters, one number).
-  const current = await loadFoldedReview(paths)
+  // `.data` is the render half of the fold's envelope (PRD #323 seam B); the smoke
+  // harness cross-checks the rendered number, and nothing renders a skip until slice E.
+  const { data: current } = await loadFoldedReview(paths)
   const tracer = formatCompositionReport(buildCompositionReport(current))
   const fundValue = formatUsd(buildCompositionReport(current).totals.fundValueUsd)
   assert(tracer.includes(fundValue), `tracer output is missing the fund value ${fundValue}.`)

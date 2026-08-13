@@ -426,7 +426,7 @@ describe("ingestInbox — restart survival", () => {
     const second = await loadFoldedReview(paths);
 
     expect(second).toEqual(first);
-    expect(first.positions.some((position) => position.id === "btc-core")).toBe(true);
+    expect(first.data.positions.some((position) => position.id === "btc-core")).toBe(true);
   });
 });
 
@@ -527,7 +527,7 @@ describe("durable-log migration — legacy-shape events fail loud, then migrate 
     expect(logged.settlement).toEqual({ reserveId: "cash-core", proceeds: 290 });
 
     // And the fold now succeeds: the position is retired, the proceeds credited.
-    const data = await loadFoldedReview(paths);
+    const { data } = await loadFoldedReview(paths);
     expect(data.positions.some((position) => position.id === "aapl-core")).toBe(false);
     expect(data.reserves.find((reserve) => reserve.id === "cash-core")?.amount).toBe(1290);
   });
@@ -624,7 +624,7 @@ describe("InvalidationMarked round-trip through event-store (T2 / R4)", () => {
     expect(events.map((event) => event.id)).toEqual(["inval-1", "inval-2"]);
 
     // Folds latest-wins onto the still-open position: the newer mark (115) wins.
-    const data = await loadFoldedReview(paths);
+    const { data } = await loadFoldedReview(paths);
     const aapl = data.positions.find((position) => position.id === "aapl-core");
     expect(aapl?.invalidation).toEqual({ price: 115, direction: "below" });
   });
