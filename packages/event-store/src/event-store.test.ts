@@ -13,6 +13,7 @@ import {
   loadFoldedReview,
   quarantineLogPath,
   resolveEventStorePaths,
+  unattendedFoldVerdict,
   type EventStorePaths,
 } from "./event-store.js";
 import { genesisSeed } from "./genesis-seed.testkit.js";
@@ -146,7 +147,8 @@ describe("loadEventLog — log-line quarantine", () => {
     // PRD #323 seam B, the pair in one test because the pair is the point: the shell
     // REFUSES a log it could not fully read, and REPORTS what it read and then dropped.
     // The first is remediable (fix the line, the next run is clean); the second is a
-    // standing fact about an append-only log, so it reports and never refuses (#320 §4).
+    // standing fact about an append-only log, so it reports and never refuses (ADR-020,
+    // `context/adr/ADR-020-the-discard-channel-report-never-refuse.md`).
     const dropped = `${JSON.stringify(openBtc())}\n${JSON.stringify(closeGhost())}\n`;
 
     // REPORT: the drop rides out on the envelope, unmodified — the shell is a pipe.
@@ -165,6 +167,36 @@ describe("loadEventLog — log-line quarantine", () => {
     // REFUSE: the same log with one unloadable line throws BEFORE any envelope exists.
     const partial = await makeStore({ log: `${dropped}{ broken\n` });
     await expect(loadFoldedReview(partial)).rejects.toThrow(/unloadable line/i);
+  });
+
+  it("the fold's verdict is PROSE ONLY — the type has no exit code to set", async () => {
+    // PRD #323 R7. The consequence is a clause-4 verdict function beside the loader, and
+    // its whole shape is the ruling: `unattendedPreferencesVerdict` returns
+    // `{exitCode, messages}` because a malformed sidecar line is an ERRAND that
+    // extinguishes when the operator edits it; this one returns messages ALONE because a
+    // dropped event's locator points into append-only history and never extinguishes.
+    // A permanently red errand channel is one nobody reads.
+    const paths = await makeStore({
+      log: `${JSON.stringify(openBtc())}\n${JSON.stringify(closeGhost())}\n`,
+    });
+
+    const verdict = unattendedFoldVerdict(await loadFoldedReview(paths));
+
+    // ONE line, carrying the count and nothing else that varies — never an enumeration,
+    // regardless of how many events dropped, because it prints unasked and daily.
+    expect(verdict.messages).toHaveLength(1);
+    expect(verdict.messages[0]).toContain("1 event(s)");
+    expect(verdict.messages[0]).not.toContain("close-ghost");
+    expect(verdict.messages[0]).not.toContain("PositionClosed");
+    // The member is ABSENT, not zero. `Object.keys` rather than a `toBeUndefined`, which
+    // would also pass on a verdict that simply forgot to set one.
+    expect(Object.keys(verdict)).toEqual(["messages"]);
+  });
+
+  it("says NOTHING over a clean log — the daily run stays byte-identical", async () => {
+    const paths = await makeStore({ log: `${JSON.stringify(openBtc())}\n` });
+
+    expect(unattendedFoldVerdict(await loadFoldedReview(paths)).messages).toEqual([]);
   });
 
   it("self-heals: a clean log removes a stale quarantine lane", async () => {

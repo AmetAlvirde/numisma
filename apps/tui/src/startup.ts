@@ -11,10 +11,11 @@
  * stays in `event-store.ts` and the read IO (`loadFoldedReview`) in
  * `@numisma/event-store`; this only sequences them.
  */
-import type { FundReviewData } from "@numisma/engine";
+import type { FoldedReview } from "@numisma/engine";
 import { loadFoldedReview, type EventStorePaths } from "@numisma/event-store";
 import { ingestInbox, type IngestReport } from "./event-store.js";
 import { parseAsOfArg } from "./spine-args.js";
+import { formatFoldCheckFailure } from "./fold-lines.js";
 import { formatGapCheckFailure } from "./gap-lines.js";
 
 /** What the renderer needs after the startup data path runs. */
@@ -23,8 +24,18 @@ export interface StartupPlan {
   asOf: string | undefined;
   /** Source label shown in the load footer. */
   sourcePath: string;
-  /** Folds genesis + log to the resolved `asOf` (or current) for rendering. */
-  loadData: () => Promise<FundReviewData>;
+  /**
+   * Folds genesis + log to the resolved `asOf` (or current) and returns the fold's
+   * WHOLE ENVELOPE — `{data, skipped}`.
+   *
+   * IT DOES NOT UNWRAP, and that is PRD #323 R4 reaching the last surface it had left
+   * to reach: a thunk typed `Promise<FundReviewData>` hands its consumer a fold
+   * indistinguishable from one taken over a complete log, which is #293 reproduced one
+   * layer out from the shell. The renderer takes `.data` at the composition root and
+   * says so there; the discards are reported on the startup channel BEFORE the
+   * alternate screen opens, because after that nothing written to stderr is visible.
+   */
+  loadData: () => Promise<FoldedReview>;
 }
 
 /** Seams the host injects: where the report goes, and (for tests) the ingest fn. */
@@ -42,6 +53,20 @@ export interface StartupDeps {
    * startup channel you read and one you learn to scroll past.
    */
   livenessLines?: (() => Promise<string[]>) | undefined;
+  /**
+   * The fold's dropped-event lines (PRD #323 seam E), for the entry point that wants
+   * them. **OMITTED MEANS SILENT, AND THERE IS DELIBERATELY NO DEFAULT** — the same
+   * rule {@link livenessLines} states and for the same reason: `report`, `spine` and
+   * `plans` enumerate their own fold's discards at their own call site, so a default
+   * here would print them twice on those surfaces and once on surfaces that never
+   * asked. Only `pnpm dev` supplies it, because only `pnpm dev` hands the terminal to
+   * a renderer and has nowhere else to say it.
+   *
+   * It takes the resolved `asOf` because the fold this reports on must be the fold the
+   * dashboard will render — reporting current-state discards over an `--as-of 2026-06-30`
+   * view would name events the rendered fold never even read.
+   */
+  foldLines?: ((asOf: string | undefined) => Promise<string[]>) | undefined;
 }
 
 /**
@@ -99,13 +124,29 @@ export async function prepareStartup(
       deps.emit(line);
     }
   }
+  // A CO-TENANT ON THE SAME CHANNEL, filed under its own kind and bounded under its own
+  // kind — `loadFoldLines` caps the fold's lines and `loadGapLines` caps the gap's,
+  // each over its own lines and never over the concatenation, so neither can starve the
+  // other (PR #322's lesson; ADR-020's reserved capacity). Guarded here for the same
+  // reason the liveness lines are: a diagnostic must never be able to stop the
+  // dashboard from mounting, and this seam refuses to trust that an injected adapter
+  // catches its own failures.
+  if (deps.foldLines !== undefined) {
+    let lines: string[];
+    try {
+      lines = await deps.foldLines(asOf);
+    } catch (error) {
+      lines = [formatFoldCheckFailure(error)];
+    }
+    for (const line of lines) {
+      deps.emit(line);
+    }
+  }
   const sourcePath = asOf ? `${paths.log} as-of ${asOf}` : paths.log;
   return {
     asOf,
     sourcePath,
-    // `.data` is the render half of the fold's envelope. The thunk stays
-    // `FundReviewData`-shaped for now because widening it is the TUI enumeration, which
-    // is PRD #323 slice E's work — not a shim for this seam, which ends at the shell.
-    loadData: async () => (await loadFoldedReview(paths, asOf)).data,
+    // THE WHOLE ENVELOPE, unwrapped nowhere in this seam — see {@link StartupPlan.loadData}.
+    loadData: () => loadFoldedReview(paths, asOf),
   };
 }

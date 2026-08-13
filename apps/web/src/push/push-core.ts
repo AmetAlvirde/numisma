@@ -9,13 +9,14 @@
  * a copy of it. `push.ts` now just wires argv + credentials around these.
  */
 import type { Pool } from "pg";
-import type { CompositionReport, FundReviewData } from "@numisma/engine";
+import type { CompositionReport, FoldedReview } from "@numisma/engine";
 import { buildCompositionReport, pickPolicyAsOf } from "@numisma/engine";
 import {
   assertLogFullyLoaded,
   loadEventLog,
   loadFoldedReview,
   resolveEventStorePaths,
+  unattendedFoldVerdict,
 } from "@numisma/event-store";
 import type { LoadedPreferences } from "@numisma/engine";
 import {
@@ -77,14 +78,18 @@ export function parsePushArgs(argv: readonly string[]): PushArgs {
   return { init: initOnly || argv.includes("--init"), initOnly };
 }
 
-/** The folded read model AND the report built from it, for one anchor. */
-export interface FoldedAnchor {
-  /**
-   * The fold output. Kept alongside the report because the glance builder needs the
-   * per-instrument mark record (`closes`) that `toProjectionReport` deliberately
-   * never lets out of the machine (D14) — the conclusion is pushed, the input is not.
-   */
-  data: FundReviewData;
+/**
+ * The folded read model AND the report built from it, for one anchor.
+ *
+ * IT EXTENDS THE FOLD'S ENVELOPE rather than copying `data` out of it: `data` is the
+ * fold output (kept alongside the report because the glance builder needs the
+ * per-instrument mark record, `closes`, that `toProjectionReport` deliberately never
+ * lets out of the machine — D14, the conclusion is pushed and the input is not), and
+ * `skipped` is every event this fold read and could not apply. Carrying only `data`
+ * here would reproduce #293 one layer further out, which is the whole defect PRD #323
+ * exists to remove.
+ */
+export interface FoldedAnchor extends FoldedReview {
   report: CompositionReport;
 }
 
@@ -149,9 +154,11 @@ export interface FoldedAnchor {
  */
 export async function loadCurrentFold(asOf?: string): Promise<FoldedAnchor> {
   const paths = resolveEventStorePaths();
-  // `.data` — the render half of the fold's envelope. The `skipped` half reaches the
-  // unattended surface in PRD #323 slice E; nothing prints one yet.
-  const { data } = await loadFoldedReview(paths, asOf);
+  // THE WHOLE ENVELOPE GOES ON, unwrapped nowhere: `data` builds the report and
+  // `skipped` rides out to the shell, which turns it into prose AFTER the row lands
+  // (PRD #323 seam E). Nothing here decides what a dropped event means — this is a
+  // loader, and the policy is `unattendedFoldVerdict` (ADR-020 clause 4).
+  const { data, skipped } = await loadFoldedReview(paths, asOf);
   const report = buildCompositionReport(data, {
     load: {
       status: "loaded",
@@ -159,7 +166,7 @@ export async function loadCurrentFold(asOf?: string): Promise<FoldedAnchor> {
       loadedAt: new Date().toISOString(),
     },
   });
-  return { data, report };
+  return { data, skipped, report };
 }
 
 /**
@@ -225,6 +232,14 @@ export interface AnchorGlance {
   glance: GlanceBlock;
   /** The preferences envelope the floor was read from. Operator channel only. */
   preferences: LoadedPreferences;
+  /**
+   * The FOLD's envelope — the second tenant, and a SIBLING KEY rather than a second
+   * member of a pair, which is the whole reason this interface is a record (PRD #323
+   * seam E arriving on spec #320 seam C's seam without rewriting it). Operator channel
+   * only: `deriveSnapshot` takes {@link glance} alone, and `fold-discard-surface.test.ts`
+   * holds that line the same way `discard-channel.test.ts` holds it for `preferences`.
+   */
+  folded: FoldedReview;
 }
 
 /**
@@ -245,6 +260,9 @@ export async function buildGlanceForAnchor(
       await loadVenueDarkAsOf(asOf),
     ),
     preferences: floor.preferences,
+    // Carried, not acted on: the fold that produced `fold.data` already reported what
+    // it dropped, and this hands that report on to the shell unchanged.
+    folded: { data: fold.data, skipped: fold.skipped },
   };
 }
 
@@ -468,6 +486,18 @@ export async function upsertSnapshot(
  */
 export const PREFERENCES_DIAGNOSTIC_KIND = "preferences";
 
+/**
+ * The FOLD report's kind on the run's operator channel — the co-tenant
+ * {@link PREFERENCES_DIAGNOSTIC_KIND} was named for, added beside it exactly as that
+ * constant's docstring promised rather than by editing a string literal in three shells.
+ *
+ * A KIND IS THE QUESTION THE DIAGNOSTIC ANSWERS (ADR-020). "Which lines of the policy
+ * sidecar could not be read" and "which events of the durable log could not be applied"
+ * are two questions, so they are two kinds, and the channel bounds them separately —
+ * neither can starve the other no matter how loud one gets.
+ */
+export const FOLD_DIAGNOSTIC_KIND = "fold";
+
 /** Everything one unattended anchor needs in order to push and then report. */
 export interface UnattendedPushInput {
   pool: Pool;
@@ -525,6 +555,15 @@ export async function pushAnchorAndReport(
 
   const verdict = unattendedPreferencesVerdict(input.anchor.preferences);
   input.channel.add(PREFERENCES_DIAGNOSTIC_KIND, verdict.messages);
+  // THE SECOND KIND, in the same three-line shape and with its own exit policy — which
+  // is that it HAS none. `unattendedFoldVerdict` returns prose and nothing else, so
+  // there is no code to fold in here and no way to write one by accident; a fold
+  // discard points into append-only history and can never extinguish, so an exit code
+  // would redden this run's errand channel permanently (ADR-020; spec #323 R7).
+  input.channel.add(
+    FOLD_DIAGNOSTIC_KIND,
+    unattendedFoldVerdict(input.anchor.folded).messages,
+  );
   input.channel.emit(input.emit ?? ((line) => console.error(line)));
   return { derived, exitCode: verdict.exitCode };
 }

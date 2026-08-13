@@ -18,7 +18,11 @@
  * never silent; a malformed value fails loud before anything is ingested.
  */
 import { buildCompositionReport, formatCompositionReport } from "@numisma/engine";
-import { loadFoldedReview, resolveEventStorePaths } from "@numisma/event-store";
+import {
+  formatFoldDiscards,
+  loadFoldedReview,
+  resolveEventStorePaths,
+} from "@numisma/event-store";
 import { ingestInbox } from "./event-store.js";
 import { parseAsOfArg, parseMagnitudeThresholdArg } from "./spine-args.js";
 import { plural } from "./plural.js";
@@ -46,9 +50,14 @@ try {
       "\n\n",
   );
 
-  // `.data` is the render half of the fold's envelope; the `skipped` half reaches this
-  // surface in PRD #323 slice E.
-  const { data } = await loadFoldedReview(paths, asOf);
+  const folded = await loadFoldedReview(paths, asOf);
+  const { data } = folded;
+  // The ENUMERATION, on stderr, before the composition it qualifies — the interactive
+  // half of PRD #323 R7. See `report.ts` for why this surface enumerates and the
+  // unattended push counts instead.
+  for (const line of formatFoldDiscards(folded)) {
+    process.stderr.write(`${line}\n`);
+  }
   const report = buildCompositionReport(data, {
     load: {
       status: "loaded",
