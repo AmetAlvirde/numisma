@@ -234,6 +234,13 @@ describe("import-orders-cli — the shell's own contract (argv, exit codes, env,
     expect(typeof run.status).toBe("number");
   }
 
+  /** Every `.tmp`/`.lock` entry in a directory — the staging name is UNIQUE per write. */
+  async function litter(dir: string): Promise<string[]> {
+    return (await readdir(dir)).filter(
+      (entry) => entry.endsWith(".tmp") || entry.endsWith(".lock"),
+    );
+  }
+
   it("prints usage to STDERR and exits 1 with no argument, touching no data dir", async () => {
     const dir = await dataDir();
     const before = (await readdir(dir)).sort();
@@ -289,7 +296,7 @@ describe("import-orders-cli — the shell's own contract (argv, exit codes, env,
     expect(run.stdout).not.toMatch(/Funding reserve for this batch/);
   });
 
-  it("exits 0 on imported, leaves no temp sibling, and never writes the plans sidecar", async () => {
+  it("exits 0 on imported and leaves no temp sibling beside the sidecar it wrote", async () => {
     const plans = "this line is authored, and this import must not touch it\n";
     const dir = await dataDir({
       "orders.jsonl": `${serializeOrderRecord(placementOnFile())}\n`,
@@ -309,13 +316,18 @@ describe("import-orders-cli — the shell's own contract (argv, exit codes, env,
     expect(await readFile(join(dir, "orders.jsonl"), "utf8")).toContain("orderFillObserved");
     // Over the DIRECTORY, never a guessed `${path}.tmp`: the staging sibling is uniquely
     // named per write, so probing one literal name would pass vacuously.
-    const leftovers = (await readdir(dir)).filter(
-      (entry) => entry.endsWith(".tmp") || entry.endsWith(".lock"),
-    );
-    expect(leftovers).toEqual([]);
-    // THE PLANS SIDECAR IS READ-ONLY on this path (#286): the import proposes a rung
-    // against the ladders in force and never writes a plan line. The bytes are unchanged,
-    // and no plans temp sibling appeared in the sweep above either.
+    expect(await litter(dir)).toEqual([]);
+    // A WEAK GUARD, KEPT AND LABELLED AS ONE. The plans sidecar is read-only on this path
+    // (#286), but this comparison is not what proves it: `loadInForceLadders` has exactly
+    // one call site (`import-orders.ts:596`), inside `if (admitted.length > 0)` and AFTER
+    // `declareFunding` — i.e. behind the interview wall a non-interactive spawn cannot get
+    // past. This case admits nothing, so `plans.jsonl` is never OPENED, and an unread file
+    // cannot fail a byte-comparison. (The proof: the fixture below is not JSON, yet stderr
+    // on this run is empty — a read would have printed `:1 skipped (invalid)`.)
+    //
+    // It is kept only as a cheap tripwire for a write on some OTHER path that this run
+    // does reach. It would NOT catch the natural #286 follow-on — writing the accepted
+    // rung pick back after `:596` — which needs a test that can answer the interview.
     expect(await readFile(join(dir, "plans.jsonl"), "utf8")).toBe(plans);
   });
 
@@ -401,6 +413,12 @@ describe("import-orders-cli — the shell's own contract (argv, exit codes, env,
     expect(run.status).toBe(1);
     // It did NOT fail on any of the reads before the prompt — no refusal was raised.
     expect(run.stderr).not.toMatch(/REFUSED/);
+    // DELIBERATELY A NODE-INTERNAL STRING, not a contract of ours. `ERR_USE_AFTER_CLOSE`
+    // is the most precise available probe for "the prompt was actually put": no message of
+    // ours is emitted between the last read and the question. The tradeoff is owned here —
+    // a Node release that rewords it breaks this case, and the fix is to re-derive the new
+    // wording rather than to weaken the probe, because a looser match would stop
+    // distinguishing "reached the prompt" from "died earlier for some other reason".
     expect(run.stderr).toMatch(/readline was closed/);
     // Nothing was written on the way to the prompt: the sidecar is still absent.
     expect(await readdir(dir)).not.toContain("orders.jsonl");

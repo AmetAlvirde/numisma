@@ -20,7 +20,10 @@
  *
  * EVERY FIXTURE IS SYNTHETIC — invented rung ids, round decade prices, round quantities.
  * No real order, price or balance appears here, and the real accumulus data dir is never
- * reachable: `NUMISMA_DATA_DIR` points at a throwaway `mkdtemp` directory in every case.
+ * reachable: the runner's `dataDir` is REQUIRED and becomes `NUMISMA_DATA_DIR` verbatim,
+ * so every case names a throwaway `mkdtemp` directory (or, in the one relative-path case,
+ * the relative string under test). There is no default — an empty string would resolve to
+ * the real ledger, so omitting the dir has to be, and is, a type error.
  */
 import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
@@ -55,8 +58,9 @@ function ladderRecords(): OrderRecord[] {
   }));
 }
 
-interface Run {
+interface ShellRun {
   status: number | null;
+  signal: NodeJS.Signals | null;
   stdout: string;
   stderr: string;
 }
@@ -90,24 +94,56 @@ describe("cancel-order-cli — the shell's argv, env and exit-code contract", ()
     return join(dataDir, "orders.jsonl");
   }
 
-  /** Run the real `cancel-order-cli.ts` under tsx, stdin CLOSED and stdio piped. */
+  /**
+   * Run the real `cancel-order-cli.ts` under tsx, stdin CLOSED and stdio piped.
+   *
+   * `dataDir` is REQUIRED and is the LITERAL `NUMISMA_DATA_DIR` value — a case that wants
+   * to exercise the relative-path refusal passes the relative string here. There is
+   * deliberately no default: `resolveDataDir` treats `""` exactly like an unset var
+   * (`packages/engine/src/data-dir.ts:47` gates on `fromEnv.trim() !== ""`) and falls back
+   * to the REAL accumulus ledger, so a runner that let the value be omitted would put a
+   * live write one forgotten argument away. Omitting it is a type error, not a fallback.
+   */
   function runCancel(
-    args: string[],
-    options: { dataDir?: string; dataDirEnv?: string; cwd?: string } = {},
-  ): Run {
+    args: readonly string[],
+    options: { dataDir: string; cwd?: string },
+  ): ShellRun {
     const script = join(REPO_ROOT, "apps", "tui", "src", "cancel-order-cli.ts");
     const tsx = join(REPO_ROOT, "node_modules", ".bin", "tsx");
-    const env = {
-      ...process.env,
-      NUMISMA_DATA_DIR: options.dataDirEnv ?? options.dataDir ?? "",
-    };
+    const env = { ...process.env, NUMISMA_DATA_DIR: options.dataDir };
     const result = spawnSync(tsx, [script, ...args], {
       encoding: "utf8",
       env,
       input: "",
+      // A shell that blocked on a read would hang this worker outright: `spawnSync` is not
+      // preemptible by vitest's own testTimeout, which is a timer on the same thread. The
+      // timeout turns a hang into a KILLED process, which `expectExited` reads as failure.
+      timeout: 20_000,
       ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
     });
-    return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+    return {
+      status: result.status,
+      signal: result.signal,
+      stdout: result.stdout ?? "",
+      stderr: result.stderr ?? "",
+    };
+  }
+
+  /**
+   * Asserted on EVERY path: the process ended on its own rather than being killed by the
+   * runner's timeout. This shell claims to need no TTY (`cancel-order-cli.ts:11-13`), so a
+   * path that started waiting on a prompt must surface here as a signal, not as a hang.
+   */
+  function expectExited(run: ShellRun): void {
+    expect(run.signal).toBeNull();
+    expect(typeof run.status).toBe("number");
+  }
+
+  /** Every `.tmp`/`.lock` entry in a directory — the staging name is UNIQUE per write. */
+  async function litter(dir: string): Promise<string[]> {
+    return (await readdir(dir)).filter(
+      (entry) => entry.endsWith(".tmp") || entry.endsWith(".lock"),
+    );
   }
 
   async function readOrders(dataDir: string): Promise<string> {
@@ -128,6 +164,7 @@ describe("cancel-order-cli — the shell's argv, env and exit-code contract", ()
 
     const result = runCancel(["rung-300", "2026-01-03T10:00:00"], { dataDir: dir });
 
+    expectExited(result);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Cancelled rung-300");
     expect(result.stderr).toBe("");
@@ -147,6 +184,7 @@ describe("cancel-order-cli — the shell's argv, env and exit-code contract", ()
 
     const result = runCancel([], { dataDir: dir });
 
+    expectExited(result);
     expect(result.status).toBe(1);
     // Exact, and on the ERROR channel — a usage line on stdout would pollute a pipeline.
     expect(result.stderr).toBe(USAGE);
@@ -164,6 +202,7 @@ describe("cancel-order-cli — the shell's argv, env and exit-code contract", ()
     // `!orderId` is one falsiness check covering both `undefined` and `""`.
     const result = runCancel([""], { dataDir: dir });
 
+    expectExited(result);
     expect(result.status).toBe(1);
     expect(result.stderr).toBe(USAGE);
     expect(result.stdout).toBe("");
@@ -184,27 +223,23 @@ describe("cancel-order-cli — the shell's argv, env and exit-code contract", ()
       // path, while an operator who passed nothing at all sees a usage line. Same
       // mistake, two code paths, two messages — pinned here so neither drifts silently.
       const result = runCancel([" "], { dataDir: dir });
+      const absent = runCancel([], { dataDir: dir });
 
+      expectExited(result);
+      expectExited(absent);
       expect(result.status).toBe(1);
       expect(result.stderr).toContain("REFUSED — no order id was given");
       // NOT the usage sentence — that is the whole point of this case.
       expect(result.stderr).not.toContain(USAGE.trim());
       expect(result.stdout).toBe("");
       expect(await readOrders(dir)).toBe(before);
+
+      // The divergence made explicit against the other branch: SAME exit code, so a
+      // calling script cannot tell the two mistakes apart — only the text can.
+      expect(absent.status).toBe(result.status);
+      expect(absent.stderr).toBe(USAGE);
     },
   );
-
-  it("the two 'no id' messages are genuinely different text", async () => {
-    const dir = await syntheticDataDir();
-
-    const absent = runCancel([], { dataDir: dir });
-    const blank = runCancel([" "], { dataDir: dir });
-
-    // Same exit code, same operator intent, different sentences. Both exit 1, so a
-    // script cannot tell them apart; only the text can.
-    expect(absent.status).toBe(blank.status);
-    expect(absent.stderr).not.toBe(blank.stderr);
-  });
 
   // ── The positional mapping. ───────────────────────────────────────────────────────
   it("maps argv[3] to observedAt: the supplied stamp lands VERBATIM in the appended line", async () => {
@@ -212,6 +247,7 @@ describe("cancel-order-cli — the shell's argv, env and exit-code contract", ()
 
     const result = runCancel(["rung-200", "2026-03-04T05:06:07"], { dataDir: dir });
 
+    expectExited(result);
     expect(result.status).toBe(0);
     // Verbatim, not re-formatted, not re-stamped — this is what proves argv[3] is the
     // stamp positional rather than something the shell reorders or ignores.
@@ -226,6 +262,7 @@ describe("cancel-order-cli — the shell's argv, env and exit-code contract", ()
     const result = runCancel(["rung-200"], { dataDir: dir });
     const after = formatObservedAt(new Date());
 
+    expectExited(result);
     expect(result.status).toBe(0);
     // `YYYY-MM-DDTHH:MM:SS` sorts lexicographically, so bracketing the spawn is a real
     // bound on `io.now()` (`cancel-order.ts:122`) without freezing global time.
@@ -243,6 +280,7 @@ describe("cancel-order-cli — the shell's argv, env and exit-code contract", ()
 
     // A shell that grew flags would either consume or reject these; this one reads two
     // positionals and stops.
+    expectExited(result);
     expect(result.status).toBe(0);
     expect(lastRecord(await readOrders(dir)).observedAt).toBe("2026-03-04T05:06:07");
   });
@@ -257,6 +295,7 @@ describe("cancel-order-cli — the shell's argv, env and exit-code contract", ()
     // the path the parent's env produced in the CHILD process.
     const result = runCancel(["rung-does-not-exist"], { dataDir: dir });
 
+    expectExited(result);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(ordersPath(dir));
     expect(result.stderr).toContain(`Nothing was written to ${ordersPath(dir)}.`);
@@ -272,10 +311,11 @@ describe("cancel-order-cli — the shell's argv, env and exit-code contract", ()
       // this very `orders.jsonl` and the cancellation would SUCCEED. The byte-identical
       // assertion below is therefore load-bearing, not vacuous.
       const result = runCancel(["rung-300", "2026-01-03T10:00:00"], {
-        dataDirEnv: relative,
+        dataDir: relative,
         cwd: dir,
       });
 
+      expectExited(result);
       expect(result.status).toBe(1);
       expect(result.stderr).toContain("split-brain ledger");
       expect(result.stderr).toContain("NUMISMA_DATA_DIR must be an absolute path");
@@ -288,10 +328,15 @@ describe("cancel-order-cli — the shell's argv, env and exit-code contract", ()
   it("maps all three outcomes: usage → 1, rejected → 1, cancelled → 0", async () => {
     const dir = await syntheticDataDir();
 
-    expect(runCancel([], { dataDir: dir }).status).toBe(1);
+    const usage = runCancel([], { dataDir: dir });
+    expectExited(usage);
+    expect(usage.status).toBe(1);
     // `not-resting`: the rung is retired by the first call, so the second is refused.
-    expect(runCancel(["rung-300", "2026-01-03T10:00:00"], { dataDir: dir }).status).toBe(0);
+    const cancelled = runCancel(["rung-300", "2026-01-03T10:00:00"], { dataDir: dir });
+    expectExited(cancelled);
+    expect(cancelled.status).toBe(0);
     const again = runCancel(["rung-300", "2026-01-04T10:00:00"], { dataDir: dir });
+    expectExited(again);
     expect(again.status).toBe(1);
     expect(again.stderr).toContain("REFUSED —");
   });
@@ -299,13 +344,12 @@ describe("cancel-order-cli — the shell's argv, env and exit-code contract", ()
   it("leaves no temp or lock litter beside the sidecar after a successful append", async () => {
     const dir = await syntheticDataDir();
 
-    expect(runCancel(["rung-200", "2026-01-03T10:00:00"], { dataDir: dir }).status).toBe(0);
+    const result = runCancel(["rung-200", "2026-01-03T10:00:00"], { dataDir: dir });
+    expectExited(result);
+    expect(result.status).toBe(0);
 
     // Over the DIRECTORY, not a guessed `${path}.tmp`: the staging name is unique per
     // write, so probing one literal name would pass vacuously.
-    const leftovers = (await readdir(dir)).filter(
-      (entry) => entry.endsWith(".tmp") || entry.endsWith(".lock"),
-    );
-    expect(leftovers).toEqual([]);
+    expect(await litter(dir)).toEqual([]);
   });
 });
