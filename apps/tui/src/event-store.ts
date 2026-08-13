@@ -355,7 +355,17 @@ let tempImageTick = 0;
  * because rename(2) is only atomic within one filesystem; a temp in `os.tmpdir()` would
  * degrade to a copy that can tear.
  *
+ * The suffix stays `.tmp` — that is policy, not decoration. Accumulus's `/data/*.tmp`
+ * ignore rule (ADR-006) is the only thing stopping a multi-megabyte staged image from
+ * becoming committable into the private data repo, so any rename of this scheme must
+ * keep the `.tmp` ending. `packages/preferences/src/sidecar-io.ts` carries the same
+ * constraint on its own copy; both must hold it.
+ *
  * A failed write removes its own temp file, so a doomed write leaves no litter behind.
+ * The cleanup is best-effort BY DESIGN: if the removal itself fails (the directory went
+ * read-only, which is often why the write failed in the first place) its error is
+ * dropped, because the caller must be told the log image failed to publish — not handed
+ * an `unlink` error naming a temp file it has never heard of.
  */
 export async function writeLogImage(logPath: string, contents: string): Promise<void> {
   await mkdir(dirname(logPath), { recursive: true });
@@ -365,7 +375,7 @@ export async function writeLogImage(logPath: string, contents: string): Promise<
     await writeFile(tempPath, contents, "utf8");
     await rename(tempPath, logPath);
   } catch (error) {
-    await rm(tempPath, { force: true });
+    await rm(tempPath, { force: true }).catch(() => {});
     throw error;
   }
 }
