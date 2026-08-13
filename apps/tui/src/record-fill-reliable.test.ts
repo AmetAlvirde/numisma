@@ -24,7 +24,7 @@ import {
   type OrderRecord,
   type PortfolioEvent,
 } from "@numisma/engine";
-import { appendOrders, loadOrders } from "@numisma/preferences";
+import { appendOrders, appendReconciliation, loadOrders, loadPlans } from "@numisma/preferences";
 import { afterEach, describe, expect, it } from "vitest";
 import { restoreLogImage, writeLogImage } from "./event-store.js";
 import { recordFill, type RecordFillIo } from "./record-fill.js";
@@ -187,6 +187,14 @@ function realIo(
       loadGenesis: async () => genesisSeed(),
       loadLogEvents: logEvents,
       loadFolded: async () => foldEvents(genesisSeed(), await logEvents()),
+      // The advisory trail (`D6`, #336), wired to REAL files in the same temp dir. It is
+      // not part of the act and no assertion below depends on it; it is real here so the
+      // act's own guarantees are measured with the trail actually running beside them.
+      plansPath: resolve(dataDir, "plans.jsonl"),
+      loadPlans,
+      reconciliationsPath: resolve(dataDir, "reconciliations.jsonl"),
+      appendReconciliation,
+      toldAt: () => "2026-01-05T18:07:00-06:00",
       ask: async () => remaining.shift() ?? "",
       out: () => undefined,
       err: (message) => err.push(message),

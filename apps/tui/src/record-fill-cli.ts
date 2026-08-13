@@ -9,7 +9,15 @@
  * test import the flow with no side effects: importing this file runs the act.
  */
 import { createInterface } from "node:readline/promises";
-import { appendOrders, loadOrders, resolveOrdersPath } from "@numisma/preferences";
+import {
+  appendOrders,
+  appendReconciliation,
+  loadOrders,
+  loadPlans,
+  resolveOrdersPath,
+  resolvePlansPath,
+  resolveReconciliationsPath,
+} from "@numisma/preferences";
 import {
   assertLogFullyLoaded,
   loadEventLog,
@@ -51,6 +59,15 @@ try {
       return load.events;
     },
     loadFolded: () => loadFoldedReview(paths),
+    plansPath: resolvePlansPath(),
+    loadPlans,
+    reconciliationsPath: resolveReconciliationsPath(),
+    appendReconciliation,
+    // UTC, and `Z` is an EXPLICIT offset of zero rather than an absent one — which is
+    // the whole of what `toldAt` requires. The fund's own zone is deliberately not used
+    // here: `toldAt` is an audit instant and never an ordering key, so rendering it in a
+    // named zone would buy nothing and would put a second calendar on this path.
+    toldAt: () => new Date().toISOString(),
     ask: (question) => rl.question(question),
     out: (message) => process.stdout.write(message),
     err: (message) => process.stderr.write(`${message}\n`),
