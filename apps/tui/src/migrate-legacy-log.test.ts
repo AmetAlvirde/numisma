@@ -270,10 +270,9 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
     /**
      * KNOWN DEFECT — CHARACTERIZED HERE, NOT BLESSED.
      *
-     * NO TRACKER ISSUE EXISTS FOR THIS YET, and this comment deliberately cites none
-     * rather than a number that would not resolve. One is owed: the fix is a behavior
-     * change, so filing it is the next step, and whoever files it should put the number
-     * here and on the sibling case below.
+     * FILED AS #345, which covers this case and the sibling case below. The fix is a
+     * behavior change, so it belongs in its own increment rather than in this tests-only
+     * one.
      *
      * This test asserts what the tool OBSERVABLY DOES today, and what it does is wrong:
      * it reports "No durable log to migrate" about a log it has just OVERWRITTEN.
@@ -291,8 +290,8 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
      * one tool in the repo that rewrites the durable log, and the same `undefined`-only
      * ENOENT check is what stands between "empty" and "unreadable". Fixing it is a
      * behavior change and this increment is tests only; the fix belongs in its own
-     * increment (see the follow-up owed above), with this test INVERTED to assert the log
-     * is left untouched.
+     * increment (#345, cited above), with this test INVERTED to assert the log is left
+     * untouched.
      */
     it("KNOWN DEFECT: rewrites an EMPTY log to a single newline while reporting 'No durable log'", async () => {
       const { dir, logPath } = await syntheticDataDir("");
@@ -308,7 +307,8 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
       expect(await litter(dir)).toEqual([]);
     });
 
-    // KNOWN DEFECT, same seam and the same unfiled follow-up as the case above.
+    // KNOWN DEFECT, same seam and the same follow-up (#345) as the case above: INVERT this
+    // case too when the fix lands, to assert the log is left untouched.
     it("KNOWN DEFECT (same seam): a blank-lines-only log is collapsed to a single newline", async () => {
       const { dir, logPath } = await syntheticDataDir("\n\n\n");
 

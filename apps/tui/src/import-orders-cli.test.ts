@@ -369,9 +369,9 @@ describe("import-orders-cli — the shell's own contract (argv, exit codes, env,
     // FOLLOWING the env var rather than merely happening to sit somewhere plausible.
     //
     // THE OTHER TWO RESOLVERS SIT BEHIND THE PROMPT and cannot be reached from a spawned
-    // run — see the interview-wall case below for why — so what is pinned here is the
-    // reachable one plus the negative that matters: no run of this shell falls back to the
-    // real accumulus root. `resolvePlansPath` and `resolveEventStorePaths` share
+    // run — see the interview-wall case below, and #346, for why — so what is pinned here
+    // is the reachable one plus the negative that matters: no run of this shell falls back
+    // to the real accumulus root. `resolvePlansPath` and `resolveEventStorePaths` share
     // `resolveDataDir` with `resolveOrdersPath`, and that agreement is pinned at the
     // resolver (`packages/preferences/src/plans-reliable.test.ts`, the data-dir drift
     // test) rather than re-derived here through an interview this harness cannot answer.
@@ -404,6 +404,12 @@ describe("import-orders-cli — the shell's own contract (argv, exit codes, env,
     // records is the wall: the interactive half of this flow — the funding declaration,
     // the rung picks, the plans read and the fold behind them — is not exercisable from a
     // non-interactive spawn, and the `no-reserve-declared` refusal is unreachable here.
+    //
+    // FILED AS #346: `createInterface` is constructed at `import-orders-cli.ts:28` and
+    // eagerly consumes stdin, so by the time the first `ask` runs a piped stdin has already
+    // ended and `rl.question` rejects — which is why piping answers to `pnpm orders:import`
+    // cannot work, and why `no-reserve-declared` at `import-orders.ts:588` is unreachable
+    // without a TTY.
     const dir = await dataDir();
     const csv = await exportFile(dir, [FRESH_ROW]);
 
