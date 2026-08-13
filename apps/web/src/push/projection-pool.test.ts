@@ -65,8 +65,16 @@ describe("projectionPoolConfig", () => {
    * process dies by signal with no PG error to explain why. One hour is the
    * interval the plist actually fires at; see schedule-window.test.ts, which pins
    * the watchdog against the same oracle from the other side.
+   *
+   * A BOUND ON ONE QUERY, NOT ON THE COMMAND, and the name says so because the
+   * distinction is load-bearing. This sum is one connect plus one query; `backfill`
+   * issues 43-44 upserts sequentially and NOTHING here scales with that count. What
+   * makes the command as a whole finite is that its loop aborts on the first
+   * rejection — a separate invariant, pinned separately in backfill-core.test.ts
+   * ("ABORTS on the first failed upsert"). Reading this assertion as a per-run bound
+   * is how a per-anchor `catch` could be added without a single test going red.
    */
-  it("gives up well inside the one-hour gap between scheduled fires", () => {
+  it("bounds ONE stalled connect-plus-query well inside the one-hour gap between fires", () => {
     const oneHourMs = 60 * 60 * 1000;
     expect(config.connectionTimeoutMillis! + PROJECTION_QUERY_TIMEOUT_MS).toBeLessThan(
       oneHourMs,

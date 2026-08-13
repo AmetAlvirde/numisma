@@ -276,6 +276,42 @@ describe("runBackfill — a loop plus the existing upsert", () => {
     expect(results.map((r) => r.report)).toEqual(written.map((r) => r.report));
   });
 
+  /**
+   * WHAT MAKES THE POOL'S PER-QUERY CAP A BOUND ON THE WHOLE COMMAND. `query_timeout`
+   * bounds ONE query at 90s (projection-pool.ts). This loop issues one upsert per
+   * anchor — 43-44 of them, sequentially — so 90s per query only bounds the command
+   * because the FIRST rejection ends it. Nothing else in the system enforces that: it
+   * is a property of this loop having no per-anchor `catch`, which no test stated
+   * until this one.
+   *
+   * The tempting future edit is exactly the one that breaks it. `backfill` is
+   * idempotent and self-healing, so "keep going past one bad anchor" reads as an
+   * obvious robustness win — and it silently turns the command's worst case into
+   * ~43 x 90s = 65 minutes: past the wrapper's 2700s watchdog ceiling AND past the
+   * one-hour gap to the next scheduled fire, which is the hang this whole increment
+   * exists to make impossible. So the invariant is pinned where it lives, on
+   * behaviour: the loop stops, and it does not touch the next anchor.
+   */
+  it("ABORTS on the first failed upsert instead of continuing down the anchors", async () => {
+    await useStore(THREE_ANCHORS);
+    const queries: RecordedQuery[] = [];
+    const pool = {
+      query: async (sql: string, params: unknown[]) => {
+        queries.push({ sql, params });
+        // The shape the pool's client-side cap actually produces on a dead socket.
+        if (queries.length === 2) {
+          throw new Error("Query read timeout");
+        }
+        return { rows: [] };
+      },
+    } as unknown as Pool;
+
+    // Three anchors, so there IS a third one to reach if the loop swallowed the error.
+    await expect(runBackfill({ pool })).rejects.toThrow(/Query read timeout/);
+    expect(queries).toHaveLength(2);
+    expect(queries.map((q) => q.params[1])).toEqual(["2026-06-05", "2026-06-09"]);
+  });
+
   it("R6: re-running over an unchanged log derives identical payloads", async () => {
     await useStore(THREE_ANCHORS);
     const first = await runBackfill();
