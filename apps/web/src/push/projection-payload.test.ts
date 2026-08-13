@@ -206,6 +206,19 @@ const ALLOWED_KEY_PATHS = [
   "$.glance.feedGap.missing[].rowId",
   "$.glance.reserveTargetPct",
   "$.glance.suppressed",
+  // The venue-dark verdict (v6, #266 D6). ENUMERATED, one path per field, for the
+  // reason the fill path's block below states: this list has never been loosened to a
+  // wildcard, so the NEXT field on a venue-dark entry fails here by name.
+  //
+  // A venue NAME and a WEEKDAY name — strictly less than `$.glance.feedGap.missing[]`
+  // above already ships, which is the row id AND label of every instrument whose mark
+  // did not arrive. What is deliberately absent is the load-bearing part: the DATE the
+  // venue went dark. `@numisma/event-store`'s `VenueDarkDay` carries it, because the
+  // gap report is a local artifact; the payload's one date is `summary.asOf`, and the
+  // date invariant below is what holds that line.
+  "$.glance.venueDark",
+  "$.glance.venueDark[].source",
+  "$.glance.venueDark[].weekday",
   // The dca branch (v4, spec #277). Conclusions again, and the same rule placed every
   // path: a STATE per position, a COUNT of unattributable lines, the loader's whole-
   // file outcome, and the rung PRICE AXIS the card is. What is deliberately absent is

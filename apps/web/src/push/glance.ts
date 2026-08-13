@@ -37,14 +37,22 @@ import type {
   CompositionReport,
   FundReviewData,
   InstrumentRegistryEntry,
+  PortfolioEvent,
 } from "@numisma/engine";
 import {
   PRICE_SOURCES,
+  addDays,
   composeRowDependencies,
   instrumentsForSource,
   lastExpectedMarkDate,
+  weekdayName,
 } from "@numisma/engine";
-import type { GlanceBlock, GlanceMissingMark } from "../projection/contract.ts";
+import { computeGapReport } from "@numisma/event-store";
+import type {
+  GlanceBlock,
+  GlanceMissingMark,
+  GlanceVenueDarkDay,
+} from "../projection/contract.ts";
 import { SUPPRESSION_KEYS } from "../projection/contract.ts";
 
 /**
@@ -69,6 +77,7 @@ export function buildGlanceBlock(
   data: FundReviewData,
   report: CompositionReport,
   reserveTargetPct?: number,
+  venueDark?: GlanceVenueDarkDay[],
 ): GlanceBlock {
   const asOf = report.dashboard.summary.asOf;
 
@@ -143,7 +152,104 @@ export function buildGlanceBlock(
       ...suppressionKeysFor(missing.length > 0, reserveTargetPct === undefined),
       ...suppressedRowIds(data, report, missing),
     ],
+    // ABSENT, NOT EMPTY, when the caller had no answer — the same conditional-spread
+    // discipline `reserveTargetPct` uses above and for a sharper reason: `[]` is a
+    // real answer here ("checked, nothing dark"), so a defaulted empty array would
+    // manufacture an all-clear out of the absence of any answer at all.
+    ...(venueDark === undefined ? {} : { venueDark }),
   };
+}
+
+/**
+ * HOW FAR BACK THE VENUE-DARK VERDICT LOOKS, in calendar days ending the day before
+ * the anchor.
+ *
+ * A WINDOW IS WHAT MAKES "MOST RECENT" MEAN "RECENT". The wire carries one entry per
+ * venue — its most recent dark day — so an unbounded window would keep reporting a
+ * venue that recovered in June as though it were dark today, which is a false *yes*
+ * with no expiry and the kind that trains an operator to ignore the surface. Seven
+ * days is chosen, not measured: it spans a full weekly cadence, so a weekday venue's
+ * outage is visible on every day of the week that follows it, and it drops off before
+ * anyone could mistake it for current.
+ *
+ * THE COST, SAID PLAINLY: an outage older than a week is invisible on the phone. That
+ * is deliberate — the durable gap report keeps the full history, and this surface's
+ * job is *does anything need me before I next sit at the desk*, not the archive.
+ */
+export const VENUE_DARK_WINDOW_DAYS = 7;
+
+/**
+ * THE WIRE NARROWING (#266 D6) — the durable log's venue-dark verdict, computed AS OF
+ * one anchor and reduced to what may leave the machine.
+ *
+ * PURE, and a pure function of `asOf` rather than of the wall clock, which is the
+ * property `pnpm backfill` rests on: it replays every historical anchor, and each one
+ * must get the verdict that was true on ITS OWN date rather than today's. The
+ * discipline is the plans sidecar's, one file over — "selected as-of each anchor's own
+ * date, so historical backfill resolves plans honestly rather than stamping today's
+ * ladder onto last month".
+ *
+ * THE WINDOW ENDS THE DAY BEFORE THE ANCHOR, which is D2's accepted cost restated in
+ * this file: `computeGapReport` pins its ceiling to "yesterday" measured from the
+ * injected `now`, so a Monday outage surfaces in Tuesday's push. `now` is therefore
+ * synthesized as NOON CDMX ON THE ANCHOR'S OWN DAY — `18:00Z` is `12:00` at UTC-6 —
+ * which is the instant that makes `dueThrough(now)` land on `asOf - 1`. For the daily
+ * push that reproduces exactly what the real clock would have given; for a backfilled
+ * anchor it is the only honest reading.
+ *
+ * MOST RECENT PER VENUE, in `PRICE_SOURCES` order. See {@link GlanceBlock.venueDark}
+ * for why the wire carries the conclusion rather than every dark day.
+ *
+ * THROWS on a malformed `asOf` (the calendar helpers refuse it). Callers on the push
+ * path must go through {@link venueDarkOrOmit}, never this directly.
+ */
+export function summarizeVenueDark(
+  events: readonly PortfolioEvent[],
+  asOf: string,
+): GlanceVenueDarkDay[] {
+  const report = computeGapReport(events, {
+    since: addDays(asOf, -VENUE_DARK_WINDOW_DAYS),
+    until: addDays(asOf, -1),
+    now: new Date(`${asOf}T18:00:00Z`),
+  });
+
+  // `report.venueDark` is ascending by date, so the LAST entry a venue appears in is
+  // its most recent dark day. One pass, last-write-wins, and the emission order comes
+  // from `PRICE_SOURCES` rather than from insertion order — a stable order the
+  // committed fixture can be diffed against.
+  const latest = new Map<string, string>();
+  for (const day of report.venueDark) {
+    latest.set(day.source, day.date);
+  }
+  return PRICE_SOURCES.flatMap((source) => {
+    const date = latest.get(source);
+    return date === undefined ? [] : [{ source, weekday: weekdayName(date) }];
+  });
+}
+
+/**
+ * {@link summarizeVenueDark}, DEGRADED TO ABSENCE rather than allowed to throw.
+ *
+ * ADR-007's third amendment, "Degrade the branch, never the anchor": an observability
+ * finding must not be able to cost the phone its NAV. The precedent beside it is
+ * `dca.source: "unreadable"` — a read that failed produces a field that says so
+ * instead of a push that did not happen. Here the field simply goes absent, which the
+ * contract already defines as "this build could not answer" and which no surface may
+ * render as an all-clear.
+ *
+ * The catch is deliberately blind. Every failure this can see is the same failure —
+ * *the verdict could not be computed* — and there is no branch a caller could take on
+ * the difference that would be better than pushing the anchor anyway.
+ */
+export function venueDarkOrOmit(
+  events: readonly PortfolioEvent[],
+  asOf: string,
+): GlanceVenueDarkDay[] | undefined {
+  try {
+    return summarizeVenueDark(events, asOf);
+  } catch {
+    return undefined;
+  }
 }
 
 /**

@@ -127,9 +127,13 @@ import { loadFixture, TEST_DCA, TEST_GLANCE } from "./push-core.fixtures.ts";
  * makes this the first bump with no cutover window, and this amendment. Editing this
  * line is still the visible price of a new field on the wire — the pin does not care
  * which way the number moves, only that no bump happens without this docstring being
- * read.
+ * read. 6 because #266 D6 paid for the venue-dark verdict the same way: the field
+ * inside the existing `glance` branch, both allow-lists grown by enumeration, the
+ * fixture regenerated, and no ADR-007 amendment owed — a venue name and a weekday
+ * disclose strictly less than `feedGap.missing[]` already ships, and the floor stayed
+ * at 4 because an absent field is a true statement about a v4 or v5 build.
  */
-const PINNED_SCHEMA_VERSION = 5;
+const PINNED_SCHEMA_VERSION = 6;
 
 /**
  * The plans symbols the DCA branch legitimately brought into push source. Their

@@ -35,18 +35,53 @@ import { loadAnchorFixture } from "../push/anchor-fixture.ts";
 import { computeVerdict, type Verdict } from "./verdict.ts";
 
 /**
- * The measured *yes* days, by date and by the trigger that took them. Five to
- * `feedGap` — "the feed didn't run" is the most actionable thing that happened all
- * month — and one to `navMove`. No day is taken by two triggers: the same-day
- * collision the precedence order exists for has never been observed.
+ * The measured *yes* days, by date and by the trigger that TOOK them (`fired[0]`).
+ *
+ * SIX OF THESE ARE NEW, AND THEY ARE #266's WHOLE POINT. Until the venue-dark verdict
+ * reached the wire this history had six *yes* days: five to `feedGap` and one to
+ * `navMove`. The six days below that `venueDark` takes — 06-28, and 07-06 through
+ * 07-10 — are days on which THE OLD SURFACE SAID NO while the durable log holds a
+ * whole venue producing nothing on a day it owed marks. That is not a threshold
+ * getting noisier; it is the false *no* this issue was filed for, now visible on the
+ * same recorded history that used to hide it.
+ *
+ * 07-06…07-10 are the RECOVERED-OUTAGE case specifically, and they are why `venueDark`
+ * is not redundant with `feedGap`: the equity feed came back on 07-06, so `feedGap`
+ * went quiet the same morning, and without this trigger the outage would have
+ * disappeared from every automatic channel the moment it stopped. The verdict keeps
+ * naming it for the length of the glance window and then lets it go.
  */
 const MEASURED_YES: Record<string, string> = {
   "2026-06-26": "feedGap",
+  "2026-06-28": "venueDark",
   "2026-06-30": "feedGap",
   "2026-07-03": "feedGap",
   "2026-07-04": "feedGap",
   "2026-07-05": "feedGap",
+  "2026-07-06": "venueDark",
+  "2026-07-07": "venueDark",
+  "2026-07-08": "venueDark",
+  "2026-07-09": "venueDark",
+  "2026-07-10": "venueDark",
   "2026-07-14": "navMove",
+};
+
+/**
+ * THE FIRST SAME-DAY COLLISIONS EVER OBSERVED IN REAL HISTORY, named rather than
+ * counted. Before #266 no anchor fired two triggers at once, so the precedence order
+ * was exercised only by the synthesized collisions in `verdict.test.ts`; on these
+ * three days `feedGap` and `venueDark` both fire and `feedGap` takes the line, which
+ * is the ordering asserted for real for the first time.
+ *
+ * They are the LIVE-OUTAGE days — the venue is dark AND this anchor's own numbers are
+ * unsafe because of it. That overlap is expected and is not a duplication to collapse:
+ * unsafe numbers today outrank a name for why they are unsafe.
+ */
+const MEASURED_COLLISIONS: Record<string, string[]> = {
+  "2026-06-30": ["feedGap", "venueDark"],
+  "2026-07-03": ["feedGap", "venueDark"],
+  "2026-07-04": ["feedGap", "venueDark"],
+  "2026-07-05": ["feedGap", "venueDark"],
 };
 
 async function replay(): Promise<{ asOf: string; verdict: Verdict }[]> {
@@ -81,7 +116,7 @@ describe("the anchor replay", () => {
     expect(replayed.length).toBeGreaterThan(yes.length);
   });
 
-  it("attributes each yes to the trigger that took it — 5 feedGap, 1 navMove", async () => {
+  it("attributes each yes to the trigger that took it — 5 feedGap, 6 venueDark, 1 navMove", async () => {
     const replayed = await replay();
     const attributed = Object.fromEntries(
       replayed
@@ -90,18 +125,27 @@ describe("the anchor replay", () => {
     );
     expect(attributed).toEqual(MEASURED_YES);
 
-    // And no *yes* day fired two triggers: the precedence order is exercised by the
-    // synthetic collisions in `verdict.test.ts`, never by real history.
-    for (const { asOf, verdict } of replayed) {
-      expect(verdict.fired.length, asOf).toBeLessThanOrEqual(1);
+    // EVERY day's full firing set, named. This used to assert "no day fires two
+    // triggers", which was true of the history and stopped being true the moment the
+    // venue-dark verdict reached the wire — a live outage makes both fire. Naming the
+    // collisions is strictly stronger than the old inequality: it pins WHICH days
+    // overlap and in WHAT ORDER, so the precedence rule is now asserted against real
+    // history rather than only against synthesized anchors.
+    for (const { asOf, verdict } of replayed.filter((r) => r.verdict.needsYou)) {
+      expect(verdict.fired.map((t) => t.name), asOf).toEqual(
+        MEASURED_COLLISIONS[asOf] ?? [MEASURED_YES[asOf]],
+      );
     }
   });
 
   it("declines navMove on 2026-06-28 — composition rule 1, not the threshold", async () => {
     const replayed = await replay();
     const day = replayed.find((r) => r.asOf === "2026-06-28")!;
-    expect(day.verdict.needsYou).toBe(false);
-    expect(day.verdict.fired).toEqual([]);
+    // `navMove` still declines, which is what this case is about. The day is no longer
+    // a *no* overall: `venueDark` takes it (#266), and it is precisely one of the days
+    // the old surface was silent on. Asserted by NAME rather than by an empty array,
+    // so the decline stays the claim and the new trigger cannot mask it.
+    expect(day.verdict.fired.map((t) => t.name)).toEqual(["venueDark"]);
     expect(day.verdict.slots.change.suppressedBy).toBe("reference-withheld");
   });
 

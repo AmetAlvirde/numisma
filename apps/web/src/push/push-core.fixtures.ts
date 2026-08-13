@@ -202,4 +202,8 @@ export const TEST_GLANCE: GlanceBlock = {
     ],
   },
   suppressed: Object.values(SUPPRESSION_KEYS),
+  // Present and NON-EMPTY on purpose (v6, #266): the key-path walk has to reach inside
+  // the array, and an empty one would hide both of its fields. One entry rather than
+  // two, because the wire carries one per venue.
+  venueDark: [{ source: "twelvedata", weekday: "Thursday" }],
 };
