@@ -113,6 +113,7 @@
  */
 import {
   PRICE_SOURCES,
+  TRADING_DAY_TIME_ZONE,
   addDays,
   instrumentsForSource,
   owesMarkOn,
@@ -147,11 +148,18 @@ export const LAUNCHD_ERA_START = "2026-07-03";
  * The timezone the trading day — and therefore "yesterday" — is anchored to. A
  * BARE STRING, not a `MarkClock`: with the ceiling pinned to yesterday at every
  * hour (below), the mark-TIME check drops out of this derivation entirely, so the
- * only thing left to duplicate is the zone. It matches `apps/price-feed`'s
- * `DEFAULT_CONFIG.timeZone`; this package does not depend on that app and will not
- * grow an edge to read one constant.
+ * only thing left to carry is the zone.
+ *
+ * NO LONGER DUPLICATED — AND THE EDGE THIS STILL DECLINES IS UNCHANGED. It used to
+ * restate `apps/price-feed`'s `DEFAULT_CONFIG.timeZone` as its own literal, on the
+ * grounds that this package will not grow an edge to an APP to read one constant.
+ * That refusal stands: there is still no dependency on `apps/price-feed`, and there
+ * will not be one. What changed is that the constant no longer lives in an app —
+ * `@numisma/engine` authors it, this package's ONLY dependency already, so deriving
+ * it costs no new edge at all and `DEFAULT_CONFIG.timeZone` now derives from the
+ * same place rather than being the place.
  */
-export const REPORT_TIME_ZONE = "America/Mexico_City";
+export const REPORT_TIME_ZONE = TRADING_DAY_TIME_ZONE;
 
 /** Why a day is lost. Both are "day lost"; they differ in what the log holds. */
 export type LostDayReason =
