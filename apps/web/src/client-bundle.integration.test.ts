@@ -15,6 +15,21 @@
  * survive minification: the projection table name and the DB-URL / secret env
  * names. Any hit means server code leaked into the client.
  *
+ * WHICH GUARD IS AUTHORITATIVE. Two tests defend this invariant, and they are not
+ * peers:
+ *
+ *   - THIS one scans the BUILT client assets. It reads what actually shipped —
+ *     after bundling, tree-shaking and minification, through whatever path the
+ *     bytes took. It is the AUTHORITATIVE boundary.
+ *   - `apps/web/src/projection/contract.test.ts` walks the module graph from
+ *     `contract.ts` in source. That is a FAST LOCAL PRE-CHECK, not the real
+ *     boundary: it runs without a build (which is why it exists), it sees static
+ *     imports only, and it stops at true third-party packages. It fails EARLIER
+ *     and more cheaply than this test; it does not fail more authoritatively.
+ *
+ * So: a green pre-check is not this invariant proven. If the two ever disagree,
+ * this one wins.
+ *
  * SUBSTRATE-GATED, like the Postgres integration tests: it needs a build to
  * inspect, so it SKIPS with a loud warning when `.vercel/output/static` is
  * absent (a plain `pnpm test` on an unbuilt tree still passes). CI builds the
