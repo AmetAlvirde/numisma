@@ -77,8 +77,13 @@ function hourNowIn(timeZone: string): number {
  * `date`, no clock manipulation and no edit to the script.
  *
  * The range is the one every installed tzdata carries — `Etc/GMT-14` through `Etc/GMT+12`
- * — so exactly one of them is at hour 00 at any instant and the search cannot come up
- * empty. It throwing would mean the zone database itself had moved, which must be loud.
+ * — so AT LEAST ONE of them is at hour 00 at any instant and the search cannot come up
+ * empty. Not exactly one: that is 27 offsets spread over a 24-hour cycle, so three pairs
+ * share a local hour (`Etc/GMT-14`/`Etc/GMT+10`, `-13`/`+11`, `-12`/`+12`) and for part of
+ * the day TWO zones sit at hour 00 together. Returning the first match is correct either
+ * way — the two are equally valid answers to the same question — but "exactly one" was
+ * never true and should not be relied on by a later edit. It throwing would mean the zone
+ * database itself had moved, which must be loud.
  */
 export function markConfigFor(window: "in" | "out"): MarkConfig {
   for (let offset = -14; offset <= 12; offset += 1) {

@@ -78,7 +78,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { JobHeartbeat } from "@numisma/event-store";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import {
   HARNESS_PLATFORM,
   TRIGGER_PATH_SET,
@@ -797,6 +797,22 @@ function assertTriple(
 }
 
 describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () => {
+  // ── THE ARMED SUITE LAUNCHES SOMETHING, ASSERTED RATHER THAN REASONED ─────────────
+  //
+  // `RUNS_PER_CASE` is the loop bound of every case below, and it is `0` whenever the
+  // trigger says not to run. Were it ever 0 INSIDE this block, all eight cases and both
+  // mutation controls would go green having launched nothing — the exact failure this
+  // suite exists to be incapable of. It is unreachable today (`resolveRunCount` refuses
+  // anything below the floor and never returns 0), but every other claim in this file is
+  // held to a bar higher than "unreachable by an argument about another module", and this
+  // is the claim the rest of them rest on.
+  it("has a repetition count, so a case cannot pass by looping zero times", () => {
+    expect(
+      RUNS_PER_CASE,
+      "the armed suite would launch nothing and every case below would pass vacuously",
+    ).toBeGreaterThanOrEqual(REPETITION_FLOOR);
+  });
+
   // ── THE FAKE MUST HAVE WON, AND IT IS PROVEN, NOT ASSUMED ─────────────────────────
   it("resolves `pnpm` the way the WRAPPER's own re-exported PATH does — to the case dir's fake", () => {
     const dirs = makeCaseDir(CASE_OPTIONS);
@@ -930,6 +946,21 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
     `case 1 — healthy run, ${RUNS_PER_CASE} consecutive times`,
     async () => {
       const settles: number[] = [];
+      // ── THE DIAGNOSTICS SURVIVE A THROW, WHICH IS THE ONLY TIME THEY MATTER ────────
+      //
+      // Every case in this file records a per-run series and prints it at the end. Printed
+      // after the loop, that print is skipped by exactly the event it exists to explain: a
+      // red on run 9 reports `expected 143 to be …` and takes the whole history with it,
+      // so a one-off is indistinguishable from a drift and the next intermittent failure
+      // is a mystery rather than evidence. `onTestFinished` runs whether the test passed
+      // or threw — a `try`/`finally` around each loop with none of the re-indentation —
+      // and the series is captured by reference, so whatever the loop managed to record
+      // before it died is what gets printed.
+      onTestFinished(() => {
+        // Recorded, not merely passed: a regression from 0.1s to 1.9s is inside the
+        // window and would otherwise be invisible.
+        console.log(`[wrapper harness] case 1 settle ms: ${settles.join(", ")}`);
+      });
       for (let run = 1; run <= RUNS_PER_CASE; run += 1) {
         const dirs = makeCaseDir(CASE_OPTIONS);
         const record = await launchWrapper({
@@ -964,9 +995,6 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
         });
         settles.push(record.settleMs);
       }
-      // Recorded, not merely passed: a regression from 0.1s to 1.9s is inside the window
-      // and would otherwise be invisible.
-      console.log(`[wrapper harness] case 1 settle ms: ${settles.join(", ")}`);
     },
     240_000,
   );
@@ -993,6 +1021,11 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
         (TIMEOUT_CASE_OPTIONS.maxRunSeconds + TIMEOUT_CASE_OPTIONS.watchdogGraceSeconds) * 1_000;
       const observeAtMs = ceilingAndGraceMs + CASE_7_OBSERVE_MARGIN_MS;
       const survivals: number[] = [];
+      onTestFinished(() => {
+        console.log(
+          `[wrapper harness] case 7 survived (ms, ceiling+grace=${ceilingAndGraceMs}): ${survivals.join(", ")}`,
+        );
+      });
 
       for (let run = 1; run <= RUNS_PER_CASE; run += 1) {
         const dirs = makeCaseDir(TIMEOUT_CASE_OPTIONS);
@@ -1045,9 +1078,6 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
         });
         survivals.push(record.durationMs);
       }
-      console.log(
-        `[wrapper harness] case 7 survived (ms, ceiling+grace=${ceilingAndGraceMs}): ${survivals.join(", ")}`,
-      );
     },
     600_000,
   );
@@ -1137,6 +1167,12 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
     `case 2 — watchdog timeout with a REACTIVE child, ${RUNS_PER_CASE} consecutive times`,
     async () => {
       const settles: number[] = [];
+      onTestFinished(() => {
+        console.log(
+          `[wrapper harness] case 2 settle ms (bound ${timeoutSettleDeadlineMs(TIMEOUT_CASE_OPTIONS)}): ` +
+            settles.join(", "),
+        );
+      });
       for (let run = 1; run <= RUNS_PER_CASE; run += 1) {
         const dirs = makeCaseDir(TIMEOUT_CASE_OPTIONS);
         // The fake hangs at the fetch step, reactively: neither it nor its `sleep` traps
@@ -1177,10 +1213,6 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
         watchdogTermObserved = observeTermPath(record, label);
         settles.push(record.settleMs);
       }
-      console.log(
-        `[wrapper harness] case 2 settle ms (bound ${timeoutSettleDeadlineMs(TIMEOUT_CASE_OPTIONS)}): ` +
-          settles.join(", "),
-      );
     },
     600_000,
   );
@@ -1189,6 +1221,12 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
     `case 3 — watchdog timeout with a TERM-DEAF grandchild, ${RUNS_PER_CASE} consecutive times`,
     async () => {
       const settles: number[] = [];
+      onTestFinished(() => {
+        console.log(
+          `[wrapper harness] case 3 settle ms (bound ${timeoutSettleDeadlineMs(TIMEOUT_CASE_OPTIONS)}): ` +
+            settles.join(", "),
+        );
+      });
       for (let run = 1; run <= RUNS_PER_CASE; run += 1) {
         const dirs = makeCaseDir(TIMEOUT_CASE_OPTIONS);
         // The historical shape verbatim: the grandchild ignores TERM and holds the
@@ -1236,10 +1274,6 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
         });
         settles.push(record.settleMs);
       }
-      console.log(
-        `[wrapper harness] case 3 settle ms (bound ${timeoutSettleDeadlineMs(TIMEOUT_CASE_OPTIONS)}): ` +
-          settles.join(", "),
-      );
     },
     600_000,
   );
@@ -1248,6 +1282,9 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
     `case 5 — an early non-zero exit, ${RUNS_PER_CASE} consecutive times`,
     async () => {
       const settles: number[] = [];
+      onTestFinished(() => {
+        console.log(`[wrapper harness] case 5 settle ms: ${settles.join(", ")}`);
+      });
       for (let run = 1; run <= RUNS_PER_CASE; run += 1) {
         // The FULL ceiling, deliberately: this run must end on its own terms long before
         // any watchdog could touch it, and a short ceiling would blur those two endings.
@@ -1263,6 +1300,12 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
           wrapperPath: WRAPPER_PATH,
           env: caseEnv(dirs, CASE_OPTIONS),
           groupLeader: true,
+          // THE SHORT WINDOW, AS ON EVERY NON-TIMEOUT PATH. This run ends on its own terms,
+          // so its EXIT trap cancels the watchdog — subshell and forked `sleep` both —
+          // before the shell leaves. Giving this case the grace-derived bound would let a
+          // watchdog left sleeping out its full ceiling over an already-dead run pass
+          // unnoticed, which is precisely the held-job-slot failure the cancellation exists
+          // to prevent.
           settleDeadlineMs: SETTLE_DEADLINE_MS,
           maxWaitMs: 60_000,
         });
@@ -1276,11 +1319,6 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
         expect(record.watchdogFired, `${label}: a run that was never timed out left a calling card`).toBe(
           false,
         );
-        // AND THE SETTLE WINDOW STAYS THE SHORT ONE. This is not a timeout path, so the
-        // watchdog was cancelled — subshell and forked `sleep` both — before the shell left.
-        // Giving this case the grace-derived bound would let a watchdog left sleeping out
-        // its full ceiling over an already-dead run pass unnoticed, which is precisely the
-        // held-job-slot failure the wrapper's own cancellation exists to prevent.
 
         assertTriple(record, dirs.caseDir, {
           exitCode: 127,
@@ -1291,7 +1329,6 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
         });
         settles.push(record.settleMs);
       }
-      console.log(`[wrapper harness] case 5 settle ms: ${settles.join(", ")}`);
     },
     600_000,
   );
@@ -1322,8 +1359,14 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
    *
    * Cases 2, 3 and 4 hang at the FIRST step, so their run has nothing to accomplish before
    * the ceiling and 3 seconds is generous. Case 6 has to get all the way to the LAST step
-   * first — four fake `pnpm` invocations, a `git add`/`git commit` against the case's own
-   * repo, and a `git status` post-check — and only then wedge. A healthy run does that in
+   * first — four fake `pnpm` invocations plus the wrapper's whole git step against the
+   * case's own repo (`rev-parse`, the explicit `add`, `diff --cached` and the `status`
+   * post-check) — and only then wedge. What it does NOT traverse is a `git commit`: the
+   * fixture commits an EMPTY `events.jsonl` and the fake `spine` writes nothing, so
+   * `git diff --cached --quiet` succeeds and the wrapper takes its documented
+   * "no tracked data changes to commit" no-op arm. An earlier version of this comment
+   * claimed the commit as part of the traversal it is buying margin for; the margin is
+   * real, the commit is not. A healthy run does all of it in
    * about 0.7s (case 1 measures it every suite run), but a 3-second ceiling gave only ~4x
    * margin and lost the race on a loaded machine: the run timed out at an earlier step and
    * the case quietly became case 2 with a different label. Widened, not removed — the
@@ -1388,6 +1431,9 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
     `case 6 — cry-wolf: a timeout at \`backfill\` IN the mark window, ${RUNS_PER_CASE} consecutive times`,
     async () => {
       const settles: number[] = [];
+      onTestFinished(() => {
+        console.log(`[wrapper harness] case 6 in-window settle ms: ${settles.join(", ")}`);
+      });
       for (let run = 1; run <= RUNS_PER_CASE; run += 1) {
         const options = markCaseOptions("in", CASE_6_OPTIONS);
         const dirs = makeCaseDir(options);
@@ -1463,7 +1509,6 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
 
         settles.push(record.settleMs);
       }
-      console.log(`[wrapper harness] case 6 in-window settle ms: ${settles.join(", ")}`);
     },
     900_000,
   );
@@ -1480,6 +1525,9 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
     `case 6 — the same cry-wolf run OUT of the window carries the prior stamp, ${RUNS_PER_CASE} consecutive times`,
     async () => {
       const settles: number[] = [];
+      onTestFinished(() => {
+        console.log(`[wrapper harness] case 6 out-of-window settle ms: ${settles.join(", ")}`);
+      });
       for (let run = 1; run <= RUNS_PER_CASE; run += 1) {
         const options = markCaseOptions("out", CASE_6_OPTIONS);
         const dirs = makeCaseDir(options);
@@ -1523,7 +1571,6 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
 
         settles.push(record.settleMs);
       }
-      console.log(`[wrapper harness] case 6 out-of-window settle ms: ${settles.join(", ")}`);
     },
     900_000,
   );
@@ -1749,6 +1796,16 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
       const reaches: number[] = [];
       const durations: number[] = [];
       const ceilingMs = TIMEOUT_CASE_OPTIONS.maxRunSeconds * 1_000;
+      // THREE SERIES, AND THIS IS THE CASE THAT NEEDS THEM MOST. It carries the suite's
+      // tightest wall-clock margins, so a red here is exactly the failure where knowing
+      // whether run 9 was slow — or whether every run had been drifting — is the whole
+      // diagnosis. Printed after the loop, none of it survives the throw.
+      onTestFinished(() => {
+        console.log(
+          `[wrapper harness] case 4 reached the step in (ms): ${reaches.join(", ")} · ran for (ms, ` +
+            `ceiling ${ceilingMs}): ${durations.join(", ")} · settle ms: ${settles.join(", ")}`,
+        );
+      });
 
       for (let run = 1; run <= RUNS_PER_CASE; run += 1) {
         const dirs = makeCaseDir(TIMEOUT_CASE_OPTIONS);
@@ -1822,10 +1879,6 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
         settles.push(record.settleMs);
         durations.push(record.durationMs);
       }
-      console.log(
-        `[wrapper harness] case 4 reached the step in (ms): ${reaches.join(", ")} · ran for (ms, ` +
-          `ceiling ${ceilingMs}): ${durations.join(", ")} · settle ms: ${settles.join(", ")}`,
-      );
     },
     600_000,
   );
@@ -1855,6 +1908,16 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
     if (timeout === undefined || external === undefined) {
       return;
     }
+    // Same reasoning as every case loop: the summary of what the two halves actually
+    // recorded is worth most when one of the comparisons below has just gone red.
+    onTestFinished(() => {
+      console.log(
+        `[wrapper harness] the pair — ${timeout.label}: exit ${timeout.heartbeat.exitCode} at ` +
+          `\`${timeout.heartbeat.lastStep}\`, card ${timeout.watchdogCard} · ${external.label}: ` +
+          `exit ${external.heartbeat.exitCode} at \`${external.heartbeat.lastStep}\`, card ` +
+          `${external.watchdogCard}`,
+      );
+    });
 
     // ── THE THREE THINGS THAT MUST DIFFER ───────────────────────────────────────────
     // (1) The exit code. `not.toBe` as well as the two literals, because the literals alone
@@ -1950,12 +2013,6 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
       ).toBe(expectedMarkWindow(observed.heartbeat.startedAt, CONTRACT_MARK_CONFIG));
     }
 
-    console.log(
-      `[wrapper harness] the pair — ${timeout.label}: exit ${timeout.heartbeat.exitCode} at ` +
-        `\`${timeout.heartbeat.lastStep}\`, card ${timeout.watchdogCard} · ${external.label}: ` +
-        `exit ${external.heartbeat.exitCode} at \`${external.heartbeat.lastStep}\`, card ` +
-        `${external.watchdogCard}`,
-    );
   });
 
   // ── S6 · THE CHILD-REAP MUTATION CONTROL ──────────────────────────────────────────
@@ -2047,6 +2104,12 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
         // stops at the first observed loss.
         const outcomes: string[] = [];
         let losses = 0;
+        // The attempt-by-attempt series is the whole diagnosis if this control ever fails:
+        // "kept on all 12" and "threw on attempt 3" are different problems, and only the
+        // series tells them apart. It must survive a throw inside the loop.
+        onTestFinished(() => {
+          console.log(`[wrapper harness] tee-deafness mutation outcomes: ${outcomes.join(", ")}`);
+        });
         for (let attempt = 1; attempt <= RUNS_PER_CASE && losses === 0; attempt += 1) {
           const dirs = makeCaseDir(TIMEOUT_CASE_OPTIONS);
           setFakeBehavior(dirs.caseDir, "prices:fetch", "hangs");
@@ -2075,7 +2138,6 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
               `(exit=${record.exitCode ?? `signal ${record.signal ?? "?"}`})`,
           );
         }
-        console.log(`[wrapper harness] tee-deafness mutation outcomes: ${outcomes.join(", ")}`);
 
         expect(
           losses,

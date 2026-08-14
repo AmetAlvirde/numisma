@@ -27,7 +27,7 @@
  * leave the wrapper's own guard untested. Presence is the contract; content is the
  * wrapper's, and the harness proves it there.
  *
- * `NUMISMA_PATH_PREPEND` GETS THE STRICTEST TREATMENT OF THE SEVEN, and it is the reason
+ * `NUMISMA_PATH_PREPEND` GETS THE STRICTEST TREATMENT OF THE NINE, and it is the reason
  * this module exists at all. The wrapper re-exports `PATH="$PATH_PREPEND:$PATH"` in its
  * OWN body, so the prepend — not the inherited `PATH` — is what decides which `pnpm` the
  * run executes. Its documented default contains the directories where the REAL pnpm and
@@ -41,7 +41,7 @@
  */
 
 import { existsSync, realpathSync } from "node:fs";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 /**
  * The complete set the wrapper reads — no more, no fewer. Verified line by line against
@@ -108,7 +108,15 @@ function realOrNearest(path: string): string {
     candidate = parent;
   }
   const real = realpathSync(candidate);
-  return resolve(path) === candidate ? real : resolve(real, resolve(path).slice(candidate.length + 1));
+  // `relative`, NOT `slice(candidate.length + 1)`. The arithmetic assumed the deepest
+  // existing ancestor never carries a trailing separator, which is true of every
+  // `dirname` result EXCEPT root: with `candidate === "/"` it dropped one character too
+  // many and turned `/nope/data` into `/ope/data`. Reachable only when the whole path
+  // sits under a nonexistent top-level directory, and it failed CLOSED (the mangled path
+  // is still outside the case dir, so the refusal still fired) — but this is the one
+  // function in the safety module that decides inside from outside, and it should be
+  // right rather than accidentally right.
+  return join(real, relative(candidate, resolve(path)));
 }
 
 function isInside(path: string, root: string): boolean {
@@ -118,7 +126,7 @@ function isInside(path: string, root: string): boolean {
 }
 
 /**
- * THE REFUSAL. Throws {@link IsolationRefusal} unless all seven are set and every
+ * THE REFUSAL. Throws {@link IsolationRefusal} unless all nine are set and every
  * path-valued one — every colon-separated entry of `NUMISMA_PATH_PREPEND` included —
  * resolves inside `caseDir`.
  *

@@ -2,7 +2,7 @@
  * THE CASE DIRECTORY — where a single wrapper run is allowed to have effects, and the
  * only place it is allowed to have them.
  *
- * Every one of the seven `NUMISMA_*` overrides points inside here, and the launcher's
+ * Every one of the nine `NUMISMA_*` overrides points inside here, and the launcher's
  * isolation contract (S2) refuses to start otherwise. A fresh directory per RUN, not per
  * case: the 12 repetitions of a case must not be able to pass by leaning on each other's
  * leftovers, and a heartbeat carried forward from run 3 into run 4 would make run 4's
@@ -16,8 +16,10 @@
  * reach it. The fake arrives ONLY through `NUMISMA_PATH_PREPEND`.
  *
  * ── `HOME` IS INSIDE THE CASE DIR TOO ─────────────────────────────────────────────────
- * Not because the wrapper reads it — all seven of its `$HOME`-derived defaults are
- * overridden — but because `git` does. A real `~/.gitconfig` could bring hooks, signing,
+ * Not because the wrapper reads it — all four of its `$HOME`-derived defaults are
+ * overridden (`ENV_FILE`, `LOG_DIR`, `PATH_PREPEND`, `DATA_DIR`; `REPO_DIR` defaults to
+ * the `__REPO_DIR__` placeholder and the remaining four name no path at all) — but
+ * because `git` does. A real `~/.gitconfig` could bring hooks, signing,
  * or a `core.excludesFile` into a run whose whole purpose is to be uninfluenced by this
  * machine.
  */
