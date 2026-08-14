@@ -447,6 +447,19 @@ describe("a PositionClosed may not seal behind a verb already in the log", () =>
     // leg, which is exactly why the message must not claim a vanished cash leg here.
     expect(damagePrevented(batch, result.committed)).toEqual({ cash: 0, closedRows: 1 });
     expect(result.rejection?.message).not.toContain("taking its cash leg");
+    // #297 — AND THE LEVEL ITSELF IS ACCOUNTED FOR. The two deltas above are blind to
+    // it: a vanished `InvalidationLevel` moves neither cash nor closed rows, so they
+    // prove only that the bogus closed row was stopped. The fold's discard channel is
+    // where the level becomes visible — folded UNGATED, the close applies first (the
+    // fold sorts by `asOf`), the mark lands on a retired id, and the channel says so.
+    // If the level ever silently vanishes again, this is the assertion that reddens.
+    expect(foldEvents(genesis(), batch.map(accepted)).skipped).toContainEqual(
+      expect.objectContaining({
+        eventId: "evt-invalidate",
+        verb: "InvalidationMarked",
+        reason: "position-absent",
+      }),
+    );
   });
 
   // CASE E, THE WIDEST — the case where MONEY moves against the operator's belief. The
