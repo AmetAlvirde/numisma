@@ -97,8 +97,8 @@ HEARTBEAT_FILE="$DATA_DIR/job-heartbeat.json"
 # the morning after a lost day. So record the distinction instead of guessing at it.
 #
 # THE ZONE IS PART OF THE CONTRACT, NOT THE MACHINE'S BUSINESS. The real gate is
-# `isAtOrAfterMarkTime(instant, { timeZone: "America/Mexico_City" })`, which resolves
-# through Intl in CDMX explicitly. Reading the bare local hour would agree with it
+# `isAtOrAfterMarkTime(instant, { timeZone: <the contract zone> })`, which resolves
+# through Intl in that zone explicitly. Reading the bare local hour would agree with it
 # only by coincidence of the OS setting — and docs/price-feed-ops.md offers the
 # divergent setup as SUPPORTED ("or shift all six of the plist's Hour entries to the
 # local clock equal to 18:00-23:00 CDMX"). Take that option on a UTC box and every
@@ -111,16 +111,34 @@ HEARTBEAT_FILE="$DATA_DIR/job-heartbeat.json"
 # silently classify EVERY run as out-of-window. Moot at 18, latent the moment the
 # contract moves, which is precisely what the guard below exists to survive.
 #
-# Duplicating the hour AND the zone into bash is deliberate and guarded:
-# apps/price-feed/src/schedule-window.test.ts pins both against DEFAULT_CONFIG, so a
-# change to the contract fails a test rather than rotting here silently.
-MARK_HOUR=18
-MARK_TZ="America/Mexico_City"
-if [[ $((10#$(TZ="$MARK_TZ" date +%H))) -ge $((10#$MARK_HOUR)) ]]; then
-  MARK_WINDOW=true
-else
-  MARK_WINDOW=false
-fi
+# CONFIGURED, NOT LITERAL — AND STILL GUARDED. The defaults below are the engine's
+# `TRADING_DAY_TIME_ZONE` / `MARK_HOUR` (packages/engine/src/price-feed/mark.ts),
+# which `DEFAULT_CONFIG` also derives from. Duplicating them into bash remains
+# deliberate: this is a shell script and cannot import the contract. The duplication
+# is the COST; the guards in apps/price-feed/src/schedule-window.test.ts are what it
+# buys — they pin these two DEFAULTS (the `:-` halves, matched as shape, so a leading
+# zero cannot creep into the hour) against `DEFAULT_CONFIG`, so a change to the
+# contract fails a test rather than rotting here silently.
+#
+# The overrides exist so a CALLER can put a run on either side of the mark window by
+# setting a value, instead of hoping the machine clock cooperates — which is what the
+# wrapper's own test harness needs and what a manual out-of-window dry run wants.
+MARK_TZ="${NUMISMA_MARK_TZ:-America/Mexico_City}"
+MARK_HOUR="${NUMISMA_MARK_HOUR:-18}"
+
+# PROVISIONAL UNTIL THE RUN IS CLASSIFIED, BECAUSE THE EXIT TRAP BELOW READS IT. The
+# two guards that refuse an unusable zone or hour, and the classification itself, run
+# AFTER the heartbeat trap and the per-run log are installed — see "the mark window,
+# classified" further down for why that ordering is the point rather than an accident.
+# The trap can therefore fire before the window has been computed, and under `set -u`
+# an unset variable inside an EXIT trap would replace the very exit code the heartbeat
+# exists to record.
+#
+# `false` IS THE HONEST VALUE ON THAT PATH, not a convenient one. `markWindow` records
+# whether the run was CAPABLE of marking the day; a run that died in its own startup
+# guards marked nothing, and `MARKS_LANDED_STEPS` withholds a stamp from it for that
+# same reason. It claims no side of a window it could not compute — it declines one.
+MARK_WINDOW=false
 
 # WHICH STEPS MEAN THE DAY'S MARKS ARE ACTUALLY IN THE LOG. `pnpm spine` (step 2) is
 # what appends them, so every step AFTER it implies they landed. Being in the window
@@ -362,6 +380,62 @@ exec > >(trap '' TERM PIPE; tee -a "$LOG_FILE") 2>&1
 
 echo "[$STAMP] price-feed daily run starting (repo=$REPO_DIR)"
 
+# --- the mark window, classified (#185 S2 / #315) ---------------------------
+# DELIBERATELY HERE, AFTER THE EXIT TRAP AND THE LOG — AND STILL BEFORE ANY WORK.
+# These two guards are the newest way for EVERY scheduled fire to die: a typo'd
+# `NUMISMA_MARK_TZ` in the plist, or tzdata moving out from under the DEFAULT path,
+# refuses all six fires of an evening. Run before the trap was installed, they would
+# have refused them on the one channel that reaches nobody — no per-run log, no
+# heartbeat, `job-heartbeat.json` still describing the last good run, and the TUI
+# reading "healthy" for days. That is the same silent rot this block exists to
+# prevent, re-entered through the guard for it, and this file's own argument at the
+# `git commit` step (a launchd job's stdout reaches no one) says so explicitly.
+#
+# Placed after the log and trap, a refusal is now a FATAL line in the per-run log and
+# a breadcrumb reading `exit 1 at step 'startup'`, with `markWindow: false` and the
+# carried stamp re-emitted untouched — it invents no coverage and erases none. Still
+# before the watchdog is armed, before the token file is sourced, before `cd` and
+# before any `pnpm`, so the refusal remains a refusal: nothing with an effect runs
+# on a run that cannot say which side of the window it is on.
+
+# REFUSE AN UNRESOLVABLE ZONE, BEFORE ANY OF IT IS USED. Bash does not fail on a bad
+# TZ the way `Intl` does: `TZ=Not/AZone date +%H` prints the UTC hour, with no error
+# and a zero exit. UTC is DISJOINT from the CDMX evening window (12:00-17:59 CDMX vs
+# the 18:00-23:59 fires), so one typo flips the window wrong on EVERY run while the
+# runs themselves keep marking correctly — the silent rot this whole block exists to
+# prevent, entered through the override that was just added. Falling back to UTC (or
+# to local) would be the same bug with a friendlier name, so this exits instead.
+# The shape check comes first so the path built below cannot be anything but a zone
+# name. `TZDIR` is honoured because that is what the C library itself consults.
+if [[ ! "$MARK_TZ" =~ ^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$ ]] ||
+  [[ ! -f "${TZDIR:-/usr/share/zoneinfo}/$MARK_TZ" ]]; then
+  echo "[$STAMP] FATAL: mark timezone '$MARK_TZ' is not a resolvable IANA zone."
+  echo "[$STAMP] No entry under ${TZDIR:-/usr/share/zoneinfo}. Bash would silently report the UTC"
+  echo "[$STAMP] hour for it, which is disjoint from the mark window, so every run would classify"
+  echo "[$STAMP] itself out-of-window while marking fine. Refusing rather than degrading."
+  echo "[$STAMP] Set NUMISMA_MARK_TZ to a real zone name, or leave it unset for the contract default."
+  exit 1
+fi
+# And refuse a mark hour that is not one. Left unchecked it would not abort either —
+# the comparison below is an `if` condition, so `set -e` never fires — it would just
+# classify every run as out-of-window, exactly like the bad zone.
+if [[ ! "$MARK_HOUR" =~ ^(0?[0-9]|1[0-9]|2[0-3])$ ]]; then
+  echo "[$STAMP] FATAL: mark hour '$MARK_HOUR' is not an hour of the day (0-23)."
+  echo "[$STAMP] Set NUMISMA_MARK_HOUR to a plain hour, or leave it unset for the contract default."
+  exit 1
+fi
+
+# Read once into a named variable so the comparison below is a self-contained
+# expression over two hour-shaped strings — which is what lets a test drive the
+# wrapper's OWN line with `08`/`09` and prove the base-10 forcing still holds.
+MARK_NOW_HOUR="$(TZ="$MARK_TZ" date +%H)"
+if [[ $((10#$MARK_NOW_HOUR)) -ge $((10#$MARK_HOUR)) ]]; then
+  MARK_WINDOW=true
+else
+  MARK_WINDOW=false
+fi
+# ----------------------------------------------------------------------------
+
 # --- the watchdog (#308 follow-up) ------------------------------------------
 # A WEDGED RUN IS A WORSE FAILURE THAN A RED ONE, and until 2026-08-11 nothing here
 # bounded it. That evening the 22:01 run reached step 6, opened a pool against Neon,
@@ -508,8 +582,14 @@ fi
 # the repo (transaction-data-is-private); the file is machine-local, chmod 600.
 if [[ -f "$ENV_FILE" ]]; then
   echo "[$STAMP] sourcing provider tokens from $ENV_FILE"
+  set -a
+  # ON ITS OWN LINE, because a `shellcheck disable` directive applies to the NEXT
+  # COMMAND — and while these three shared one line it attached to `set -a`, leaving
+  # the `source` it was written for still reported. The file did not pass shellcheck
+  # at all until this moved; the suppression is unchanged, only aimed correctly.
   # shellcheck disable=SC1090
-  set -a; source "$ENV_FILE"; set +a
+  source "$ENV_FILE"
+  set +a
 else
   echo "[$STAMP] no token file at $ENV_FILE (fine: crypto-only Binance is keyless)"
 fi

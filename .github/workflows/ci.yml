@@ -85,6 +85,16 @@ jobs:
         run: pnpm --filter @numisma/web build
 
       - name: Test (unit + DB-backed ADR-007 invariants, push idempotency, client-bundle guard)
+        # ⚠️ THE PRICE-FEED WRAPPER HARNESS DOES NOT RUN HERE, AND A GREEN CHECK ON THIS
+        # STEP DOES NOT MEAN IT PASSED — IT MEANS IT WAS NOT ATTEMPTED.
+        # `apps/price-feed/src/wrapper-harness/` drives ops/price-feed/run-daily-fetch.sh
+        # as a real process. It targets macOS /bin/bash 3.2.57, BSD ps/pgrep and a
+        # watchdog hand-rolled *because* macOS ships no timeout(1), so it cannot run on
+        # this ubuntu-latest runner. Its platform gate skips it here and SAYS SO in the
+        # test output (one always-running test prints the decision either way). The
+        # harness runs on a macOS machine, automatically when its own subject code
+        # changes, or on demand via `pnpm test:wrapper`. See docs/price-feed-ops.md.
+        #
         # --testTimeout raises the default 5s ceiling for the git-heavy tui tests,
         # which flake on slower CI runners under full-suite parallel load. This is
         # a CI-runner mitigation, not a change to any assertion.

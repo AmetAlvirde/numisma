@@ -139,8 +139,8 @@ export interface FoldedAnchor extends FoldedReview {
  * FAILS LOUD on a partial log: `loadFoldedReview` asserts the log fully loaded, so
  * an unparseable or legacy-shape line throws here rather than upserting a
  * silently-skewed NAV. `push.ts` calls this BEFORE it constructs the Pool, so that
- * throw happens before any connection or write. It never mutates the log (only the
- * read path's quarantine sidecar beside it moves).
+ * throw happens before any connection or write. See the write-on-read invariant in
+ * `packages/event-store/README.md`.
  *
  * The `load` provenance block matches the TUI's report path — and is one of the
  * keys `toProjectionReport` drops, so it never reaches the cloud.

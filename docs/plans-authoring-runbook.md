@@ -230,10 +230,10 @@ again. Nothing else on this page is worth anything until that log has an entry i
 - `pnpm plans` is standalone, and never writes what you authored. It never writes the
   sidecar and never touches git, and a plans failure never kills the NAV fold or
   withholds a push — the fold does not read this file at all. It is not, however, write-
-  free: reading the fold maintains the event log's `events.jsonl.quarantine` lane, which
-  it removes once every log line parses. That lane is gitignored and belongs to the log,
-  not to your plans; it is named here only so a vanished breadcrumb after a `pnpm plans`
-  run is not a mystery.
+  free: reading the fold maintains the event log's `events.jsonl.quarantine` lane (see
+  the write-on-read invariant in `packages/event-store/README.md`). That lane is
+  gitignored and belongs to the log, not to your plans; it is named here only so a
+  vanished breadcrumb after a `pnpm plans` run is not a mystery.
 - The plan **bodies** are provisional (they are parked on the fills export); the
   **envelope** is not. If a body shape changes later, the repair path is the file's own
   mechanism: supersede with a new line.

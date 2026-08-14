@@ -1,19 +1,21 @@
 /**
  * `pnpm plans` — the desk command over the `plans.jsonl` sidecar.
  *
- * It reads two things: the fold (for which positions EXIST as of the query date — the
- * single fact that separates `pending` against `active`) and the sidecar itself. It
- * never appends a plan line, never touches git, and is not on the ingest path, so a
- * broken sidecar cannot kill the NAV fold or withhold a push. The fold does not read
- * this file at all.
+ * It reads three things: the fold (for which positions EXIST as of the query date —
+ * the single fact that separates `pending` against `active`), the sidecar itself, and
+ * the `reconciliations.jsonl` trail, whose read is what lets an `active` row say
+ * whether its most recent fill agreed with the plan (D8). It never appends a plan
+ * line, never writes the trail, never touches git, and is not on the ingest path, so
+ * a broken sidecar cannot kill the NAV fold or withhold a push. The fold does not
+ * read either file at all.
  *
  * IT IS NOT WRITE-FREE, and the exception is named here rather than left to be
  * discovered. `loadFoldedReview` → `loadEventLog` maintains the event log's quarantine
- * lane unconditionally (`event-store.ts`): it writes `events.jsonl.quarantine` when a
- * log line fails to parse and REMOVES it when none does. So a `pnpm plans` run can
- * delete a forensic breadcrumb the last `pnpm spine` left behind. The lane is
- * gitignored and belongs to the log, not the sidecar, so both claims that matter here
- * — this command never writes `plans.jsonl`, and never touches git — hold exactly.
+ * lane (see the write-on-read invariant in `packages/event-store/README.md`). So a
+ * `pnpm plans` run can delete a forensic breadcrumb the last `pnpm spine` left behind.
+ * The lane is gitignored and belongs to the log, not the sidecar, so both claims that
+ * matter here — this command never writes `plans.jsonl`, and never touches git — hold
+ * exactly.
  *
  * ADR-001's split, once more: every decision about what the file MEANS is pure
  * (`listPlansAsOf` in the engine, `formatPlansReport` beside this shell) and only the
@@ -42,7 +44,12 @@ import {
   loadFoldedReview,
   resolveEventStorePaths,
 } from "@numisma/event-store";
-import { loadPlans, resolvePlansPath } from "@numisma/preferences";
+import {
+  loadPlans,
+  loadReconciliations,
+  resolvePlansPath,
+  resolveReconciliationsPath,
+} from "@numisma/preferences";
 import { formatPlansReport } from "./plans-report.js";
 import { parseAsOfArg } from "./spine-args.js";
 
@@ -74,6 +81,10 @@ try {
     asOf,
     existingPositionIds,
     sourcePath,
+    // The THIRD read, and it is total: an absent or unreadable trail qualifies the
+    // rows it cannot answer for rather than killing the page. The trail's own load
+    // arm carries its path, so nothing here has to hand the path across separately.
+    reconciliations: await loadReconciliations(resolveReconciliationsPath()),
   });
   process.stdout.write(`${report.text}\n`);
   process.exitCode = report.exitCode;
