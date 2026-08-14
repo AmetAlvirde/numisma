@@ -120,6 +120,7 @@ const EXPECTED_DURABLE_FILES = [
   "orders.jsonl",
   "plans.jsonl",
   "preferences.jsonl",
+  "reconciliations.jsonl",
 ].sort();
 
 /**

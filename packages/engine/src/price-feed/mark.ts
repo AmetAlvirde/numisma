@@ -31,13 +31,45 @@ export interface Quote {
 }
 
 /**
- * The two configurable knobs of the mark-instant contract. The DEFAULTS
- * (`America/Mexico_City`, `18:00`) live in `@numisma/price-feed`'s config module;
- * the INVARIANT enforced here — a timezone-anchored `asOf` and one mark per period
- * — is not configurable.
+ * THE TRADING-DAY TIMEZONE, AND THE ONE PLACE IT IS AUTHORED. Everything that has
+ * to agree about which calendar day a mark belongs to derives from here:
+ * `apps/price-feed`'s `DEFAULT_CONFIG.timeZone`, the durable log's
+ * `REPORT_TIME_ZONE`, and — through the guarded textual join in
+ * `apps/price-feed/src/schedule-window.test.ts` — the daily wrapper's `MARK_TZ`.
+ *
+ * It lives in the engine beside the instrument registry for the same reason
+ * `VENUE_CADENCE` does (#266): it is code-owned reference data that several
+ * packages must agree on, and the engine is the leaf every one of them already
+ * depends on. Restating it anywhere else is the bug — two copies compile happily
+ * while disagreeing about what "yesterday" means.
+ *
+ * CDMX has been a fixed -06:00 since 2022 (no DST), which is why the wrapper can
+ * compare bare hours at all; the derivations below still go through `Intl` rather
+ * than assuming that offset.
+ */
+export const TRADING_DAY_TIME_ZONE = "America/Mexico_City";
+
+/**
+ * The hour of the trading day at which the daily mark becomes due, in
+ * {@link TRADING_DAY_TIME_ZONE}. Authored as a NUMBER, not as `"18"`: the wrapper's
+ * bash comparison arithmetic-evaluates its operands, and a string carrying a
+ * leading zero (`"08"`) is invalid octal there — a shape that cannot silently
+ * classify every run as out-of-window is worth more than the two characters.
+ */
+export const MARK_HOUR = 18;
+
+/** {@link MARK_HOUR} as the `HH:MM` local mark time a {@link MarkClock} takes. */
+export const MARK_TIME = `${String(MARK_HOUR).padStart(2, "0")}:00`;
+
+/**
+ * The two configurable knobs of the mark-instant contract. The DEFAULTS are
+ * {@link TRADING_DAY_TIME_ZONE} and {@link MARK_TIME} above, which
+ * `@numisma/price-feed`'s config module derives its `DEFAULT_CONFIG` from; the
+ * INVARIANT enforced here — a timezone-anchored `asOf` and one mark per period —
+ * is not configurable.
  */
 export interface MarkClock {
-  /** IANA timezone the trading day is anchored to (e.g. `America/Mexico_City`). */
+  /** IANA timezone the trading day is anchored to; see {@link TRADING_DAY_TIME_ZONE}. */
   timeZone: string;
   /** Daily mark time as `HH:MM` local; a fetch before it emits no mark. */
   markTime: string;

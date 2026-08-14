@@ -28,3 +28,13 @@ export {
   appendNoPlan,
   unattendedPlansVerdict,
 } from "./plans.js";
+// The `reconciliations.jsonl` trail's IO half, on the same terms: the record
+// contract, the closed mismatch vocabulary, the verdict function and the canonical
+// serializer stay pure in `@numisma/engine` (ADR-001) and are NOT re-exported here.
+export type { UnattendedReconciliationsVerdict } from "./reconciliations.js";
+export {
+  resolveReconciliationsPath,
+  loadReconciliations,
+  appendReconciliation,
+  unattendedReconciliationsVerdict,
+} from "./reconciliations.js";

@@ -28,12 +28,25 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveDataDir } from "@numisma/engine";
 import { loadPlans } from "@numisma/preferences";
-import type { LoadedPlans, SkippedPlanLine } from "@numisma/engine";
+import type { LoadedPlans, LoadedReconciliations, SkippedPlanLine } from "@numisma/engine";
 import { describe, expect, it } from "vitest";
 import { formatPlansReport } from "./plans-report.js";
 
 const AS_OF = "2026-08-10";
 const SOURCE = "/tmp/synthetic/plans.jsonl";
+
+/**
+ * These tests are about the SIDECAR, so every one of them runs against a trail that
+ * is not there — the state a checkout has before its first recorded fill. `absent` is
+ * deliberately NOT an error, so it leaves the exit-code assertions below saying
+ * exactly what they said before the trail existed. What the trail ADDS to a row is
+ * asserted next door, in `plans-report-trail.test.ts`.
+ */
+const NO_TRAIL: LoadedReconciliations = {
+  load: { status: "absent", sourcePath: "/tmp/synthetic/reconciliations.jsonl" },
+  reconciliations: [],
+  skipped: [],
+};
 
 /** A synthetic sidecar that resolves to all five states at {@link AS_OF}. */
 function fiveStateFixture(): LoadedPlans {
@@ -108,6 +121,7 @@ describe("the plans desk report", () => {
       asOf: AS_OF,
       existingPositionIds: EXISTING,
       sourcePath: SOURCE,
+      reconciliations: NO_TRAIL,
     });
 
     // pending — declared, not yet realized. The day-zero row, never `$0`.
@@ -149,6 +163,7 @@ describe("the plans desk report", () => {
       asOf: AS_OF,
       existingPositionIds: new Set([...EXISTING, "pos-pending"]),
       sourcePath: SOURCE,
+      reconciliations: NO_TRAIL,
     });
     expect(row(text, "pos-pending")).toContain("active");
   });
@@ -161,6 +176,7 @@ describe("the plans desk report", () => {
         asOf: AS_OF,
         existingPositionIds: EXISTING,
         sourcePath: SOURCE,
+        reconciliations: NO_TRAIL,
       });
       expect(exitCode).toBe(0);
     });
@@ -171,6 +187,7 @@ describe("the plans desk report", () => {
         asOf: AS_OF,
         existingPositionIds: new Set<string>(),
         sourcePath: SOURCE,
+        reconciliations: NO_TRAIL,
       });
       expect(exitCode).toBe(0);
       expect(text).toContain(SOURCE);
@@ -182,6 +199,7 @@ describe("the plans desk report", () => {
         asOf: AS_OF,
         existingPositionIds: EXISTING,
         sourcePath: SOURCE,
+        reconciliations: NO_TRAIL,
       });
       expect(report.exitCode).not.toBe(0);
       // The diagnostics are in the rendered text, not merely implied by the code.
@@ -199,6 +217,7 @@ describe("the plans desk report", () => {
         asOf: AS_OF,
         existingPositionIds: EXISTING,
         sourcePath: SOURCE,
+        reconciliations: NO_TRAIL,
       });
       expect(report.exitCode).not.toBe(0);
       expect(report.text).toMatch(/could not be read/);
@@ -228,6 +247,7 @@ describe("the plans desk report", () => {
       asOf: AS_OF,
       existingPositionIds: new Set<string>(),
       sourcePath: path,
+      reconciliations: NO_TRAIL,
     });
 
     // Prose: the line NUMBER so the operator can go look, the BUCKET, and the

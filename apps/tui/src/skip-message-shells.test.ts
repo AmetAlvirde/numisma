@@ -193,6 +193,17 @@ const SHELLS: Shell[] = [
         loadGenesis: async () => syntheticFund(),
         loadLogEvents: async (): Promise<PortfolioEvent[]> => [],
         loadFolded: async () => syntheticFund(),
+        // The advisory trail (#336). This refusal lands long before the act, so nothing
+        // here may be reached; each binding throws to say so.
+        plansPath: "/synthetic/plans.jsonl",
+        loadPlans: async () => {
+          throw new Error("must not read plans");
+        },
+        reconciliationsPath: "/synthetic/reconciliations.jsonl",
+        appendReconciliation: async () => {
+          throw new Error("must not write");
+        },
+        toldAt: () => "2026-02-01T10:00:00Z",
         ask: async () => "",
         out: () => {},
         err: () => {},
