@@ -1652,10 +1652,20 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
   // than through the clock, which is why the guard is asserted here and not taken on
   // trust.
   //
-  // BOTH RUNS DIE BEFORE THE EXIT TRAP IS INSTALLED, so there is no heartbeat and no log
-  // file to read — the refusal is on the child's own stdout, and the assertion triple
-  // does not apply. That is the correct shape: a run that cannot say which side of the
-  // window it is on must not write a breadcrumb claiming one.
+  // AND IT REFUSES OUT LOUD, WHICH IS A SEPARATE CLAIM FROM REFUSING. These guards are the
+  // newest way for EVERY scheduled fire to die, so where they die decides whether anyone
+  // finds out. They used to run before the EXIT trap and before the log existed: a typo'd
+  // zone in the plist killed all six fires of an evening leaving no per-run log and no
+  // breadcrumb, `job-heartbeat.json` went on describing the last good run, and the TUI read
+  // "healthy" until the staleness channel aged out days later — the same silent rot the
+  // guard exists to prevent, re-entered through the guard. They now run after the trap and
+  // the log, so the refusal lands as a FATAL log line and a breadcrumb reading `exit 1 at
+  // step 'startup'`, and these cases assert exactly that.
+  //
+  // IT STILL REFUSES: no `pnpm` sentinel exists, `lastStep` never left `startup`, and
+  // `markWindow` is `false` — which DECLINES a side rather than claiming one. A run that
+  // died in its own startup guards marked nothing, so `false` is what "was this run capable
+  // of marking?" honestly answers, and the stamp is neither written nor erased.
   describe("the configured mark window refuses a value it cannot resolve", () => {
     for (const [name, value, expected] of [
       ["NUMISMA_MARK_TZ", "Not/AZone", "is not a resolvable IANA zone"],
@@ -1685,8 +1695,28 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
             `${name}=${value}: the wrapper reached \`${command}\` despite refusing its own configuration`,
           ).toBe(false);
         }
-        expect(record.heartbeat, `${name}=${value}: a run that refused its own configuration ` +
-          "still wrote a breadcrumb claiming a side of the window").toBeUndefined();
+        // AND IT SAID SO ON BOTH CHANNELS THAT REACH A HUMAN. The per-run log is the one an
+        // operator reads; the heartbeat is the one the TUI reads. A refusal that produced
+        // neither is indistinguishable from a machine that was switched off.
+        expect(
+          record.logText,
+          `${name}=${value}: the refusal left no per-run log — every fire of the evening would ` +
+            "die on the one channel that reaches nobody",
+        ).toContain("FATAL");
+        expect(
+          record.heartbeat,
+          `${name}=${value}: the refusal left no breadcrumb, so job-heartbeat.json goes on ` +
+            "describing the last good run and the TUI reads healthy",
+        ).toBeDefined();
+        expect(record.heartbeat?.exitCode, `${name}=${value}: heartbeat exit code`).toBe(1);
+        expect(record.heartbeat?.lastStep, `${name}=${value}: heartbeat step`).toBe("startup");
+        // DECLINED, NOT CLAIMED — and nothing stamped: a run that died at `startup` marked
+        // nothing, which is exactly what `markWindow: false` says.
+        expect(record.heartbeat?.markWindow, `${name}=${value}: heartbeat markWindow`).toBe(false);
+        expect(
+          record.heartbeat?.lastMarkWindowFinishedAt,
+          `${name}=${value}: a run that refused its own configuration invented a marked-day stamp`,
+        ).toBeUndefined();
         expect(record.pgidResidue, `${name}=${value}: processes left in pgid ${record.pgid}`).toEqual([]);
       });
     }

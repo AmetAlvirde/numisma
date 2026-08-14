@@ -4,6 +4,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { MARK_HOUR, TRADING_DAY_TIME_ZONE, instrumentsForSource } from "@numisma/engine";
+import { parseHeartbeat } from "@numisma/event-store";
 import { DEFAULT_CONFIG } from "./config.js";
 import { caseEnv, makeCaseDir, type CaseDirs, type CaseOptions } from "./wrapper-harness/case-dir.testkit.js";
 import { assertIsolated } from "./wrapper-harness/isolation.testkit.js";
@@ -174,8 +175,59 @@ function runWrapper(overrides: Record<string, string>): {
   return { status: result.status, output: `${result.stdout ?? ""}${result.stderr ?? ""}`, dirs };
 }
 
-/** It refused before it ran anything: no fake `pnpm` was ever invoked. */
-function expectReachedNoStep(dirs: CaseDirs): void {
+/** The per-run log the wrapper's `tee` wrote, concatenated. Empty if it never got that far. */
+function runLogText(logDir: string): string {
+  if (!existsSync(logDir)) {
+    return "";
+  }
+  return readdirSync(logDir)
+    .filter((name) => name.startsWith("price-feed-") && name.endsWith(".log"))
+    .map((name) => readFileSync(join(logDir, name), "utf8"))
+    .join("");
+}
+
+/**
+ * Assert the shape a config refusal must have — and it is deliberately NOT silence.
+ *
+ * The two guards are the newest way for every scheduled fire to die, so where they die
+ * decides whether the operator ever finds out. They now run after the EXIT-trap heartbeat
+ * and the per-run log are installed, which means a typo'd zone leaves a FATAL line in the
+ * log and a breadcrumb saying `exit 1 at step 'startup'` instead of nothing at all. The
+ * earlier ordering exited before either existed: `job-heartbeat.json` went on describing
+ * the last good run, and the TUI read "healthy" for as long as it took the staleness
+ * channel to age out — the same silent rot the guard was written to prevent.
+ *
+ * And it still refuses: `lastStep` is `startup`, no `pnpm` sentinel exists, and
+ * `markWindow` declines rather than claims a side it could not compute.
+ */
+function expectRefusedLoudly(dirs: CaseDirs, output: string, value: string): void {
+  // It NAMES THE VALUE. A bare "bad timezone" would leave an operator staring at a plist
+  // and an env file trying to work out which one was read.
+  expect(output).toContain(value);
+  expect(output).toContain("FATAL");
+
+  const logText = runLogText(dirs.logDir);
+  expect(logText, "the refusal left no per-run log — it died on the quietest channel").toContain(
+    "FATAL",
+  );
+  expect(logText).toContain(value);
+
+  const heartbeat = parseHeartbeat(
+    existsSync(join(dirs.dataDir, "job-heartbeat.json"))
+      ? readFileSync(join(dirs.dataDir, "job-heartbeat.json"), "utf8")
+      : undefined,
+  );
+  expect(heartbeat, "the refusal left no breadcrumb, so the TUI keeps reading the last good run")
+    .toBeDefined();
+  expect(heartbeat?.exitCode).toBe(1);
+  expect(heartbeat?.lastStep).toBe("startup");
+  // It DECLINES the window rather than claiming one, and stamps nothing: `markWindow`
+  // records whether the run could have marked, and this one marked nothing.
+  expect(heartbeat?.markWindow).toBe(false);
+  expect(heartbeat?.lastMarkWindowFinishedAt).toBeUndefined();
+
+  // AND IT REFUSED BEFORE IT RAN ANYTHING. A guard that fired after the fetch would have
+  // let a run with an unknowable window append to the log first.
   for (const command of WRAPPER_PNPM_COMMANDS) {
     expect(
       existsSync(join(dirs.caseDir, "sentinels", sentinelNameFor(command))),
@@ -355,16 +407,8 @@ describe("the launchd fetch window", () => {
 
     const result = runWrapper({ NUMISMA_MARK_TZ: BAD_ZONE });
 
-    expect(result.status).not.toBe(0);
-    // It NAMES THE VALUE. A bare "bad timezone" would leave an operator staring at a
-    // plist and an env file trying to work out which one was read.
-    expect(result.output).toContain(BAD_ZONE);
-    expect(result.output).toContain("FATAL");
-    // BEFORE the mark window, and before anything else happens at all: the run never
-    // gets past its own startup, so it writes no per-run log and leaves no half-done
-    // work to explain. A fallback to UTC would have reached all of it.
-    expect(readdirSync(result.dirs.logDir)).toEqual([]);
-    expectReachedNoStep(result.dirs);
+    expect(result.status).toBe(1);
+    expectRefusedLoudly(result.dirs, result.output, BAD_ZONE);
   });
 
   it("refuses a mark hour that is not an hour, which would classify every run out-of-window", () => {
@@ -373,11 +417,8 @@ describe("the launchd fetch window", () => {
     // it just answers `false`, forever, on every run.
     const result = runWrapper({ NUMISMA_MARK_HOUR: "noon" });
 
-    expect(result.status).not.toBe(0);
-    expect(result.output).toContain("noon");
-    expect(result.output).toContain("FATAL");
-    expect(readdirSync(result.dirs.logDir)).toEqual([]);
-    expectReachedNoStep(result.dirs);
+    expect(result.status).toBe(1);
+    expectRefusedLoudly(result.dirs, result.output, "noon");
   });
 
   it("lists exactly the wrapper steps that follow the one appending marks", () => {

@@ -126,42 +126,19 @@ HEARTBEAT_FILE="$DATA_DIR/job-heartbeat.json"
 MARK_TZ="${NUMISMA_MARK_TZ:-America/Mexico_City}"
 MARK_HOUR="${NUMISMA_MARK_HOUR:-18}"
 
-# REFUSE AN UNRESOLVABLE ZONE, BEFORE ANY OF IT IS USED. Bash does not fail on a bad
-# TZ the way `Intl` does: `TZ=Not/AZone date +%H` prints the UTC hour, with no error
-# and a zero exit. UTC is DISJOINT from the CDMX evening window (12:00-17:59 CDMX vs
-# the 18:00-23:59 fires), so one typo flips the window wrong on EVERY run while the
-# runs themselves keep marking correctly — the silent rot this whole block exists to
-# prevent, entered through the override that was just added. Falling back to UTC (or
-# to local) would be the same bug with a friendlier name, so this exits instead.
-# The shape check comes first so the path built below cannot be anything but a zone
-# name. `TZDIR` is honoured because that is what the C library itself consults.
-if [[ ! "$MARK_TZ" =~ ^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$ ]] ||
-  [[ ! -f "${TZDIR:-/usr/share/zoneinfo}/$MARK_TZ" ]]; then
-  echo "[$STAMP] FATAL: mark timezone '$MARK_TZ' is not a resolvable IANA zone."
-  echo "[$STAMP] No entry under ${TZDIR:-/usr/share/zoneinfo}. Bash would silently report the UTC"
-  echo "[$STAMP] hour for it, which is disjoint from the mark window, so every run would classify"
-  echo "[$STAMP] itself out-of-window while marking fine. Refusing rather than degrading."
-  echo "[$STAMP] Set NUMISMA_MARK_TZ to a real zone name, or leave it unset for the contract default."
-  exit 1
-fi
-# And refuse a mark hour that is not one. Left unchecked it would not abort either —
-# the comparison below is an `if` condition, so `set -e` never fires — it would just
-# classify every run as out-of-window, exactly like the bad zone.
-if [[ ! "$MARK_HOUR" =~ ^(0?[0-9]|1[0-9]|2[0-3])$ ]]; then
-  echo "[$STAMP] FATAL: mark hour '$MARK_HOUR' is not an hour of the day (0-23)."
-  echo "[$STAMP] Set NUMISMA_MARK_HOUR to a plain hour, or leave it unset for the contract default."
-  exit 1
-fi
-
-# Read once into a named variable so the comparison below is a self-contained
-# expression over two hour-shaped strings — which is what lets a test drive the
-# wrapper's OWN line with `08`/`09` and prove the base-10 forcing still holds.
-MARK_NOW_HOUR="$(TZ="$MARK_TZ" date +%H)"
-if [[ $((10#$MARK_NOW_HOUR)) -ge $((10#$MARK_HOUR)) ]]; then
-  MARK_WINDOW=true
-else
-  MARK_WINDOW=false
-fi
+# PROVISIONAL UNTIL THE RUN IS CLASSIFIED, BECAUSE THE EXIT TRAP BELOW READS IT. The
+# two guards that refuse an unusable zone or hour, and the classification itself, run
+# AFTER the heartbeat trap and the per-run log are installed — see "the mark window,
+# classified" further down for why that ordering is the point rather than an accident.
+# The trap can therefore fire before the window has been computed, and under `set -u`
+# an unset variable inside an EXIT trap would replace the very exit code the heartbeat
+# exists to record.
+#
+# `false` IS THE HONEST VALUE ON THAT PATH, not a convenient one. `markWindow` records
+# whether the run was CAPABLE of marking the day; a run that died in its own startup
+# guards marked nothing, and `MARKS_LANDED_STEPS` withholds a stamp from it for that
+# same reason. It claims no side of a window it could not compute — it declines one.
+MARK_WINDOW=false
 
 # WHICH STEPS MEAN THE DAY'S MARKS ARE ACTUALLY IN THE LOG. `pnpm spine` (step 2) is
 # what appends them, so every step AFTER it implies they landed. Being in the window
@@ -402,6 +379,62 @@ WATCHDOG_FIRED_FILE="$LOG_FILE.watchdog-fired"
 exec > >(trap '' TERM PIPE; tee -a "$LOG_FILE") 2>&1
 
 echo "[$STAMP] price-feed daily run starting (repo=$REPO_DIR)"
+
+# --- the mark window, classified (#185 S2 / #315) ---------------------------
+# DELIBERATELY HERE, AFTER THE EXIT TRAP AND THE LOG — AND STILL BEFORE ANY WORK.
+# These two guards are the newest way for EVERY scheduled fire to die: a typo'd
+# `NUMISMA_MARK_TZ` in the plist, or tzdata moving out from under the DEFAULT path,
+# refuses all six fires of an evening. Run before the trap was installed, they would
+# have refused them on the one channel that reaches nobody — no per-run log, no
+# heartbeat, `job-heartbeat.json` still describing the last good run, and the TUI
+# reading "healthy" for days. That is the same silent rot this block exists to
+# prevent, re-entered through the guard for it, and this file's own argument at the
+# `git commit` step (a launchd job's stdout reaches no one) says so explicitly.
+#
+# Placed after the log and trap, a refusal is now a FATAL line in the per-run log and
+# a breadcrumb reading `exit 1 at step 'startup'`, with `markWindow: false` and the
+# carried stamp re-emitted untouched — it invents no coverage and erases none. Still
+# before the watchdog is armed, before the token file is sourced, before `cd` and
+# before any `pnpm`, so the refusal remains a refusal: nothing with an effect runs
+# on a run that cannot say which side of the window it is on.
+
+# REFUSE AN UNRESOLVABLE ZONE, BEFORE ANY OF IT IS USED. Bash does not fail on a bad
+# TZ the way `Intl` does: `TZ=Not/AZone date +%H` prints the UTC hour, with no error
+# and a zero exit. UTC is DISJOINT from the CDMX evening window (12:00-17:59 CDMX vs
+# the 18:00-23:59 fires), so one typo flips the window wrong on EVERY run while the
+# runs themselves keep marking correctly — the silent rot this whole block exists to
+# prevent, entered through the override that was just added. Falling back to UTC (or
+# to local) would be the same bug with a friendlier name, so this exits instead.
+# The shape check comes first so the path built below cannot be anything but a zone
+# name. `TZDIR` is honoured because that is what the C library itself consults.
+if [[ ! "$MARK_TZ" =~ ^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$ ]] ||
+  [[ ! -f "${TZDIR:-/usr/share/zoneinfo}/$MARK_TZ" ]]; then
+  echo "[$STAMP] FATAL: mark timezone '$MARK_TZ' is not a resolvable IANA zone."
+  echo "[$STAMP] No entry under ${TZDIR:-/usr/share/zoneinfo}. Bash would silently report the UTC"
+  echo "[$STAMP] hour for it, which is disjoint from the mark window, so every run would classify"
+  echo "[$STAMP] itself out-of-window while marking fine. Refusing rather than degrading."
+  echo "[$STAMP] Set NUMISMA_MARK_TZ to a real zone name, or leave it unset for the contract default."
+  exit 1
+fi
+# And refuse a mark hour that is not one. Left unchecked it would not abort either —
+# the comparison below is an `if` condition, so `set -e` never fires — it would just
+# classify every run as out-of-window, exactly like the bad zone.
+if [[ ! "$MARK_HOUR" =~ ^(0?[0-9]|1[0-9]|2[0-3])$ ]]; then
+  echo "[$STAMP] FATAL: mark hour '$MARK_HOUR' is not an hour of the day (0-23)."
+  echo "[$STAMP] Set NUMISMA_MARK_HOUR to a plain hour, or leave it unset for the contract default."
+  exit 1
+fi
+
+# Read once into a named variable so the comparison below is a self-contained
+# expression over two hour-shaped strings — which is what lets a test drive the
+# wrapper's OWN line with `08`/`09` and prove the base-10 forcing still holds.
+MARK_NOW_HOUR="$(TZ="$MARK_TZ" date +%H)"
+if [[ $((10#$MARK_NOW_HOUR)) -ge $((10#$MARK_HOUR)) ]]; then
+  MARK_WINDOW=true
+else
+  MARK_WINDOW=false
+fi
+# ----------------------------------------------------------------------------
 
 # --- the watchdog (#308 follow-up) ------------------------------------------
 # A WEDGED RUN IS A WORSE FAILURE THAN A RED ONE, and until 2026-08-11 nothing here

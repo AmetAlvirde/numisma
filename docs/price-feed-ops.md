@@ -40,7 +40,11 @@ substituted**: the wrapper rejects an unresolvable `NUMISMA_MARK_TZ` (checked
 against `${TZDIR:-/usr/share/zoneinfo}`) or a non-numeric `NUMISMA_MARK_HOUR`
 before computing the mark window, with a named error, rather than letting
 bash's own silent UTC fallback flip every run's in/out-of-window judgment
-while the runs themselves kept marking fine.
+while the runs themselves kept marking fine. **The refusal is loud on both
+channels**: it writes the `FATAL` line to the per-run log and leaves a
+heartbeat reading `exit 1` at step `startup` with `markWindow: false`, so a
+typo that kills every fire of an evening shows up as a failed run rather than
+as `job-heartbeat.json` still describing the last good one.
 
 ## Where provider tokens live (scheduled environment)
 
