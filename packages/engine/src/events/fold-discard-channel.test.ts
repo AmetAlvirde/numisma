@@ -283,6 +283,74 @@ describe("the fold's discard channel", () => {
     expect(folded.data.closedPositions).toHaveLength(3);
   });
 
+  it("stays silent on a mark placed during a reused id's SECOND live period", () => {
+    // A reused position id — closed, reopened, closed again — carries TWO full-close
+    // rows. The retirement date this pass dates a mark against must be the LATEST of
+    // them: an id absent from `positions` was retired by its LAST close, and a mark
+    // placed while the position was live between the two closes is no drop at all.
+    //
+    // Earliest-wins would date this mark against the FIRST close and report it, which
+    // is the cry-wolf failure the whole pass is built to avoid. Unreachable through the
+    // ingest gate (`crossReferenceOpen` refuses a duplicate id) and entirely reachable
+    // through ungated `foldEvents` — the legacy migration and pre-rule history, which
+    // is the population this channel exists for.
+    const reused = (markAsOf: string): PortfolioEvent[] => [
+      opened("evt-open-first", "2026-06-02", "pos-reused"),
+      {
+        id: "evt-close-first",
+        asOf: "2026-06-04",
+        type: "PositionClosed",
+        positionId: "pos-reused",
+        settlement: { reserveId: "pulse-cash", proceeds: 300 },
+      },
+      opened("evt-open-second", "2026-06-05", "pos-reused"),
+      {
+        id: "evt-invalidation-reused",
+        asOf: markAsOf,
+        type: "InvalidationMarked",
+        positionId: "pos-reused",
+        price: 90,
+        direction: "below",
+      },
+      {
+        id: "evt-close-second",
+        asOf: "2026-06-08",
+        type: "PositionClosed",
+        positionId: "pos-reused",
+        settlement: { reserveId: "pulse-cash", proceeds: 300 },
+      },
+    ];
+
+    // Mark dated INSIDE the second live period: applied to a live position. No record.
+    const live = foldEvents(genesis(), reused("2026-06-06"));
+    expect(live.skipped).toEqual([]);
+    expect(live.data.positions).toEqual([]);
+    expect(live.data.closedPositions).toHaveLength(2);
+
+    // Mark dated after the LAST close: nothing left to attach to. Exactly one record.
+    const late = foldEvents(genesis(), [
+      ...reused("2026-06-06").filter((event) => event.id !== "evt-invalidation-reused"),
+      {
+        id: "evt-invalidation-reused",
+        asOf: "2026-06-09",
+        type: "InvalidationMarked",
+        positionId: "pos-reused",
+        price: 90,
+        direction: "below",
+      },
+    ]);
+    expect(late.skipped).toEqual([
+      {
+        eventId: "evt-invalidation-reused",
+        index: 4,
+        verb: "InvalidationMarked",
+        reason: "position-absent",
+        detail: expect.any(String),
+      },
+    ]);
+    expect(late.data.closedPositions).toHaveLength(2);
+  });
+
   it("records the absent leg of a Transfer while the present leg applies", () => {
     const folded = foldEvents(genesis(), [
       {
