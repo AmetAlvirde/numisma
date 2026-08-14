@@ -1296,6 +1296,402 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
     600_000,
   );
 
+  // ── S8 · THE MARK WINDOW — CASES 6 AND 8 ──────────────────────────────────────────
+  //
+  // BOTH CASES CHOOSE THEIR SIDE OF THE WINDOW BY SETTING A VALUE, never by hoping the
+  // suite runs in the evening. Every case below computes its configuration FRESH, inside
+  // the loop, from `markConfigFor` — see `mark-window.testkit.ts` for why the zone it
+  // picks leaves ~23 hours of margin on both sides and therefore cannot be straddled by a
+  // run of this suite.
+  //
+  // EACH CASE ALSO ASSERTS THE SIDE IT ASKED FOR, in so many words, and that assertion is
+  // not redundant with the triple. The triple judges `markWindow` against an ORACLE, and
+  // an oracle agrees with the run just as happily when both say `false` — so an in-window
+  // case whose configuration silently stopped working would still pass the triple while
+  // asserting nothing about the stamp it exists to prove. The bare `toBe(true)` /
+  // `toBe(false)` below is what makes that impossible.
+
+  /** A case's configuration for one run, on the side of the window it asks for. */
+  function markCaseOptions(window: "in" | "out", base: CaseOptions): CaseOptions {
+    return { ...base, mark: markConfigFor(window) };
+  }
+
+  /**
+   * CASE 6'S CEILING IS DELIBERATELY LOOSER THAN EVERY OTHER TIMEOUT CASE'S, and the extra
+   * seconds are the whole difference between a cry-wolf case and a second copy of case 2.
+   *
+   * Cases 2, 3 and 4 hang at the FIRST step, so their run has nothing to accomplish before
+   * the ceiling and 3 seconds is generous. Case 6 has to get all the way to the LAST step
+   * first — four fake `pnpm` invocations, a `git add`/`git commit` against the case's own
+   * repo, and a `git status` post-check — and only then wedge. A healthy run does that in
+   * about 0.7s (case 1 measures it every suite run), but a 3-second ceiling gave only ~4x
+   * margin and lost the race on a loaded machine: the run timed out at an earlier step and
+   * the case quietly became case 2 with a different label. Widened, not removed — the
+   * timeout still has to happen, it just has to happen at the step this case names.
+   */
+  const CASE_6_OPTIONS: CaseOptions = { ...TIMEOUT_CASE_OPTIONS, maxRunSeconds: 5 };
+
+  /**
+   * The dispatch assertion's failure message, carrying the step the run ACTUALLY died at.
+   * Without it, "expected undefined to be 'hangs'" says nothing about whether the run
+   * wedged early or never wedged at all — the two failures needing opposite fixes.
+   */
+  function dispatchContext(record: RunRecord): string {
+    return (
+      `run ended at \`${record.heartbeat?.lastStep ?? "<no heartbeat>"}\` after ` +
+      `${record.durationMs}ms`
+    );
+  }
+
+  /**
+   * The `pnpm` first-arguments the fake recorded, in the order the wrapper made them.
+   *
+   * Read off the fake's own append-only log rather than off the sentinels, because the
+   * sentinels are a SET and case 6's whole claim is about ORDER: the three steps before
+   * `backfill` succeeded and the run wedged at `backfill` itself.
+   */
+  function invocationOrder(caseDir: string): string[] {
+    const logPath = join(caseDir, "sentinels", INVOCATION_LOG_NAME);
+    if (!existsSync(logPath)) {
+      return [];
+    }
+    return readFileSync(logPath, "utf8")
+      .split("\n")
+      .filter((line) => line.startsWith("pnpm "))
+      .map((line) => line.slice("pnpm ".length).split(" ")[0] ?? "");
+  }
+
+  /** The behavior the fake's per-first-argument dispatch selected for one sub-command. */
+  function dispatchedBehavior(caseDir: string, command: string): string | undefined {
+    const path = join(caseDir, "sentinels", dispatchRecordNameFor(command));
+    return existsSync(path) ? readFileSync(path, "utf8").trim() : undefined;
+  }
+
+  /**
+   * CASE 6 · THE CRY-WOLF RUN — a timeout AFTER the day's marks are already in the log.
+   *
+   * Cases 2 and 3 hang at `prices-fetch`, so nothing landed and nothing may be stamped.
+   * This one succeeds through `spine`, `commit`, `post-check` and `gap-report` and wedges
+   * at `backfill` — the derived, networked step — so the marks ARE in the log and an
+   * in-window run must say so even though it exited 124. Under-stamping here is what
+   * would make the next morning claim "nothing recorded" for a day the log plainly holds.
+   *
+   * IT IS ALSO THE WORST PLACE IN THE SUITE FOR THE `PATH` MISTAKE. "Succeeds through the
+   * spine step, then hangs at the backfill" is precisely what a REAL pipeline does against
+   * a slow hosted database — so a case 6 that accidentally resolved the real `pnpm` would
+   * look like a passing cry-wolf case while having appended to the real event log and
+   * committed it. The sentinel assertions inside the triple are the guard, and the
+   * dispatch record below is what proves the hang came from the fake's own per-argument
+   * table rather than from anything real being slow.
+   */
+  it(
+    `case 6 — cry-wolf: a timeout at \`backfill\` IN the mark window, ${RUNS_PER_CASE} consecutive times`,
+    async () => {
+      const settles: number[] = [];
+      for (let run = 1; run <= RUNS_PER_CASE; run += 1) {
+        const options = markCaseOptions("in", CASE_6_OPTIONS);
+        const dirs = makeCaseDir(options);
+        // THE ONE BEHAVIOR ENTRY THAT MAKES THIS CASE ITSELF. Everything before `backfill`
+        // falls through to the fake's default `succeeds`, so the run reaches the last step
+        // with the day's marks appended and committed, and only then wedges.
+        setFakeBehavior(dirs.caseDir, "backfill", "hangs");
+        const label = `case 6 run ${run}/${RUNS_PER_CASE} (in-window, ${options.mark.timeZone} hour ${options.mark.hour})`;
+
+        const record = await launchWrapper({
+          caseDir: dirs.caseDir,
+          wrapperPath: WRAPPER_PATH,
+          env: caseEnv(dirs, options),
+          groupLeader: true,
+          settleDeadlineMs: timeoutSettleDeadlineMs(options),
+          maxWaitMs: 120_000,
+        });
+
+        expect(record.logText, `${label}: the watchdog did not arm — was the child detached?`).toContain(
+          "watchdog armed:",
+        );
+        expect(record.logText, `${label}: the watchdog never fired`).toContain(
+          `WATCHDOG: run exceeded ${options.maxRunSeconds}s`,
+        );
+        expect(record.watchdogFired, `${label}: the watchdog left no calling card`).toBe(true);
+        assertGraceBoundedSettle(record, label, options);
+
+        // THE HANG CAME FROM THE DISPATCH, and it is proven rather than assumed. Three
+        // `succeeds` and one `hangs`, selected by the fake on its FIRST ARGUMENT — which
+        // is the capability a single-behavior fake does not have and the reason this case
+        // is expressible at all.
+        for (const command of ["prices:fetch", "spine", "gap-report"]) {
+          expect(
+            dispatchedBehavior(dirs.caseDir, command),
+            `${label}: the fake did not take its \`succeeds\` branch for \`${command}\``,
+          ).toBe("succeeds");
+        }
+        expect(
+          dispatchedBehavior(dirs.caseDir, "backfill"),
+          `${label}: the fake did not take its \`hangs\` branch for \`backfill\` — this run wedged ` +
+            "somewhere the harness did not put a hang, which is what a REAL slow backfill would " +
+            `look like (${dispatchContext(record)})`,
+        ).toBe("hangs");
+        // AND IN THAT ORDER. The sentinels are a set; the wedge is a position.
+        expect(invocationOrder(dirs.caseDir), `${label}: the wrapper's step order`).toEqual([
+          ...WRAPPER_PNPM_COMMANDS,
+        ]);
+
+        assertTriple(record, dirs.caseDir, {
+          exitCode: 124,
+          lastStep: "timeout:backfill",
+          pnpmReached: WRAPPER_PNPM_COMMANDS,
+          mark: options.mark,
+          label,
+        });
+
+        // THE SIDE THIS CASE ASKED FOR, stated bare. Without it the triple's oracle would
+        // be satisfied by an out-of-window run agreeing with an out-of-window oracle, and
+        // the stamp assertion below would never be reached.
+        expect(
+          record.heartbeat?.markWindow,
+          `${label}: the configured zone did not put this run IN the window — every ` +
+            "assertion about the stamp below is vacuous until it does",
+        ).toBe(true);
+        // THE PAYLOAD OF THE WHOLE CASE. `backfill` is past `spine`, so the marks landed;
+        // in-window and landed means this run IS the day's last in-window finish, and the
+        // heartbeat has to say so even though the run itself timed out.
+        expect(
+          record.heartbeat?.lastMarkWindowFinishedAt,
+          `${label}: a run that appended and committed the day's marks and THEN wedged left ` +
+            "the day unstamped — the next morning would read it as nothing recorded",
+        ).toBe(record.heartbeat?.finishedAt);
+
+        settles.push(record.settleMs);
+      }
+      console.log(`[wrapper harness] case 6 in-window settle ms: ${settles.join(", ")}`);
+    },
+    900_000,
+  );
+
+  /**
+   * CASE 6, THE OTHER SIDE — the same run, out of the window, must CARRY rather than stamp.
+   *
+   * A prior stamp is seeded, and seeding it is what makes this case say anything: with a
+   * fresh case dir "carried the previous value forward" and "invented nothing" are the same
+   * observation, and only one of them is the contract. The heartbeat has ONE slot, so this
+   * is the run that would erase the evening's evidence if it stamped itself.
+   */
+  it(
+    `case 6 — the same cry-wolf run OUT of the window carries the prior stamp, ${RUNS_PER_CASE} consecutive times`,
+    async () => {
+      const settles: number[] = [];
+      for (let run = 1; run <= RUNS_PER_CASE; run += 1) {
+        const options = markCaseOptions("out", CASE_6_OPTIONS);
+        const dirs = makeCaseDir(options);
+        seedMarkedEveningHeartbeat(dirs.dataDir);
+        setFakeBehavior(dirs.caseDir, "backfill", "hangs");
+        const label = `case 6 run ${run}/${RUNS_PER_CASE} (out-of-window, ${options.mark.timeZone} hour ${options.mark.hour})`;
+
+        const record = await launchWrapper({
+          caseDir: dirs.caseDir,
+          wrapperPath: WRAPPER_PATH,
+          env: caseEnv(dirs, options),
+          groupLeader: true,
+          settleDeadlineMs: timeoutSettleDeadlineMs(options),
+          maxWaitMs: 120_000,
+        });
+
+        expect(record.watchdogFired, `${label}: the watchdog left no calling card`).toBe(true);
+        assertGraceBoundedSettle(record, label, options);
+        expect(
+          dispatchedBehavior(dirs.caseDir, "backfill"),
+          `${label}: the fake did not take its \`hangs\` branch for \`backfill\` ` +
+            `(${dispatchContext(record)})`,
+        ).toBe("hangs");
+        expect(invocationOrder(dirs.caseDir), `${label}: the wrapper's step order`).toEqual([
+          ...WRAPPER_PNPM_COMMANDS,
+        ]);
+
+        assertTriple(record, dirs.caseDir, {
+          exitCode: 124,
+          lastStep: "timeout:backfill",
+          pnpmReached: WRAPPER_PNPM_COMMANDS,
+          mark: options.mark,
+          carriedStamp: AUTHORED_PRIOR_STAMP,
+          label,
+        });
+
+        expect(
+          record.heartbeat?.markWindow,
+          `${label}: the configured zone did not put this run OUT of the window`,
+        ).toBe(false);
+
+        settles.push(record.settleMs);
+      }
+      console.log(`[wrapper harness] case 6 out-of-window settle ms: ${settles.join(", ")}`);
+    },
+    900_000,
+  );
+
+  /**
+   * CASE 8 · THE HEARTBEAT CARRY-FORWARD, and the join it is the only case to exercise.
+   *
+   * The heartbeat has a BASH WRITER and a TYPESCRIPT READER with nothing else joining them
+   * at runtime. That is why the event-store's heartbeat module is in the arming path set,
+   * and it is why this case is not droppable: without it the suite arms on a file whose
+   * behavior no case verifies.
+   *
+   * Both directions run OUT of the window deliberately. An in-window run that reaches
+   * `complete` stamps ITSELF, which would overwrite whatever it carried and make both
+   * halves below unobservable — the carry is only visible on a run that did not earn a
+   * stamp of its own.
+   *
+   * Deterministic and therefore cheap: the fake succeeds everywhere, so there is no
+   * ceiling to wait out and the twelve runs cost a second each.
+   */
+  it(
+    `case 8 — a schemaVersion-1 file's \`finishedAt\` is CARRIED, ${RUNS_PER_CASE} consecutive times`,
+    async () => {
+      for (let run = 1; run <= RUNS_PER_CASE; run += 1) {
+        const options = markCaseOptions("out", CASE_OPTIONS);
+        const dirs = makeCaseDir(options);
+        // v1 predates the mark-window field entirely, and every v1 run was read as
+        // in-window — so its `finishedAt` IS the last in-window finish, and the wrapper
+        // migrates it forward. This is the ONLY path on which the wrapper derives a stamp
+        // from a field that is not one.
+        seedV1Heartbeat(dirs.dataDir);
+        const label = `case 8 run ${run}/${RUNS_PER_CASE} (v1 carry, ${options.mark.timeZone} hour ${options.mark.hour})`;
+
+        const record = await launchWrapper({
+          caseDir: dirs.caseDir,
+          wrapperPath: WRAPPER_PATH,
+          env: caseEnv(dirs, options),
+          groupLeader: true,
+          settleDeadlineMs: SETTLE_DEADLINE_MS,
+          maxWaitMs: 60_000,
+        });
+
+        expect(record.logText, `${label}: the watchdog did not arm`).toContain("watchdog armed:");
+        expect(record.watchdogFired, `${label}: a healthy run left a calling card`).toBe(false);
+
+        assertTriple(record, dirs.caseDir, {
+          exitCode: 0,
+          lastStep: "complete",
+          pnpmReached: WRAPPER_PNPM_COMMANDS,
+          mark: options.mark,
+          carriedStamp: AUTHORED_V1_CARRY,
+          label,
+        });
+
+        expect(
+          record.heartbeat?.markWindow,
+          `${label}: the configured zone did not put this run OUT of the window — an ` +
+            "in-window run stamps itself and the carry becomes unobservable",
+        ).toBe(false);
+        // AND THE FILE IT WROTE IS v2. The migration is one-way: reading a v1 file must
+        // not re-emit one, or the next run would migrate the same value again forever.
+        expect(record.heartbeat?.schemaVersion, `${label}: heartbeat schemaVersion`).toBe(2);
+      }
+    },
+    600_000,
+  );
+
+  it(
+    `case 8 — an in-window v2 file that died before \`spine\` yields NO stamp, ${RUNS_PER_CASE} consecutive times`,
+    async () => {
+      for (let run = 1; run <= RUNS_PER_CASE; run += 1) {
+        const options = markCaseOptions("out", CASE_OPTIONS);
+        const dirs = makeCaseDir(options);
+        // THE DEFECT THAT OPENED THIS LINE OF WORK, seeded verbatim. The v1 fallback used
+        // to be gated NEGATIVELY — it fired whenever the file did not say
+        // `"markWindow": false` — which is true of this perfectly ordinary v2 file: an
+        // in-window run that died before `spine` correctly omits the stamp (it marked
+        // nothing) while carrying `"markWindow": true`. The old gate read that omission as
+        // v1 and promoted the FAILURE's own `finishedAt` into a marked-day stamp,
+        // manufacturing evidence that the day was covered and silencing the staleness
+        // warning on exactly the morning it was needed.
+        seedInWindowDiedBeforeSpineHeartbeat(dirs.dataDir);
+        const label = `case 8 run ${run}/${RUNS_PER_CASE} (no invention, ${options.mark.timeZone} hour ${options.mark.hour})`;
+
+        const record = await launchWrapper({
+          caseDir: dirs.caseDir,
+          wrapperPath: WRAPPER_PATH,
+          env: caseEnv(dirs, options),
+          groupLeader: true,
+          settleDeadlineMs: SETTLE_DEADLINE_MS,
+          maxWaitMs: 60_000,
+        });
+
+        assertTriple(record, dirs.caseDir, {
+          exitCode: 0,
+          lastStep: "complete",
+          pnpmReached: WRAPPER_PNPM_COMMANDS,
+          mark: options.mark,
+          label,
+        });
+
+        expect(
+          record.heartbeat?.markWindow,
+          `${label}: the configured zone did not put this run OUT of the window`,
+        ).toBe(false);
+        // NAMED, not merely "undefined". The seeded file's `finishedAt` is the exact value
+        // the negatively-gated fallback would have promoted, so this is the assertion that
+        // would have gone red on the defect.
+        expect(
+          record.heartbeat?.lastMarkWindowFinishedAt,
+          `${label}: the wrapper promoted a failed run's \`finishedAt\` into a marked-day ` +
+            "stamp — a day that was never covered now reads as covered",
+        ).not.toBe(AUTHORED_PRIOR_STAMP);
+      }
+    },
+    600_000,
+  );
+
+  // ── THE ZONE INPUT REFUSES, IT DOES NOT DEGRADE ───────────────────────────────────
+  //
+  // The input cases 6 and 8 are driven by is only as good as its failure mode. Bash does
+  // not fail on a bad `TZ` the way `Intl` does — `TZ=Not/AZone date +%H` prints the UTC
+  // hour, silently and with a zero exit — and UTC is DISJOINT from the CDMX evening
+  // window, so one typo would classify every run out-of-window while the runs themselves
+  // kept marking correctly. That is case 6 made vacuous again, through the input rather
+  // than through the clock, which is why the guard is asserted here and not taken on
+  // trust.
+  //
+  // BOTH RUNS DIE BEFORE THE EXIT TRAP IS INSTALLED, so there is no heartbeat and no log
+  // file to read — the refusal is on the child's own stdout, and the assertion triple
+  // does not apply. That is the correct shape: a run that cannot say which side of the
+  // window it is on must not write a breadcrumb claiming one.
+  describe("the configured mark window refuses a value it cannot resolve", () => {
+    for (const [name, value, expected] of [
+      ["NUMISMA_MARK_TZ", "Not/AZone", "is not a resolvable IANA zone"],
+      ["NUMISMA_MARK_HOUR", "evening", "is not an hour of the day"],
+    ] as const) {
+      it(`exits 1 naming the value when \`${name}\` is \`${value}\``, async () => {
+        const dirs = makeCaseDir(CASE_OPTIONS);
+        const record = await launchWrapper({
+          caseDir: dirs.caseDir,
+          wrapperPath: WRAPPER_PATH,
+          env: { ...caseEnv(dirs, CASE_OPTIONS), [name]: value },
+          groupLeader: true,
+          settleDeadlineMs: SETTLE_DEADLINE_MS,
+          maxWaitMs: 60_000,
+        });
+
+        expect(record.exitCode, `${name}=${value}: exit code`).toBe(1);
+        expect(record.stdout, `${name}=${value}: the refusal names the value it refused`).toContain(
+          `'${value}'`,
+        );
+        expect(record.stdout).toContain(expected);
+        // IT REFUSED BEFORE IT RAN ANYTHING. A guard that fired after the fetch would have
+        // let a run with an unknowable window append to the log first.
+        for (const command of WRAPPER_PNPM_COMMANDS) {
+          expect(
+            existsSync(join(dirs.caseDir, "sentinels", sentinelNameFor(command))),
+            `${name}=${value}: the wrapper reached \`${command}\` despite refusing its own configuration`,
+          ).toBe(false);
+        }
+        expect(record.heartbeat, `${name}=${value}: a run that refused its own configuration ` +
+          "still wrote a breadcrumb claiming a side of the window").toBeUndefined();
+        expect(record.pgidResidue, `${name}=${value}: processes left in pgid ${record.pgid}`).toEqual([]);
+      });
+    }
+  });
+
   // ── CASE 4 · THE EXTERNAL STOP ────────────────────────────────────────────────────
   //
   // THE SAME FAKE, THE SAME CEILING AND THE SAME STEP AS CASE 2. Everything about this run
