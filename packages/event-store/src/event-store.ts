@@ -92,7 +92,8 @@ export async function loadGenesis(genesisPath: string): Promise<FundReviewData> 
  * fails to parse is diverted to the quarantine lane (returned, and surfaced to a
  * durable `events.jsonl.quarantine` sidecar) instead of aborting the load, so a
  * single corrupt line degrades gracefully rather than bricking startup. The rest
- * of the log still loads. The log file itself is never mutated on read.
+ * of the log still loads. The log file itself is never mutated on read. See the
+ * write-on-read invariant in `packages/event-store/README.md`.
  */
 export async function loadEventLog(logPath: string): Promise<EventLogLoad> {
   const raw = await readOptional(logPath);
@@ -184,8 +185,8 @@ async function surfaceQuarantine(logPath: string, quarantined: QuarantinedLine[]
 /**
  * Load genesis + the durable log, assert the log fully loaded, then fold to `asOf`
  * (or current state) for rendering. A pure READ: it does NOT ingest — the inbox is
- * never consulted and the durable log is never written (only `loadEventLog`'s
- * quarantine sidecar moves).
+ * never consulted. See the write-on-read invariant in
+ * `packages/event-store/README.md` for what `loadEventLog` does write.
  */
 export async function loadFoldedReview(
   paths: EventStorePaths,

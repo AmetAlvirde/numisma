@@ -43,10 +43,23 @@ the production entry point on purpose — test scaffolding shared with
 
 ## Invariants enforced
 
-- **Quarantine over abort.** A corrupt log line never aborts a read; it is
-  collected and durably surfaced to `events.jsonl.quarantine`, which
-  self-heals (removed) once the log reads clean again (`loadEventLog` →
-  `surfaceQuarantine`).
+- **Quarantine over abort (the write-on-read invariant).** A corrupt log line
+  never aborts a read; it is collected and durably surfaced to
+  `events.jsonl.quarantine` (`loadEventLog` → `surfaceQuarantine`). Two halves,
+  and only one of them is universal. **Universal, on every reader of the log:**
+  the log and genesis themselves are never written on read — the single path
+  touched is that derived sidecar beside the log, and it is maintained
+  *unconditionally*, written when the log does not read clean and removed when
+  it does, so a fixed log self-heals. **Scoped, and the caller's job:**
+  `assertLogFullyLoaded` is a separate function nothing calls for you. The
+  fold/ingest read paths pair it with the load immediately (`loadFoldedReview`,
+  the TUI's `ingestInbox`, `loadGapReport`, the price feed's spine pre-check),
+  and there the sidecar write and the fail-loud stop are the same event — the
+  scoping ADR-003 states. A bare `loadEventLog` writes the sidecar and returns
+  a partial load *without throwing*; two readers decline the assert on purpose
+  and say so at their call sites (`loadVenueDarkAsOf` and `enumerateAnchors` in
+  `apps/web/src/push`). A new reader inherits the sidecar write, never the
+  throw.
 - **Fail loud on partial logs.** `assertLogFullyLoaded` refuses to fold when
   any line was quarantined — a silently-dropped event would skew NAV.
 - **Gap report reports, never fills.** `computeGapReport` is pure and
