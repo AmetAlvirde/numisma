@@ -31,6 +31,21 @@ path, else `__REPO_DIR__`/the plist's `EnvironmentVariables`), `NUMISMA_PRICEFEE
 (the token env file, else `~/.config/numisma/price-feed.env`), and
 `NUMISMA_PRICEFEED_LOG_DIR` (per-run log directory, else `~/Library/Logs/numisma`).
 
+Two more let a caller put a run on either side of the mark window without
+waiting on the machine clock: `NUMISMA_MARK_TZ` and `NUMISMA_MARK_HOUR`, each
+defaulting to the contract the engine authors once — `TRADING_DAY_TIME_ZONE`
+/ `MARK_HOUR` in `packages/engine/src/price-feed/mark.ts` (America/Mexico_City,
+18). Unlike the overrides above, a bad value here is **fatal, not silently
+substituted**: the wrapper rejects an unresolvable `NUMISMA_MARK_TZ` (checked
+against `${TZDIR:-/usr/share/zoneinfo}`) or a non-numeric `NUMISMA_MARK_HOUR`
+before computing the mark window, with a named error, rather than letting
+bash's own silent UTC fallback flip every run's in/out-of-window judgment
+while the runs themselves kept marking fine. **The refusal is loud on both
+channels**: it writes the `FATAL` line to the per-run log and leaves a
+heartbeat reading `exit 1` at step `startup` with `markWindow: false`, so a
+typo that kills every fire of an evening shows up as a failed run rather than
+as `job-heartbeat.json` still describing the last good one.
+
 ## Where provider tokens live (scheduled environment)
 
 - **Crypto needs no token.** Binance public REST is keyless, so a crypto-only run
@@ -569,3 +584,41 @@ bad day never appends a bad mark. The console/log distinguishes the two cases �
 private `<fund>` repo, `~/Dev/<fund>/data` by default. The `inbox/` and
 `prices/` subtrees are the disposable cache: `<fund>`'s allowlist `.gitignore`
 keeps them (and `ingested/`, `*.tmp`, `*.quarantine`) out of the versioned history.
+
+## The committed wrapper test harness (and why a green CI check says nothing about it)
+
+`apps/price-feed/src/wrapper-harness/` drives `ops/price-feed/run-daily-fetch.sh`
+as a real process — launched the way launchd launches it (`/bin/bash <wrapper>`,
+in its own session), against an authored fake `pnpm`, inside a temp directory.
+
+**⚠️ It can never run in CI as CI exists today. A green CI run does not mean this
+harness passed — it means it was not attempted.** CI is a single `ubuntu-latest`
+job; this suite targets macOS `/bin/bash` 3.2.57, BSD `ps`/`pgrep` and a watchdog
+that is hand-rolled *because* macOS ships no `timeout(1)`. The suite's platform
+gate skips it on Linux and prints the reason, so the CI log says so out loud —
+but the check itself is green either way.
+
+Where it runs, and when:
+
+- **Automatically, on a macOS `pnpm test`, when its own subject changed.** The
+  trigger compares `git merge-base HEAD origin/main` (on `main` itself, `HEAD~1`)
+  against `ops/price-feed/**`, the harness's own directory, and
+  `packages/event-store/src/heartbeat.ts` — committed history *and* the dirty
+  tree, because an uncommitted wrapper edit is exactly when you most want it.
+- **On demand:** `pnpm test:wrapper`. Runs it regardless of the trigger; the
+  platform gate still applies.
+- **It never skips silently.** One always-running test prints the decision, the
+  reason, the base SHA it compared against and the path set — on every `pnpm
+  test`, armed or not.
+
+Overrides: `NUMISMA_WRAPPER_TEST` = `auto` (default) · `always` · `never` (which
+still prints its reason — a mute button on this channel announces itself).
+`NUMISMA_WRAPPER_TEST_RUNS` raises the per-case repetition above its committed
+floor of 12; it is refused, not clamped, below it.
+
+**Nothing it runs touches anything real.** All nine `NUMISMA_*` overrides the
+wrapper reads are pointed inside a per-run temp directory and the launcher
+*refuses to start* if any is unset or resolves outside it — because an
+unisolated run is not a flaky test, it is a real `prices:fetch`, a real `spine`
+append, a real commit against the durable event log and a real `backfill`
+against the hosted projection, passing green while it happens.

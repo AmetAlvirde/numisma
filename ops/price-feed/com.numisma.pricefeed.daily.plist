@@ -4,9 +4,12 @@
 
   Fires the wrapper (run-daily-fetch.sh) EVERY HOUR from 18:00 through 23:00 in the
   MACHINE's local timezone. The mark-instant contract's default mark time is 18:00
-  America/Mexico_City (ADR-005 / config.ts), so this assumes the Mac's System
-  Settings timezone is CDMX. If the machine runs another timezone, shift all six
-  Hours to the local clock equal to 18:00–23:00 CDMX, or keep the OS on CDMX.
+  America/Mexico_City (ADR-005; authored once as `TRADING_DAY_TIME_ZONE` / `MARK_HOUR`
+  in packages/engine/src/price-feed/mark.ts, which the wrapper's NUMISMA_MARK_TZ /
+  NUMISMA_MARK_HOUR defaults and DEFAULT_CONFIG both derive from), so this assumes
+  the Mac's System Settings timezone is CDMX. If the machine runs another timezone,
+  shift all six Hours to the local clock equal to 18:00–23:00 CDMX, or keep the OS
+  on CDMX.
 
   WHY SIX FIRES AND NOT ONE (#185 S2). A MISSED FIRE IS NOT RECOVERED BY
   IDEMPOTENCY. Those are two different properties and the old note here conflated
