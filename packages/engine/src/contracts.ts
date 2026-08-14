@@ -84,6 +84,54 @@ export interface FundReviewData {
   closedPositions?: ClosedPositionRecord[];
 }
 
+/**
+ * Why the fold could not apply an event. CLOSED AT TWO MEMBERS — a third reason is a
+ * spec change, not a build decision. `position-absent`: the verb named a position the
+ * fold has no record of (never opened in this window, or already retired).
+ * `reserve-absent`: a cash leg named a reserve the fold has no record of.
+ */
+export type FoldSkipReason = "position-absent" | "reserve-absent";
+
+/**
+ * One event the fold read and then dropped — the Discard Channel's record (PRD #323,
+ * implementing #293). The locator is `eventId` + `index`, NOT a line number: the
+ * durable log is append-only, so the id is globally unique and greppable in
+ * `events.jsonl` and the report is a standing fact rather than an errand.
+ *
+ * `verb` is its OWN FIELD and is never interpolated into `detail`, and `detail` is
+ * FIXED PROSE — it never quotes event content and never carries a fund figure. Both
+ * hold because these records surface on channels a human reads daily; content in the
+ * prose would leak position and cash detail onto surfaces that must stay stable.
+ */
+export interface SkippedFoldEvent {
+  /** `BaseEvent.id` — globally unique, greppable in the durable log. */
+  eventId: string;
+  /** 0-based position in the events array handed to `foldEvents`. */
+  index: number;
+  /** The event's type. Its own field, never interpolated into `detail`. */
+  verb: string;
+  reason: FoldSkipReason;
+  /** Fixed prose. Never quotes event content; never contains a fund figure. */
+  detail: string;
+}
+
+/**
+ * The fold's return envelope: what it built, plus what it dropped building it.
+ *
+ * A SIBLING TYPE, NOT A FIELD ON {@link FundReviewData} (PRD #323 R1). `FundReviewData`
+ * is also the genesis seed's ON-DISK shape — `loadGenesis` parses one — so a `skipped[]`
+ * there would be a field a seed file could declare, on an immutable artifact that by
+ * definition discarded nothing. `EventLogLoad = {events, quarantined}` is the in-file
+ * precedent one layer up.
+ *
+ * `data` is exactly what the fold has always returned, bit-identical for every input.
+ * `skipped` is empty on a complete log.
+ */
+export interface FoldedReview {
+  data: FundReviewData;
+  skipped: SkippedFoldEvent[];
+}
+
 /** Per-Tier slice of a closed trade's
  * realized P&L: proceeds credited to this Tier minus its share of the cost basis. */
 export interface RealizedTierAttribution {

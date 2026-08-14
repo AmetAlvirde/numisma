@@ -44,10 +44,20 @@ The rule the position book actually wants is one sentence:
 Nothing may be dated after the close, because the fold applies events in
 (`asOf`, then log) order and anything dated after a close lands on a position
 the close already consumed — it hits `foldEvents`'s `if (closing)` /
-`if (trimming)` / `if (adding)` skip and vanishes, unobservably, since
-`foldEvents` returns a `FundReviewData` and `FundReviewData` has no warnings
-field (ledger 18, issue #293). Anything dated **before** the close, by the same
-ordering, lands ahead of it and folds perfectly correctly.
+`if (trimming)` / `if (adding)` skip. **Corrected in place 2026-08-13 (spec
+#323, implementing #293 — closes ledger item 18): those three arms no longer
+vanish unobservably.** `foldEvents` now returns a `FoldedReview` —
+`{data, skipped}` — and each of the three skip branches this paragraph names
+(`PositionClosed`, `PositionTrimmed`, `PositionAddedTo` naming an already-closed
+id) is recorded on `skipped` with reason `position-absent`, reported on every
+surface a human reads (ADR-020, the Discard Channel). **One sibling verb stays
+the accepted, deliberate exception:** `InvalidationMarked` sets no state of its
+own to branch on, so it is detected only by a post-loop absence check, and a
+mark dated after a seal on an already-closed id is indistinguishable there from
+one that landed on a still-open, still-surviving position and so goes
+undetected — the honest boundary of "detect by absence," not an oversight.
+Anything dated **before** the close, by the same ordering, lands ahead of it
+and folds perfectly correctly.
 
 That invariant is reachable from two arrival orders, and today only one of them
 is guarded correctly:

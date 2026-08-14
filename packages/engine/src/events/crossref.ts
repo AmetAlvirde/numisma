@@ -17,7 +17,13 @@
  * at fold, corrupting NAV under `warnings: []`). Deriving from the fold makes that
  * whole divergence class UNREPRESENTABLE rather than guarded. See ADR-015 and ADR-003.
  */
-import type { CapitalTier, Currency, FundReviewData, PositionLot } from "../contracts.js";
+import type {
+  CapitalTier,
+  Currency,
+  FundReviewData,
+  PositionLot,
+  SkippedFoldEvent,
+} from "../contracts.js";
 import type {
   DepositEvent,
   EventError,
@@ -63,9 +69,12 @@ export const SETTLEMENT_MAGNITUDE_THRESHOLD = 0.5;
  * gate checks debits against, plus the two facts that make the Reserve itself
  * checkable — the currency it is denominated in, and the date it was born.
  *
- * `amount`/`tiers` are read straight off `foldEvents(...).reserves`, so "what the gate
- * thinks this Reserve holds" and "what the fold will produce" are the same number by
- * construction (ADR-015), not by two encodings agreeing.
+ * `amount`/`tiers` are read straight off `foldEvents(...).data.reserves` — the read model
+ * inside the fold's `{data, skipped}` envelope (ADR-020) — so "what the gate thinks this
+ * Reserve holds" and "what the fold will produce" are the same number by construction
+ * (ADR-015), not by two encodings agreeing. A balance the fold could not apply is
+ * therefore missing from BOTH, identically; the drop is reported on `skipped`, which
+ * rides through to {@link EventReference} and which no gate rule reads.
  */
 export interface ReserveView {
   amount: number;
@@ -138,7 +147,7 @@ export interface EventReference {
    * (fail-loud-at-ingest).
    *
    * Derived from the fold's own CLOSED BOOK — the full-close rows of
-   * `foldEvents(...).closedPositions` — so "retired" means exactly what the fold
+   * `foldEvents(...).data.closedPositions` — so "retired" means exactly what the fold
    * means by it. A partial (trim) row is excluded: a trim always leaves the position
    * open, and the fold keeps it in `positions`.
    *
@@ -229,7 +238,8 @@ export interface EventReference {
    * Folded Reserve balances the cross-ref sufficiency gate checks a debit
    * against (a withdraw/transfer/open-funding can't exceed available, per Tier).
    * `tiers` is null for an untiered Reserve — only its `amount` is checked. Read off
-   * `foldEvents(...).reserves`, so a deposit earlier in the inbox funds a later
+   * `foldEvents(...).data.reserves` (the read model inside the fold's `{data, skipped}`
+   * envelope, ADR-020), so a deposit earlier in the inbox funds a later
    * withdraw because the FOLD says it does. `currency` is the Reserve's own
    * denomination, read by the same-currency Transfer guard (a cross-currency move is
    * FX, not a Transfer).
@@ -292,6 +302,29 @@ export interface EventReference {
    * whole world to ask rather than needing this shape widened.
    */
   worldAsOf: (asOf: string) => EventReference;
+  /**
+   * EVERY EVENT THE GATE'S OWN FOLD READ AND COULD NOT APPLY — the Discard Channel
+   * reaching the gate (ADR-020, `context/adr/ADR-020-the-discard-channel-report-never-refuse.md`;
+   * PRD #323 R5). Empty on a complete log.
+   *
+   * NOT AN INPUT TO ANY RULE, AND THAT IS A RULING RATHER THAN AN OVERSIGHT (R2). The
+   * channel's whole doctrine is REPORT, NEVER REFUSE, and here refusing is not merely
+   * impolite — it is catastrophic. `priorEvents` is the DURABLE LOG, which is
+   * append-only: a drop in it can never be repaired. So if any `crossReference*` rule
+   * refused while this array was non-empty, one damaged historical event would brick
+   * every future ingest, permanently, with no remedy an operator could carry out. Every
+   * rule's verdict therefore stays a pure function of exactly what it read before this
+   * field existed; the parity suite pins that (`gate-carries-discards.test.ts`).
+   *
+   * Carried on the `accountCurrencies` widening precedent above — all consumption of
+   * this type is in-repo and narrow, and no exactness latch guards it (the
+   * `KeysAreExactly` assertions live on `ProjectionReport`, not here).
+   *
+   * WHO ACTS ON IT: the callers, each on its own surface. {@link walkPendingInbox} lifts
+   * the union onto its result deduped, and the two direct callers — the legacy migration
+   * and `record-fill` — surface it to the operator at the keyboard.
+   */
+  skipped: SkippedFoldEvent[];
 }
 
 /**
@@ -311,6 +344,14 @@ export interface EventReference {
  * `PositionLot` carry no `asOf`, so the folded book cannot answer it) — all read off the
  * inputs directly.
  *
+ * AND THE FOLD'S DISCARDS COME OUT WITH THE BOOK. Because this function RUNS the fold,
+ * a dropped prior was a blind spot INSIDE the gate — the gate was judging candidates
+ * against a book it could not tell from a complete one. The envelope's `skipped` half
+ * rides out on {@link EventReference.skipped} and nothing here filters or truncates it;
+ * no rule reads it (ADR-020's report-never-refuse, and PRD #323 R2's sharpening: a rule
+ * that refused on a prior drop would brick all future ingest permanently). Rendering is
+ * the caller's, on the caller's own surface.
+ *
  * COST, and the standing budget. This is O(log length) per call — measured on a
  * MARK-HEAVY synthetic log (the durable log is 98.5% `PriceMarked`, and the original
  * fixture-shaped benchmark missed a quadratic term because of it; ADR-015 records both
@@ -324,7 +365,12 @@ export function buildEventReference(
   genesis: FundReviewData,
   priorEvents: readonly PortfolioEvent[] = [],
 ): EventReference {
-  const folded = foldEvents(genesis, [...priorEvents]);
+  // THE WHOLE ENVELOPE, destructured — `data` is the world the guards read, `skipped` is
+  // what the fold read and could not apply. Both ride out on the reference: dropping the
+  // second half here would leave the gate looking at a book it cannot tell from a
+  // complete one, which is the defect this projection is downstream of, not upstream of.
+  // See {@link EventReference.skipped} for why no rule may act on it.
+  const { data: folded, skipped } = foldEvents(genesis, [...priorEvents]);
   const genesisAsOf = genesis.review.asOf;
 
   // A Reserve's birth date is the one fact the folded record does not carry: a seeded
@@ -567,6 +613,7 @@ export function buildEventReference(
       ]),
     ),
     worldAsOf,
+    skipped,
   };
 }
 
@@ -904,12 +951,22 @@ function requirePositionBornBy(
  * THE HOLE THIS SHUTS IS INVISIBLE TO BOTH EVENTS INDIVIDUALLY. When the trim is gated
  * the close does not exist yet; when the close is gated nothing is retired yet, so
  * `closedPositionIds` cannot see it either. Both pass, and the fold's (`asOf`, then log)
- * ordering then applies the close FIRST and drops every event dated after it — and the
- * drop is UNOBSERVABLE AFTER THE FACT, because `foldEvents` has no diagnostics channel
- * to report it on: it returns a `FundReviewData`, which carries no warnings field at
- * all. That is ledger 18's shape, and it is exactly why this rule has to sit at INGEST.
- * A fold that could complain would still be complaining about an event already durably
- * logged; a fold that cannot complain leaves nothing behind to notice.
+ * ordering then applies the close FIRST and drops every event dated after it.
+ *
+ * THE FOLD DOES REPORT THAT DROP NOW, AND THIS RULE IS WORTH MORE FOR IT, NOT LESS.
+ * Ledger 18's shape was that `foldEvents` returned a bare `FundReviewData` with nowhere
+ * to say what it had dropped, so the loss was unobservable after the fact. PRD #323 gave
+ * it the Discard Channel — `{data, skipped}`, ADR-020 — and the channel reaches THIS
+ * FILE, because {@link buildEventReference} RUNS the fold to build the world these
+ * guards read: the drop was never a display defect downstream of the gate that the gate
+ * compensated for, it was a blind spot INSIDE the gate. The two now do different jobs
+ * that compose. This rule PREVENTS the loss, at the only moment prevention is possible —
+ * before the event is durable. {@link EventReference.skipped} REPORTS whatever was
+ * already lost: everything logged before this rule shipped, and everything that reaches
+ * the fold without passing here at all (the legacy-migration path, and any direct
+ * `foldEvents` caller). Neither substitutes for the other, and the channel deliberately
+ * never refuses — refusing on a prior drop would brick all future ingest, permanently,
+ * over history no operator can repair (#323 R2).
  *
  * Measured at 80827b6 on `[Opened 06-05, Trimmed 06-18, Closed 06-10 @ 50]`: a position
  * that broke even reported `realizedPnlUsd: -50` at full size, because the close landed

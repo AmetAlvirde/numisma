@@ -100,16 +100,17 @@ function excludedPopulationGenesis(): FundReviewData {
 describe("deriveHeadDigest", () => {
   it("summarizes a folded read model, sourcing fundValueUsd from the canonical fold", () => {
     const folded = foldEvents(genesis(), []);
-    const report = buildCompositionReport(folded);
+    const report = buildCompositionReport(folded.data);
 
     const headDigest = deriveHeadDigest(folded, "evt-42", "0.7.2");
 
     expect(headDigest).toEqual({
-      schemaVersion: 1,
-      asOf: folded.review.asOf,
+      schemaVersion: 2,
+      asOf: folded.data.review.asOf,
       fundValueUsd: report.totals.fundValueUsd,
-      openPositionCount: folded.positions.length,
-      closedPositionCount: (folded.closedPositions ?? []).length,
+      openPositionCount: folded.data.positions.length,
+      closedPositionCount: (folded.data.closedPositions ?? []).length,
+      discardedEventCount: 0,
       headEventId: "evt-42",
       appVersion: "0.7.2",
     });
@@ -133,7 +134,7 @@ describe("deriveHeadDigest", () => {
     expect(headDigest.openPositionCount).toBe(0);
     expect(headDigest.closedPositionCount).toBe(1);
     expect(headDigest.fundValueUsd).toBe(
-      buildCompositionReport(folded).totals.fundValueUsd,
+      buildCompositionReport(folded.data).totals.fundValueUsd,
     );
   });
 
@@ -141,7 +142,60 @@ describe("deriveHeadDigest", () => {
     const folded = foldEvents(genesis(), []);
     const headDigest = deriveHeadDigest(folded, null, "0.7.2");
     expect(headDigest.headEventId).toBeNull();
-    expect(headDigest.schemaVersion).toBe(1);
+    expect(headDigest.schemaVersion).toBe(2);
+  });
+
+  // --- The Discard Channel in the durable digest (ADR-020, HeadDigest v2) ---
+
+  it("records the capture fold's discard count so the durable digest stops reading clean", () => {
+    // Two closes, each naming a position this fold has no record of: two drops, one
+    // record apiece. Every id below is authored for this test.
+    const ghostCloses: PortfolioEvent[] = [
+      {
+        id: "close-ghost-a",
+        asOf: "2026-06-03",
+        type: "PositionClosed",
+        positionId: "never-opened-a",
+        settlement: { reserveId: "tiered", proceeds: 500 },
+      },
+      {
+        id: "close-ghost-b",
+        asOf: "2026-06-04",
+        type: "PositionClosed",
+        positionId: "never-opened-b",
+        settlement: { reserveId: "tiered", proceeds: 700 },
+      },
+    ];
+    const damaged = foldEvents(genesis(), ghostCloses);
+    expect(damaged.skipped).toHaveLength(2);
+
+    const headDigest = deriveHeadDigest(damaged, "close-ghost-b", "0.7.2");
+
+    expect(headDigest.schemaVersion).toBe(2);
+    expect(headDigest.discardedEventCount).toBe(2);
+
+    // A COUNT, not the list: no skip locator, verb or reason reaches the digest.
+    // Serialized exactly as the capture writes it, so this holds for the bytes on disk.
+    // (`headEventId` legitimately names the head event — a v1 field, not a skip record.)
+    const serialized = JSON.stringify(headDigest);
+    expect(serialized).not.toContain("close-ghost-a");
+    expect(serialized).not.toContain("never-opened-a");
+    expect(serialized).not.toContain("never-opened-b");
+    expect(serialized).not.toContain("position-absent");
+    expect(serialized).not.toContain("PositionClosed");
+    expect(Object.keys(headDigest)).not.toContain("skipped");
+  });
+
+  it("carries a discard count of 0 — present, not absent — on a clean fold", () => {
+    const clean = foldEvents(genesis(), []);
+    expect(clean.skipped).toEqual([]);
+
+    const headDigest = deriveHeadDigest(clean, null, "0.7.2");
+
+    expect(headDigest.discardedEventCount).toBe(0);
+    // Present on EVERY digest: a missing key would make a clean head and an unmarked
+    // damaged one indistinguishable to a reader, which is the defect v2 exists to close.
+    expect(Object.keys(headDigest)).toContain("discardedEventCount");
   });
 
   // --- Engine edge locks (ADR-003 anti-drift amendment) ---------------------
@@ -149,7 +203,7 @@ describe("deriveHeadDigest", () => {
   it("keeps a non-round-float value byte-identical to the report total (the anti-drift guard)", () => {
     // 3 × 0.1 === 0.30000000000000004 — a value a stray toFixed/round would mangle.
     const folded = foldEvents(nonRoundFloatGenesis(), []);
-    const report = buildCompositionReport(folded);
+    const report = buildCompositionReport(folded.data);
     const headDigest = deriveHeadDigest(folded, "h", "v");
 
     // Byte-for-byte equal to the canonical total — never rounded, never reformatted.
@@ -162,7 +216,7 @@ describe("deriveHeadDigest", () => {
 
   it("reports a zero fund value and zero counts for the empty/zero fold, still equal to the report total", () => {
     const folded = foldEvents(emptyGenesis(), []);
-    const report = buildCompositionReport(folded);
+    const report = buildCompositionReport(folded.data);
     const headDigest = deriveHeadDigest(folded, null, "v");
 
     expect(headDigest.fundValueUsd).toBe(0);
@@ -177,7 +231,7 @@ describe("deriveHeadDigest", () => {
     const raw = emptyGenesis();
     expect(raw.closedPositions).toBeUndefined();
 
-    const headDigest = deriveHeadDigest(raw, null, "v");
+    const headDigest = deriveHeadDigest({ data: raw, skipped: [] }, null, "v");
     expect(headDigest.closedPositionCount).toBe(0);
   });
 
@@ -185,12 +239,12 @@ describe("deriveHeadDigest", () => {
     // Two positions on the book: one live, one paper. fundValueUsd values only the
     // live one; openPositionCount counts both. The two intentionally diverge.
     const folded = foldEvents(excludedPopulationGenesis(), []);
-    const report = buildCompositionReport(folded);
+    const report = buildCompositionReport(folded.data);
     const headDigest = deriveHeadDigest(folded, "h", "v");
 
     // openPositionCount = all logged open positions, INCLUDING the excluded non-live one.
     expect(headDigest.openPositionCount).toBe(2);
-    expect(headDigest.openPositionCount).toBe(folded.positions.length);
+    expect(headDigest.openPositionCount).toBe(folded.data.positions.length);
     // The composition report excluded the paper position from the value.
     expect(report.dashboard.summary.dataSafety.nonLiveExcluded).toBe(1);
     // fundValueUsd remains byte-identical to the canonical (live-only) total — so the

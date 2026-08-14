@@ -134,6 +134,37 @@ describe("record-fill-cli — the shell refuses a partial durable log (finding 2
     expect(result.stdout).not.toMatch(/Resting rungs:/);
   });
 
+  it("MARKS a fold taken over damaged history, before the interview starts", async () => {
+    // An authored `Deposit` naming a reserve the synthetic genesis never declares: the
+    // fold reads it and drops its cash leg. PRD #323 R7 — recording a fill onto a fold
+    // derived from damaged history is when the epistemic marker is worth the most, and
+    // it is worth nothing if it lands thirty answers into the interview.
+    const dir = await syntheticDataDir([
+      JSON.stringify({
+        id: "authored-drop-1",
+        asOf: "2026-01-02",
+        type: "Deposit",
+        reserveId: "authored-reserve-never-opened",
+        amount: 250,
+        tier: "c1",
+      }),
+    ]);
+
+    const result = runFill(dir);
+
+    // ONE counted line, not an enumeration, and it names no event content.
+    expect(result.stderr).toContain("1 event(s)");
+    expect(result.stderr).not.toContain("authored-drop-1");
+    expect(result.stderr).not.toContain("authored-reserve-never-opened");
+    // BEFORE the act: the rung listing is the interview's first printed line, and the
+    // marker is on the near side of the operator's decision, not inside it.
+    expect(result.stdout).toMatch(/Resting rungs:/);
+    // REPORT, NEVER REFUSE — the drop points into append-only history, so it can never
+    // extinguish and must not redden this shell's exit code. The run ends 1 only because
+    // stdin is closed and the interview is abandoned, exactly as the control case does.
+    expect(result.stderr).not.toMatch(/refusing to fold a partial log/i);
+  });
+
   it("gets past the log read on a fully-loadable (here, empty) log", async () => {
     const dir = await syntheticDataDir([]);
 

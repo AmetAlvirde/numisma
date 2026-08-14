@@ -25,6 +25,7 @@ import {
   loadGenesis,
   readOptional,
   resolveEventStorePaths,
+  unattendedFoldVerdict,
 } from "@numisma/event-store";
 import { restoreLogImage, writeLogImage } from "./event-store.js";
 import { recordFill } from "./record-fill.js";
@@ -32,6 +33,26 @@ import { recordFill } from "./record-fill.js";
 const paths = resolveEventStorePaths();
 const rl = createInterface({ input: process.stdin, output: process.stdout });
 try {
+  // THE FOLD IS TAKEN, AND ITS DISCARD SUMMARY RENDERED, BEFORE THE ACT BEGINS.
+  //
+  // `recordFill` reaches `loadFolded()` at step 5, some thirty answers into the
+  // interview. That is where this line would land if the thunk folded lazily — after
+  // the operator has committed to the act, which is the wrong side of the decision. The
+  // shell's `loadLogEvents` binding below already states this reasoning for the
+  // partial-log refusal; this is the same argument for the report beside it. Nothing in
+  // the act writes to the durable log before step 5, so folding here reads the same log.
+  //
+  // THE COUNTED LINE, NOT THE ENUMERATION (PRD #323 R7). This is a prompt-driven
+  // interview, and the operator is being told a fact about the fold they are about to
+  // act on — recording a fill onto a fold derived from damaged history is when that
+  // marker is worth the most. `pnpm report` is where the per-event answer lives, and
+  // the line says so. It never refuses and never sets an exit code: the locator points
+  // into append-only history, so refusing here would brick every future fill over one
+  // damaged historical event (ADR-020, clauses 2 and 5).
+  const folded = await loadFoldedReview(paths);
+  for (const line of unattendedFoldVerdict(folded).messages) {
+    process.stderr.write(`${line}\n`);
+  }
   const outcome = await recordFill({
     ordersPath: resolveOrdersPath(),
     eventsPath: paths.log,
@@ -58,7 +79,10 @@ try {
       assertLogFullyLoaded(load, paths.log);
       return load.events;
     },
-    loadFolded: () => loadFoldedReview(paths),
+    // The fold read at the top of this file, whose discards the operator was told about
+    // before the interview started. `.data` is unwrapped only here, at the boundary of
+    // a flow that renders the fund and does not report on it.
+    loadFolded: async () => folded.data,
     plansPath: resolvePlansPath(),
     loadPlans,
     reconciliationsPath: resolveReconciliationsPath(),

@@ -109,12 +109,12 @@ function crossRef(seed: FundReviewData, raw: unknown, reference: EventReference)
 describe("PositionTrimmed — off-mark NAV honesty (T2 / R2)", () => {
   it("an off-mark fill moves NAV, realized captures the delta, and markVsFill discloses it", () => {
     const seed = genesis();
-    const baseNav = buildCompositionReport(foldEvents(seed, [])).totals.fundValueUsd;
+    const baseNav = buildCompositionReport(foldEvents(seed, []).data).totals.fundValueUsd;
 
     // Remove all 4 c2 units. At mark 100 the removed units are worth 400; the fill
     // lands OFF the mark at 360 (10% low — inside the 50% settlement sanity gate).
     const event = accept(seed, trim({ removals: [{ tier: "c2", quantity: 4 }], proceeds: 360 }));
-    const data = foldEvents(seed, [event]);
+    const data = foldEvents(seed, [event]).data;
     const report = buildCompositionReport(data);
     const row = report.closedBook.rows.find((r) => r.positionId === "btc-pos");
 
@@ -138,9 +138,9 @@ describe("PositionTrimmed — off-mark NAV honesty (T2 / R2)", () => {
 
   it("a settle-at-mark fill conserves NAV and discloses a ~zero delta", () => {
     const seed = genesis();
-    const baseNav = buildCompositionReport(foldEvents(seed, [])).totals.fundValueUsd;
+    const baseNav = buildCompositionReport(foldEvents(seed, []).data).totals.fundValueUsd;
     const event = accept(seed, trim({ removals: [{ tier: "c2", quantity: 4 }], proceeds: 400 }));
-    const report = buildCompositionReport(foldEvents(seed, [event]));
+    const report = buildCompositionReport(foldEvents(seed, [event]).data);
     const row = report.closedBook.rows.find((r) => r.positionId === "btc-pos");
 
     expect(row?.markVsFill?.deltaUsd).toBeCloseTo(0, 6);
@@ -156,7 +156,7 @@ describe("PositionTrimmed — multi-tier + batch sufficiency (T3)", () => {
       seed,
       trim({ removals: [{ tier: "c1", quantity: 2 }, { tier: "c2", quantity: 3 }], proceeds: 500 }),
     );
-    const data = foldEvents(seed, [event]);
+    const data = foldEvents(seed, [event]).data;
     const survivor = data.positions.find((p) => p.id === "btc-pos");
     const c1 = survivor?.lots.filter((l) => l.tier === "c1").reduce((s, l) => s + l.quantity, 0);
     const c2 = survivor?.lots.filter((l) => l.tier === "c2").reduce((s, l) => s + l.quantity, 0);
@@ -224,7 +224,7 @@ describe("PositionTrimmed — full-retirement REJECT, the position always surviv
       seed,
       trim({ removals: [{ tier: "c1", quantity: 4 }, { tier: "c2", quantity: 3 }], proceeds: 700 }),
     );
-    const data = foldEvents(seed, [event]);
+    const data = foldEvents(seed, [event]).data;
     const survivor = data.positions.find((p) => p.id === "btc-pos");
     expect(survivor).toBeDefined();
     const remaining = survivor?.lots.reduce((s, l) => s + l.quantity, 0);

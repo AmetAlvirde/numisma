@@ -186,7 +186,7 @@ function realIo(
       restoreLogImage: (prior) => restoreLogImage(eventsPath, prior),
       loadGenesis: async () => genesisSeed(),
       loadLogEvents: logEvents,
-      loadFolded: async () => foldEvents(genesisSeed(), await logEvents()),
+      loadFolded: async () => foldEvents(genesisSeed(), await logEvents()).data,
       // The advisory trail (`D6`, #336), wired to REAL files in the same temp dir. It is
       // not part of the act and no assertion below depends on it; it is real here so the
       // act's own guarantees are measured with the trail actually running beside them.

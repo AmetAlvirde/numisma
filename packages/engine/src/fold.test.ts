@@ -142,7 +142,7 @@ function sectionRows(
 describe("foldEvents — fold output is a contract-valid FundReviewData", () => {
   it("the no-event fold parses and composes identically to the genesis seed", () => {
     const genesis = seededGenesis();
-    const folded = foldEvents(genesis, []);
+    const folded = foldEvents(genesis, []).data;
 
     // Provably a valid read model: it survives the same gate hand-authored files do.
     expect(parseFundReview(folded).kind).toBe("ok");
@@ -167,7 +167,7 @@ describe("foldEvents — fold output is a contract-valid FundReviewData", () => 
         lots: [{ quantity: 1, cost: 100, tier: "c1" }],
       }),
       marked("e2", "2026-06-06", "btc-usd", 130),
-    ]);
+    ]).data;
 
     expect(parseFundReview(folded).kind).toBe("ok");
     expect(positionById(folded, "btc-core")?.markPrice).toBe(130);
@@ -197,7 +197,7 @@ describe("foldEvents — PositionAddedTo refreshes the entry-VWAC fallback mark"
         lot: { quantity: 10, cost: 200, tier: "c1" },
         funding: { reserveId: "no-such-reserve", amount: 2000 },
       },
-    ]);
+    ]).data;
 
     // The fallback mark tracks the new blended VWAC ((10×100 + 10×200) / 20 = 150), NOT
     // the stale open-time average of 100.
@@ -232,7 +232,7 @@ describe("foldEvents — PositionAddedTo refreshes the entry-VWAC fallback mark"
         lot: { quantity: 10, cost: 200, tier: "c1" },
         funding: { reserveId: "no-such-reserve", amount: 2000 },
       },
-    ]);
+    ]).data;
 
     // A real PriceMarked (130) wins over any VWAC fallback — the add never blends it away.
     expect(positionById(folded, "marked-core")?.markPrice).toBe(130);
@@ -259,7 +259,7 @@ describe("foldEvents — PositionAddedTo refreshes the entry-VWAC fallback mark"
         lot: { quantity: 10, cost: 200, tier: "c1" },
         funding: { reserveId: "no-such-reserve", amount: 2000 },
       },
-    ]);
+    ]).data;
 
     // The anchor and the mark move together, but the blend re-prices the fold's own
     // cost anchor IN PLACE at its original date — it never appends a new dated point,
@@ -296,7 +296,7 @@ describe("foldEvents — PositionAddedTo refreshes the entry-VWAC fallback mark"
         lot: { quantity: 10, cost: 200, tier: "c1" },
         funding: { reserveId: "no-such-reserve", amount: 2000 },
       },
-    ]);
+    ]).data;
 
     expect((folded.closes ?? []).filter((close) => close.instrumentId === "btc-usd")).toEqual([
       { instrumentId: "btc-usd", asOf: "2026-06-02", price: 150 },
@@ -328,7 +328,7 @@ describe("foldEvents — PositionAddedTo refreshes the entry-VWAC fallback mark"
         lot: { quantity: 10, cost: 200, tier: "c1" },
         funding: { reserveId: "no-such-reserve", amount: 2000 },
       },
-    ]);
+    ]).data;
 
     // A real mark owns both sides; the add pushes no anchor of its own.
     expect((folded.closes ?? []).filter((close) => close.instrumentId === "btc-usd")).toEqual([
@@ -362,7 +362,7 @@ describe("foldEvents — PositionAddedTo refreshes the entry-VWAC fallback mark"
         funding: { reserveId: "no-such-reserve", amount: 2000 },
       },
       marked("mk-3", "2026-06-03", "btc-usd", 130),
-    ]);
+    ]).data;
 
     expect(positionById(folded, "sameday-mark-core")?.markPrice).toBe(130);
     const latest = (folded.closes ?? [])
@@ -396,7 +396,7 @@ describe("foldEvents — PositionAddedTo refreshes the entry-VWAC fallback mark"
         funding: { reserveId: "no-such-reserve", amount: 2000 },
       },
       marked("mk-4", "2026-06-02", "btc-usd", 130),
-    ]);
+    ]).data;
 
     expect((folded.closes ?? []).filter((close) => close.instrumentId === "btc-usd")).toEqual([
       { instrumentId: "btc-usd", asOf: "2026-06-02", price: 130 },
@@ -420,7 +420,7 @@ describe("foldEvents — PositionAddedTo refreshes the entry-VWAC fallback mark"
       }),
       marked("mk-5", "2026-06-03", "btc-usd", 120),
       marked("mk-6", "2026-06-03", "btc-usd", 130),
-    ]);
+    ]).data;
 
     // markPrice is latest-wins (130); the display anchor now agrees instead of
     // stranding the superseded 120 as the day's Close.
@@ -453,7 +453,7 @@ describe("foldEvents — PositionAddedTo refreshes the entry-VWAC fallback mark"
         funding: { reserveId: "no-such-reserve", amount: 2000 },
       },
       marked("mk-7", "2026-06-04", "btc-usd", 105),
-    ]);
+    ]).data;
 
     // Appending the blend as a dated point rendered 100 → 150 → 105: a spike the
     // market never printed, with a nonsense changeAbs/changePct. The journey carries
@@ -493,7 +493,7 @@ describe("foldEvents — PositionAddedTo refreshes the entry-VWAC fallback mark"
         lot: { quantity: 10, cost: 200, tier: "c1" },
         funding: { reserveId: "no-such-reserve", amount: 2000 },
       },
-    ]);
+    ]).data;
 
     expect(positionById(folded, "genesis-close-core")?.markPrice).toBe(150);
     expect((folded.closes ?? []).filter((close) => close.instrumentId === "btc-usd")).toEqual([
@@ -510,16 +510,16 @@ describe("foldEvents — as-of windows", () => {
 
   it("applies events on or before asOf and excludes those after", () => {
     // Between the two marks: only the 06-05 mark applies.
-    expect(positionById(foldEvents(seededGenesis(), events, "2026-06-07"), "aapl-core")?.markPrice).toBe(160);
+    expect(positionById(foldEvents(seededGenesis(), events, "2026-06-07").data, "aapl-core")?.markPrice).toBe(160);
     // After both: the later mark applies.
-    expect(positionById(foldEvents(seededGenesis(), events, "2026-06-10"), "aapl-core")?.markPrice).toBe(170);
+    expect(positionById(foldEvents(seededGenesis(), events, "2026-06-10").data, "aapl-core")?.markPrice).toBe(170);
   });
 
   it("includes an event whose asOf exactly equals the boundary", () => {
     // asOf === the mark date: boundary equality is inclusive.
-    expect(positionById(foldEvents(seededGenesis(), events, "2026-06-05"), "aapl-core")?.markPrice).toBe(160);
+    expect(positionById(foldEvents(seededGenesis(), events, "2026-06-05").data, "aapl-core")?.markPrice).toBe(160);
     // One day before the first mark: nothing applies, the genesis mark stands.
-    expect(positionById(foldEvents(seededGenesis(), events, "2026-06-04"), "aapl-core")?.markPrice).toBe(150);
+    expect(positionById(foldEvents(seededGenesis(), events, "2026-06-04").data, "aapl-core")?.markPrice).toBe(150);
   });
 
   it("lets the latest PriceMarked <= asOf win per instrument", () => {
@@ -528,7 +528,7 @@ describe("foldEvents — as-of windows", () => {
       marked("b", "2026-06-08", "aapl-usd", 210),
       marked("c", "2026-06-12", "aapl-usd", 220),
     ];
-    expect(positionById(foldEvents(seededGenesis(), marks, "2026-06-10"), "aapl-core")?.markPrice).toBe(210);
+    expect(positionById(foldEvents(seededGenesis(), marks, "2026-06-10").data, "aapl-core")?.markPrice).toBe(210);
   });
 
   it("resolves same-day marks by log order (last appended wins)", () => {
@@ -536,7 +536,7 @@ describe("foldEvents — as-of windows", () => {
       marked("first", "2026-06-05", "aapl-usd", 200),
       marked("last", "2026-06-05", "aapl-usd", 210),
     ];
-    expect(positionById(foldEvents(seededGenesis(), sameDay, "2026-06-05"), "aapl-core")?.markPrice).toBe(210);
+    expect(positionById(foldEvents(seededGenesis(), sameDay, "2026-06-05").data, "aapl-core")?.markPrice).toBe(210);
   });
 });
 
@@ -555,23 +555,23 @@ describe("foldEvents — verb semantics", () => {
   const close = closed("c1", "2026-06-10", "btc-core");
 
   it("an open adds the Position to composition from its asOf onward", () => {
-    expect(positionById(foldEvents(emptyGenesis(), [open], "2026-06-04"), "btc-core")).toBeUndefined();
+    expect(positionById(foldEvents(emptyGenesis(), [open], "2026-06-04").data, "btc-core")).toBeUndefined();
     // Boundary equality: the position exists as of its open date.
-    expect(positionById(foldEvents(emptyGenesis(), [open], "2026-06-05"), "btc-core")).toBeDefined();
+    expect(positionById(foldEvents(emptyGenesis(), [open], "2026-06-05").data, "btc-core")).toBeDefined();
   });
 
   it("a close removes the Position from current composition, but history survives in the log", () => {
     const log: PortfolioEvent[] = [open, close];
 
     // Open-before / close-after windows resolve per as-of date from the same log.
-    expect(positionById(foldEvents(emptyGenesis(), log, "2026-06-07"), "btc-core")).toBeDefined();
+    expect(positionById(foldEvents(emptyGenesis(), log, "2026-06-07").data, "btc-core")).toBeDefined();
     // Boundary equality: the close applies as of its own date.
-    expect(positionById(foldEvents(emptyGenesis(), log, "2026-06-10"), "btc-core")).toBeUndefined();
+    expect(positionById(foldEvents(emptyGenesis(), log, "2026-06-10").data, "btc-core")).toBeUndefined();
     // Current state (no asOf): closed and gone.
-    expect(positionById(foldEvents(emptyGenesis(), log), "btc-core")).toBeUndefined();
+    expect(positionById(foldEvents(emptyGenesis(), log).data, "btc-core")).toBeUndefined();
 
     // The log is never mutated: re-folding an earlier window still shows it.
-    expect(positionById(foldEvents(emptyGenesis(), log, "2026-06-07"), "btc-core")).toBeDefined();
+    expect(positionById(foldEvents(emptyGenesis(), log, "2026-06-07").data, "btc-core")).toBeDefined();
   });
 });
 
@@ -597,7 +597,7 @@ describe("foldEvents — tier + entry-FX preservation (ADR-002)", () => {
         ],
       }),
       marked("m", "2026-06-06", "cemex-mxn", 100),
-    ]);
+    ]).data;
 
     // entryFx survives losslessly into the folded read model.
     expect(positionById(folded, "cemex-house-money")?.lots).toEqual([
@@ -632,7 +632,7 @@ describe("foldEvents — tier + entry-FX preservation (ADR-002)", () => {
 
 describe("foldEvents — Close seeding", () => {
   it("seeds a genesis-held instrument's t0 anchor at markPrice, not cost", () => {
-    const folded = foldEvents(seededGenesis(), []);
+    const folded = foldEvents(seededGenesis(), []).data;
     const anchors = (folded.closes ?? []).filter((close) => close.instrumentId === "aapl-usd");
 
     // Exactly one anchor, at the genesis date, equal to markPrice (150) not cost (100).
@@ -642,7 +642,7 @@ describe("foldEvents — Close seeding", () => {
   it("lets a genesis-provided Close win over the seeded markPrice anchor", () => {
     const genesis = seededGenesis();
     genesis.closes = [{ instrumentId: "aapl-usd", asOf: GENESIS_AS_OF, price: 999 }];
-    const folded = foldEvents(genesis, []);
+    const folded = foldEvents(genesis, []).data;
     const anchors = (folded.closes ?? []).filter((close) => close.instrumentId === "aapl-usd");
 
     // The genesis Close is preserved; no synthetic markPrice anchor is added on top.
@@ -656,7 +656,7 @@ describe("foldEvents — Close seeding", () => {
     // next honest mark at the seed's own markPrice would read as a fat finger.
     const genesis = seededGenesis();
     genesis.closes = [{ instrumentId: "aapl-usd", asOf: "2026-05-01", price: 40 }];
-    const folded = foldEvents(genesis, []);
+    const folded = foldEvents(genesis, []).data;
     const anchors = (folded.closes ?? []).filter((close) => close.instrumentId === "aapl-usd");
 
     // Recorded history is preserved AND the t0 anchor is minted on top of it.
@@ -681,7 +681,7 @@ describe("foldEvents — Close seeding", () => {
       ...genesis.positions,
       { ...genesis.positions[0]!, id: "aapl-tactical", portfolioId: "tactical" },
     ];
-    const folded = foldEvents(genesis, []);
+    const folded = foldEvents(genesis, []).data;
 
     expect((folded.closes ?? []).filter((close) => close.instrumentId === "aapl-usd")).toEqual([
       { instrumentId: "aapl-usd", asOf: GENESIS_AS_OF, price: 150 },
@@ -701,7 +701,7 @@ describe("foldEvents — Close seeding", () => {
         currency: "USD",
         lots: [{ quantity: 1, cost: 100, tier: "c1" }],
       }),
-    ]);
+    ]).data;
     const anchors = (folded.closes ?? []).filter((close) => close.instrumentId === "btc-usd");
 
     // The anchor lands at the open date and equals the weighted-average entry cost.
@@ -709,7 +709,7 @@ describe("foldEvents — Close seeding", () => {
   });
 
   it("yields no journey and no spurious markprice-close-mismatch for a single anchor", () => {
-    const report = buildCompositionReport(foldEvents(seededGenesis(), []));
+    const report = buildCompositionReport(foldEvents(seededGenesis(), []).data);
 
     expect(report.priceJourneys).toEqual([]);
     expect(report.warnings.filter((warning) => warning.code === "markprice-close-mismatch")).toEqual([]);
@@ -733,7 +733,7 @@ describe("foldEvents — FX-at-entry P&L semantics", () => {
         currency: "MXN",
         lots: [{ quantity: 10, cost: 50, tier: "c1", entryFx: 25 }],
       }),
-    ]);
+    ]).data;
 
     expect(positionById(folded, "cemex-fx")?.markPrice).toBe(50); // weighted-average cost
     const pnl = buildCompositionReport(folded).dashboard.summary.totalUnrealizedPnlUsd;
@@ -755,7 +755,7 @@ describe("foldEvents — FX-at-entry P&L semantics", () => {
         currency: "USD",
         lots: [{ quantity: 2, cost: 100, tier: "c1" }],
       }),
-    ]);
+    ]).data;
     expect(buildCompositionReport(usd).dashboard.summary.totalUnrealizedPnlUsd).toBe(0);
 
     // MXN but entryFx == review FX (20): the FX translation is the identity, P&L 0.
@@ -771,18 +771,18 @@ describe("foldEvents — FX-at-entry P&L semantics", () => {
         currency: "MXN",
         lots: [{ quantity: 10, cost: 50, tier: "c1", entryFx: 20 }],
       }),
-    ]);
+    ]).data;
     expect(buildCompositionReport(flatFx).dashboard.summary.totalUnrealizedPnlUsd).toBe(0);
   });
 });
 
 describe("foldEvents — as-of-before-genesis guard", () => {
   it("throws rather than folding to a misleading pre-genesis snapshot", () => {
-    expect(() => foldEvents(seededGenesis(), [], "2026-05-31")).toThrow(/precedes the genesis seed date/);
+    expect(() => foldEvents(seededGenesis(), [], "2026-05-31").data).toThrow(/precedes the genesis seed date/);
   });
 
   it("accepts asOf exactly equal to the genesis date as the genesis state", () => {
-    const folded = foldEvents(seededGenesis(), [], GENESIS_AS_OF);
+    const folded = foldEvents(seededGenesis(), [], GENESIS_AS_OF).data;
     expect(folded.review.asOf).toBe(GENESIS_AS_OF);
     expect(folded.positions.map((position) => position.id)).toEqual(["aapl-core"]);
   });
@@ -791,7 +791,7 @@ describe("foldEvents — as-of-before-genesis guard", () => {
 describe("foldEvents — the seed is never mutated (defensive clone)", () => {
   it("returns sub-objects that are not shared by reference with the genesis seed", () => {
     const genesis = seededGenesis();
-    const folded = foldEvents(genesis, []);
+    const folded = foldEvents(genesis, []).data;
 
     expect(folded.fund).not.toBe(genesis.fund);
     expect(folded.portfolios).not.toBe(genesis.portfolios);
@@ -814,7 +814,7 @@ describe("foldEvents — the seed is never mutated (defensive clone)", () => {
         amount: 1000,
       },
     ];
-    const folded = foldEvents(genesis, []);
+    const folded = foldEvents(genesis, []).data;
 
     // A future consumer writing through the read model must not reach the seed.
     folded.fund.name = "Mutated";

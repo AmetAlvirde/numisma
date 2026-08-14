@@ -150,7 +150,7 @@ class Harness {
       },
       loadGenesis: async () => genesisSeed(),
       loadLogEvents: async () => this.logEvents(),
-      loadFolded: async () => foldEvents(genesisSeed(), this.logEvents()),
+      loadFolded: async () => foldEvents(genesisSeed(), this.logEvents()).data,
       // The advisory trail (`D6`, #336), held in memory. Nothing in this suite turns on
       // it — it is wired so the act's atomicity is measured with the trail running, and
       // so a future edit that let it reach a writer would fail here rather than in prod.
@@ -206,12 +206,12 @@ class Harness {
   }
 
   reserveAmount(reserveId: string): number {
-    const folded = foldEvents(genesisSeed(), this.logEvents());
+    const folded = foldEvents(genesisSeed(), this.logEvents()).data;
     return folded.reserves.find((reserve) => reserve.id === reserveId)?.amount ?? 0;
   }
 
   navUsd(): number {
-    const folded = foldEvents(genesisSeed(), this.logEvents());
+    const folded = foldEvents(genesisSeed(), this.logEvents()).data;
     return buildCompositionReport(folded).totals.fundValueUsd;
   }
 }
@@ -396,7 +396,7 @@ describe("one Position per ladder — first fill OPENS, every fill after APPENDS
     expect(outcome.act.event.positionId).toBe("position-synthetic");
     expect(outcome.act.event.funding.amount).toBe(300 * 10);
     // Still ONE Position on the ladder — a Position is one decision.
-    const folded = foldEvents(genesisSeed(), second.logEvents());
+    const folded = foldEvents(genesisSeed(), second.logEvents()).data;
     expect(folded.positions.map((position) => position.id)).toEqual(["position-synthetic"]);
   });
 });
@@ -1061,5 +1061,55 @@ describe("the fill recorder ceilings admission at the rung's PLACED quantity", (
     if (outcome.status !== "rejected") throw new Error("expected a rejection");
     expect(outcome.reason).toBe("bad-quantity");
     expect(outcome.message).toBe("11 exceeds the 10 still claimed by this rung");
+  });
+});
+
+// THE GATE'S OWN FOLD REPORTS WHAT IT DROPPED, ON THE OPERATOR'S SURFACE (PRD #323
+// slice C, seam C; ADR-020). `recordFill` builds an `EventReference` to cross-reference
+// the fill it is about to write, and building one FOLDS the whole prior log — so a
+// dropped historical event is a fact this flow holds at the exact moment an operator is
+// deciding whether to write onto that history.
+describe("recording a fill over damaged history says so, and still records", () => {
+  /**
+   * A close naming a position the log never opened — the shape of pre-gate history
+   * (#293's ungateable path). Authored, like every fixture in this file.
+   */
+  function ghostClose(): PortfolioEvent {
+    return {
+      id: "evt-ghost-close",
+      asOf: "2026-01-03",
+      type: "PositionClosed",
+      positionId: "position-never-opened",
+      settlement: { reserveId: "reserve-synthetic", proceeds: 100 },
+    } as PortfolioEvent;
+  }
+
+  it("enumerates the dropped event with its locator before asking to write", async () => {
+    const harness = new Harness({ events: [ghostClose()], answers: openTopRungAnswers() });
+
+    const outcome = expectRecorded(await recordFill(harness.io));
+
+    // REPORTED, NEVER REFUSED: the log is append-only, so a drop already in it can never
+    // be repaired — refusing here would make one dead event permanently block every
+    // future fill (#323 R2).
+    expect(outcome.status).toBe("recorded");
+
+    const printed = harness.out.join("");
+    expect(printed).toContain("DROPPED EVENT evt-ghost-close");
+    expect(printed).toContain("PositionClosed");
+    expect(printed).toContain("position-absent");
+    // The warning reaches the operator BEFORE the confirmation they answer.
+    const warned = harness.out.findIndex((line) => line.includes("DROPPED EVENT"));
+    const prompted = harness.out.findIndex((line) => line.includes("About to write"));
+    expect(warned).toBeGreaterThanOrEqual(0);
+    expect(prompted).toBeGreaterThan(warned);
+  });
+
+  it("stays SILENT on a clean log — an undamaged fill's output is unchanged", async () => {
+    const harness = new Harness({ answers: openTopRungAnswers() });
+
+    expectRecorded(await recordFill(harness.io));
+
+    expect(harness.out.join("")).not.toContain("DROPPED EVENT");
   });
 });

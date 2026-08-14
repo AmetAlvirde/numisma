@@ -38,7 +38,12 @@
  * fund's own trading-day timezone, never the machine's idea of a date.
  */
 import { tradingDayAsOf } from "@numisma/engine";
-import { REPORT_TIME_ZONE, loadFoldedReview, resolveEventStorePaths } from "@numisma/event-store";
+import {
+  REPORT_TIME_ZONE,
+  formatFoldDiscards,
+  loadFoldedReview,
+  resolveEventStorePaths,
+} from "@numisma/event-store";
 import {
   loadPlans,
   loadReconciliations,
@@ -51,7 +56,16 @@ import { parseAsOfArg } from "./spine-args.js";
 try {
   const asOfFlag = parseAsOfArg(process.argv);
   const asOf = asOfFlag ?? tradingDayAsOf(new Date(), REPORT_TIME_ZONE);
-  const data = await loadFoldedReview(resolveEventStorePaths(), asOfFlag);
+  const folded = await loadFoldedReview(resolveEventStorePaths(), asOfFlag);
+  const { data } = folded;
+  // The ENUMERATION (PRD #323 R7). Born-ness below is derived from this fold, so a
+  // dropped `PositionOpened`/`PositionClosed` can move a rung's verdict — the operator
+  // sees which events the fold could not apply BEFORE they read the ladder. It is
+  // deliberately not folded into `report.exitCode` below: that code is the plans
+  // report's own verdict, and a fold discard never extinguishes.
+  for (const line of formatFoldDiscards(folded)) {
+    process.stderr.write(`${line}\n`);
+  }
 
   // BORN-NESS, from the fold: open positions and closed ones alike. A position that
   // has been closed was realized — it is not a declaration awaiting its first fill —

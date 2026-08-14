@@ -67,7 +67,7 @@ Under that root (`<dataDir>`, e.g. `~/Dev/<fund>/data`):
 | --------------------------------------- | -------------------------------------------------------------------------------------- | ---------------- |
 | `<dataDir>/genesis.json`               | Immutable t0 seed (a `FundReviewData` shape) — the start of recorded history.         | tracked         |
 | `<dataDir>/events.jsonl`               | Append-only event log, one JSON event per line. Appended atomically (temp + rename).  | tracked         |
-| `<dataDir>/head-digest.json`           | Derived, versioned summary of the folded head (the Head Digest) — a breadcrumb that makes a bad-NAV search cheap; never a source of truth (nothing folds it back). | tracked |
+| `<dataDir>/head-digest.json`           | Derived, versioned summary of the folded head (the Head Digest) — a breadcrumb that makes a bad-NAV search cheap; schema v2 adds `discardedEventCount`, the number of distinct events the fold read and could not apply — counted through the channel's own dedup key, so it matches the evening run's fold line for the same log (ADR-020, the Discard Channel); never a source of truth (nothing folds it back). | tracked |
 | `<dataDir>/preferences.jsonl`          | Append-only profit-split policy sidecar, validated on load.                           | tracked         |
 | `<dataDir>/orders.jsonl`               | Append-only Orders sidecar — resting claims on capital, joined to the fold at read time and never folded into NAV (ADR-013). | tracked |
 | `<dataDir>/orders.jsonl.lock`          | Transient exclusive-create lock guarding a concurrent `orders.jsonl` write.           | ignored         |

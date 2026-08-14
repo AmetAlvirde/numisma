@@ -51,7 +51,18 @@ composition report's `warnings: []`. [Precision note, 2026-08-08: read the
 `FundReviewData`, which has NO warnings field — the only `warnings` in
 `contracts.ts` is on `CompositionReport` (`:487`). The fold has no diagnostics
 channel to warn on at all; that is ledger item 18, still open, and it is why
-every rule of this class has to sit at ingest.] On the repo's own `cash-settlement.fixtures.ts` the shadow reached `amount
+every rule of this class has to sit at ingest. **Corrected in place 2026-08-13
+(spec #323, implementing #293 — closes ledger item 18): `foldEvents` now
+returns a `FoldedReview` — `{data, skipped}` — and `data` is the same
+`FundReviewData` this note describes, still with no warnings field of its own.
+The fold's diagnostics now live on the sibling `skipped[]`, the Discard
+Channel (ADR-020), not as a field ON the read model — the distinction this ADR
+amendment's whole point turns on (a verb the fold drops for naming an absent
+Position or Reserve now surfaces as a `skipped` record rather than nothing at
+all; this ADR's own MUST FIX 1 was closed at ingest, not by that channel, and
+is unaffected). The historical claim above is accurate for the state at
+2026-08-08 and is left standing as the record of what MUST FIX 1 actually
+found.**] On the repo's own `cash-settlement.fixtures.ts` the shadow reached `amount
 3100 / c1 1400 / c2 1700` where the fold produced `amount 2300 / c1 1200 / c2
 1100`, and the divergence then compounded through a `Withdraw` of the phantom
 balance into a negative reserve lot, a dropped tier rollup, and NAV low by the

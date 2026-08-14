@@ -3,7 +3,11 @@ import {
   formatAvailableCapital,
   formatCompositionReport,
 } from "@numisma/engine";
-import { loadFoldedReview, resolveEventStorePaths } from "@numisma/event-store";
+import {
+  formatFoldDiscards,
+  loadFoldedReview,
+  resolveEventStorePaths,
+} from "@numisma/event-store";
 import { loadOrders, resolveOrdersPath } from "@numisma/preferences";
 import { loadAvailableCapital } from "./available-capital.js";
 import { parseAsOfArg } from "./spine-args.js";
@@ -19,7 +23,19 @@ import { parseAsOfArg } from "./spine-args.js";
 try {
   const paths = resolveEventStorePaths();
   const asOf = parseAsOfArg(process.argv);
-  const data = await loadFoldedReview(paths, asOf);
+  const folded = await loadFoldedReview(paths, asOf);
+  const { data } = folded;
+  // THE ENUMERATION, not the count (PRD #323 R7). This surface runs because a human
+  // just asked it a question, so every dropped event's locator, verb and reason is
+  // printed in full — the id is greppable in `events.jsonl`, which is what makes the
+  // report actionable. The unattended push gets ONE counted line instead, because that
+  // one prints daily forever and an enumeration there would starve its co-tenants.
+  // On stderr, BEFORE the report: the composition below is the fold's product, and a
+  // reader must know the fold was incomplete before they read its totals. It never
+  // touches `process.exitCode` — the log is append-only, so this never extinguishes.
+  for (const line of formatFoldDiscards(folded)) {
+    process.stderr.write(`${line}\n`);
+  }
   const sourcePath = asOf ? `${paths.log} as-of ${asOf}` : paths.log;
   const report = buildCompositionReport(data, {
     load: {

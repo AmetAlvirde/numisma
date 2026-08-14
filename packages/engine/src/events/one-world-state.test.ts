@@ -187,7 +187,7 @@ describe("the gate's world IS the fold's world (ADR-015)", () => {
   it("projects every folded Reserve, amount and Tier mix, with untiered staying null", () => {
     const accepted = acceptedBatch();
     const reference = buildEventReference(genesis(), accepted);
-    const folded = foldEvents(genesis(), accepted);
+    const folded = foldEvents(genesis(), accepted).data;
 
     // Same Reserve set, in both directions — the gate holds no Reserve the fold dropped
     // and misses none the fold birthed (`capital-cash` exists only because of the verb).
@@ -243,7 +243,7 @@ describe("the gate's world IS the fold's world (ADR-015)", () => {
   it("takes the retired set from the fold's closed book, and open lots from its survivors", () => {
     const accepted = acceptedBatch();
     const reference = buildEventReference(genesis(), accepted);
-    const folded = foldEvents(genesis(), accepted);
+    const folded = foldEvents(genesis(), accepted).data;
 
     // btc-core was closed; aapl-core was only TRIMMED, so it survives. The gate learns
     // both facts from the fold rather than from a per-verb ledger of its own.
@@ -293,7 +293,7 @@ describe("the gate's world IS the fold's world (ADR-015)", () => {
     // The fold restamps `review.asOf` to the latest event, so `genesisAsOf` is read off
     // the seed. The birth-date gate depends on it for seeded Reserves.
     expect(reference.genesisAsOf).toBe(GENESIS_AS_OF);
-    expect(foldEvents(genesis(), accepted).review.asOf).not.toBe(GENESIS_AS_OF);
+    expect(foldEvents(genesis(), accepted).data.review.asOf).not.toBe(GENESIS_AS_OF);
 
     // A seeded Reserve exists from the instant the world does; a log-born one from its
     // own `ReserveOpened`. Neither is on the folded `ReserveRecord`.

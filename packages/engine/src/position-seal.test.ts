@@ -190,8 +190,8 @@ const totalCash = (fund: FundReviewData): number =>
  * numbers moved. Folds `genesis + committed` against `genesis + nothing`.
  */
 function ledgerDelta(committed: PortfolioEvent[]): { cash: number; closedRows: number } {
-  const before = foldEvents(genesis(), []);
-  const after = foldEvents(genesis(), committed);
+  const before = foldEvents(genesis(), []).data;
+  const after = foldEvents(genesis(), committed).data;
   return {
     cash: totalCash(after) - totalCash(before),
     closedRows: (after.closedPositions?.length ?? 0) - (before.closedPositions?.length ?? 0),
@@ -401,7 +401,7 @@ describe("a PositionClosed may not seal behind a verb already in the log", () =>
     // seal check leaves it green. It documents the figures; the `damagePrevented`
     // assertion above is what reddens.
     it("would fabricate a realized loss if those events ever reached the fold", () => {
-      const folded = foldEvents(genesis(), batch().map(accepted));
+      const folded = foldEvents(genesis(), batch().map(accepted)).data;
 
       expect(ledgerDelta(batch().map(accepted))).toEqual({ cash: -50, closedRows: 1 });
       expect(folded.closedPositions?.[0]).toMatchObject({
@@ -476,7 +476,7 @@ describe("a PositionClosed may not seal behind a verb already in the log", () =>
     // unfolded batch also nets to a cash delta of 0, because the $100 debit that should
     // have fired never did. The lie is in the SIZE of what was closed.
     it("would drop the add-to whole — its debit unfired, its lot unclosed", () => {
-      const folded = foldEvents(genesis(), batch().map(accepted));
+      const folded = foldEvents(genesis(), batch().map(accepted)).data;
 
       expect(ledgerDelta(batch().map(accepted))).toEqual({ cash: 0, closedRows: 1 });
       expect(folded.closedPositions?.[0]).toMatchObject({
@@ -518,7 +518,7 @@ describe("the seal rule refuses nothing it should not", () => {
     // the open, back 50 + 50.
     expect(ledgerDelta(result.committed)).toEqual({ cash: 0, closedRows: 2 });
 
-    const folded = foldEvents(genesis(), result.committed);
+    const folded = foldEvents(genesis(), result.committed).data;
     const rows = folded.closedPositions ?? [];
     expect(rows.map((row) => Boolean(row.partial))).toEqual([true, false]);
     // THE ASSERTION THAT MAKES THIS TEST NON-VACUOUS: the full-close row is sized 50,
@@ -545,7 +545,7 @@ describe("the seal rule refuses nothing it should not", () => {
     expect(result.rejection).toBeNull();
     expect(ledgerDelta(result.committed)).toEqual({ cash: 0, closedRows: 2 });
 
-    const rows = foldEvents(genesis(), result.committed).closedPositions ?? [];
+    const rows = foldEvents(genesis(), result.committed).data.closedPositions ?? [];
     expect(rows.map((row) => row.closedAsOf)).toEqual(["2026-06-10", "2026-06-18"]);
     expect(rows[1]).toMatchObject({ costBasisUsd: 50, realizedPnlUsd: 0 });
   });
@@ -575,7 +575,7 @@ describe("the seal rule refuses nothing it should not", () => {
     expect(result.rejection).toBeNull();
     expect(ledgerDelta(result.committed)).toEqual({ cash: 200, closedRows: 1 });
 
-    const folded = foldEvents(genesis(), result.committed);
+    const folded = foldEvents(genesis(), result.committed).data;
     expect(folded.closedPositions?.[0]).toMatchObject({
       positionId: "btc-core",
       costBasisUsd: 200,
@@ -772,7 +772,7 @@ describe("case C is admitted, the backdated trim ADR-017 relaxed", () => {
   // rows, the same realized 50. It was the argument for the relaxation and is now the
   // expectation of it — which is the point of stating the cost in the book's own numbers.
   it("and the book it folds to is the one that argued for admitting it", () => {
-    const folded = foldEvents(genesis(), caseC().map(accepted));
+    const folded = foldEvents(genesis(), caseC().map(accepted)).data;
     const rows = folded.closedPositions ?? [];
 
     expect(rows.map((row) => row.closedAsOf)).toEqual(["2026-06-08", "2026-06-10"]);

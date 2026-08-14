@@ -23,7 +23,7 @@
  */
 import { readFile } from "node:fs/promises";
 import type { SuppliedCashLeg } from "@numisma/engine";
-import { resolveEventStorePaths } from "@numisma/event-store";
+import { formatFoldDiscards, resolveEventStorePaths } from "@numisma/event-store";
 import { migrateLegacyLog } from "./event-store.js";
 
 const MAPPING_PATH = "data/migration-cash-legs.json";
@@ -47,6 +47,14 @@ async function main(): Promise<void> {
   const paths = resolveEventStorePaths();
   const cashLegs = await readCashLegs();
   const report = await migrateLegacyLog(paths, cashLegs);
+  // What the migration's own folds read and could not apply, to stderr — the operator is
+  // standing here and this is the one path the ingest gates never covered (#293). It
+  // does not change the outcome below: the rewrite already happened and it preserved
+  // this history verbatim, damage included (ADR-020, report never refuse). Empty on a
+  // clean log, so a clean migration's output is byte-identical to before.
+  for (const line of formatFoldDiscards({ skipped: report.discarded })) {
+    process.stderr.write(`${line}\n`);
+  }
   const touched = report.migratedCount + report.unchangedCount;
   if (touched === 0) {
     process.stdout.write(`No durable log to migrate at ${report.outputPath}.\n`);

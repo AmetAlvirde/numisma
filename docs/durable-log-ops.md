@@ -160,9 +160,11 @@ See `price-feed-ops.md` ("PATH: the scheduler must be able to find `pnpm` **and*
   commit-refused, thrown, **push-timeout**) each degrade without throwing or blocking
   (`ingest-commit-hardening.test.ts`).
 - The byte-identical anti-drift lock
-  `deriveHeadDigest(folded).fundValueUsd === buildCompositionReport(folded).totals.fundValueUsd`,
+  `deriveHeadDigest(folded).fundValueUsd === buildCompositionReport(folded.data).totals.fundValueUsd`,
   with a non-round-float tripwire that fails if anyone inserts a `toFixed`/round
-  (`durable-log.test.ts`).
+  (`durable-log.test.ts`). `folded` is the whole `FoldedReview` envelope —
+  `deriveHeadDigest` takes it (never a bare `FundReviewData`) so a caller cannot
+  derive a digest that omits `discardedEventCount` (ADR-020).
 - The **go-back invariant**: after `git revert` + re-fold, the re-derived Head Digest
   equals the pre-bad Head Digest (`go-back-invariant.test.ts`).
 - No tooling attribution: the commit author is the operator's git identity, enforced by

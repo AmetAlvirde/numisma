@@ -188,7 +188,7 @@ describe("ADR-017 — a PositionAddedTo dated STRICTLY BEFORE its target's close
     // actually held. The add lands 06-08 on lots the 06-10 close then consumes, so the
     // single closed row carries BOTH lots — cost basis 200, not the 100 the refusal
     // would have booked.
-    const folded = foldEvents(genesis(), ingestBatch(closeThenAdd("2026-06-08")).committed);
+    const folded = foldEvents(genesis(), ingestBatch(closeThenAdd("2026-06-08")).committed).data;
     const rows = (folded.closedPositions ?? []).filter((row) => row.positionId === "btc-late");
 
     expect(rows).toHaveLength(1);
