@@ -141,8 +141,37 @@ export interface EventReference {
    * `foldEvents(...).closedPositions` — so "retired" means exactly what the fold
    * means by it. A partial (trim) row is excluded: a trim always leaves the position
    * open, and the fold keeps it in `positions`.
+   *
+   * SINCE ADR-017 THIS IS THE KEY SET OF {@link closedPositionAsOf} and nothing else —
+   * one derivation, so the membership answer and the dated answer cannot drift apart.
+   * It remains the right question for the two verbs whose refusal is date-INSENSITIVE
+   * (`PositionClosed`, `InvalidationMarked`); the two date-SENSITIVE verbs ask the map.
    */
   closedPositionIds: Set<string>;
+  /**
+   * Every retired position id → the date its `PositionClosed` retired it. What makes
+   * "is this position closed" answerable AS OF A DATE, and the carrier ADR-017's guards
+   * read: reject when `event.asOf >= closedAsOf`, admit when `event.asOf < closedAsOf`.
+   *
+   * THE COMPARISON IS `>=`, matching {@link requirePositionUntouchedAfter}'s own
+   * strictness (which accepts EQUAL, because trim-then-close on one day is ordinary and
+   * the fold's (`asOf`, THEN LOG INDEX) order applies the earlier-logged verb first).
+   * The two rules meet on the close date and must not disagree there — otherwise a
+   * batch's verdict would depend on which of the pair arrived first.
+   *
+   * Read today by {@link crossReferenceAddedTo} only; {@link crossReferenceTrim} joins
+   * it when ADR-017's second half lands, which additionally needs the world as of the
+   * trim's own date because it reads {@link positionLots}.
+   *
+   * KEY SET: exactly {@link closedPositionIds}, which is built FROM this map. The
+   * EARLIEST close wins if a position somehow carries two full-close rows — the fold
+   * applies events in (`asOf`, then log) order, so the first-sorting close is the one
+   * that actually retires the id and every later verb must be judged against it. The
+   * ingest gate refuses a second close outright, so nothing reaching here through the
+   * ingest path can hold two; `buildEventReference` is pure and takes the safe reading
+   * anyway.
+   */
+  closedPositionAsOf: Map<string, string>;
   /**
    * Every known position id → the date it came into existence: `genesis.review.asOf`
    * for a genesis-held position, the `PositionOpened`'s own `asOf` for a log-born
@@ -216,11 +245,53 @@ export interface EventReference {
    * expected proceeds (quantity × last close) and the Tier mix proceeds inherit.
    * Mirrors `lastClose` existing solely to feed the PriceMarked guard.
    *
-   * The fold's surviving `positions`, and only those: a retired id is caught by
-   * {@link closedPositionIds} before either magnitude gate reaches this map, so the
-   * lots of a closed position are never needed and are not carried.
+   * The fold's surviving `positions`, and only those: a retired id has NO ENTRY HERE.
+   * For every verb but one that is harmless — a retired id is caught by
+   * {@link closedPositionIds} before either magnitude gate reaches this map. The
+   * exception is ADR-017's backdated trim, which is now admitted against a position the
+   * fold has retired; it reads {@link worldAsOf}'s map instead of this one, for the two
+   * reasons that field records.
    */
   positionLots: Map<string, { instrumentId: string; lots: PositionLot[] }>;
+  /**
+   * THE SAME REFERENCE, REBUILT FROM THE EVENTS DATED ON OR BEFORE `asOf` — the world
+   * the fold will actually place a backdated verb in, rather than the world as it stands
+   * after everything the log has accepted. ADR-015's doctrine one level deeper: the gate
+   * judges against the fold, and for a BACKDATED verb the relevant fold is the one at
+   * the verb's own date.
+   *
+   * ADR-017 needs this, and needs it for TWO reasons, only the first of which is
+   * visible. {@link crossReferenceTrim} now admits a trim dated before its target's
+   * close, and that target is RETIRED in this reference, so:
+   *
+   *   1. {@link positionLots} has no entry for it and the position-lot-sufficiency gate
+   *      would see `available = 0` — refusing every backdated trim anyway, with a
+   *      message ("holds only 0") that misdescribes the fund's own history; and
+   *   2. THE SETTLEMENT-MAGNITUDE GATE WOULD SILENTLY STOP FIRING. It is guarded on
+   *      `if (held && last !== undefined)`, so an absent `held` does not weaken the
+   *      check — it DELETES it, with no error, no warning and nothing going red. A
+   *      backdated trim would be the one class of trim admitted with no proceeds sanity
+   *      check at all. Restoring `held` from the as-of world fixes this structurally,
+   *      which is why the fix belongs here and not in a patched conditional.
+   *
+   * THE PREFIX IS INCLUSIVE OF `asOf` because the fold orders by (`asOf`, then LOG
+   * INDEX) and every event in this reference was logged BEFORE the one being checked —
+   * so a same-dated prior really is applied first, and belongs in the world the verb
+   * lands in. The event under check is never in its own prefix. The exclusive boundary
+   * lives on the other side, in the guards' `>=`: a verb dated ON its target's close is
+   * refused before this is ever called, so the retiring close can never enter the world.
+   *
+   * LAZY: nothing is folded until a guard asks, and today only a trim aimed at an
+   * already-retired position asks. The ordinary path — every trim, mark and close on an
+   * open position — costs exactly nothing. When it does fire it is one additional
+   * `foldEvents` over a prefix of the log, on top of the one this reference was built
+   * from; see this function's own cost note.
+   *
+   * The returned reference is a FULL {@link EventReference}, not a fragment, so a future
+   * as-of question (reserve balances at a date — the follow-up ADR-017 names) has the
+   * whole world to ask rather than needing this shape widened.
+   */
+  worldAsOf: (asOf: string) => EventReference;
 }
 
 /**
@@ -338,14 +409,23 @@ export function buildEventReference(
   // a retired id stays known (it existed; close-and-reopen mints a fresh id), and the
   // full-close rows are precisely the retired set. A partial row is a trim, whose
   // position is still open above.
+  //
+  // Each retired id is DATED as it is collected (ADR-017): the membership set below is
+  // the map's key set, so "closed" and "closed as of" are one derivation and cannot
+  // disagree. Earliest close wins — the fold applies events in (`asOf`, then log) order,
+  // so a first-sorting close is the one that actually retires the id.
   const positionIds = new Set(folded.positions.map((position) => position.id));
-  const closedPositionIds = new Set<string>();
+  const closedPositionAsOf = new Map<string, string>();
   for (const row of folded.closedPositions ?? []) {
     positionIds.add(row.positionId);
     if (!row.partial) {
-      closedPositionIds.add(row.positionId);
+      const retiredAsOf = closedPositionAsOf.get(row.positionId);
+      if (retiredAsOf === undefined || row.closedAsOf < retiredAsOf) {
+        closedPositionAsOf.set(row.positionId, row.closedAsOf);
+      }
     }
   }
+  const closedPositionIds = new Set(closedPositionAsOf.keys());
 
   // Each known position's BIRTH DATE. A LOG-BORN position's is read off the folded
   // book and only off it: unlike a Reserve's, that date IS carried by the folded
@@ -440,6 +520,33 @@ export function buildEventReference(
     });
   }
 
+  // ADR-017's as-of world, LAZY. Nothing folds until a guard asks, and today the only
+  // caller is a trim aimed at an already-retired position — so every trim, mark and
+  // close on an OPEN position pays exactly one closure allocation and no fold.
+  //
+  // THE PREFIX IS `<=`, INCLUSIVE OF SAME-DATED SIBLINGS, because that is the world the
+  // fold will actually build under the backdated verb. `foldEvents` orders by (`asOf`,
+  // THEN LOG INDEX), and every event in `priorEvents` has a LOWER log index than the
+  // event being cross-referenced — the walk rebuilds this reference from
+  // `[...priorEvents, ...accepted]` and the candidate joins `accepted` only after it is
+  // admitted, so it is never in its own prefix and `<=` cannot make a trim judge against
+  // itself. A same-dated prior is therefore applied BEFORE the verb under check, and a
+  // strict `<` would hide it: it judged against a world the fold does not build, which
+  // both let same-dated siblings oversell a position (each seeing the others' lots
+  // intact) and falsely refused a trim that a same-dated add had made room for — and
+  // refused a trim dated on its position's own OPEN date with the `holds only 0` message
+  // this ADR exists to eliminate. `<=` here and the guard's `>=` above are one boundary
+  // read from its two ends: reaching this call means `event.asOf < retiredAsOf` strictly,
+  // so no prefix dated `<= event.asOf` can ever pull the retiring close into the world.
+  //
+  // Recursion is not a hazard: the returned reference is built by this same constructor
+  // and its own `worldAsOf` is equally lazy.
+  const worldAsOf = (asOf: string): EventReference =>
+    buildEventReference(
+      genesis,
+      priorEvents.filter((event) => event.asOf <= asOf),
+    );
+
   return {
     positionIds,
     reserveIds: new Set(folded.reserves.map((reserve) => reserve.id)),
@@ -448,6 +555,7 @@ export function buildEventReference(
     instrumentIds: new Set(folded.instruments.map((instrument) => instrument.id)),
     genesisAsOf,
     closedPositionIds,
+    closedPositionAsOf,
     positionBornAsOf,
     positionLastVerbAsOf,
     lastClose,
@@ -458,6 +566,7 @@ export function buildEventReference(
         { instrumentId: position.instrumentId, lots: position.lots },
       ]),
     ),
+    worldAsOf,
   };
 }
 
@@ -1022,12 +1131,38 @@ function crossReferenceTrim(
   if (bornBy) {
     return { ...bornBy, message: `PositionTrimmed ${bornBy.message}` };
   }
-  if (reference.closedPositionIds.has(event.positionId)) {
+  // ADR-017, THE TRIM HALF: "a close is the position's last dated event" is a rule about
+  // DATES, so this refusal must be too. A trim dated STRICTLY BEFORE the close that
+  // retired the position is a correctly-dated trim reported late, and the fold places it
+  // where its date says. `>=` matches the seal rule's strictness in the other direction:
+  // the two rules meet on the close date itself and must not disagree there.
+  const retiredAsOf = reference.closedPositionAsOf.get(event.positionId);
+  if (retiredAsOf !== undefined && event.asOf >= retiredAsOf) {
     return eventError(
       "positionId",
-      `PositionTrimmed targets position id '${event.positionId}', which is already closed.`,
+      `PositionTrimmed targets position id '${event.positionId}', which is already closed ` +
+        `as of ${retiredAsOf} — and this trim is dated ${event.asOf}. The fold applies events ` +
+        `in date order, so this one would land on a position the close has already ` +
+        `consumed and its removal would vanish silently. A trim dated BEFORE ${retiredAsOf} ` +
+        `is accepted; redate it if the sale really happened while the position was open.`,
     );
   }
+  // AND THE COMPARISON IS NOT THE WORK. Reaching here with `retiredAsOf` set means the
+  // trim is BACKDATED and its target is retired in `reference` — so `positionLots` has no
+  // entry for it. Judged against that world the sufficiency gate below would see
+  // `available = 0` and refuse every backdated trim with a message that misdescribes the
+  // fund's own history; worse, the settlement-magnitude gate is guarded on
+  // `if (held && last !== undefined)` and would SILENTLY STOP FIRING — no error, no
+  // warning, nothing red — leaving the backdated trim the one class of trim admitted with
+  // no proceeds sanity check at all.
+  //
+  // So the remaining gates judge against the world AS OF THE TRIM'S OWN DATE (ADR-015's
+  // doctrine one level deeper: the gate judges against the fold, and for a backdated verb
+  // the relevant fold is the one at the verb's date). `held` comes back as a SIDE EFFECT
+  // of that, which is why the magnitude hole is closed structurally here rather than by
+  // patching its conditional. For an ordinary trim this is `reference` itself — no fold,
+  // no allocation, no change in behavior.
+  const world = retiredAsOf === undefined ? reference : reference.worldAsOf(event.asOf);
   const trimSettlesInto = requireReserveBornBy(
     reference,
     event.settlement.reserveId,
@@ -1037,7 +1172,7 @@ function crossReferenceTrim(
   if (trimSettlesInto.kind === "event-error") {
     return { ...trimSettlesInto.error, message: `PositionTrimmed ${trimSettlesInto.error.message}` };
   }
-  const held = reference.positionLots.get(event.positionId);
+  const held = world.positionLots.get(event.positionId);
   const availableByTier = new Map<CapitalTier, number>();
   for (const lot of held?.lots ?? []) {
     availableByTier.set(lot.tier, (availableByTier.get(lot.tier) ?? 0) + lot.quantity);
@@ -1080,7 +1215,7 @@ function crossReferenceTrim(
   }
   // Settlement-magnitude gate on the removed subset: expected ≈ Σ removed quantity ×
   // the instrument's last close; a gross deviation is a fat-finger, rejected loud.
-  const last = held ? reference.lastClose.get(held.instrumentId) : undefined;
+  const last = held ? world.lastClose.get(held.instrumentId) : undefined;
   if (held && last !== undefined) {
     const removedQuantity = event.removals.reduce((sum, removal) => sum + removal.quantity, 0);
     const expected = removedQuantity * last.price;
@@ -1101,10 +1236,30 @@ function crossReferenceTrim(
 }
 
 /**
- * Cross-reference a `PositionAddedTo`: the position must exist and be open, and the
- * funding Reserve
- * must exist and hold enough (per tier) to cover the debit — so an add cannot drive
- * a Reserve silently negative. Pure.
+ * Cross-reference a `PositionAddedTo`: the position must exist and must not already be
+ * closed AS OF THIS EVENT'S DATE, and the funding Reserve must exist and hold enough
+ * (per tier) to cover the debit — so an add cannot drive a Reserve silently negative.
+ * Pure.
+ *
+ * ADR-017, THE FIRST OF ITS TWO SITES. The closed check compares dates rather than
+ * asking a date-blind `closedPositionIds.has(id)`: an add dated STRICTLY BEFORE the
+ * close is admitted, because the fold's (`asOf`, then log) ordering lands it ahead of
+ * the close and it folds perfectly correctly — the lots it appends are lots the close
+ * then consumes. Refusing it made the closed book report a position smaller than the
+ * fund actually held, and the operator's only remedy was hand-editing the durable log.
+ *
+ * THIS HALF NEEDS ONLY THE COMPARISON, and that is why it lands before the trim's.
+ * Nothing below reads {@link EventReference.positionLots} — the checks are the funding
+ * Reserve's birth and its per-tier debit sufficiency, neither of which is a fact about
+ * the position's holdings. `crossReferenceTrim` does read the lots, and a closed
+ * position has NO entry there (the map is the fold's survivors), so relaxing its
+ * comparison alone would refuse the trim again one gate later and silently disable its
+ * settlement-magnitude check; it needs the world as of the trim's own date instead.
+ *
+ * THE RESERVE IS STILL SIZED AT ITS BALANCE NOW, not at the add's date — `checkDebit`
+ * reads `reserveBalances`, the fold of everything accepted. Pre-existing for every
+ * backdated verb the gate admits; ADR-017 widens the population it applies to without
+ * changing its shape, and names it as a follow-up rather than a hole opened here.
  */
 function crossReferenceAddedTo(
   event: PositionAddedToEvent,
@@ -1114,10 +1269,20 @@ function crossReferenceAddedTo(
   if (bornBy) {
     return { ...bornBy, message: `PositionAddedTo ${bornBy.message}` };
   }
-  if (reference.closedPositionIds.has(event.positionId)) {
+  // `>=`, deliberately: EQUAL IS REFUSED here, where `requirePositionUntouchedAfter`
+  // accepts it. The two rules are the same sentence read from its two ends — a close may
+  // not be dated behind an accepted verb, and a verb may not be dated ON OR AFTER an
+  // accepted close — and on the close date itself only one of them can say yes, or the
+  // batch's verdict would turn on which of the pair the log happened to receive first.
+  const retiredAsOf = reference.closedPositionAsOf.get(event.positionId);
+  if (retiredAsOf !== undefined && event.asOf >= retiredAsOf) {
     return eventError(
       "positionId",
-      `PositionAddedTo targets position id '${event.positionId}', which is already closed.`,
+      `PositionAddedTo targets position id '${event.positionId}', which is already closed ` +
+        `as of ${retiredAsOf} — and this add is dated ${event.asOf}. The fold applies events ` +
+        `in date order, so this one would land on a position the close has already ` +
+        `consumed and its lot would vanish silently. An add dated BEFORE ${retiredAsOf} is ` +
+        `accepted; redate it if the fill really happened while the position was open.`,
     );
   }
   const addFundedBy = requireReserveBornBy(

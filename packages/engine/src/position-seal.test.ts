@@ -741,35 +741,37 @@ it("names the LAST-logged verb when two share the latest date", () => {
   );
 });
 
-// CASE C — A DELIBERATE OVER-REJECTION, PINNED SO THAT CHANGING IT IS A DECISION.
+// CASE C — THE OVER-REJECTION ADR-017 RESOLVED, NOW PINNED THE OTHER WAY UP.
 // `[Opened 06-05, Closed 06-10, Trimmed 06-08]`: the trim sorts BEFORE the close and
-// would fold perfectly correctly, so refusing it is stricter than the fold requires.
-// It stays refused on purpose — relaxing it means admitting retroactive edits to a
-// closed position's history, which is a policy question about the book, not a gate bug.
-// Filed as ledger item 21. This test exists so that a future relaxation is deliberate
-// rather than drift, and it is equally a pin on the SEAL rule's reach: the seal check
-// guards closes only, so the trim must still be refused by the already-closed guard and
-// must NOT report the seal message.
-describe("case C stays refused as already-closed, deliberately (ledger 21)", () => {
+// folds perfectly correctly, so refusing it was stricter than the fold required. It was
+// pinned as refused (ledger item 21) so that relaxing it would be a decision rather than
+// drift; ADR-017 took that decision, and the pin is inverted here rather than deleted —
+// the batch is the same, only the expected answer moved. It remains a pin on the SEAL
+// rule's reach in the bargain: the seal check guards closes only, and admitting this trim
+// must not make it start reporting on trims. The refusal boundary and the settlement-
+// magnitude gate that survives the relaxation live in `position-backdated-trim.test.ts`.
+describe("case C is admitted, the backdated trim ADR-017 relaxed", () => {
   const caseC = () => [
     openLate(),
     closePayload("evt-close", "2026-06-10"),
     trimPayload("evt-trim", "2026-06-08", 0.5, 50),
   ];
 
-  it("rejects the backdated trim with the already-closed message, not the seal one", () => {
+  it("admits the backdated trim, reporting neither the already-closed nor the seal message", () => {
     const result = ingestBatch(caseC());
 
-    expect(result.rejection?.path).toBe("positionId");
-    expect(result.rejection?.message).toContain("PositionTrimmed");
-    expect(result.rejection?.message).toContain("already closed");
-    expect(result.rejection?.message).not.toContain("has already been accepted for it");
-    expect(result.committed).toEqual([]);
+    expect(result.rejection).toBeNull();
+    expect(result.committed.map((event) => event.id)).toEqual([
+      "evt-open-late",
+      "evt-close",
+      "evt-trim",
+    ]);
   });
 
-  // What today's refusal costs, stated so the ledger-21 decision can be weighed on
-  // evidence rather than intuition: these events WOULD have folded correctly.
-  it("although that trim would have folded correctly — which is why 21 is open", () => {
+  // Unchanged from when it was the EVIDENCE for ledger 21: the same fold, the same two
+  // rows, the same realized 50. It was the argument for the relaxation and is now the
+  // expectation of it — which is the point of stating the cost in the book's own numbers.
+  it("and the book it folds to is the one that argued for admitting it", () => {
     const folded = foldEvents(genesis(), caseC().map(accepted));
     const rows = folded.closedPositions ?? [];
 
