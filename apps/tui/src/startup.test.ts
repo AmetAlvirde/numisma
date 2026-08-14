@@ -171,7 +171,7 @@ describe("prepareStartup — ingests, surfaces the report, and wires the fold lo
           throw new Error("ingest should not run when --as-of is invalid");
         },
       }),
-    ).rejects.toThrow(/--as-of/);
+    ).rejects.toThrow("Missing or invalid value for --as-of (expected YYYY-MM-DD).");
     expect(emitted).toEqual([]);
   });
 

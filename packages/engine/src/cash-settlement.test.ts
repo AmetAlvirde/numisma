@@ -109,6 +109,20 @@ describe("cash leg — Close credits the settlement reserve, proceeds tiered pro
     // alt-pos cost basis: c1 100 + c2 300 = 400. Proceeds 360 = a realized loss.
     // c1 weight 25% → 90 (lost 10), c2 weight 75% → 270 (lost 30). Lineage shrinks
     // honestly on the same Tier it was risked on.
+    //
+    // The loss is GATE-LEGAL, and the mark is what makes it so. The settlement-magnitude
+    // gate sizes the close against `quantity × last close`, and last close moves with
+    // every PriceMarked: walking alt-usd from the genesis anchor 40 down to 25 (−37.5%,
+    // inside the ±50% mark band) resets expected to 20 × 25 = 500, so 360 is −28% —
+    // in-band. Both legs are run through `crossReferenceEvent` below rather than
+    // asserted in prose, so the fixture cannot drift back into an unreachable world.
+    const mark: PortfolioEvent = {
+      id: "mark-alt",
+      asOf: "2026-06-02",
+      type: "PriceMarked",
+      instrumentId: "alt-usd",
+      price: 25,
+    };
     const close: PortfolioEvent = {
       id: "close-alt",
       asOf: "2026-06-03",
@@ -117,7 +131,14 @@ describe("cash leg — Close credits the settlement reserve, proceeds tiered pro
       settlement: { reserveId: "tiered", proceeds: 360 },
     };
 
-    const data = foldEvents(genesis(), [close]);
+    const seed = genesis();
+    expect(crossReferenceEvent(mark, buildEventReference(seed, [])).kind).toBe("ok");
+    expect(crossReferenceEvent(close, buildEventReference(seed, [mark])).kind).toBe("ok");
+    // …and the mark is load-bearing: against the genesis anchor of 40 the same close
+    // is a 55% deviation and the gate refuses it.
+    expect(crossReferenceEvent(close, buildEventReference(seed, [])).kind).toBe("event-error");
+
+    const data = foldEvents(seed, [mark, close]);
     const reserve = reserveById(data, "tiered");
 
     expect(reserve.amount).toBe(1860); // 1500 + 360
