@@ -206,6 +206,83 @@ describe("the fold's discard channel", () => {
     expect(folded.data.closedPositions).toHaveLength(1);
   });
 
+  it("records an invalidation dated strictly after its position was retired", () => {
+    // The one sub-case detect-by-absence CAN decide (#297). A mark on a closed id is
+    // ambiguous in general — but its DATE against the retirement date is not: a mark
+    // dated BEFORE the close applied while the position was live (no drop), and a mark
+    // dated AFTER it had nothing left to attach to (a drop, and a silent one — an
+    // `InvalidationMarked` moves no observable state, which is the reason to report it,
+    // not the reason to stay quiet).
+    //
+    // Three ids in one fold, all retired, differing only in when their mark is dated:
+    // after the close, before it, and ON it. Only the first is a drop.
+    const folded = foldEvents(genesis(), [
+      opened("evt-open-late", "2026-06-02", "pos-late"),
+      opened("evt-open-clean", "2026-06-02", "pos-clean"),
+      opened("evt-open-same", "2026-06-02", "pos-same"),
+      {
+        id: "evt-close-late",
+        asOf: "2026-06-04",
+        type: "PositionClosed",
+        positionId: "pos-late",
+        settlement: { reserveId: "pulse-cash", proceeds: 300 },
+      },
+      {
+        id: "evt-close-clean",
+        asOf: "2026-06-04",
+        type: "PositionClosed",
+        positionId: "pos-clean",
+        settlement: { reserveId: "pulse-cash", proceeds: 300 },
+      },
+      {
+        id: "evt-close-same",
+        asOf: "2026-06-04",
+        type: "PositionClosed",
+        positionId: "pos-same",
+        settlement: { reserveId: "pulse-cash", proceeds: 300 },
+      },
+      {
+        id: "evt-invalidation-late",
+        asOf: "2026-06-06",
+        type: "InvalidationMarked",
+        positionId: "pos-late",
+        price: 90,
+        direction: "below",
+      },
+      {
+        id: "evt-invalidation-clean",
+        asOf: "2026-06-03",
+        type: "InvalidationMarked",
+        positionId: "pos-clean",
+        price: 90,
+        direction: "below",
+      },
+      {
+        id: "evt-invalidation-same",
+        asOf: "2026-06-04",
+        type: "InvalidationMarked",
+        positionId: "pos-same",
+        price: 90,
+        direction: "below",
+      },
+    ]);
+
+    // Exactly one record: the cry-wolf guard the pass was built around must not
+    // regress, and the boundary is STRICTLY later — a mark dated on the close date
+    // is not later than it.
+    expect(folded.skipped).toEqual([
+      {
+        eventId: "evt-invalidation-late",
+        index: 6,
+        verb: "InvalidationMarked",
+        reason: "position-absent",
+        detail: expect.any(String),
+      },
+    ]);
+    expect(folded.data.positions).toEqual([]);
+    expect(folded.data.closedPositions).toHaveLength(3);
+  });
+
   it("records the absent leg of a Transfer while the present leg applies", () => {
     const folded = foldEvents(genesis(), [
       {
