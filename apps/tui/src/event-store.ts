@@ -379,12 +379,47 @@ export function nextLogImage(prior: string | undefined, events: PortfolioEvent[]
   return `${prior ?? ""}${prefix}${lines}\n`;
 }
 
-/** Write a full image of the log via temp + rename. The only way the log is written. */
+/**
+ * Per-process counter behind the temp name. Two writes from the SAME process can
+ * be in flight at once (the pid alone would collide), so the name carries a tick
+ * as well; across processes the pid separates them.
+ */
+let tempImageTick = 0;
+
+/**
+ * Write a full image of the log via temp + rename. The only way the log is written.
+ *
+ * The temp file's name is unique per write — `<log>.<pid>.<tick>.tmp` — and lives in the
+ * SAME directory as the log. Unique because a shared `<log>.tmp` is a shared mutable file:
+ * two concurrent writers open it at once, one truncates what the other is still writing,
+ * and the rename — atomic in itself — then publishes a blended or truncated image, or
+ * fails outright because the sibling already renamed the source away. Same directory
+ * because rename(2) is only atomic within one filesystem; a temp in `os.tmpdir()` would
+ * degrade to a copy that can tear.
+ *
+ * The suffix stays `.tmp` — that is policy, not decoration. Accumulus's `/data/*.tmp`
+ * ignore rule (ADR-006) is the only thing stopping a multi-megabyte staged image from
+ * becoming committable into the private data repo, so any rename of this scheme must
+ * keep the `.tmp` ending. `packages/preferences/src/sidecar-io.ts` carries the same
+ * constraint on its own copy; both must hold it.
+ *
+ * A failed write removes its own temp file, so a doomed write leaves no litter behind.
+ * The cleanup is best-effort BY DESIGN: if the removal itself fails (the directory went
+ * read-only, which is often why the write failed in the first place) its error is
+ * dropped, because the caller must be told the log image failed to publish — not handed
+ * an `unlink` error naming a temp file it has never heard of.
+ */
 export async function writeLogImage(logPath: string, contents: string): Promise<void> {
   await mkdir(dirname(logPath), { recursive: true });
-  const tempPath = `${logPath}.tmp`;
-  await writeFile(tempPath, contents, "utf8");
-  await rename(tempPath, logPath);
+  tempImageTick += 1;
+  const tempPath = `${logPath}.${process.pid}.${tempImageTick}.tmp`;
+  try {
+    await writeFile(tempPath, contents, "utf8");
+    await rename(tempPath, logPath);
+  } catch (error) {
+    await rm(tempPath, { force: true }).catch(() => {});
+    throw error;
+  }
 }
 
 /**
