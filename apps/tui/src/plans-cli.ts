@@ -9,11 +9,11 @@
  *
  * IT IS NOT WRITE-FREE, and the exception is named here rather than left to be
  * discovered. `loadFoldedReview` → `loadEventLog` maintains the event log's quarantine
- * lane unconditionally (`event-store.ts`): it writes `events.jsonl.quarantine` when a
- * log line fails to parse and REMOVES it when none does. So a `pnpm plans` run can
- * delete a forensic breadcrumb the last `pnpm spine` left behind. The lane is
- * gitignored and belongs to the log, not the sidecar, so both claims that matter here
- * — this command never writes `plans.jsonl`, and never touches git — hold exactly.
+ * lane (see the write-on-read invariant in `packages/event-store/README.md`). So a
+ * `pnpm plans` run can delete a forensic breadcrumb the last `pnpm spine` left behind.
+ * The lane is gitignored and belongs to the log, not the sidecar, so both claims that
+ * matter here — this command never writes `plans.jsonl`, and never touches git — hold
+ * exactly.
  *
  * ADR-001's split, once more: every decision about what the file MEANS is pure
  * (`listPlansAsOf` in the engine, `formatPlansReport` beside this shell) and only the

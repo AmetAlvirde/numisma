@@ -28,10 +28,9 @@
  * which is why push automation stays a strong want and does not gate D4.
  *
  * R7 — IT NEVER MUTATES THE DURABLE LOG. Every fold goes through
- * `loadFoldedReview`, a pure read; the only file that moves on the read path is the
- * quarantine sidecar BESIDE the log, and only when the log does not read clean (in
- * which case the fold throws before anything is written). Re-asserted across all
- * anchors in `backfill-core.test.ts`.
+ * `loadFoldedReview`, a pure read. See the write-on-read invariant in
+ * `packages/event-store/README.md`. Re-asserted across all anchors in
+ * `backfill-core.test.ts`.
  *
  * ── ANCHOR FIXTURE EXPOSURE — read before regenerating ──────────────────────────
  * `--fixture` writes the replayed anchors to a COMMITTED file so slice 4's replay
