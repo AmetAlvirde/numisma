@@ -31,6 +31,17 @@ path, else `__REPO_DIR__`/the plist's `EnvironmentVariables`), `NUMISMA_PRICEFEE
 (the token env file, else `~/.config/numisma/price-feed.env`), and
 `NUMISMA_PRICEFEED_LOG_DIR` (per-run log directory, else `~/Library/Logs/numisma`).
 
+Two more let a caller put a run on either side of the mark window without
+waiting on the machine clock: `NUMISMA_MARK_TZ` and `NUMISMA_MARK_HOUR`, each
+defaulting to the contract the engine authors once — `TRADING_DAY_TIME_ZONE`
+/ `MARK_HOUR` in `packages/engine/src/price-feed/mark.ts` (America/Mexico_City,
+18). Unlike the overrides above, a bad value here is **fatal, not silently
+substituted**: the wrapper rejects an unresolvable `NUMISMA_MARK_TZ` (checked
+against `${TZDIR:-/usr/share/zoneinfo}`) or a non-numeric `NUMISMA_MARK_HOUR`
+before computing the mark window, with a named error, rather than letting
+bash's own silent UTC fallback flip every run's in/out-of-window judgment
+while the runs themselves kept marking fine.
+
 ## Where provider tokens live (scheduled environment)
 
 - **Crypto needs no token.** Binance public REST is keyless, so a crypto-only run
@@ -601,7 +612,7 @@ still prints its reason — a mute button on this channel announces itself).
 `NUMISMA_WRAPPER_TEST_RUNS` raises the per-case repetition above its committed
 floor of 12; it is refused, not clamped, below it.
 
-**Nothing it runs touches anything real.** All seven `NUMISMA_*` overrides the
+**Nothing it runs touches anything real.** All nine `NUMISMA_*` overrides the
 wrapper reads are pointed inside a per-run temp directory and the launcher
 *refuses to start* if any is unset or resolves outside it — because an
 unisolated run is not a flaky test, it is a real `prices:fetch`, a real `spine`
