@@ -27,6 +27,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, chmodSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { installFakeBin } from "./fake-bin.testkit.js";
+import { markEnv, type MarkConfig } from "./mark-window.testkit.js";
 
 /** The bare, non-login PATH launchd actually hands the job. */
 export const LAUNCHD_BARE_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
@@ -46,6 +47,14 @@ export interface CaseOptions {
   readonly maxRunSeconds: number;
   /** How long the watchdog waits after SIGTERM before escalating, in seconds. */
   readonly watchdogGraceSeconds: number;
+  /**
+   * WHICH SIDE OF THE MARK WINDOW THIS CASE'S RUN FALLS ON (#315, #319). Carried on the
+   * options rather than defaulted anywhere, because a default is how `markWindow` goes
+   * back to being a function of what time the suite happened to start — see
+   * `mark-window.testkit.ts`. Every case states its side, and the SAME value feeds the
+   * environment below and the oracle that judges the result.
+   */
+  readonly mark: MarkConfig;
 }
 
 /**
@@ -113,12 +122,19 @@ export function makeCaseDir(options: CaseOptions): CaseDirs {
 }
 
 /**
- * The seven overrides, and nothing that could reach outside the case dir.
+ * The nine overrides, and nothing that could reach outside the case dir.
  *
  * `NUMISMA_PATH_PREPEND` is the case's fake bin AND NOTHING ELSE. Adding a real directory
  * to this list — even a plausible-looking one — is how this suite becomes a live run
  * against real, private data. The isolation contract refuses it; this is where it would
  * be tempting.
+ *
+ * THE TWO MARK OVERRIDES ARE ALWAYS SET, INCLUDING FOR THE CASES THAT DO NOT CARE. They
+ * carry no real-data risk — neither is path-valued and neither selects data — but leaving
+ * them unset lets the wrapper fall back to the contract zone, and a case that meant to be
+ * in-window is then in-window only between 18:00 and 23:59 CDMX. That is the vacuity #319
+ * exists to kill, so the isolation contract refuses them unset like the other seven and
+ * every case states its side.
  */
 export function caseEnv(dirs: CaseDirs, options: CaseOptions): NodeJS.ProcessEnv {
   return {
@@ -139,6 +155,7 @@ export function caseEnv(dirs: CaseDirs, options: CaseOptions): NodeJS.ProcessEnv
     NUMISMA_DATA_DIR: dirs.dataDir,
     NUMISMA_PRICEFEED_MAX_RUN_SECONDS: String(options.maxRunSeconds),
     NUMISMA_PRICEFEED_WATCHDOG_GRACE_SECONDS: String(options.watchdogGraceSeconds),
+    ...markEnv(options.mark),
   };
 }
 

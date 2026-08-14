@@ -99,15 +99,28 @@ import {
   type CaseOptions,
 } from "./case-dir.testkit.js";
 import {
+  INVOCATION_LOG_NAME,
   TERM_DEAF_CHILD_NAME,
   TERM_DEAF_CHILD_SENTINEL,
   WRAPPER_PNPM_COMMANDS,
+  dispatchRecordNameFor,
   installDecoyBin,
   releaseFakeHang,
   sentinelNameFor,
   setFakeBehavior,
 } from "./fake-bin.testkit.js";
 import { IsolationRefusal, WRAPPER_ENV_VARS, assertIsolated } from "./isolation.testkit.js";
+import {
+  AUTHORED_PRIOR_STAMP,
+  AUTHORED_V1_CARRY,
+  CONTRACT_MARK_CONFIG,
+  expectedMarkWindow,
+  markConfigFor,
+  seedInWindowDiedBeforeSpineHeartbeat,
+  seedMarkedEveningHeartbeat,
+  seedV1Heartbeat,
+  type MarkConfig,
+} from "./mark-window.testkit.js";
 import {
   launchWrapper,
   observedBashVersion,
@@ -512,8 +525,19 @@ const RUNS_PER_CASE = decision.run ? resolveRunCount(process.env.NUMISMA_WRAPPER
  */
 const SETTLE_DEADLINE_MS = 2_000;
 
-/** A case's own ceiling. Comfortably above a fake-tool run, far below the harness cap. */
-const CASE_OPTIONS: CaseOptions = { maxRunSeconds: 30, watchdogGraceSeconds: 2 };
+/**
+ * A case's own ceiling. Comfortably above a fake-tool run, far below the harness cap.
+ *
+ * `mark` IS THE CONTRACT'S OWN PAIR, stated rather than defaulted. For every case written
+ * before the zone became an input the case's zone simply IS the contract's zone, so
+ * naming it here changes nothing about what those cases assert — and it means no case
+ * anywhere can inherit its side of the mark window from the time of day.
+ */
+const CASE_OPTIONS: CaseOptions = {
+  maxRunSeconds: 30,
+  watchdogGraceSeconds: 2,
+  mark: CONTRACT_MARK_CONFIG,
+};
 
 /**
  * A ceiling a case can actually WAIT OUT. Every timeout case pays it in full, twelve times,
@@ -521,7 +545,11 @@ const CASE_OPTIONS: CaseOptions = { maxRunSeconds: 30, watchdogGraceSeconds: 2 }
  * clamps its poll to the ceiling when the ceiling is the smaller of the two, and a ceiling
  * under a second would measure `sleep`'s rounding rather than the watchdog's decision.
  */
-const TIMEOUT_CASE_OPTIONS: CaseOptions = { maxRunSeconds: 3, watchdogGraceSeconds: 2 };
+const TIMEOUT_CASE_OPTIONS: CaseOptions = {
+  maxRunSeconds: 3,
+  watchdogGraceSeconds: 2,
+  mark: CONTRACT_MARK_CONFIG,
+};
 
 /** How long past its own ceiling AND grace case 7's hang is observed still alive. */
 const CASE_7_OBSERVE_MARGIN_MS = 1_000;
@@ -656,22 +684,6 @@ function observeTermPath(record: RunRecord, label: string): TermPathObservation 
 }
 
 /**
- * Whether this run was in the mark window, computed the way the CONTRACT computes it —
- * `America/Mexico_City`, hour ≥ 18 — rather than from the machine's local clock, which
- * would agree only by coincidence of an OS setting. Read off the heartbeat's own
- * `startedAt` so a run that straddles 18:00 CDMX is still judged against the instant the
- * wrapper judged itself at.
- */
-function expectedMarkWindow(startedAt: string): boolean {
-  const hour = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Mexico_City",
-    hour: "2-digit",
-    hourCycle: "h23",
-  }).format(new Date(startedAt));
-  return Number(hour) >= 18;
-}
-
-/**
  * S4 · THE ASSERTION TRIPLE, applied uniformly and never selectively. (1) the exit code,
  * (2) the heartbeat's contents parsed by the reader that reads it in production, (3) zero
  * processes remaining in the run's process group — historically the highest-value
@@ -694,6 +706,21 @@ function assertTriple(
      * fetch HALTS the run before `spine`, so a doomed mark is never appended.
      */
     pnpmReached: readonly string[];
+    /**
+     * THE CASE'S OWN MARK CONFIGURATION, and the oracle below judges `markWindow` against
+     * IT rather than against the contract's. While the zone was a literal the two were the
+     * same thing; now that a case chooses its side, an oracle still reading the contract
+     * zone would judge an in-window case against the wrong side — permanently red, or
+     * worse, green for the wrong reason for the six hours a day the two happen to agree.
+     */
+    mark: MarkConfig;
+    /**
+     * The `lastMarkWindowFinishedAt` the run found ALREADY ON DISK, or `undefined` for a
+     * fresh case dir. It is what a run that did not mark must re-emit unchanged, and what
+     * a run that DID mark must overwrite — the two halves of the carry-forward contract,
+     * indistinguishable from each other unless a prior stamp exists to tell them apart.
+     */
+    carriedStamp?: string;
     label: string;
   },
 ): void {
@@ -726,8 +753,12 @@ function assertTriple(
   }
   expect(heartbeat.exitCode, `${where}heartbeat exitCode`).toBe(expected.exitCode);
   expect(heartbeat.lastStep, `${where}heartbeat lastStep`).toBe(expected.lastStep);
-  const inWindow = expectedMarkWindow(heartbeat.startedAt);
-  expect(heartbeat.markWindow, `${where}heartbeat markWindow`).toBe(inWindow);
+  const inWindow = expectedMarkWindow(heartbeat.startedAt, expected.mark);
+  expect(
+    heartbeat.markWindow,
+    `${where}heartbeat markWindow, against the case's configured zone ` +
+      `${expected.mark.timeZone} and hour ${expected.mark.hour}`,
+  ).toBe(inWindow);
   // IN-WINDOW ALONE IS NOT ENOUGH, and the decorated step name is not a step name: the
   // wrapper compares the BARE `LAST_STEP` against its landed-steps list and only decorates
   // at print time, so the oracle has to undecorate before it asks the same question.
@@ -738,10 +769,23 @@ function assertTriple(
     expect(heartbeat.lastMarkWindowFinishedAt, `${where}lastMarkWindowFinishedAt`).toBe(
       heartbeat.finishedAt,
     );
-  } else {
+  } else if (expected.carriedStamp === undefined) {
     // A fresh case dir carries nothing forward, and the writer must INVENT nothing — least
     // of all on a run that died before `spine` and therefore marked nothing at all.
     expect(heartbeat.lastMarkWindowFinishedAt, `${where}lastMarkWindowFinishedAt`).toBeUndefined();
+  } else {
+    // A PRIOR STAMP WAS ON DISK AND THIS RUN DID NOT EARN A NEW ONE, so it must re-emit
+    // that one byte for byte. `toBe`, not merely "defined": a run that replaced it with
+    // its OWN finish would still be defined, and that substitution is precisely the defect
+    // — a run that marked nothing claiming the day as covered.
+    expect(heartbeat.lastMarkWindowFinishedAt, `${where}lastMarkWindowFinishedAt`).toBe(
+      expected.carriedStamp,
+    );
+    expect(
+      heartbeat.lastMarkWindowFinishedAt,
+      `${where}lastMarkWindowFinishedAt was RE-STAMPED with this run's own finish by a run ` +
+        "that marked nothing — the carried value must survive untouched",
+    ).not.toBe(heartbeat.finishedAt);
   }
 
   // (3) Zero processes remaining in the run's process group.
@@ -809,9 +853,14 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
       expect(() => assertIsolated(caseEnv(dirs, CASE_OPTIONS), dirs.caseDir)).not.toThrow();
     });
 
-    it("refuses when ANY of the seven overrides is unset", () => {
+    it("refuses when ANY of the nine overrides is unset", () => {
       const dirs = makeCaseDir(CASE_OPTIONS);
-      expect(WRAPPER_ENV_VARS).toHaveLength(7);
+      // NINE SINCE #315, not seven: `NUMISMA_MARK_TZ` and `NUMISMA_MARK_HOUR` joined the
+      // set, and they are refused unset for the same reason as the other seven even though
+      // neither is path-valued — an unset one lets the wrapper fall back to the contract
+      // zone, and a case that meant to be in-window is then in-window only between 18:00
+      // and 23:59 CDMX. Green while asserting nothing, arriving through the clock.
+      expect(WRAPPER_ENV_VARS).toHaveLength(9);
       for (const name of WRAPPER_ENV_VARS) {
         const env = { ...caseEnv(dirs, CASE_OPTIONS) };
         delete env[name];
@@ -910,6 +959,7 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
           exitCode: 0,
           lastStep: "complete",
           pnpmReached: WRAPPER_PNPM_COMMANDS,
+          mark: CASE_OPTIONS.mark,
           label,
         });
         settles.push(record.settleMs);
@@ -990,6 +1040,7 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
           exitCode: 0,
           lastStep: "complete",
           pnpmReached: WRAPPER_PNPM_COMMANDS,
+          mark: TIMEOUT_CASE_OPTIONS.mark,
           label,
         });
         survivals.push(record.durationMs);
@@ -1118,6 +1169,7 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
           exitCode: 124,
           lastStep: "timeout:prices-fetch",
           pnpmReached: ["prices:fetch"],
+          mark: TIMEOUT_CASE_OPTIONS.mark,
           label,
         });
         // KEPT FOR THE PAIR COMPARISON below, which is how the watchdog-TERM and
@@ -1179,6 +1231,7 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
           exitCode: 124,
           lastStep: "timeout:prices-fetch",
           pnpmReached: ["prices:fetch"],
+          mark: TIMEOUT_CASE_OPTIONS.mark,
           label,
         });
         settles.push(record.settleMs);
@@ -1233,6 +1286,7 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
           exitCode: 127,
           lastStep: "prices-fetch",
           pnpmReached: ["prices:fetch"],
+          mark: CASE_OPTIONS.mark,
           label,
         });
         settles.push(record.settleMs);
@@ -1335,6 +1389,7 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
           // hung, spending the credibility the breadcrumb exists to hold.
           lastStep: "prices-fetch",
           pnpmReached: ["prices:fetch"],
+          mark: TIMEOUT_CASE_OPTIONS.mark,
           label,
         });
         externalTermObserved = observeTermPath(record, label);
@@ -1466,7 +1521,7 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
       expect(
         observed.heartbeat.markWindow,
         `${observed.label}: markWindow disagrees with the contract's own zone`,
-      ).toBe(expectedMarkWindow(observed.heartbeat.startedAt));
+      ).toBe(expectedMarkWindow(observed.heartbeat.startedAt, CONTRACT_MARK_CONFIG));
     }
 
     console.log(

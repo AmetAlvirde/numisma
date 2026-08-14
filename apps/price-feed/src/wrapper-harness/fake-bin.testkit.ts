@@ -7,9 +7,11 @@
  *
  * ONE FAKE `pnpm` THAT DISPATCHES ON ITS FIRST ARGUMENT, not four unrelated scripts. The
  * wrapper calls `pnpm` four times with distinct first arguments — `prices:fetch`,
- * `spine`, `gap-report -- --write`, `backfill` — and a later slice needs a run that
- * succeeds through `spine` and then hangs at `backfill` specifically. A single-behavior
- * fake cannot express that; a per-command behavior table can.
+ * `spine`, `gap-report -- --write`, `backfill` — and case 6 needs a run that succeeds
+ * through `spine` and then hangs at `backfill` specifically, which is what makes it a
+ * CRY-WOLF case: the day's marks are in the log and the run wedged afterwards. A
+ * single-behavior fake cannot express that; a per-command behavior table can, and case 6
+ * asserts the dispatch record ({@link dispatchRecordNameFor}) rather than trusting it.
  *
  * INSTALLED THROUGH `NUMISMA_PATH_PREPEND`, NEVER ON THE INHERITED `PATH`. This is the
  * single most dangerous mistake available in this increment. The wrapper re-exports
@@ -96,6 +98,20 @@ export function sentinelNameFor(command: string): string {
   return `pnpm-${command.replace(/[^A-Za-z0-9._-]/g, "-")}`;
 }
 
+/**
+ * The file recording WHICH BEHAVIOR the fake's per-first-argument dispatch selected for
+ * one sub-command. It is what lets case 6 prove its hang originated in that dispatch —
+ * `succeeds` for the three steps before it, `hangs` for `backfill` — rather than in a
+ * single-behavior fake that could not have expressed "hangs at backfill specifically" at
+ * all.
+ */
+export function dispatchRecordNameFor(command: string): string {
+  return `behavior-${command.replace(/[^A-Za-z0-9._-]/g, "-")}`;
+}
+
+/** The file every invocation appends one line to, in the order the wrapper made them. */
+export const INVOCATION_LOG_NAME = "pnpm-invocations.log";
+
 function behaviorKeyFor(command: string): string {
   return command.replace(/[^A-Za-z0-9._-]/g, "-");
 }
@@ -129,6 +145,14 @@ BEHAVIOR="succeeds"
 if [[ -f "\${CASE_DIR}/behavior/\${KEY}" ]]; then
   BEHAVIOR="$(cat "\${CASE_DIR}/behavior/\${KEY}")"
 fi
+
+# WHICH BRANCH THIS INVOCATION TOOK, RECORDED IN A FILE rather than only announced on
+# stdout. A case that must prove a LATER step hung — case 6 hangs at \`backfill\` after
+# succeeding through \`spine\` — needs evidence that the divergence came from THIS
+# dispatch on the first argument, and stdout cannot carry it: a hanging fake is killed
+# by the watchdog's group TERM with whatever bash had buffered still unwritten. A
+# redirect that closes with the \`printf\` is on disk before the hang begins.
+printf '%s\\n' "\${BEHAVIOR}" > "\${CASE_DIR}/sentinels/behavior-\${KEY}"
 
 # BLOCK UNTIL RELEASED, IN ONE-SECOND HOPS. No case that wants a timeout ever writes the
 # release file, so for those this is a hang with no end but the watchdog's. Short hops keep

@@ -1,16 +1,31 @@
 /**
  * S2 · THE ISOLATION CONTRACT — the safety module of the wrapper harness (PRD #314 §4).
  *
- * IT OWNS THE SEVEN `NUMISMA_*` VARIABLES THE WRAPPER READS, and its whole interface is a
+ * IT OWNS THE NINE `NUMISMA_*` VARIABLES THE WRAPPER READS, and its whole interface is a
  * REFUSAL. That is why it is a module of its own rather than three lines inside the
  * launcher: a missing override is not a flaky test, it is a real `prices:fetch`, a real
  * `spine` append, a real `git commit` against the durable event log and a real `backfill`
  * against the hosted database — **and the run passes green while doing it.**
  *
- * Exactly seven, verified against the wrapper's own configuration block
- * (`ops/price-feed/run-daily-fetch.sh`, lines 38-65): every one of them must be set, and
- * every path-valued one must resolve INSIDE the case's temp directory. Refusal, never a
+ * Exactly nine, verified against the wrapper's own configuration block
+ * (`ops/price-feed/run-daily-fetch.sh`): every one of them must be set, and every
+ * path-valued one must resolve INSIDE the case's temp directory. Refusal, never a
  * default — a default is how the real durable log gets written by a test.
+ *
+ * THE TWO MARK VARIABLES ARE HERE FOR A DIFFERENT REASON THAN THE OTHER SEVEN, and the
+ * difference is worth stating because it decides how far the refusal goes. Neither is
+ * path-valued and neither selects data, so an unset one cannot touch the real ledger. What
+ * it CAN do is let the wrapper fall back to the contract zone — and then a case that meant
+ * to be in-window is in-window only between 18:00 and 23:59 CDMX, so its heartbeat
+ * assertions quietly stop meaning anything for most of the day. That is the same
+ * green-while-testing-nothing failure the other seven prevent, arriving through the clock,
+ * so it is refused the same way: unset is a refusal, never a default.
+ *
+ * THEIR VALUES ARE DELIBERATELY NOT VALIDATED HERE. The wrapper refuses an unresolvable
+ * zone and a non-hour mark hour itself (#315), and a case ASSERTS that refusal by launching
+ * with a bad one — a contract that pre-screened them would make that case unreachable and
+ * leave the wrapper's own guard untested. Presence is the contract; content is the
+ * wrapper's, and the harness proves it there.
  *
  * `NUMISMA_PATH_PREPEND` GETS THE STRICTEST TREATMENT OF THE SEVEN, and it is the reason
  * this module exists at all. The wrapper re-exports `PATH="$PATH_PREPEND:$PATH"` in its
@@ -30,7 +45,7 @@ import { dirname, isAbsolute, resolve } from "node:path";
 
 /**
  * The complete set the wrapper reads — no more, no fewer. Verified line by line against
- * the wrapper's configuration block; a wrapper edit that adds an eighth is a change to
+ * the wrapper's configuration block; a wrapper edit that adds a tenth is a change to
  * this contract, and the trigger arms the suite on exactly that edit.
  */
 export const WRAPPER_ENV_VARS = [
@@ -41,6 +56,8 @@ export const WRAPPER_ENV_VARS = [
   "NUMISMA_DATA_DIR",
   "NUMISMA_PRICEFEED_MAX_RUN_SECONDS",
   "NUMISMA_PRICEFEED_WATCHDOG_GRACE_SECONDS",
+  "NUMISMA_MARK_TZ",
+  "NUMISMA_MARK_HOUR",
 ] as const;
 
 /**
