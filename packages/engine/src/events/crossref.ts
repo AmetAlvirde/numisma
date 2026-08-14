@@ -69,9 +69,12 @@ export const SETTLEMENT_MAGNITUDE_THRESHOLD = 0.5;
  * gate checks debits against, plus the two facts that make the Reserve itself
  * checkable — the currency it is denominated in, and the date it was born.
  *
- * `amount`/`tiers` are read straight off `foldEvents(...).reserves`, so "what the gate
- * thinks this Reserve holds" and "what the fold will produce" are the same number by
- * construction (ADR-015), not by two encodings agreeing.
+ * `amount`/`tiers` are read straight off `foldEvents(...).data.reserves` — the read model
+ * inside the fold's `{data, skipped}` envelope (ADR-020) — so "what the gate thinks this
+ * Reserve holds" and "what the fold will produce" are the same number by construction
+ * (ADR-015), not by two encodings agreeing. A balance the fold could not apply is
+ * therefore missing from BOTH, identically; the drop is reported on `skipped`, which
+ * rides through to {@link EventReference} and which no gate rule reads.
  */
 export interface ReserveView {
   amount: number;
@@ -144,7 +147,7 @@ export interface EventReference {
    * (fail-loud-at-ingest).
    *
    * Derived from the fold's own CLOSED BOOK — the full-close rows of
-   * `foldEvents(...).closedPositions` — so "retired" means exactly what the fold
+   * `foldEvents(...).data.closedPositions` — so "retired" means exactly what the fold
    * means by it. A partial (trim) row is excluded: a trim always leaves the position
    * open, and the fold keeps it in `positions`.
    *
@@ -235,7 +238,8 @@ export interface EventReference {
    * Folded Reserve balances the cross-ref sufficiency gate checks a debit
    * against (a withdraw/transfer/open-funding can't exceed available, per Tier).
    * `tiers` is null for an untiered Reserve — only its `amount` is checked. Read off
-   * `foldEvents(...).reserves`, so a deposit earlier in the inbox funds a later
+   * `foldEvents(...).data.reserves` (the read model inside the fold's `{data, skipped}`
+   * envelope, ADR-020), so a deposit earlier in the inbox funds a later
    * withdraw because the FOLD says it does. `currency` is the Reserve's own
    * denomination, read by the same-currency Transfer guard (a cross-currency move is
    * FX, not a Transfer).
