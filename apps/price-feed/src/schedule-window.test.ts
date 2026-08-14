@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { MARK_HOUR, TRADING_DAY_TIME_ZONE, instrumentsForSource } from "@numisma/engine";
 import { DEFAULT_CONFIG } from "./config.js";
+import { caseEnv, makeCaseDir, type CaseDirs, type CaseOptions } from "./wrapper-harness/case-dir.testkit.js";
+import { assertIsolated } from "./wrapper-harness/isolation.testkit.js";
+import { CONTRACT_MARK_CONFIG } from "./wrapper-harness/mark-window.testkit.js";
+import { WRAPPER_PNPM_COMMANDS, sentinelNameFor } from "./wrapper-harness/fake-bin.testkit.js";
 
 /**
  * The launchd schedule template is CONFIG, not code, so most of what could be
@@ -106,26 +109,79 @@ function firesPerDay(intervals: CalendarInterval[]): number {
   }, 0);
 }
 
+/** A short ceiling and grace: these runs refuse before the watchdog is ever armed. */
+const REFUSAL_CASE_OPTIONS: CaseOptions = {
+  maxRunSeconds: 5,
+  watchdogGraceSeconds: 1,
+  mark: CONTRACT_MARK_CONFIG,
+};
+
+/**
+ * A hard cap on the blocking call. `spawnSync` cannot be preempted by a vitest timer, so
+ * without this a run that ever blocked — a credential prompt, a stalled socket — would
+ * WEDGE THE WORKER rather than fail. Expiry is a named failure below, never a pass.
+ */
+const REFUSAL_RUN_TIMEOUT_MS = 60_000;
+
 /**
  * Run the real wrapper under the real `/bin/bash`, for the config-refusal paths ONLY.
  *
- * SAFE BECAUSE IT NEVER GETS PAST VALIDATION. Both callers hand it a value the
- * wrapper is required to reject, and that rejection happens before `mkdir -p
- * "$LOG_DIR"`, before the EXIT-trap heartbeat is installed and long before anything
- * touches pnpm, the durable log or a provider — the assertion on the absent log dir
- * is what holds that true. Never call this with a VALID config: the wrapper would go
- * on to run the actual daily pipeline against the real data dir. Driving the wrapper
- * on its succeeding paths is the wrapper harness's job, not this file's.
+ * SAFE BECAUSE THE REAL DEFAULTS ARE STRUCTURALLY UNREACHABLE, NOT BECAUSE THE CALLERS
+ * ARE CAREFUL. There is no `...process.env` here: the environment is built fresh by
+ * {@link caseEnv}, every one of the nine `NUMISMA_*` overrides points inside a per-run
+ * temp dir, and {@link assertIsolated} refuses the launch otherwise — the same contract
+ * the wrapper harness's launcher enforces, imported rather than re-stated. That matters
+ * for a reason a docstring cannot cover: with `NUMISMA_PRICEFEED_ENV` inherited the
+ * wrapper would `source` the operator's real chmod-600 token file under `set -a`, and
+ * with `NUMISMA_PATH_PREPEND` inherited it would resolve the REAL `pnpm` and `node`. A
+ * guard that is only offered can be walked past by any later edit that moves it; a
+ * refusal taken before the spawn cannot.
+ *
+ * The fake bin the case dir installs is the second layer: if a refusal ever stopped
+ * refusing, the run would reach a fake `pnpm` that writes a sentinel — which the callers
+ * assert is absent — rather than a real one.
  *
  * `/bin/bash` explicitly, never the shebang's `env bash`: launchd runs 3.2.57, and a
  * Homebrew bash 5 would silently accept shapes 3.2 rejects.
  */
-function runWrapper(env: Record<string, string>): { status: number | null; output: string } {
+function runWrapper(overrides: Record<string, string>): {
+  status: number | null;
+  output: string;
+  dirs: CaseDirs;
+} {
+  const dirs = makeCaseDir(REFUSAL_CASE_OPTIONS);
+  const env = { ...caseEnv(dirs, REFUSAL_CASE_OPTIONS), ...overrides };
+  assertIsolated(env, dirs.caseDir);
+
   const result = spawnSync("/bin/bash", [WRAPPER_PATH], {
     encoding: "utf8",
-    env: { ...process.env, ...env },
+    env,
+    cwd: dirs.caseDir,
+    timeout: REFUSAL_RUN_TIMEOUT_MS,
   });
-  return { status: result.status, output: `${result.stdout ?? ""}${result.stderr ?? ""}` };
+  if (result.error !== undefined) {
+    throw result.error;
+  }
+  // A timeout kill arrives as a SIGNAL with a null status, which is indistinguishable
+  // from a real refusal if only `status` is read. Name it: a wrapper that hung on a
+  // path whose whole claim is that it exits immediately is a failure of this test.
+  if (result.signal !== null) {
+    throw new Error(
+      `the wrapper was killed by ${result.signal} rather than exiting — it did not refuse ` +
+        `within ${REFUSAL_RUN_TIMEOUT_MS}ms. That is a failure of this case, never a pass.`,
+    );
+  }
+  return { status: result.status, output: `${result.stdout ?? ""}${result.stderr ?? ""}`, dirs };
+}
+
+/** It refused before it ran anything: no fake `pnpm` was ever invoked. */
+function expectReachedNoStep(dirs: CaseDirs): void {
+  for (const command of WRAPPER_PNPM_COMMANDS) {
+    expect(
+      existsSync(join(dirs.caseDir, "sentinels", sentinelNameFor(command))),
+      `the wrapper reached \`${command}\` despite refusing its own configuration`,
+    ).toBe(false);
+  }
 }
 
 describe("the launchd fetch window", () => {
@@ -297,14 +353,7 @@ describe("the launchd fetch window", () => {
     const BAD_ZONE = "Not/AZone";
     expect(() => new Intl.DateTimeFormat("en-US", { timeZone: BAD_ZONE })).toThrow(RangeError);
 
-    const sandbox = mkdtempSync(join(tmpdir(), "numisma-mark-zone-"));
-    const logDir = join(sandbox, "logs");
-    const result = runWrapper({
-      NUMISMA_MARK_TZ: BAD_ZONE,
-      NUMISMA_PRICEFEED_LOG_DIR: logDir,
-      NUMISMA_DATA_DIR: join(sandbox, "data"),
-      NUMISMA_REPO_DIR: sandbox,
-    });
+    const result = runWrapper({ NUMISMA_MARK_TZ: BAD_ZONE });
 
     expect(result.status).not.toBe(0);
     // It NAMES THE VALUE. A bare "bad timezone" would leave an operator staring at a
@@ -312,28 +361,23 @@ describe("the launchd fetch window", () => {
     expect(result.output).toContain(BAD_ZONE);
     expect(result.output).toContain("FATAL");
     // BEFORE the mark window, and before anything else happens at all: the run never
-    // reaches `mkdir -p "$LOG_DIR"`, so there is no per-run log, no heartbeat and no
-    // half-done work to explain. A fallback to UTC would have reached all of it.
-    expect(existsSync(logDir)).toBe(false);
+    // gets past its own startup, so it writes no per-run log and leaves no half-done
+    // work to explain. A fallback to UTC would have reached all of it.
+    expect(readdirSync(result.dirs.logDir)).toEqual([]);
+    expectReachedNoStep(result.dirs);
   });
 
   it("refuses a mark hour that is not an hour, which would classify every run out-of-window", () => {
     // Same failure mode as the bad zone, through the other override: a non-numeric
     // hour makes the comparison's arithmetic fail, and that failure does not abort —
     // it just answers `false`, forever, on every run.
-    const sandbox = mkdtempSync(join(tmpdir(), "numisma-mark-hour-"));
-    const logDir = join(sandbox, "logs");
-    const result = runWrapper({
-      NUMISMA_MARK_HOUR: "noon",
-      NUMISMA_PRICEFEED_LOG_DIR: logDir,
-      NUMISMA_DATA_DIR: join(sandbox, "data"),
-      NUMISMA_REPO_DIR: sandbox,
-    });
+    const result = runWrapper({ NUMISMA_MARK_HOUR: "noon" });
 
     expect(result.status).not.toBe(0);
     expect(result.output).toContain("noon");
     expect(result.output).toContain("FATAL");
-    expect(existsSync(logDir)).toBe(false);
+    expect(readdirSync(result.dirs.logDir)).toEqual([]);
+    expectReachedNoStep(result.dirs);
   });
 
   it("lists exactly the wrapper steps that follow the one appending marks", () => {

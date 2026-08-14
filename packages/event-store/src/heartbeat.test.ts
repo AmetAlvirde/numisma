@@ -459,10 +459,27 @@ describe("the wrapper's own bytes, read by the reader that must consume them", (
           NUMISMA_PRICEFEED_LOG_DIR: join(dataDir, "logs"),
         },
         stdio: "ignore",
+        // A HARD CAP, because this call BLOCKS. `execFileSync` cannot be preempted by a
+        // vitest timer, so a run that ever stalled — a git credential prompt, a stalled
+        // socket — would wedge the worker rather than fail. This path dies at the `cd` in
+        // well under a second; a minute is orders of magnitude of slack.
+        timeout: 60_000,
       });
-    } catch {
+    } catch (error) {
       // EXPECTED: there is no repo to `cd` into, so the run dies early and non-zero.
       // That is the case the breadcrumb exists for, and the trap still fires.
+      //
+      // A TIMEOUT KILL LANDS HERE TOO, and it is not that. It arrives as a SIGNAL rather
+      // than an exit status, so swallowing it would report "the wrapper died early" about
+      // a wrapper that hung — and the assertions below would then fail on a missing file
+      // with no hint of why. Name it instead.
+      const signal = (error as { signal?: NodeJS.Signals | null }).signal ?? null;
+      if (signal !== null) {
+        throw new Error(
+          `the wrapper was killed by ${signal} rather than exiting: it hung instead of dying ` +
+            "at the `cd` into a nonexistent repo. That is a failure of this case, never a pass.",
+        );
+      }
     }
     return readFile(join(dataDir, "job-heartbeat.json"), "utf8");
   }
