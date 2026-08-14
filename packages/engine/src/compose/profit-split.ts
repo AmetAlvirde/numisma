@@ -6,7 +6,11 @@
  * PREFERENCES policy that lives in a time-stamped sidecar DECOUPLED from the event log
  * (see `pickPolicyAsOf`). Composition happens at READ time as a second input:
  *
- *   composeProfitSplit(foldEvents(genesis, log, asOf), pickPolicyAsOf(prefs, asOf), genesis, reservePctOfNav)
+ *   composeProfitSplit(foldEvents(genesis, log, asOf).data, pickPolicyAsOf(prefs, asOf), genesis, reservePctOfNav)
+ *
+ * `.data` because `foldEvents` returns the Discard Channel envelope `{data, skipped}`
+ * (ADR-020): this layer takes the read model, and the fold's discards are reported on
+ * the surfaces built for them rather than folded into an obligation figure.
  *
  * so the log folds standalone to the pure #90 book with ZERO preferences, and the
  * obligation is layered on top faithfully as-of. Nothing here is added to NAV —

@@ -367,8 +367,11 @@ not, and the reason is *structural*, not a matter of discipline:
   open/closed Position counts, the head event id, and the writing-app version — every field
   recomputable from the log by a fold. **Corrected in place 2026-08-13 (spec #323 →
   ADR-020, the Discard Channel): schema v2 adds a fifth recomputable field,
-  `discardedEventCount`** — the number of events the capture fold read and could not
-  apply (`folded.skipped.length`) — so a nonzero discard is visible on the one artifact
+  `discardedEventCount`** — the number of DISTINCT events the capture fold read and could
+  not apply (`dedupeFoldSkips(folded.skipped).length`, the Discard Channel's own key, so
+  this artifact and the unattended verdict line can never report different figures for
+  one log; a `Transfer` records each absent leg, and that is two records about one
+  event) — so a nonzero discard is visible on the one artifact
   premised on nobody replaying the log to re-check it; still a count only, still no
   reader, still recomputable, so this bullet's claim is amended, not broken. The rejected "dated full snapshot" was a *replacement*
   for the actions log; the Head Digest is a *pointer into* it.
