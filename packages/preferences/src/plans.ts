@@ -38,8 +38,10 @@
  */
 import { readFile } from "node:fs/promises";
 import {
+  CAPITAL_TIERS,
   DCA_CADENCES,
   PLAN_KINDS,
+  PULL_INSTRUCTION,
   isIsoCalendarDate,
   type CapitalTier,
   type DcaCadence,
@@ -51,7 +53,12 @@ import {
   type PlanRecord,
   type SkippedPlanLine,
 } from "@numisma/engine";
-import { appendSidecarLines, resolveSidecarPath } from "./sidecar-io.js";
+import {
+  appendSidecarLines,
+  isRecordObject,
+  resolveSidecarPath,
+  stripBom,
+} from "./sidecar-io.js";
 
 /** The sidecar's name, used by the path resolver and by nothing else. */
 const PLANS_FILE_NAME = "plans.jsonl";
@@ -66,15 +73,6 @@ const PLANS_FILE_NAME = "plans.jsonl";
 export function resolvePlansPath(dataDir?: string): string {
   return resolveSidecarPath(PLANS_FILE_NAME, dataDir);
 }
-
-/**
- * The CLOSED capital-tier vocabulary, mirrored here as a value because `CapitalTier`
- * is a type and a runtime check needs a list. Unlike `kind` and `cadence` this list is
- * strict: `tierOrder` is consumed to route capital, so an unrecognized tier is
- * unusable rather than merely unreadable, and adding one is an ADR-002 amendment — a
- * fund-structure change, not a forward-compatibility event.
- */
-const CAPITAL_TIERS: readonly CapitalTier[] = ["c1", "c2", "c3"];
 
 /** How much of an unrecognized `kind` may be carried into a diagnostic field. */
 const KIND_TOKEN_MAX_LENGTH = 24;
@@ -94,12 +92,6 @@ function sanitizeKindToken(raw: string): string | undefined {
   return token === "" ? undefined : token;
 }
 
-/**
- * The instruction an `unsupported` skip carries. It is the whole reason the skip
- * taxonomy splits by INSTRUCTION rather than by parse stage: this line is fine and
- * this checkout is behind.
- */
-const PULL_INSTRUCTION = "this checkout may be older than the file — pull and retry";
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim() !== "";
@@ -143,10 +135,6 @@ function isRenderableId(value: unknown): value is string {
 
 function isFinitePositive(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
-}
-
-function isRecordObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isPlanKind(value: unknown): value is PlanKind {
@@ -444,12 +432,6 @@ function readPlanLine(
   }
 }
 
-/**
- * The UTF-8 byte-order mark, which an editor may prepend to a hand-authored file. It
- * is invisible to the operator and fatal to `JSON.parse` on line 1, so a loader that
- * did not strip it would report the FIRST line of a perfectly good file corrupt.
- */
-const BOM = "\uFEFF";
 
 /**
  * Read the sidecar into VALIDATED records — TOTALLY. No input throws.
@@ -494,7 +476,7 @@ export async function loadPlans(path: string): Promise<LoadedPlans> {
   const skipped: SkippedPlanLine[] = [];
   /** Every ladder id this file has already declared — the cross-line state, built once. */
   const claimedLadderIds = new Set<string>();
-  const lines = (raw.startsWith(BOM) ? raw.slice(BOM.length) : raw).split("\n");
+  const lines = stripBom(raw).split("\n");
   for (let index = 0; index < lines.length; index += 1) {
     const trimmed = (lines[index] ?? "").trim();
     if (trimmed === "") {

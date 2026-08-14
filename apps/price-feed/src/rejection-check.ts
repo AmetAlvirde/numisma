@@ -128,9 +128,8 @@ export interface SpineWorld {
  * surfaces as an ENOENT note rather than silence — a pre-check needs a reference,
  * so its absence is reported as "could not pre-check", never a false all-clear.
  *
- * Reading the log refreshes `events.jsonl.quarantine` (the derived side lane), which
- * is deliberate and shared with every other reader; the log and genesis themselves
- * are never written here (R6).
+ * Reading the log refreshes `events.jsonl.quarantine`. See the write-on-read
+ * invariant in `packages/event-store/README.md` (R6).
  */
 export async function loadSpineReference(
   paths: SpineReferencePaths,

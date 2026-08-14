@@ -49,6 +49,18 @@ export const TRACKED_FILES = [
   "preferences.jsonl",
   "orders.jsonl",
   "plans.jsonl",
+  // A reconciliation line passes the membership test ONLY because it carries its own
+  // `declared` copy of the plan as shown. Plan supersession is by APPEND and
+  // `pickPlanAsOf` selects the latest `effectiveAt <= asOf`, so a line appended later
+  // but DATED EARLIER retroactively changes what re-derivation returns for a fill
+  // already recorded: a past verdict is not reproducible. That is what makes the trail
+  // non-re-derivable truth rather than a cache of `plans.jsonl`.
+  //
+  // So the copy is MANDATORY, not convenient — and the obvious-sounding simplification
+  // ("the declared values are already in plans.jsonl") is wrong: they are not there as
+  // they stood on the day the operator was told. Anything that drops `declared` also
+  // drops this file's right to be on this list.
+  "reconciliations.jsonl",
 ];
 
 /**
