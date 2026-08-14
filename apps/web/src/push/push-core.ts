@@ -17,6 +17,7 @@ import {
   loadFoldedReview,
   resolveEventStorePaths,
 } from "@numisma/event-store";
+import type { LoadedPreferences } from "@numisma/engine";
 import {
   loadOrders,
   loadPlans,
@@ -24,6 +25,7 @@ import {
   resolveOrdersPath,
   resolvePlansPath,
   resolvePreferencesPath,
+  unattendedPreferencesVerdict,
 } from "@numisma/preferences";
 import type {
   DcaBlock,
@@ -38,6 +40,9 @@ import {
 } from "../projection/contract.ts";
 import { buildDcaBlock, type DcaFillInputs } from "./dca-block.ts";
 import { buildGlanceBlock, venueDarkOrOmit } from "./glance.ts";
+// TYPE-ONLY: this module files into the channel it is handed and never constructs one.
+// The shells own the channel's lifetime, because a run has one channel and many kinds.
+import type { RunReport } from "./unattended-report.ts";
 
 /** What the push shell's two flags decide, once argv has been read. */
 export interface PushArgs {
@@ -160,11 +165,18 @@ export async function loadCurrentFold(asOf?: string): Promise<FoldedAnchor> {
  * the push's second privileged input, and the only place in `apps/web` allowed to
  * touch it (`preferences-import-guard.test.ts`).
  *
- * R1 — NO FLOOR IS EVER INVENTED. `loadPreferences` quarantines a malformed line
- * (dropping it) and returns `[]` for a missing file; `pickPolicyAsOf` returns
+ * R1 — NO FLOOR IS EVER INVENTED. `loadPreferences` discards a malformed line and
+ * returns empty `entries` for a missing or unreadable file; `pickPolicyAsOf` returns
  * `undefined` when nothing is in effect as-of the anchor. Every one of those paths
- * ends here as `undefined`, which the glance block encodes as an ABSENT
- * `reserveTargetPct` and the reader renders as a suppressed Reserve slot.
+ * ends here as an absent `reserveTargetPct`, which the glance block encodes as an
+ * ABSENT field and the reader renders as a suppressed Reserve slot.
+ *
+ * IT RETURNS THE WHOLE LOAD, NOT JUST THE FLOOR, and that widening is the Discard
+ * Channel's second clause reaching the shell: the skips are a value the caller
+ * receives whether or not it looks. Returning only the number would leave the
+ * discards visible at this line and nowhere else — which is exactly the silence spec
+ * #320 exists to remove, moved one function outward. NOTHING HERE DECIDES WHAT A SKIP
+ * MEANS: this is a loader, and the policy is `unattendedPreferencesVerdict`.
  *
  * `defaultProfitPolicyEntry` (which is 10) is deliberately NOT imported. It is a
  * SEED FOR A NEW SIDECAR, not a read-gap filler, and `seedDefaultPreferences` sits
@@ -177,9 +189,40 @@ export async function loadCurrentFold(asOf?: string): Promise<FoldedAnchor> {
  */
 export async function loadReserveFloorAsOf(
   asOf: string,
-): Promise<number | undefined> {
-  const prefs = await loadPreferences(resolvePreferencesPath());
-  return pickPolicyAsOf(prefs, asOf)?.reserveTargetPct;
+): Promise<ReserveFloorLoad> {
+  const preferences = await loadPreferences(resolvePreferencesPath());
+  return {
+    reserveTargetPct: pickPolicyAsOf(preferences.entries, asOf)?.reserveTargetPct,
+    preferences,
+  };
+}
+
+/** The floor in force on an anchor, AND the load that answered — skips included. */
+export interface ReserveFloorLoad {
+  /** Absent whenever no policy is in force as-of the anchor. Never invented (R1). */
+  reserveTargetPct: number | undefined;
+  /** The whole envelope, so the shell can report what the read discarded. */
+  preferences: LoadedPreferences;
+}
+
+/**
+ * One anchor's glance block, AND the loads that produced it.
+ *
+ * THE SECOND FIELD IS THE SEAM, and it is deliberately a RECORD rather than a pair.
+ * This derivation already composes two as-of loads and will compose more; each one
+ * that can discard an input owes the shell its envelope, and each gets its own named
+ * field here. A tuple, or a bare `LoadedPreferences` return, would make the next
+ * tenant rewrite the signature instead of adding a key to it.
+ *
+ * NOTHING IN HERE REACHES THE WIRE. `deriveSnapshot` takes {@link glance} alone; the
+ * envelopes stay on the operator's side of the run, and `projection-payload.test.ts`
+ * plus `discard-channel.test.ts` both hold that line.
+ */
+export interface AnchorGlance {
+  /** The block that goes on the wire, and the ONLY field that does. */
+  glance: GlanceBlock;
+  /** The preferences envelope the floor was read from. Operator channel only. */
+  preferences: LoadedPreferences;
 }
 
 /**
@@ -189,14 +232,18 @@ export async function loadReserveFloorAsOf(
  */
 export async function buildGlanceForAnchor(
   fold: FoldedAnchor,
-): Promise<GlanceBlock> {
+): Promise<AnchorGlance> {
   const asOf = fold.report.dashboard.summary.asOf;
-  return buildGlanceBlock(
-    fold.data,
-    fold.report,
-    await loadReserveFloorAsOf(asOf),
-    await loadVenueDarkAsOf(asOf),
-  );
+  const floor = await loadReserveFloorAsOf(asOf);
+  return {
+    glance: buildGlanceBlock(
+      fold.data,
+      fold.report,
+      floor.reserveTargetPct,
+      await loadVenueDarkAsOf(asOf),
+    ),
+    preferences: floor.preferences,
+  };
 }
 
 /**
@@ -410,4 +457,72 @@ export async function upsertSnapshot(
     ],
   );
   return derived;
+}
+
+/**
+ * The preferences report's KIND on the run's operator channel. Named and exported so a
+ * co-tenant kind is added beside it rather than by editing a string literal in three
+ * shells — and so a test can ask for this kind's lines alone.
+ */
+export const PREFERENCES_DIAGNOSTIC_KIND = "preferences";
+
+/** Everything one unattended anchor needs in order to push and then report. */
+export interface UnattendedPushInput {
+  pool: Pool;
+  report: CompositionReport;
+  /** The glance AND the envelopes it was derived from — see {@link AnchorGlance}. */
+  anchor: AnchorGlance;
+  dca: DcaBlock;
+  /** The run's shared operator channel. Other kinds may already have filed into it. */
+  channel: RunReport;
+  /** Where the channel is written. Injected so the ORDERING below is assertable. */
+  emit?: ((line: string) => void) | undefined;
+}
+
+/** What the run produced, and how it should end. */
+export interface UnattendedPush {
+  derived: SnapshotDerivation;
+  /**
+   * THIS KIND'S exit code, not the run's. A caller with more than one diagnostic kind
+   * composes the codes itself — kinds do not share an exit policy, and a function that
+   * returned "the run's code" would be deciding for tenants it does not know about.
+   */
+  exitCode: number;
+}
+
+/**
+ * UPSERT FIRST, REPORT AFTER — the whole point of spec #320's seam C, and the reason
+ * this function exists at all rather than three lines inside `push.ts`'s `main()`.
+ *
+ * `buildGlanceForAnchor` runs BEFORE the upsert, so a diagnostic raised where the
+ * discard is discovered is one refactor away from withholding the snapshot. The
+ * Discard Channel's fifth clause forbids exactly that: availability of the fund's
+ * daily view outranks the completeness of any one sidecar. So the skips are CARRIED —
+ * out of the loader in its envelope, through {@link AnchorGlance}, to here — and only
+ * turned into prose and an exit code once the row has landed. `push.ts` is a
+ * self-executing script that no test may import, which is why the ordering lives in
+ * this importable function instead: `discard-channel.test.ts` drives it with a pool
+ * and an emitter sharing one sequence log, so "after" is asserted rather than read off
+ * the shell's line order.
+ *
+ * THE THREE LINES AFTER THE UPSERT ARE THE CO-TENANCY SEAM, and they are deliberately
+ * not collapsed into a helper: derive one kind's verdict, file its PROSE under its own
+ * kind, return its EXIT CODE separately. A second kind is three more lines in the same
+ * shape, with its own exit policy — including one that is always zero — and neither
+ * kind's report can starve the other, because the channel bounds per kind.
+ */
+export async function pushAnchorAndReport(
+  input: UnattendedPushInput,
+): Promise<UnattendedPush> {
+  const derived = await upsertSnapshot(
+    input.pool,
+    input.report,
+    input.anchor.glance,
+    input.dca,
+  );
+
+  const verdict = unattendedPreferencesVerdict(input.anchor.preferences);
+  input.channel.add(PREFERENCES_DIAGNOSTIC_KIND, verdict.messages);
+  input.channel.emit(input.emit ?? ((line) => console.error(line)));
+  return { derived, exitCode: verdict.exitCode };
 }

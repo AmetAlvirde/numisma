@@ -34,8 +34,9 @@ import {
   buildGlanceForAnchor,
   loadCurrentFold,
   parsePushArgs,
-  upsertSnapshot,
+  pushAnchorAndReport,
 } from "./push-core.ts";
+import { RunReport } from "./unattended-report.ts";
 
 /**
  * Apply the DDL (composition_snapshot table) through the driver for one-command
@@ -48,7 +49,16 @@ async function initSchema(pool: Pool): Promise<void> {
   console.log("[push] schema applied (composition_snapshot table)");
 }
 
-async function main(): Promise<void> {
+/**
+ * Runs the push and returns THE PROCESS'S EXIT CODE.
+ *
+ * It returns a code rather than exiting because the code is now a REPORT: a discarded
+ * `preferences.jsonl` line marks the run non-zero after the snapshot has already been
+ * upserted (spec #320 seam C). A launchd job's stderr goes to an unread log, so the
+ * mark has to be a checked value. A non-zero return therefore does NOT mean the push
+ * failed — a failed push still throws, and the rejection handler below owns that.
+ */
+async function main(): Promise<number> {
   // `argv.slice(2)` drops the node binary and this script's own path; the parser and
   // the reasoning behind its exact-match flag pairing live in `push-core.ts`, where a
   // test can reach them.
@@ -79,8 +89,16 @@ async function main(): Promise<void> {
   // not a failure either — it is carried onto the wire as `source: "unreadable"`, the
   // one answer an empty branch could never give.
   const fold = initOnly ? undefined : await loadCurrentFold();
-  const glance = fold ? await buildGlanceForAnchor(fold) : undefined;
+  // The glance derivation hands back the block AND the sidecar envelopes it read. The
+  // envelopes are CARRIED, not acted on: reporting a discard here would be reporting
+  // it before the snapshot exists, which is the one thing seam C forbids.
+  const anchor = fold ? await buildGlanceForAnchor(fold) : undefined;
   const dca = fold ? await buildDcaForAnchor(fold) : undefined;
+
+  // The run's operator channel. It is co-tenanted by construction — every diagnostic
+  // kind files under its own name and is bounded under its own name — so a second kind
+  // joins this run by filing here, not by rewriting what the first kind prints.
+  const channel = new RunReport();
 
   // Same deadlines as `backfill`, and for the same reason — this command is the
   // other unattended projection writer, so it is exposed to the identical dead-socket
@@ -92,17 +110,23 @@ async function main(): Promise<void> {
       await initSchema(pool);
     }
 
-    if (!fold || !glance || !dca) {
+    if (!fold || !anchor || !dca) {
       console.log("[push] --init-only: schema applied, no snapshot pushed");
-      return;
+      return 0;
     }
 
-    const { fundId, asOf, schemaVersion } = await upsertSnapshot(
+    // Upsert, THEN report — the ordering is inside this call and asserted by
+    // `discard-channel.test.ts`, because `push.ts` cannot be imported by a test.
+    const { derived, exitCode } = await pushAnchorAndReport({
       pool,
-      fold.report,
-      glance,
+      report: fold.report,
+      anchor,
       dca,
-    );
+      channel,
+      emit: (line) => console.error(`[push] ${line}`),
+    });
+    const { fundId, asOf, schemaVersion } = derived;
+    const { glance } = anchor;
 
     console.log(
       `[push] pushed snapshot fundId=${fundId} asOf=${asOf} schemaVersion=${schemaVersion} ` +
@@ -111,13 +135,17 @@ async function main(): Promise<void> {
         `suppressed=[${glance.suppressed.join(",")}] ` +
         `dca=${dca.source}/${dca.positions.length}`,
     );
+    // Every kind's code composes here and nowhere else. Kinds do NOT share an exit
+    // policy — a kind whose finding can never extinguish is prose-only and returns
+    // zero — so this is a fold over independently-decided codes, not one rule.
+    return exitCode;
   } finally {
     await pool.end();
   }
 }
 
 main().then(
-  () => process.exit(0),
+  (code) => process.exit(code),
   (err: unknown) => {
     console.error("[push] failed:", err instanceof Error ? err.message : err);
     process.exit(1);

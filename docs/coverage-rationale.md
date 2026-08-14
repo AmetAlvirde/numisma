@@ -552,7 +552,7 @@ individually itemized with its own paragraph. Grouped by package.
 | File | Lines | Uncovered | What's there |
 | --- | --- | --- | --- |
 | `heartbeat.ts` | 97.82% | `:199-200` | One branch past the documented "taken as written for v2, never synthesized" guard. |
-| `preferences.ts` | 95.74% | `:106-107,142-143` | Split-ratio validation edge (`wealth + reserve <= 0`) and the non-`ENOENT` rethrow on `loadPreferences` — same shape as `price-store.ts`'s. |
+| `preferences.ts` | 100% lines, 96.55% branch | `:214,225` | Re-derived after spec #320 made the loader total: **the non-`ENOENT` rethrow this row used to name no longer exists** — that path is now the `load-failed` arm of the returned envelope and is covered, as is the split-denominator guard the row's other citation pointed at. What remains is two branch-only arms, neither of them a behavior: `:214` is `String(error)`, the non-`Error` arm of the `load-failed` message (reachable only if something other than an `Error` is thrown out of `readFile`); `:225` is the `?? ""` arm of `lines[index]`, unreachable by construction — `index` is always in range — and present only because `noUncheckedIndexedAccess` types the access as possibly-`undefined`. |
 | `orders.ts` (preferences package) | 89.74% | `:73-75,181-182,222-223,225-227,229-230` | `:73-75` is `defaultWarn`'s `console.warn` fallback when no `warn` is injected; `:181-182` is the non-`ENOENT` rethrow on the sidecar read (same shape as `price-store.ts`'s); `:222-223,225-227,229-230` are the lock-contention retry path in the sidecar's advisory file lock (`open(lockPath, "wx")` racing another writer) — a real concurrency branch, exercised only under contention. |
 
 None of the above is claimed unreachable. Each is a real branch this table now
