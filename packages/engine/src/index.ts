@@ -115,6 +115,9 @@ export type {
   ProfitPolicy,
   ProfitPolicyEntry,
   ProfitSplit,
+  PreferenceSkipReason,
+  SkippedPreferenceLine,
+  LoadedPreferences,
 } from "./compose/profit-split.js";
 export {
   pickPolicyAsOf,

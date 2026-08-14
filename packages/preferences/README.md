@@ -20,7 +20,8 @@ Enumerated explicitly in `src/index.ts`:
 | Export | Kind | Purpose |
 | --- | --- | --- |
 | `resolvePreferencesPath` | function | Resolve `<dataDir>/preferences.jsonl` under the shared `resolveDataDir` root (never CWD-relative). |
-| `loadPreferences` | function | Read the append-only sidecar into ordered, validated `ProfitPolicyEntry[]`. A missing file is `[]`; a malformed/out-of-range line is quarantined (dropped), not thrown. |
+| `loadPreferences` | function | Read the append-only sidecar into a total `LoadedPreferences` envelope: `{load, entries, skipped}` — a `LoadOutcome`, the ordered validated `ProfitPolicyEntry[]`, and one `SkippedPreferenceLine` per discarded line. A missing file is `{status: "loaded"}` with empty buckets (the normal starting state); any other read error is `{status: "load-failed", message}`. Never throws. |
+| `unattendedPreferencesVerdict`, `UnattendedPreferencesVerdict` | function, type | The unattended-caller policy over a `LoadedPreferences`, as a value rather than a convention: `{exitCode, messages}`. Non-zero iff anything was skipped or the load failed; prose-only messages that name the file, the 1-based line and the reason, never the line's content. |
 | `seedDefaultPreferences` | function | The **only** preferences writer: seed a **new** sidecar with the fund's locked default policy, only if it holds no valid entry yet — not a read-gap fallback; never call it to paper over a missing/quarantined policy. Its one-line append is inline; there is no general `appendPreference` entry point (see below). |
 | `resolveOrdersPath` | function | Resolve `<dataDir>/orders.jsonl` under the shared `resolveDataDir` root. |
 | `loadOrders` | function | Read the sidecar into a total `OrdersLoad` outcome: `{status: "loaded", records, skips}` \| `{status: "absent"}` \| `{status: "unreadable", message}`. Never throws. |
@@ -47,13 +48,20 @@ Enumerated explicitly in `src/index.ts`:
   the second `rename` silently discard the first's batch. A waiter refuses
   after `LOCK_TIMEOUT_MS` (10s) rather than break a lock it cannot prove is
   stale.
-- **Validate on load, quarantine on failure — never throw.** Both loaders
-  treat a malformed line as skippable input, not a fatal error:
-  `loadPreferences` silently drops a bad line; `loadOrders` reports every
-  skip (`OrderSkip[]`) via both a `warn` callback and the returned outcome,
-  distinguishing `absent` (no file) from `unreadable` (a real read error) —
-  collapsing those would let a permissions error render as an unencumbered
-  balance.
+- **Validate on load, report every discard — never throw** (the Discard
+  Channel, ADR-020). Both loaders treat a malformed line as skippable input,
+  not a fatal error, and **both return the discard to the caller** rather than
+  dropping it silently: `loadPreferences` returns one `SkippedPreferenceLine`
+  per rejected line (1-based line number, closed-vocabulary reason, fixed prose
+  that never quotes the line) inside its `LoadedPreferences` envelope;
+  `loadOrders` returns every skip (`OrderSkip[]`) and additionally offers a
+  `warn` callback — an addition to the envelope, never a substitute for it.
+  Both distinguish "nothing to read" from "could not be read"
+  (`loadPreferences`'s `loaded`/`load-failed`, `loadOrders`'s
+  `absent`/`unreadable`) — collapsing those would let a permissions error render
+  as an unencumbered balance, or as a fund that has set no policy. Neither
+  loader decides the consequence: that is `unattendedPreferencesVerdict`'s job,
+  and per ADR-020's fifth clause the consequence is never to withhold the push.
 - **Strict ISO calendar dates only.** `preferences.jsonl`'s `effectiveAt`
   must match `YYYY-MM-DD` exactly (no time component) because
   `pickPolicyAsOf` orders entries by string comparison; a `Date.parse`-able

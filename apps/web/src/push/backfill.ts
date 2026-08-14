@@ -26,12 +26,27 @@
 import { Pool } from "pg";
 import {
   parseBackfillArgs,
-  runBackfill,
+  runBackfillAndReport,
   writeAnchorFixture,
 } from "./backfill-core.ts";
 import { projectionPoolConfig } from "./projection-pool.ts";
+import { RunReport } from "./unattended-report.ts";
 
-async function main(): Promise<void> {
+/**
+ * Runs the backfill and returns THE PROCESS'S EXIT CODE.
+ *
+ * ZERO ON A DISCARD, UNLIKE THE PUSH — deliberate, and the warrant is in
+ * `runBackfillAndReport`'s docstring: this command's exit code is read by
+ * `ops/price-feed/run-daily-fetch.sh`, which turns any non-zero into a heartbeat the
+ * TUI renders as "the daily price job FAILED" on every startup until the sidecar is
+ * edited. A standing fact must not permanently redden an errand channel. The discard
+ * is REPORTED on stderr regardless, and a failed replay still exits 1 — it throws.
+ *
+ * The three lines that fold a verdict into prose and a code live in
+ * `backfill-core.ts`, not here, so a test can assert their ORDER: this file is a
+ * `main().then(..., process.exit)` script that importing would execute.
+ */
+async function main(): Promise<number> {
   // `argv.slice(2)` drops the node binary and this script's own path; the parser and
   // the reasoning behind its exact-match flag pairing live in `backfill-core.ts`,
   // where a test can reach them.
@@ -54,9 +69,15 @@ async function main(): Promise<void> {
     fixtureOnly || !connectionString
       ? undefined
       : new Pool(projectionPoolConfig(connectionString));
+  // The run's operator channel. Prose composes by kind; exit codes compose by policy;
+  // a co-tenant kind that is prose-only never touches the second one. Both foldings
+  // happen in `runBackfillAndReport`, which returns them separately.
+  const channel = new RunReport();
   try {
-    const results = await runBackfill({
+    const { exitCode } = await runBackfillAndReport({
       pool,
+      channel,
+      emit: (line) => console.error(`[backfill] ${line}`),
       onAnchor: (anchor, index, total) => {
         console.log(
           `[backfill] ${String(index + 1).padStart(3)}/${total} ` +
@@ -68,25 +89,30 @@ async function main(): Promise<void> {
             `${anchor.written ? "" : " (not written)"}`,
         );
       },
+      // The run's own output. It goes in the hook rather than after the call because
+      // the channel is emitted LAST — a diagnostic is the final thing a run says, and
+      // one printed mid-replay is a diagnostic positioned to abort one.
+      onComplete: async (results) => {
+        if (writeFixture) {
+          console.log(`[backfill] fixture written: ${await writeAnchorFixture(results)}`);
+        }
+        const [first] = results;
+        console.log(
+          `[backfill] ${results.length} anchor(s) ` +
+            `${pool ? "upserted" : "derived (no write)"}: ` +
+            `${first?.asOf} … ${results[results.length - 1]?.asOf}`,
+        );
+      },
     });
 
-    if (writeFixture) {
-      console.log(`[backfill] fixture written: ${await writeAnchorFixture(results)}`);
-    }
-
-    const [first] = results;
-    console.log(
-      `[backfill] ${results.length} anchor(s) ` +
-        `${pool ? "upserted" : "derived (no write)"}: ` +
-        `${first?.asOf} … ${results[results.length - 1]?.asOf}`,
-    );
+    return exitCode;
   } finally {
     await pool?.end();
   }
 }
 
 main().then(
-  () => process.exit(0),
+  (code) => process.exit(code),
   (err: unknown) => {
     console.error("[backfill] failed:", err instanceof Error ? err.message : err);
     process.exit(1);
