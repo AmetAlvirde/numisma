@@ -5,6 +5,7 @@
 // against a fixed input.
 import type { FoldedReview } from "./contracts.js";
 import { buildCompositionReport } from "./compose/report.js";
+import { dedupeFoldSkips } from "./events/fold.js";
 
 /**
  * A derived, versioned summary of a folded read model at a point in the log — the
@@ -25,7 +26,9 @@ import { buildCompositionReport } from "./compose/report.js";
  * event whose target it cannot find. Without a marker here, that damage is laundered:
  * `fundValueUsd` and the counts come out wrong in the one artifact whose premise is
  * that nobody replays the log to re-check them. So the digest carries the count of
- * events the capture fold discarded — `0` on a clean fold, always present.
+ * events the capture fold discarded — `0` on a clean fold, always present, and counted
+ * through `dedupeFoldSkips` so this number and the unattended verdict line can never
+ * report different figures for the same log (see {@link HeadDigest.discardedEventCount}).
  *
  * A COUNT, NOT THE LIST. The skip records (`SkippedFoldEvent`, with their locators) go
  * to surfaces where a reader can act on them; a digest nothing folds back is not such a
@@ -51,10 +54,20 @@ export interface HeadDigest {
   openPositionCount: number;
   closedPositionCount: number;
   /**
-   * How many events the capture fold read and then discarded — `folded.skipped.length`.
-   * `0` on a clean fold, and present on every digest so a nonzero count is a positive
-   * signal rather than a missing key. A COUNT ONLY: the records themselves (ids,
-   * indices, reasons) live on the surfaces a reader can act from — see {@link HeadDigest}.
+   * How many events the capture fold read and then discarded — `dedupeFoldSkips(
+   * folded.skipped).length`, the Discard Channel's own count. `0` on a clean fold, and
+   * present on every digest so a nonzero count is a positive signal rather than a
+   * missing key. A COUNT ONLY: the records themselves (ids, indices, reasons) live on
+   * the surfaces a reader can act from — see {@link HeadDigest}.
+   *
+   * DEDUPED, NOT `skipped.length` — a deviation from spec #323 §5, which stated the
+   * field as the raw record count. A `Transfer` records its two legs independently, so
+   * one event with both reserves absent writes TWO records; the raw length would put `2`
+   * here while `unattendedFoldVerdict` — which counts the same log through
+   * `dedupeFoldSkips` — says one event. Two surfaces disagreeing about one log is the
+   * defect ADR-020 exists to close, and this is the surface that cannot be re-derived to
+   * settle it: the digest is committed and the run that wrote it is gone. So both
+   * surfaces count through the ONE key, and the number matches the name.
    */
   discardedEventCount: number;
   headEventId: string | null;
@@ -85,7 +98,7 @@ export function deriveHeadDigest(
     fundValueUsd,
     openPositionCount: data.positions.length,
     closedPositionCount: (data.closedPositions ?? []).length,
-    discardedEventCount: skipped.length,
+    discardedEventCount: dedupeFoldSkips(skipped).length,
     headEventId,
     appVersion,
   };

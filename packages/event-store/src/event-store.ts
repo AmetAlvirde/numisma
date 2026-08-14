@@ -22,6 +22,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import {
   INBOX_PATH_SEGMENTS,
+  dedupeFoldSkips,
   foldEvents,
   parseEvent,
   parseFundReview,
@@ -29,7 +30,6 @@ import {
   type FoldedReview,
   type FundReviewData,
   type PortfolioEvent,
-  type SkippedFoldEvent,
 } from "@numisma/engine";
 
 export interface EventStorePaths {
@@ -267,8 +267,14 @@ export interface UnattendedFoldVerdict {
  * enumeration; a figure on a daily-printed channel is a fund detail laundered into log
  * files and CI output (ADR-020 clause 3).
  *
- * DEDUPED ON (`eventId`, `reason`), WHICH IS WHY THE COUNT IS A RUN'S COUNT AND NOT A
- * LOOP'S. The backfill folds once per anchor and re-reads the same log each time, so a
+ * DEDUPED THROUGH THE ENGINE'S OWN `dedupeFoldSkips` — never a local re-derivation of
+ * the (`eventId`, `reason`) key. One definition of "a distinct finding" is what keeps
+ * this line, the interactive enumeration, `walkPendingInbox` and the head digest's
+ * `discardedEventCount` reporting the SAME number for the same log; two definitions
+ * would let a future sharpening of the key move some of them and not others, and the
+ * halves would still pass their own tests.
+ *
+ * IT IS A RUN'S COUNT AND NOT A LOOP'S. The backfill folds once per anchor and re-reads the same log each time, so a
  * ten-anchor replay rediscovers one damaged event ten times; the shell concatenates
  * every anchor's `skipped` and calls this ONCE, and the dedup is what turns that into
  * "one event was dropped". `RunReport`'s own dedup cannot do it — two anchors legitimately
@@ -283,7 +289,7 @@ export interface UnattendedFoldVerdict {
 export function unattendedFoldVerdict(
   folded: Pick<FoldedReview, "skipped">,
 ): UnattendedFoldVerdict {
-  const distinct = dedupeSkips(folded.skipped);
+  const distinct = dedupeFoldSkips(folded.skipped);
   if (distinct.length === 0) {
     // A CLEAN FOLD SAYS NOTHING, so the daily run's output is byte-identical to the one
     // before this channel existed. Silence here is what buys the line its meaning.
@@ -335,7 +341,7 @@ export function formatFoldDiscards(
   folded: Pick<FoldedReview, "skipped">,
   limit: number = MAX_FOLD_DISCARD_LINES,
 ): string[] {
-  const distinct = dedupeSkips(folded.skipped);
+  const distinct = dedupeFoldSkips(folded.skipped);
   if (distinct.length === 0) {
     // EMPTY MEANS CLEAN — the caller stays quiet, exactly as `formatGapReport` does, and
     // that is what bounds the noise by construction on every surface this feeds.
@@ -355,29 +361,6 @@ export function formatFoldDiscards(
     );
   }
   return lines;
-}
-
-/**
- * Distinct skips by (`eventId`, `reason`), in first-appearance order.
- *
- * FIRST APPEARANCE, so the fold's own deterministic ordering (application order, with
- * the post-loop invalidation records appended) survives the dedup. The pair is the key
- * rather than the whole record because one event can be dropped for two different
- * reasons and that is two findings — a `Transfer` whose destination reserve is absent is
- * one record; one whose BOTH legs are absent is genuinely one finding about one event
- * and collapses, which is the ruling spec #323 R7 states.
- */
-function dedupeSkips(skipped: readonly SkippedFoldEvent[]): SkippedFoldEvent[] {
-  const seen = new Set<string>();
-  const distinct: SkippedFoldEvent[] = [];
-  for (const skip of skipped) {
-    const key = `${skip.eventId} ${skip.reason}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      distinct.push(skip);
-    }
-  }
-  return distinct;
 }
 
 /**
