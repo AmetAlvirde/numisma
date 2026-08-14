@@ -114,7 +114,7 @@ describe("report on the fold — parity with the legacy snapshot path", () => {
     // The fold path report uses (no events) vs. the legacy snapshot path the old
     // report read. Same genesis content drives both; the load metadata is the
     // default for both so only the read model differs.
-    const folded = await loadFoldedReview(paths);
+    const { data: folded } = await loadFoldedReview(paths);
     const snapshot = await loadFundReview(paths.genesis);
 
     expect(buildCompositionReport(folded)).toEqual(buildCompositionReport(snapshot));
@@ -129,7 +129,7 @@ describe("report on the fold — no divergence from the app's read model", () =>
     await ingestInbox(paths);
 
     // ...and report, reading the SAME genesis + log via the SAME fold, sees it.
-    const data = await loadFoldedReview(paths);
+    const { data } = await loadFoldedReview(paths);
     const report = buildCompositionReport(data);
 
     expect(data.positions.some((position) => position.id === "btc-core")).toBe(true);
@@ -154,7 +154,7 @@ describe("reserve reconciliation report line — folded balances (C2/C3)", () =>
     const paths = await makeStore({ inbox: [openBtc()] });
     await ingestInbox(paths);
 
-    const folded = await loadFoldedReview(paths);
+    const { data: folded } = await loadFoldedReview(paths);
     const foldedReport = buildCompositionReport(folded);
     const foldedLine = foldedReport.reserveReconciliation.find(
       (line) => line.reserveId === "cash-core",
@@ -230,7 +230,7 @@ describe("reserve reconciliation report line — folded balances (C2/C3)", () =>
     };
     const paths = await makeStore({ genesis });
 
-    const report = buildCompositionReport(await loadFoldedReview(paths));
+    const report = buildCompositionReport((await loadFoldedReview(paths)).data);
 
     // Insertion order preserved — NOT the descending-value order (large, medium, small).
     expect(report.reserveReconciliation.map((line) => line.reserveId)).toEqual([

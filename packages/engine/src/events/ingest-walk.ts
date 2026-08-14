@@ -35,8 +35,9 @@
  * job; this takes the already-read candidates as data and returns the verdicts as
  * data. Nothing here touches the filesystem.
  */
-import type { FundReviewData } from "../contracts.js";
+import type { FundReviewData, SkippedFoldEvent } from "../contracts.js";
 import { buildEventReference, crossReferenceEvent, type EventReference } from "./crossref.js";
+import { dedupeFoldSkips } from "./fold.js";
 import { parseEvent } from "./parse.js";
 import type { PortfolioEvent } from "./types.js";
 
@@ -106,6 +107,26 @@ export interface IngestWalkResult {
    * pre-check needs in order to judge this run's fresh marks.
    */
   reference: EventReference;
+  /**
+   * Every event the walk's OWN FOLDS read and could not apply — the union over every
+   * reference this walk built, DEDUPED on (`eventId`, `reason`) (ADR-020; PRD #323 R5).
+   * Empty on a complete log.
+   *
+   * THE DEDUP IS STRUCTURAL, NOT A TIDINESS. This walk re-derives the reference on every
+   * accept (ADR-015), so an n-event batch folds the log n+1 times and one dropped prior
+   * is reported by every one of those folds — the price-feed's 13-mark batch would hand
+   * its consumer 14 copies of one finding. 14 is a fact about this loop, not about the
+   * log, and an operator reading it as damage would be reading the loop.
+   *
+   * It is a REPORT AND NOTHING ELSE. Nothing here rejects, halts or changes a verdict on
+   * account of a drop: `priorEvents` is the append-only durable log, so a drop in it can
+   * never be repaired, and refusing would brick every future ingest permanently (R2).
+   * The consumer is the TUI's `ingestInbox`, where a human is at the keyboard — and it
+   * is deliberately a HANDOFF rather than a second print: `apps/tui`'s startup channel
+   * already enumerates this same log's discards once (`fold-lines.ts`, slice E), and one
+   * finding printed twice on one channel is how a channel stops being read.
+   */
+  skipped: SkippedFoldEvent[];
 }
 
 export interface IngestWalkOptions {
@@ -133,7 +154,8 @@ export interface IngestWalkOptions {
  * duplicate, a rejection, or an invalid candidate leaves the world untouched — a
  * rejected event is one the spine would refuse to apply, so it must not be allowed to
  * inform the judgment of the next one. `result.reference` is the world the walk ended
- * in.
+ * in, and `result.skipped` is what every fold along the way read and could not apply —
+ * lifted, deduped, and acted on by no rule here (ADR-020).
  */
 export function walkPendingInbox(
   candidates: readonly unknown[],
@@ -145,9 +167,18 @@ export function walkPendingInbox(
   const accepted: PortfolioEvent[] = [];
   const rejected: IngestWalkRejection[] = [];
   let duplicateCount = 0;
+  // The union of what EVERY reference below reported dropped, collected as each one is
+  // built and deduped only on the way out — so no fold's answer can be lost by a later
+  // one replacing the reference that carried it. Deduping here instead of at the end of
+  // the loop would be wrong for the same reason: the walk can return from three places.
+  const foldSkips: SkippedFoldEvent[] = [];
+  const carrying = (next: EventReference): EventReference => {
+    foldSkips.push(...next.skipped);
+    return next;
+  };
   // Re-derived on every accept below; built once here so a batch that accepts nothing
   // (all duplicates, or empty) still costs exactly one fold.
-  let reference = buildEventReference(world.genesis, priorEvents);
+  let reference = carrying(buildEventReference(world.genesis, priorEvents));
 
   // Only pass the magnitude dial when the caller set it, so the engine keeps its own
   // ±50% default (exactOptionalPropertyTypes forbids an explicit `undefined`).
@@ -166,6 +197,7 @@ export function walkPendingInbox(
         invalid: { index, path: parsed.path, message: parsed.message },
         seenIds,
         reference,
+        skipped: dedupeFoldSkips(foldSkips),
       };
     }
     const event = parsed.value;
@@ -180,16 +212,31 @@ export function walkPendingInbox(
     if (crossRef.kind !== "ok") {
       rejected.push({ index, event, path: crossRef.path, message: crossRef.message });
       if (options.haltOnRejection) {
-        return { accepted, duplicateCount, rejected, seenIds, reference };
+        return {
+          accepted,
+          duplicateCount,
+          rejected,
+          seenIds,
+          reference,
+          skipped: dedupeFoldSkips(foldSkips),
+        };
       }
       // Do NOT advance the world with an event the spine would refuse to apply.
       continue;
     }
     accepted.push(event);
     // The accept IS the advance: re-fold genesis + everything committed + everything
-    // this batch has taken so far. One fold per accepted event, deliberately (ADR-015).
-    reference = buildEventReference(world.genesis, [...priorEvents, ...accepted]);
+    // this batch has taken so far. One fold per accepted event, deliberately (ADR-015)
+    // — and the n+1th look at the same standing drop, which is what `skipped` dedups.
+    reference = carrying(buildEventReference(world.genesis, [...priorEvents, ...accepted]));
   }
 
-  return { accepted, duplicateCount, rejected, seenIds, reference };
+  return {
+    accepted,
+    duplicateCount,
+    rejected,
+    seenIds,
+    reference,
+    skipped: dedupeFoldSkips(foldSkips),
+  };
 }

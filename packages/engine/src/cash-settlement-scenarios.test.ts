@@ -144,7 +144,7 @@ describe("cash leg — mixed-tier close on a real-shaped fixture (T4)", () => {
     const reference = buildEventReference(realShapedGenesis());
     expect(crossReferenceEvent(close, reference).kind).toBe("ok");
 
-    const data = foldEvents(realShapedGenesis(), [close]);
+    const data = foldEvents(realShapedGenesis(), [close]).data;
     const reserve = reserveById(data, "pulse-bitget-usdt");
 
     // Aggregate exact: authoritative `amount` moves by exactly the proceeds.
@@ -202,7 +202,7 @@ describe("cash leg — mixed-tier close on a real-shaped fixture (T4)", () => {
       positionId: "gram-bitget-pulse",
       settlement: { reserveId: "pulse-bitget-usdt", proceeds: 108 },
     };
-    const reserve = reserveById(foldEvents(realShapedGenesis(), [close]), "pulse-bitget-usdt");
+    const reserve = reserveById(foldEvents(realShapedGenesis(), [close]).data, "pulse-bitget-usdt");
     expect(reserve.lots?.map((lot) => lot.tier).sort()).toEqual(["c1", "c2", "c3"]);
     expect(tierQty(reserve, "c3")).toBeCloseTo(100, 6);
   });
@@ -378,7 +378,7 @@ describe("cash leg — the ingest gate walk, and the cash it leaves behind (slic
       reference = buildEventReference(genesis(), accepted);
     }
 
-    const folded = foldEvents(genesis(), accepted);
+    const folded = foldEvents(genesis(), accepted).data;
 
     for (const [reserveId, expected] of Object.entries(EXPECTED)) {
       const reserve = reserveById(folded, reserveId);

@@ -234,7 +234,9 @@ class Harness {
       },
       loadGenesis: async () => genesisSeed(),
       loadLogEvents: async () => this.logEvents(),
-      loadFolded: async () => foldEvents(genesisSeed(), this.logEvents()),
+      // `.data` per PRD #323: `loadFolded` now hands the act the fund data alone, the
+      // fold's discard envelope having been reported by the shell before the interview.
+      loadFolded: async () => foldEvents(genesisSeed(), this.logEvents()).data,
       loadPlans: async () => {
         if (this.options.plans === "throws") {
           throw new Error("synthetic plans read failure");

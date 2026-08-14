@@ -48,7 +48,7 @@ describe("cash leg — Open debits the funding reserve, tiered by the lots' own 
       funding: { reserveId: "tiered", amount: 300 },
     };
 
-    const data = foldEvents(genesis(), [open]);
+    const data = foldEvents(genesis(), [open]).data;
     const reserve = reserveById(data, "tiered");
 
     expect(reserve.amount).toBe(1200); // 1500 - 300
@@ -92,7 +92,7 @@ describe("cash leg — Open debits the funding reserve, tiered by the lots' own 
       funding: { reserveId: "tiered", amount: 330 },
     };
 
-    const data = foldEvents(genesis(), [open]);
+    const data = foldEvents(genesis(), [open]).data;
     const reserve = reserveById(data, "tiered");
 
     // Exact, not approximate: 330 × 200/300 is 66000/300 = 220 in IEEE-754, and c2
@@ -138,7 +138,7 @@ describe("cash leg — Close credits the settlement reserve, proceeds tiered pro
     // is a 55% deviation and the gate refuses it.
     expect(crossReferenceEvent(close, buildEventReference(seed, [])).kind).toBe("event-error");
 
-    const data = foldEvents(seed, [mark, close]);
+    const data = foldEvents(seed, [mark, close]).data;
     const reserve = reserveById(data, "tiered");
 
     expect(reserve.amount).toBe(1860); // 1500 + 360
@@ -171,7 +171,7 @@ describe("cash leg — Deposit / Withdraw / Transfer route through the same seam
       amount: 250,
       tier: "c1",
     };
-    const reserve = reserveById(foldEvents(genesis(), [deposit]), "tiered");
+    const reserve = reserveById(foldEvents(genesis(), [deposit]).data, "tiered");
     expect(reserve.amount).toBe(1750);
     expect(tierQty(reserve, "c1")).toBe(1250);
     expect(tierQty(reserve, "c2")).toBe(500);
@@ -186,7 +186,7 @@ describe("cash leg — Deposit / Withdraw / Transfer route through the same seam
       amount: 200,
       tier: "c2",
     };
-    const reserve = reserveById(foldEvents(genesis(), [withdraw]), "tiered");
+    const reserve = reserveById(foldEvents(genesis(), [withdraw]).data, "tiered");
     expect(reserve.amount).toBe(1300);
     expect(tierQty(reserve, "c2")).toBe(300);
   });
@@ -201,7 +201,7 @@ describe("cash leg — Deposit / Withdraw / Transfer route through the same seam
       amount: 150,
       tier: "c1",
     };
-    const data = foldEvents(genesis(), [transfer]);
+    const data = foldEvents(genesis(), [transfer]).data;
     const from = reserveById(data, "tiered");
     const to = reserveById(data, "untiered");
 
@@ -220,7 +220,7 @@ describe("cash leg — Deposit / Withdraw / Transfer route through the same seam
       amount: 100,
       tier: "c3",
     };
-    const reserve = reserveById(foldEvents(genesis(), [deposit]), "untiered");
+    const reserve = reserveById(foldEvents(genesis(), [deposit]).data, "untiered");
     expect(reserve.amount).toBe(900);
     expect(reserve.lots).toBeUndefined();
   });

@@ -69,7 +69,7 @@ describe("the losing close is admissible — proven at the real ingest gate", ()
 
 describe("realized P&L — closed book", () => {
   it("keeps the closed position as a blotter row with realized = proceeds − cost basis", () => {
-    const data = foldEvents(genesis(), ALT_LOG);
+    const data = foldEvents(genesis(), ALT_LOG).data;
 
     // The open position is retired…
     expect(data.positions.find((p) => p.id === "alt-pos")).toBeUndefined();
@@ -85,7 +85,7 @@ describe("realized P&L — closed book", () => {
   });
 
   it("attributes realized per Tier on the closed position's cost-basis mix", () => {
-    const data = foldEvents(genesis(), ALT_LOG);
+    const data = foldEvents(genesis(), ALT_LOG).data;
     const byTier = new Map(
       data.closedPositions![0]!.tierAttribution.map((t) => [t.tier, t]),
     );
@@ -98,14 +98,14 @@ describe("realized P&L — closed book", () => {
   });
 
   it("rolls realized up by Tempo and by Tier in the report blotter", () => {
-    const report = buildCompositionReport(foldEvents(genesis(), ALT_LOG));
+    const report = buildCompositionReport(foldEvents(genesis(), ALT_LOG).data);
     expect(report.closedBook.totalRealizedPnlUsd).toBeCloseTo(-40, 6);
     expect(report.closedBook.byTempo.find((r) => r.key === "Pulse")!.realizedPnlUsd).toBeCloseTo(-40, 6);
     expect(report.closedBook.byTier.find((r) => r.key === "c1")!.realizedPnlUsd).toBeCloseTo(-10, 6);
   });
 
   it("is descriptive only: realized is NOT added to NAV", () => {
-    const data = foldEvents(genesis(), ALT_LOG);
+    const data = foldEvents(genesis(), ALT_LOG).data;
     const withBook = buildCompositionReport(data).totals.fundValueUsd;
     // Blanking the closed book must not change fund value — it never fed NAV.
     const withoutBook = buildCompositionReport({ ...data, closedPositions: [] }).totals.fundValueUsd;
@@ -125,19 +125,19 @@ describe("invalidation watch", () => {
 
   it("flags THESIS INVALIDATED when the mark breaches the level", () => {
     // alt-pos markPrice 40; a below-45 stop is breached (40 ≤ 45).
-    const report = buildCompositionReport(foldEvents(genesis(), [mark(45)]));
+    const report = buildCompositionReport(foldEvents(genesis(), [mark(45)]).data);
     const row = report.invalidationWatch.find((r) => r.positionId === "alt-pos");
     expect(row?.breached).toBe(true);
   });
 
   it("reads OK when the mark is clear of the level", () => {
-    const report = buildCompositionReport(foldEvents(genesis(), [mark(35)]));
+    const report = buildCompositionReport(foldEvents(genesis(), [mark(35)]).data);
     expect(report.invalidationWatch.find((r) => r.positionId === "alt-pos")?.breached).toBe(false);
   });
 
   it("is latest-wins: a later mark supersedes an earlier one", () => {
     // First clear (35, OK), then revised to 45 (breached) — latest wins.
-    const report = buildCompositionReport(foldEvents(genesis(), [mark(35), mark(45)]));
+    const report = buildCompositionReport(foldEvents(genesis(), [mark(35), mark(45)]).data);
     expect(report.invalidationWatch.find((r) => r.positionId === "alt-pos")?.breached).toBe(true);
   });
 });
@@ -179,14 +179,14 @@ describe("closed book — as-of replay (fold invariant)", () => {
   const log: PortfolioEvent[] = [...ALT_LOG, OPEN_BETA, CLOSE_BETA];
 
   it("yields an empty blotter as-of before the first close", () => {
-    const data = foldEvents(genesis(), log, "2026-06-04");
+    const data = foldEvents(genesis(), log, "2026-06-04").data;
     // alt-pos is still open on 06-04; nothing has closed yet.
     expect(data.positions.find((p) => p.id === "alt-pos")).toBeDefined();
     expect(data.closedPositions).toHaveLength(0);
   });
 
   it("reproduces the one-row blotter as-of the first close date", () => {
-    const data = foldEvents(genesis(), log, "2026-06-05");
+    const data = foldEvents(genesis(), log, "2026-06-05").data;
     // Only alt-pos has closed by 06-05; beta-pos is not even open yet.
     expect(data.closedPositions).toHaveLength(1);
     expect(data.closedPositions![0]!.positionId).toBe("alt-pos");
@@ -197,14 +197,14 @@ describe("closed book — as-of replay (fold invariant)", () => {
   });
 
   it("shows beta-pos still open (not yet on the blotter) mid-timeline", () => {
-    const data = foldEvents(genesis(), log, "2026-06-12");
+    const data = foldEvents(genesis(), log, "2026-06-12").data;
     // 06-12: alt-pos closed, beta-pos open but not yet closed.
     expect(data.closedPositions).toHaveLength(1);
     expect(data.positions.find((p) => p.id === "beta-pos")).toBeDefined();
   });
 
   it("reproduces the full two-row blotter as-of the second close, matching a live fold", () => {
-    const asOf = foldEvents(genesis(), log, "2026-06-15");
+    const asOf = foldEvents(genesis(), log, "2026-06-15").data;
     // Both closes have landed by 06-15: alt-pos (−40) + beta-pos (+50) = +10 total.
     // A loss NETTED against a gain — the one place in the suite where the blotter
     // total can tell a signed sum from an absolute-value one.
@@ -213,7 +213,7 @@ describe("closed book — as-of replay (fold invariant)", () => {
 
     // Replay invariant: folding the whole log with NO as-of (current state) must
     // equal folding as-of the last event date — the blotter is stable once closed.
-    const live = foldEvents(genesis(), log);
+    const live = foldEvents(genesis(), log).data;
     expect(buildCompositionReport(live).closedBook.totalRealizedPnlUsd).toBeCloseTo(10, 6);
     expect(live.closedPositions!.map((r) => r.positionId).sort()).toEqual(
       asOf.closedPositions!.map((r) => r.positionId).sort(),
@@ -282,7 +282,7 @@ describe("closed book — mixed-entryFx total-exactness (fold invariant)", () =>
   };
 
   it("keeps realizedPnlUsd and every rollup total exact despite mixed entry FX", () => {
-    const data = foldEvents(mixedFxGenesis(), [CLOSE_MX]);
+    const data = foldEvents(mixedFxGenesis(), [CLOSE_MX]).data;
     const row = data.closedPositions![0]!;
     // Cost basis converts per-lot at its own entryFx: 100/10 + 300/20 = 10 + 15 = 25.
     expect(row.costBasisUsd).toBeCloseTo(25, 6);
@@ -298,7 +298,7 @@ describe("closed book — mixed-entryFx total-exactness (fold invariant)", () =>
   });
 
   it("splits per Tier by NATIVE cost weight — the documented approximation, not USD-cost-exact", () => {
-    const data = foldEvents(mixedFxGenesis(), [CLOSE_MX]);
+    const data = foldEvents(mixedFxGenesis(), [CLOSE_MX]).data;
     const byTier = new Map(
       data.closedPositions![0]!.tierAttribution.map((t) => [t.tier, t]),
     );

@@ -142,7 +142,7 @@ async function readOrUndefined(path: string): Promise<string | undefined> {
 describe("PositionAddedTo round-trip through event-store (T1)", () => {
   it("persists, reloads, and folds an appended lot (own entry FX / tier), debits the funding reserve, books no realized P&L", async () => {
     // Baseline NAV from a store that only folds genesis (no events).
-    const baseline = buildCompositionReport(await loadFoldedReview(await makeStore({})))
+    const baseline = buildCompositionReport((await loadFoldedReview(await makeStore({}))).data)
       .totals.fundValueUsd;
 
     const paths = await makeStore({ inbox: [addAapl()] });
@@ -165,7 +165,7 @@ describe("PositionAddedTo round-trip through event-store (T1)", () => {
 
     // Folds: the new lot is APPENDED as a distinct element preserving its own entry
     // FX and tier — never blended into the genesis lot's weighted average (ADR-002).
-    const data = await loadFoldedReview(paths);
+    const { data } = await loadFoldedReview(paths);
     const aapl = data.positions.find((position) => position.id === "aapl-core");
     expect(aapl?.lots).toEqual([
       { quantity: 2, cost: 100, tier: "c1" },
@@ -196,7 +196,7 @@ describe("PositionAddedTo — append-never-merge (ADR-002)", () => {
     const report = await ingestInbox(paths);
     expect(report).toMatchObject({ newCount: 2, duplicateCount: 0 });
 
-    const data = await loadFoldedReview(paths);
+    const { data } = await loadFoldedReview(paths);
     const c1Lots = data.positions.find((p) => p.id === "aapl-core")?.lots.filter((l) => l.tier === "c1");
     // Genesis lot + two appended lots = THREE distinct c1 lots, none merged.
     expect(c1Lots).toEqual([

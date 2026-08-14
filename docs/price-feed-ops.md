@@ -456,7 +456,14 @@ Confirm, in order:
    PROJECTION_WRITE_DATABASE_URL is not set` means the key is missing from the env
    file — the run goes red here, deliberately, rather than leaving the dashboard to
    rot quietly. Note the exit is non-zero but the durable log is already committed
-   and verified: this failure costs a stale projection, never fund data.
+   and verified: this failure costs a stale projection, never fund data. If any
+   anchor's fold read an event it could not apply (an absent target — the Discard
+   Channel, ADR-020), a single extra `[backfill] fold: N event(s) were read from
+   the durable log and could not be applied, …` line appears, deduped once per run
+   regardless of how many anchors re-discovered it; this line never sets the exit
+   code — a fold discard is a standing fact about already-committed history, not a
+   failure of this run (`unattendedFoldVerdict`, `pnpm report` shows each dropped
+   event's id/index/verb/reason).
 
 **Why the local step runs before the networked one.** Under `set -e` a failing step
 aborts everything after it, so the order decides what a partial run still delivers.

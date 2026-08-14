@@ -129,7 +129,7 @@ describe("prepareStartup — ingests, surfaces the report, and wires the fold lo
     expect(plan.asOf).toBeUndefined();
     expect(plan.sourcePath).toBe(paths.log);
     // The loader the renderer mounts folds the durable log: the opened position is there.
-    const data = await plan.loadData();
+    const { data } = await plan.loadData();
     expect(data.positions.some((position) => position.id === "btc-core")).toBe(true);
   });
 
@@ -155,7 +155,7 @@ describe("prepareStartup — ingests, surfaces the report, and wires the fold lo
 
     expect(plan.asOf).toBe("2026-06-04");
     expect(plan.sourcePath).toBe(`${paths.log} as-of 2026-06-04`);
-    const data = await plan.loadData();
+    const { data } = await plan.loadData();
     expect(data.positions.some((position) => position.id === "btc-core")).toBe(false);
   });
 

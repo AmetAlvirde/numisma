@@ -41,7 +41,7 @@ function parse(event: Record<string, unknown>): PortfolioEvent {
   return result.value;
 }
 
-/** Fold the fixture genesis over `events`. */
+/** Fold the fixture genesis over `events`, keeping the whole envelope. */
 function fold(events: PortfolioEvent[]): ReturnType<typeof foldEvents> {
   const parsedGenesis = parseFundReview(JSON.stringify(GENESIS));
   if (parsedGenesis.kind !== "ok") throw new Error("bad genesis fixture");

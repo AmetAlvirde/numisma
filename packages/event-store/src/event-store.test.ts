@@ -8,11 +8,13 @@
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { deriveHeadDigest } from "@numisma/engine";
 import {
   loadEventLog,
   loadFoldedReview,
   quarantineLogPath,
   resolveEventStorePaths,
+  unattendedFoldVerdict,
   type EventStorePaths,
 } from "./event-store.js";
 import { genesisSeed } from "./genesis-seed.testkit.js";
@@ -49,6 +51,33 @@ function openBtc(id = "open-btc") {
 
 function markAapl(price: number, id = "mark-aapl") {
   return { id, asOf: "2026-06-06", type: "PriceMarked", instrumentId: "aapl-usd", price };
+}
+
+/**
+ * A `Transfer` whose BOTH legs name reserves the fold has no record of — ONE event, two
+ * skip RECORDS, one finding. Authored here; the ids are invented for this test.
+ */
+function transferBothLegsGhost(id = "transfer-both-ghost") {
+  return {
+    id,
+    asOf: "2026-06-08",
+    type: "Transfer",
+    fromReserveId: "ghost-cash-a",
+    toReserveId: "ghost-cash-b",
+    amount: 100,
+    tier: "c1",
+  };
+}
+
+/** A close whose target the fold has no record of — one silent drop, authored here. */
+function closeGhost(id = "close-ghost") {
+  return {
+    id,
+    asOf: "2026-06-07",
+    type: "PositionClosed",
+    positionId: "ghost-core",
+    settlement: { reserveId: "cash-core", proceeds: 300 },
+  };
 }
 
 const createdDirs: string[] = [];
@@ -129,6 +158,85 @@ describe("loadEventLog — log-line quarantine", () => {
     // The bad line is still surfaced to the side lane for the operator to fix.
     const lane = await readFile(quarantineLogPath(paths.log), "utf8");
     expect(lane).toContain("{ broken");
+  });
+
+  it("refuses what could not be read, reports what was read and then dropped", async () => {
+    // PRD #323 seam B, the pair in one test because the pair is the point: the shell
+    // REFUSES a log it could not fully read, and REPORTS what it read and then dropped.
+    // The first is remediable (fix the line, the next run is clean); the second is a
+    // standing fact about an append-only log, so it reports and never refuses (ADR-020,
+    // `context/adr/ADR-020-the-discard-channel-report-never-refuse.md`).
+    const dropped = `${JSON.stringify(openBtc())}\n${JSON.stringify(closeGhost())}\n`;
+
+    // REPORT: the drop rides out on the envelope, unmodified — the shell is a pipe.
+    const clean = await makeStore({ log: dropped });
+    const folded = await loadFoldedReview(clean);
+    expect(folded.skipped).toHaveLength(1);
+    expect(folded.skipped[0]).toMatchObject({
+      eventId: "close-ghost",
+      index: 1,
+      verb: "PositionClosed",
+      reason: "position-absent",
+    });
+    // And the fold itself is untouched: the open still applied.
+    expect(folded.data.positions.map((position) => position.id)).toContain("btc-core");
+
+    // REFUSE: the same log with one unloadable line throws BEFORE any envelope exists.
+    const partial = await makeStore({ log: `${dropped}{ broken\n` });
+    await expect(loadFoldedReview(partial)).rejects.toThrow(/unloadable line/i);
+  });
+
+  it("the fold's verdict is PROSE ONLY — the type has no exit code to set", async () => {
+    // PRD #323 R7. The consequence is a clause-4 verdict function beside the loader, and
+    // its whole shape is the ruling: `unattendedPreferencesVerdict` returns
+    // `{exitCode, messages}` because a malformed sidecar line is an ERRAND that
+    // extinguishes when the operator edits it; this one returns messages ALONE because a
+    // dropped event's locator points into append-only history and never extinguishes.
+    // A permanently red errand channel is one nobody reads.
+    const paths = await makeStore({
+      log: `${JSON.stringify(openBtc())}\n${JSON.stringify(closeGhost())}\n`,
+    });
+
+    const verdict = unattendedFoldVerdict(await loadFoldedReview(paths));
+
+    // ONE line, carrying the count and nothing else that varies — never an enumeration,
+    // regardless of how many events dropped, because it prints unasked and daily.
+    expect(verdict.messages).toHaveLength(1);
+    expect(verdict.messages[0]).toContain("1 event(s)");
+    expect(verdict.messages[0]).not.toContain("close-ghost");
+    expect(verdict.messages[0]).not.toContain("PositionClosed");
+    // The member is ABSENT, not zero. `Object.keys` rather than a `toBeUndefined`, which
+    // would also pass on a verdict that simply forgot to set one.
+    expect(Object.keys(verdict)).toEqual(["messages"]);
+  });
+
+  it("the digest and the unattended line report the SAME number for the same log", async () => {
+    // The two surfaces are read by the same operator hours apart — the evening line as it
+    // prints, the digest whenever a bad NAV sends someone back through `head-digest.json`
+    // — and the digest is the half that cannot be re-derived to settle a disagreement,
+    // because it is committed and the run that wrote it is gone. So they must count the
+    // same thing, by construction rather than by two definitions happening to agree.
+    //
+    // ONE `Transfer` with both legs absent is the shape that separates them: it writes two
+    // skip RECORDS (each leg records independently, spec #323 slice A) about ONE event.
+    // A raw `skipped.length` says 2 where the verdict says 1.
+    const paths = await makeStore({
+      log: `${JSON.stringify(openBtc())}\n${JSON.stringify(transferBothLegsGhost())}\n`,
+    });
+    const folded = await loadFoldedReview(paths);
+    expect(folded.skipped).toHaveLength(2); // two records…
+
+    const digest = deriveHeadDigest(folded, "transfer-both-ghost", "0.7.2");
+    const verdict = unattendedFoldVerdict(folded);
+
+    expect(digest.discardedEventCount).toBe(1); // …one event.
+    expect(verdict.messages[0]).toContain(`${digest.discardedEventCount} event(s)`);
+  });
+
+  it("says NOTHING over a clean log — the daily run stays byte-identical", async () => {
+    const paths = await makeStore({ log: `${JSON.stringify(openBtc())}\n` });
+
+    expect(unattendedFoldVerdict(await loadFoldedReview(paths)).messages).toEqual([]);
   });
 
   it("self-heals: a clean log removes a stale quarantine lane", async () => {

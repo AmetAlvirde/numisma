@@ -77,11 +77,17 @@
  */
 import { writeFile } from "node:fs/promises";
 import type { Pool } from "pg";
-import type { CompositionReport, LoadedPreferences } from "@numisma/engine";
+import type {
+  CompositionReport,
+  FoldedReview,
+  LoadedPreferences,
+  SkippedFoldEvent,
+} from "@numisma/engine";
 import {
   loadEventLog,
   loadGenesis,
   resolveEventStorePaths,
+  unattendedFoldVerdict,
   type EventStorePaths,
 } from "@numisma/event-store";
 import { unattendedPreferencesVerdict } from "@numisma/preferences";
@@ -97,6 +103,7 @@ import {
   deriveSnapshot,
   loadCurrentFold,
   upsertSnapshot,
+  FOLD_DIAGNOSTIC_KIND,
   PREFERENCES_DIAGNOSTIC_KIND,
   type AnchorGlance,
   type SnapshotDerivation,
@@ -216,6 +223,20 @@ export interface BackfillOptions {
    * leave the projection with a partial replay for a sidecar problem.
    */
   onPreferencesLoad?: ((loaded: LoadedPreferences) => void) | undefined;
+  /**
+   * Called once per anchor, AFTER that anchor has been written, with the FOLD envelope
+   * that anchor's row was derived from (PRD #323 seam E). Same ordering guarantee and
+   * same reasoning as {@link onPreferencesLoad} beside it: a callback that throws must
+   * not be able to withhold a row, and this one is invoked where it cannot.
+   *
+   * PER ANCHOR, BECAUSE THAT IS THE TRUTH, and here the repetition is not even
+   * approximately harmless: each anchor re-folds the whole log to its own date, so one
+   * damaged historical event is genuinely rediscovered on every anchor at or after its
+   * date. Collapsing that to once per RUN is the CALLER's job — and for this kind it is
+   * `unattendedFoldVerdict`'s dedup rather than `RunReport`'s, because two anchors
+   * legitimately produce two DIFFERENT counts and text-dedup would keep both lines.
+   */
+  onFoldedLoad?: ((folded: FoldedReview) => void) | undefined;
 }
 
 /**
@@ -289,6 +310,7 @@ export async function runBackfill(
     // throw abandons the entire replay over a sidecar line. Pinned in
     // `discard-channel.test.ts`; same guarantee `pushAnchorAndReport` gives the push.
     options.onPreferencesLoad?.(glance.preferences);
+    options.onFoldedLoad?.(glance.folded);
     options.onAnchor?.(anchor, index, anchors.length);
   }
   return results;
@@ -313,7 +335,8 @@ export interface BackfillRun {
 }
 
 /** Everything a reported backfill needs beyond the replay's own options. */
-export interface BackfillAndReportInput extends Omit<BackfillOptions, "onPreferencesLoad"> {
+export interface BackfillAndReportInput
+  extends Omit<BackfillOptions, "onPreferencesLoad" | "onFoldedLoad"> {
   /** The run's shared operator channel. Other kinds may already have filed into it. */
   channel: RunReport;
   /** Where the channel is written. Injected so the ORDERING below is assertable. */
@@ -363,10 +386,24 @@ export async function runBackfillAndReport(
   input: BackfillAndReportInput,
 ): Promise<BackfillRun> {
   let preferencesExitCode = 0;
+  /**
+   * EVERY ANCHOR'S SKIPS, CONCATENATED — deliberately not deduped here and not turned
+   * into prose here. The replay re-folds the whole log per anchor, so one damaged event
+   * appears once per anchor at or after its date, and each anchor's fold sees a
+   * different number of them: anchor 1 may see one drop and anchor 12 may see nine.
+   * Filing a line per anchor would therefore leave the channel holding twelve DIFFERENT
+   * count lines, which `RunReport`'s text-dedup cannot collapse and should not try to.
+   * One verdict over the union, after the loop, is the only shape that yields the
+   * run's real count.
+   */
+  const foldSkips: SkippedFoldEvent[] = [];
   const results = await runBackfill({
     pool: input.pool,
     paths: input.paths,
     onAnchor: input.onAnchor,
+    onFoldedLoad: (folded) => {
+      foldSkips.push(...folded.skipped);
+    },
     // The co-tenancy seam, deliberately not collapsed into a helper: derive one kind's
     // verdict, file its PROSE under its own kind, accumulate its EXIT CODE separately.
     // A second kind is three more lines in the same shape, with its own exit policy.
@@ -376,6 +413,18 @@ export async function runBackfillAndReport(
       preferencesExitCode = Math.max(preferencesExitCode, verdict.exitCode);
     },
   });
+
+  // ONE fold verdict for the whole replay, deduped on (`eventId`, `reason`) inside the
+  // verdict — so N anchors that each rediscovered the same damaged event yield one line
+  // carrying the count of DISTINCT dropped events, not N lines and not N × the count.
+  // It files no exit code because its type has none: a fold discard is a standing fact
+  // about append-only history, and this command's exit code is read by
+  // `run-daily-fetch.sh` (see below), which is precisely the channel a standing fact
+  // must never permanently redden.
+  input.channel.add(
+    FOLD_DIAGNOSTIC_KIND,
+    unattendedFoldVerdict({ skipped: foldSkips }).messages,
+  );
 
   await input.onComplete?.(results);
   input.channel.emit(input.emit ?? ((line) => console.error(line)));

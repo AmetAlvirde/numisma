@@ -365,7 +365,15 @@ not, and the reason is *structural*, not a matter of discipline:
 - **The Head Digest is a re-derivable breadcrumb, not stored state.** It carries only
   `fundValueUsd` (sourced from the canonical `buildCompositionReport`, never a side calc),
   open/closed Position counts, the head event id, and the writing-app version — every field
-  recomputable from the log by a fold. The rejected "dated full snapshot" was a *replacement*
+  recomputable from the log by a fold. **Corrected in place 2026-08-13 (spec #323 →
+  ADR-020, the Discard Channel): schema v2 adds a fifth recomputable field,
+  `discardedEventCount`** — the number of DISTINCT events the capture fold read and could
+  not apply (`dedupeFoldSkips(folded.skipped).length`, the Discard Channel's own key, so
+  this artifact and the unattended verdict line can never report different figures for
+  one log; a `Transfer` records each absent leg, and that is two records about one
+  event) — so a nonzero discard is visible on the one artifact
+  premised on nobody replaying the log to re-check it; still a count only, still no
+  reader, still recomputable, so this bullet's claim is amended, not broken. The rejected "dated full snapshot" was a *replacement*
   for the actions log; the Head Digest is a *pointer into* it.
 - **It is overwritten each ingest, not accumulated per period.** The rejected option
   duplicated unchanged `FundReviewData` every review point; the Head Digest is a single file
@@ -385,7 +393,11 @@ not, and the reason is *structural*, not a matter of discipline:
 Elevated here from an incidental test assertion to a **named invariant of this ADR**,
 analogous to the realized-P&L amendment's blank-the-closed-book lock:
 
-> `deriveHeadDigest(folded).fundValueUsd === buildCompositionReport(folded).totals.fundValueUsd`
+> `deriveHeadDigest(folded).fundValueUsd === buildCompositionReport(folded.data).totals.fundValueUsd`
+>
+> (`folded` is the whole `FoldedReview` envelope since ADR-020 — `deriveHeadDigest` takes
+> it, never a bare `FundReviewData`, so a caller structurally cannot derive a digest that
+> omits `discardedEventCount`.)
 
 The Head Digest's value **must equal the canonical composition report's fund value,
 byte-for-byte** — never a rounded, reformatted, or independently computed number. Any change
