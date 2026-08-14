@@ -232,10 +232,12 @@ export function foldEvents(
   // Latest-wins per position. The VALUE CARRIES THE MARKING EVENT'S LOCATOR alongside
   // the level, because `InvalidationMarked` is the one drop kind with no branch to hang
   // a diagnostic on — it is detected after the loop, BY ABSENCE, and by then the event
-  // itself is long out of scope. Latest-wins keeps the latest marker's locator.
+  // itself is long out of scope. Latest-wins keeps the latest marker's locator. The
+  // `asOf` rides along for the same reason: the post-loop pass dates the mark against
+  // its target's retirement date, and that comparison is unmakeable from the level.
   const latestInvalidation = new Map<
     string,
-    { level: InvalidationLevel; eventId: string; index: number }
+    { level: InvalidationLevel; eventId: string; index: number; asOf: string }
   >();
   const skipped: SkippedFoldEvent[] = [];
   /** Record one drop with the event's own locator. Never refuses, never throws. */
@@ -533,6 +535,7 @@ export function foldEvents(
           level: { price: event.price, direction: event.direction },
           eventId: event.id,
           index: order,
+          asOf: event.asOf,
         });
         break;
       case "PriceMarked": {
@@ -651,14 +654,78 @@ export function foldEvents(
   // is worth less than no channel. An id in NEITHER the surviving positions NOR the
   // closed book never had a target in this fold at all.
   //
-  // RESIDUAL, NAMED AND ACCEPTED: an invalidation dated after a seal on a CLOSED id goes
-  // undetected here — the id is in the closed book, so it passes. No observable state
-  // moves in that case, and its sibling verbs' consequences (a close, trim, or add on
-  // the same retired id) are all detected by the arms above. This is the honest boundary
-  // of detect-by-absence, not an oversight to be patched with a heuristic.
+  // A CLOSED ID IS NOT AUTOMATICALLY INNOCENT (#297). "In the closed book" answers only
+  // that the id existed; it does not answer whether the MARK found it. Dating the mark
+  // against the retirement date does, and exactly — not by heuristic:
+  //   • mark BEFORE the retiring close  → applied while the position was live. No drop.
+  //   • mark AFTER  the retiring close  → landed on an id the fold had already deleted.
+  //     The level vanished, and because an `InvalidationMarked` moves no observable
+  //     state, NOTHING ELSE anywhere can say so. Unobservable is the reason to report
+  //     it, not the reason to stay quiet.
+  // Both operands are state this pass already holds, which is what makes this a decision
+  // rather than an inference — and what keeps it clear of the cry-wolf failure above.
+  //
+  // RESIDUALS, NAMED AND ACCEPTED — TWO drops still pass this pass in silence. Detection
+  // here is deliberately only the exactly-decidable sub-case (#297); these two are not it,
+  // and naming them is the point. Widening to cover either is #329's business, not this
+  // pass's — but the comment must not assert a boundary the code does not hold.
+  //
+  //   1. A SUPERSEDED POST-RETIREMENT MARK. `latestInvalidation` is latest-wins per
+  //      position (A3's documented property), so when two marks both land after the
+  //      close only the later one is even visible here. The earlier one was dropped by
+  //      the fold and leaves no record at all — one drop reported, two drops taken.
+  //   2. THE SAME-DATE TIE: a mark dated ON its position's retirement date. The fold
+  //      breaks an equal-`asOf` tie by log index, so this IS decidable — and, to be
+  //      exact about why it is nevertheless undecided: the index is not missing state.
+  //      `order` is in scope in the `PositionClosed` arm above, right where the row is
+  //      pushed; carrying it in a fold-local map instead of re-deriving retirement from
+  //      `closedPositions` after the loop would settle the tie outright. What is missing
+  //      is only the CLOSED BOOK's carriage of it — a consequence of where this
+  //      derivation is SITED, a choice, not a constraint that binds this function.
+  //      Rather than widen the ruled sub-case, the comparison stays STRICTLY later and
+  //      the tie stays silent.
+  //
+  // Every other same-day sibling verb (close, trim, add on the retired id) is caught by
+  // the arms above; these two are the honest edge of detect-by-date.
   const closedBookIds = new Set(closedPositions.map((record) => record.positionId));
+  // Retirement dates, from the FULL-close rows only — a partial row is a trim, and the
+  // fold never deletes on a trim. LATEST wins: an id that is absent from `positions` at
+  // the end of the fold was retired by its LAST full close, so that is the date "was the
+  // position still live?" has to be asked against.
+  //
+  // DO NOT "ALIGN" THIS WITH `crossReferenceInvalidation`'s `closedPositionAsOf`
+  // (`crossref.ts`, A2), which is EARLIEST-wins. The two maps look alike and answer
+  // opposite questions, so harmonising them would break one of them:
+  //   • A2 is a GATE looking FORWARD — "from what date on is this id retired, so which
+  //     incoming verbs must I refuse?" Earliest is the conservative bound there; it errs
+  //     toward REFUSING, which is the safe direction for a gate.
+  //   • This is a REPORT looking BACKWARD — "on the mark's date, was the id already
+  //     gone for good?" Earliest errs toward ALARMING here: on a reused id (closed,
+  //     reopened, closed again — two full-close rows) a mark placed during the SECOND
+  //     live period post-dates the FIRST close and would be reported as a drop, flatly
+  //     contradicting this pass's own rule that a mark applied while the position was
+  //     live is no drop. That is the cry-wolf failure the guard above exists to prevent.
+  // Latest-wins errs the other way — a mark landing in the dead gap between two live
+  // periods stays silent — which is a miss, not a false alarm, and this channel is built
+  // to prefer silence over crying wolf. A gated log cannot produce two full-close rows
+  // for one id (`crossReferenceOpen` refuses a duplicate id), but ungated `foldEvents`
+  // callers — the legacy migration and pre-rule history — can, and they are exactly the
+  // population this channel exists for.
+  const retiredAsOf = new Map<string, string>();
+  for (const record of closedPositions) {
+    if (record.partial) continue;
+    const existing = retiredAsOf.get(record.positionId);
+    if (existing === undefined || record.closedAsOf > existing) {
+      retiredAsOf.set(record.positionId, record.closedAsOf);
+    }
+  }
   const orphanedMarks = [...latestInvalidation.entries()]
-    .filter(([positionId]) => !positions.has(positionId) && !closedBookIds.has(positionId))
+    .filter(([positionId, mark]) => {
+      if (positions.has(positionId)) return false;
+      if (!closedBookIds.has(positionId)) return true;
+      const retired = retiredAsOf.get(positionId);
+      return retired !== undefined && mark.asOf > retired;
+    })
     .map(([, mark]) => mark)
     // Appended AFTER the in-loop records (they are found after the loop), ordered among
     // themselves by input index — deterministic without pretending to an application
