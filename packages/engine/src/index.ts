@@ -57,7 +57,7 @@ export type {
   RealizedRollupRow,
   InvalidationWatchRow,
 } from "./contracts.js";
-export { validationSeverityByCode } from "./contracts.js";
+export { validationSeverityByCode, CAPITAL_TIERS } from "./contracts.js";
 
 // Public functions: parse untrusted input, compose the read model, drill down.
 export { parseFundReview } from "./parse.js";
@@ -394,10 +394,48 @@ export type {
 export {
   PLAN_KINDS,
   DCA_CADENCES,
+  PULL_INSTRUCTION,
   isIsoCalendarDate,
   pickPlanAsOf,
   listPlansAsOf,
 } from "./plans.js";
+
+// The `reconciliations.jsonl` trail (E2, #321) — THE RECORD THAT THE OPERATOR WAS
+// TOLD: at a named moment a reader compared one fill against the plan in force and
+// showed the operator the result. `plans.jsonl` stays authoritative; a line there
+// never overrides it.
+//
+// Pure declarations only — the closed mismatch vocabulary, the record and read-side
+// shapes, the verdict function total over `PlanLookup`'s five arms, and the canonical
+// serializer. The file IO lives in `@numisma/preferences`, per ADR-001, which is also
+// why the READ-side shapes are declared here rather than beside the loader: the
+// dependency runs one way only.
+//
+// MANUAL BLOCK, exactly like the plans one above and for the same reason: this list
+// is NOT derived, so a shape added to the module is nameable outside the package only
+// if it is added HERE too.
+export type {
+  ReconciliationMismatch,
+  DeclaredAsShown,
+  ReconciliationFillKind,
+  ReconciliationRecord,
+  LoadedReconciliationRecord,
+  ReconciliationSkipReason,
+  SkippedReconciliationLine,
+  LoadedReconciliations,
+  ReconciliationVerdict,
+  PlanReconciliation,
+  ReconciliationClass,
+} from "./reconciliations.js";
+export {
+  RECONCILIATION_MISMATCHES,
+  isRenderableRecordId,
+  isRecordEventId,
+  reconcileAgainstPlan,
+  classifyReconciliation,
+  pickReconciliationAsOf,
+  serializeReconciliationRecord,
+} from "./reconciliations.js";
 
 // The ONE pure resolver for the durable ledger's data root, honoring the
 // `NUMISMA_DATA_DIR` env override with an absolute, homedir-derived accumulus

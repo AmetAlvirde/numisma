@@ -1,13 +1,15 @@
 /**
- * The two mechanics EVERY sidecar in ADR-004's class needs, extracted because two
- * real call sites now need them: where the file lives, and how a line gets added to
- * it without losing one.
+ * The mechanics EVERY sidecar in ADR-004's class needs, extracted because more than
+ * one real call site needs each: where the file lives, how a line gets added to it
+ * without losing one, and the two things every JSONL reader here does to a line
+ * before it can look at what the line MEANS.
  *
- * Neither carries any FORMAT policy — no record shape, no validation, no vocabulary.
- * That is what makes this shareable at all: `orders.ts` and `plans.ts` disagree
- * about almost everything except "resolve under the data dir" and "append
- * atomically", and those two rules belong to the filesystem and to ADR-006, not to
- * either file's contract.
+ * Nothing here carries any FORMAT policy — no record shape, no validation, no
+ * vocabulary. That is what makes this shareable at all: `orders.ts`, `plans.ts` and
+ * `reconciliations.ts` disagree about almost everything except "resolve under the
+ * data dir", "append atomically", "a BOM is not content" and "an array is not a
+ * record". Those belong to the filesystem, to ADR-006, to UTF-8 and to JSON — not to
+ * any one file's contract.
  */
 import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
@@ -46,6 +48,31 @@ export function resolveSidecarPath(fileName: string, dataDir?: string): string {
     );
   }
   return join(resolve(raw), fileName);
+}
+
+/**
+ * The UTF-8 byte-order mark. Nothing this repo writes emits one, but a file that has
+ * been round-tripped through an editor — a hand-authored plan, a repaired trail —
+ * can carry one, and it is invisible to the operator and fatal to `JSON.parse` on
+ * line 1. A loader that did not strip it would call the FIRST line of a perfectly
+ * good file corrupt.
+ */
+const BOM = "\uFEFF";
+
+/** Drop a leading BOM if there is one. A no-op on every file this repo writes. */
+export function stripBom(raw: string): string {
+  return raw.startsWith(BOM) ? raw.slice(BOM.length) : raw;
+}
+
+/**
+ * Is this a JSON OBJECT — not an array, not `null`, not a scalar?
+ *
+ * `typeof [] === "object"` and `typeof null === "object"`, so the bare `typeof` test
+ * every sidecar reader wants is wrong twice over, and it is wrong in the direction
+ * that lets a line through to code that will then index it.
+ */
+export function isRecordObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**
