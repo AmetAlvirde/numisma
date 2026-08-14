@@ -8,6 +8,7 @@
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { deriveHeadDigest } from "@numisma/engine";
 import {
   loadEventLog,
   loadFoldedReview,
@@ -50,6 +51,22 @@ function openBtc(id = "open-btc") {
 
 function markAapl(price: number, id = "mark-aapl") {
   return { id, asOf: "2026-06-06", type: "PriceMarked", instrumentId: "aapl-usd", price };
+}
+
+/**
+ * A `Transfer` whose BOTH legs name reserves the fold has no record of — ONE event, two
+ * skip RECORDS, one finding. Authored here; the ids are invented for this test.
+ */
+function transferBothLegsGhost(id = "transfer-both-ghost") {
+  return {
+    id,
+    asOf: "2026-06-08",
+    type: "Transfer",
+    fromReserveId: "ghost-cash-a",
+    toReserveId: "ghost-cash-b",
+    amount: 100,
+    tier: "c1",
+  };
 }
 
 /** A close whose target the fold has no record of — one silent drop, authored here. */
@@ -191,6 +208,29 @@ describe("loadEventLog — log-line quarantine", () => {
     // The member is ABSENT, not zero. `Object.keys` rather than a `toBeUndefined`, which
     // would also pass on a verdict that simply forgot to set one.
     expect(Object.keys(verdict)).toEqual(["messages"]);
+  });
+
+  it("the digest and the unattended line report the SAME number for the same log", async () => {
+    // The two surfaces are read by the same operator hours apart — the evening line as it
+    // prints, the digest whenever a bad NAV sends someone back through `head-digest.json`
+    // — and the digest is the half that cannot be re-derived to settle a disagreement,
+    // because it is committed and the run that wrote it is gone. So they must count the
+    // same thing, by construction rather than by two definitions happening to agree.
+    //
+    // ONE `Transfer` with both legs absent is the shape that separates them: it writes two
+    // skip RECORDS (each leg records independently, spec #323 slice A) about ONE event.
+    // A raw `skipped.length` says 2 where the verdict says 1.
+    const paths = await makeStore({
+      log: `${JSON.stringify(openBtc())}\n${JSON.stringify(transferBothLegsGhost())}\n`,
+    });
+    const folded = await loadFoldedReview(paths);
+    expect(folded.skipped).toHaveLength(2); // two records…
+
+    const digest = deriveHeadDigest(folded, "transfer-both-ghost", "0.7.2");
+    const verdict = unattendedFoldVerdict(folded);
+
+    expect(digest.discardedEventCount).toBe(1); // …one event.
+    expect(verdict.messages[0]).toContain(`${digest.discardedEventCount} event(s)`);
   });
 
   it("says NOTHING over a clean log — the daily run stays byte-identical", async () => {
