@@ -29,6 +29,7 @@ import {
   type FundReviewData,
   type OrderRecord,
   type PortfolioEvent,
+  type ReconciliationRecord,
 } from "@numisma/engine";
 import type { OrdersLoad } from "@numisma/preferences";
 import { recordFill, type RecordFillIo, type RecordFillOutcome } from "./record-fill.js";
@@ -92,6 +93,8 @@ class Harness {
   readonly err: string[] = [];
   /** Every question the flow put to the operator, in order — the prompt TEXT matters. */
   readonly asked: string[] = [];
+  /** Trail lines the advisory reconcile appended — held, never asserted on here. */
+  readonly reconciliations: ReconciliationRecord[] = [];
   private readonly answers: string[];
 
   constructor(options: {
@@ -148,6 +151,20 @@ class Harness {
       loadGenesis: async () => genesisSeed(),
       loadLogEvents: async () => this.logEvents(),
       loadFolded: async () => foldEvents(genesisSeed(), this.logEvents()),
+      // The advisory trail (`D6`, #336), held in memory. Nothing in this suite turns on
+      // it — it is wired so the act's atomicity is measured with the trail running, and
+      // so a future edit that let it reach a writer would fail here rather than in prod.
+      plansPath: "/synthetic/plans.jsonl",
+      loadPlans: async () => ({
+        load: { status: "loaded" as const, sourcePath: "/synthetic/plans.jsonl" },
+        plans: [],
+        skipped: [],
+      }),
+      reconciliationsPath: "/synthetic/reconciliations.jsonl",
+      appendReconciliation: async (_path, record) => {
+        this.reconciliations.push(record);
+      },
+      toldAt: () => "2026-01-05T18:07:00-06:00",
       ask: async (question) => {
         this.asked.push(question);
         return this.answers.shift() ?? "";

@@ -237,6 +237,20 @@ export type LoadedPlanRecord = PlanRecord & { line: number };
 export type PlanSkipReason = "unsupported" | "invalid";
 
 /**
+ * The instruction an `unsupported` skip carries — the whole reason the taxonomy above
+ * splits by INSTRUCTION rather than by parse stage: this line is fine and this
+ * checkout is behind.
+ *
+ * It lives beside the reason it explains rather than in each loader, because the two
+ * sidecars that emit it were carrying it word for word: `unsupported` means one thing
+ * across ADR-004's class, and an operator who reads a different instruction from
+ * `plans.jsonl` than from `reconciliations.jsonl` for the same bucket has been told
+ * the taxonomy means two things.
+ */
+export const PULL_INSTRUCTION =
+  "this checkout may be older than the file — pull and retry";
+
+/**
  * One line the loader could not turn into a record, REPORTED rather than swallowed.
  *
  * `detail` is PROSE-ONLY and never quotes the line. Plan bodies carry figures, and
@@ -381,22 +395,49 @@ function requireAsOf(asOf: IsoDate, caller: string): void {
 }
 
 /**
- * The supersession comparison: the pair `(effectiveAt, line)`, lexicographic, with
- * **`effectiveAt` PRIMARY**.
+ * The supersession comparison, ONCE: the pair `(date, line)`, lexicographic, with
+ * **the DATE PRIMARY**.
  *
  * Inverting the keys breaks as-of replay outright: a back-dated correction appended
  * today would beat a plan appended last month, and every historical query would
  * answer with a policy that was not yet in effect.
+ *
+ * It is exported — and stated over a bare `date` rather than over `effectiveAt` —
+ * because the `reconciliations.jsonl` trail selects by the same pair, on its own
+ * `asOf`, and D8's "a later clean fill clears the mark" is exactly this comparison.
+ * A second comparator with the same semantics is the thing to avoid: two copies of
+ * "which line is newer" drift into a silently wrong ladder rather than a slow one.
+ * {@link isLater} is a naming adapter over it, not a second answer.
  */
+export function isLaterByDateThenLine(
+  a: { date: IsoDate; line: number },
+  b: { date: IsoDate; line: number },
+): boolean {
+  return a.date === b.date ? a.line > b.line : a.date > b.date;
+}
+
+/** {@link isLaterByDateThenLine}, spelled in the sidecar's own field name. */
 function isLater(
   a: { effectiveAt: IsoDate; line: number },
   b: { effectiveAt: IsoDate; line: number },
 ): boolean {
-  return a.effectiveAt === b.effectiveAt ? a.line > b.line : a.effectiveAt > b.effectiveAt;
+  return isLaterByDateThenLine(
+    { date: a.effectiveAt, line: a.line },
+    { date: b.effectiveAt, line: b.line },
+  );
 }
 
-/** File order — the operator's own reading order, and the only order a diagnostic list may take. */
-function byLine<T extends { line: number }>(entries: readonly T[]): T[] {
+/**
+ * File order — the operator's own reading order, and the only order a diagnostic list
+ * may take.
+ *
+ * Exported for {@link isLaterByDateThenLine}'s reason, one notch weaker: the trail's
+ * diagnostics take the same order, and "file order is the operator's own reading
+ * order" has to keep meaning ONE thing across both files. A sort is a sort and two
+ * correct copies cost nothing today — but two copies is one more pair someone has to
+ * keep identical for a stated invariant to stay stated once.
+ */
+export function byLine<T extends { line: number }>(entries: readonly T[]): T[] {
   return [...entries].sort((a, b) => a.line - b.line);
 }
 

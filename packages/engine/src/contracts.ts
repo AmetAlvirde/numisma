@@ -14,7 +14,24 @@
 export type Currency = "USD" | "MXN";
 export type ExecutionMode = "live" | "paper" | "back-test" | "forward-test";
 export type Direction = "long" | "short";
-export type CapitalTier = "c1" | "c2" | "c3";
+/**
+ * The fund's CLOSED capital-tier vocabulary, declared ONCE as a value and narrowed
+ * into the type below.
+ *
+ * A value rather than a bare union because `CapitalTier` is erased at runtime and
+ * every sidecar loader has to test an untrusted string from a file against it. Both
+ * `plans.jsonl` and `reconciliations.jsonl` did that against their own private copies
+ * of this list, which is exactly the wrong shape for it: adding a tier is an ADR-002
+ * amendment — a fund-structure change, not a forward-compatibility event — and an
+ * amendment applied to one copy would make the other treat every line naming the new
+ * tier as CORRUPT, diagnosing "torn write" at a file that is perfectly intact.
+ *
+ * The type is derived from the value rather than restated beside it, so the two
+ * cannot disagree even here.
+ */
+export const CAPITAL_TIERS = ["c1", "c2", "c3"] as const;
+
+export type CapitalTier = (typeof CAPITAL_TIERS)[number];
 
 /**
  * A Lot is the shared genealogy unit: it preserves Capital Tier attribution on a

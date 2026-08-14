@@ -49,29 +49,54 @@
  * landed by — after which the reconciliation is clean and the flow proceeds. The log half
  * is deliberately NOT rewritten: it is the durable record of fact and it is correct; it is
  * the speculative sidecar that is behind.
+ *
+ * THE RECONCILIATION TRAIL IS NOT PART OF THE ACT, AND THE ARGUMENT ABOVE IS UNCHANGED BY
+ * IT (`D6`, #336). After the two writes above are durable, this flow compares the fill it
+ * just recorded against the plan `plans.jsonl` declares for that position and appends one
+ * line to `data/reconciliations.jsonl` saying what the operator was told. That read is
+ * ADVISORY: it cannot refuse a fill, fail one, roll one back, or change this flow's exit
+ * code, because a plan is a declaration of intent and not an authorization. Every failure
+ * of it degrades to a loud stderr warn and returns.
+ *
+ * Both halves of that placement are load-bearing. Writing the trail INSIDE the act would
+ * let a plans-adjacent problem refuse a real observed fill; writing it BEFORE would record
+ * a telling for a fill that validation then rejects. So it is last, outside the `try` that
+ * rolls the log back, and the residual crash window named above is untouched — a kill
+ * between the act and the trail costs one advisory line, which a reader reports as UNKNOWN
+ * rather than as clean.
  */
 import {
   bookedFills,
   buildEventReference,
   buildFillAct,
+  classifyReconciliation,
   committedRungs,
   crossReferenceEvent,
+  isIsoCalendarDate,
   isObservedAtStamp,
+  isRenderableRecordId,
   OBSERVED_AT_RULE,
   parseEvent,
+  pickPlanAsOf,
   pickRestingOrdersAsOf,
   proposeFillVerdicts,
+  reconcileAgainstPlan,
   reconcileFillActs,
   scopeBookForFill,
   type BookObservation,
+  type CapitalTier,
   type CommittedRung,
   type FillAct,
   type FundReviewData,
   type LadderTarget,
+  type LoadedPlans,
   type ObservedRungState,
   type OrderRecord,
+  type PlanLookup,
   type PortfolioEvent,
   type ProposedVerdict,
+  type ReconciliationFillKind,
+  type ReconciliationRecord,
 } from "@numisma/engine";
 import type { OrdersLoad } from "@numisma/preferences";
 import { nextLogImage, serializeEvent } from "./event-store.js";
@@ -95,6 +120,23 @@ export interface RecordFillIo {
   loadLogEvents: () => Promise<PortfolioEvent[]>;
   /** The FOLDED book: where the ladder's Position and the funding tier are read from. */
   loadFolded: () => Promise<FundReviewData>;
+  /**
+   * `plans.jsonl` — READ ONLY, and only AFTER the act (`D1`, `D6`). It is named on the
+   * bag rather than resolved inside the flow for the reason every other path here is:
+   * a test drives an unreadable sidecar without touching a disk.
+   */
+  plansPath: string;
+  loadPlans: (path: string) => Promise<LoadedPlans>;
+  /** `data/reconciliations.jsonl` — the trail. Appended best-effort, outside the act. */
+  reconciliationsPath: string;
+  appendReconciliation: (path: string, record: ReconciliationRecord) => Promise<void>;
+  /**
+   * THE TELLING (`D4`) — when the operator was shown the reconciliation, as an instant
+   * with an EXPLICIT OFFSET. Injected rather than read from the wall clock so a test can
+   * pin it, and deliberately distinct from the fill's own `asOf`: a back-dated fill's
+   * telling is not the fill's date.
+   */
+  toldAt: () => string;
   ask: (question: string) => Promise<string>;
   out: (message: string) => void;
   err: (message: string) => void;
@@ -288,6 +330,202 @@ async function observeBook(
   }
 
   return { status: "observed", observation: { observedAt, present } };
+}
+
+/**
+ * The half of {@link RecordFillIo} the advisory reconcile touches — and nothing else.
+ *
+ * Narrowed the way `resolveFunding` takes `ask` alone: the reconcile can reach no writer
+ * of the act, so no future edit of it can reach one either. Nothing in this type can
+ * write `events.jsonl`, write `orders.jsonl`, or roll either back.
+ */
+export type ReconcileTrailIo = Pick<
+  RecordFillIo,
+  "plansPath" | "loadPlans" | "reconciliationsPath" | "appendReconciliation" | "toldAt" | "err"
+>;
+
+/** Everything about the fill THAT ALREADY LANDED which the reconcile reasons over. */
+export interface RecordedFillFacts {
+  positionId: string;
+  /** `BaseEvent.id` — `D7`'s "one line per fill" is one line per event id. */
+  eventId: string;
+  fillKind: ReconciliationFillKind;
+  /**
+   * The fill's own date AND the date the selector selects on. Typed `string` rather
+   * than `IsoDate` because that is what `BaseEvent.asOf` is — see {@link lookUpPlanForFill}.
+   */
+  asOf: string;
+  /** The observed side of `D3`'s membership test. */
+  lotTier: CapitalTier;
+  /**
+   * THE PRE-FILL born-ness set, and the ordering is the point: a `PositionOpened` fill
+   * records the plan as it stood at the moment of the telling — still `pending`. That is
+   * the truthful account, because this line IS the record of the loop closing. Handing
+   * over the post-fill set would render it `active` and quietly destroy that fact.
+   */
+  existingPositionIds: ReadonlySet<string>;
+}
+
+/** The lookup for a fill whose plan could not be established — never a mismatch, never clean. */
+function planUnreadable(): PlanLookup {
+  return { status: "unreadable", skipped: [], unattributable: [] };
+}
+
+/**
+ * `S1a` — THE CALENDAR GUARD, AND WHY IT IS NOT A `try`/`catch`.
+ *
+ * `pickPlanAsOf` is the one non-total call on this path: its `requireAsOf` guard THROWS
+ * when `asOf` is not a strict ISO calendar date, and it throws BY DESIGN — a lax date
+ * does not merely look wrong, it SORTS wrong and silently selects a different plan. `D1`
+ * forbids a throw here, so the predicate is cleared BEFORE the call and its failure has a
+ * specified verdict: `declared: {status: "unreadable"}`, never a mismatch and never clean.
+ *
+ * `BaseEvent.asOf` is typed plain `string`, not `IsoDate`, so this is a TYPE-LEVEL gap
+ * and not merely a defensive one — the compiler will not catch its omission. Catching
+ * around the selector instead would be the wrong repair twice over: it would swallow a
+ * genuine bug, and it would leave the wrong-plan selection unaddressed.
+ *
+ * The plans READ is wrapped, and that is a different question. `loadPlans` is total by
+ * contract, but this is an INJECTED IO boundary and IO genuinely fails; a throwing reader
+ * must not reach the caller, because the fill it belongs to is already on disk.
+ */
+async function lookUpPlanForFill(
+  io: ReconcileTrailIo,
+  fill: RecordedFillFacts,
+): Promise<PlanLookup> {
+  if (!isIsoCalendarDate(fill.asOf)) {
+    return planUnreadable();
+  }
+  let loaded: LoadedPlans;
+  try {
+    loaded = await io.loadPlans(io.plansPath);
+  } catch {
+    return planUnreadable();
+  }
+  return pickPlanAsOf(loaded, fill.positionId, fill.asOf, fill.existingPositionIds);
+}
+
+/**
+ * `S1` + `S3` — THE ADVISORY RECONCILE AND THE BEST-EFFORT TRAIL APPEND.
+ *
+ * Called ONCE, after the two-file act is durable and outside its rollback. It returns
+ * normally on every path, including every failure: the fill is already on disk, so the
+ * only thing a throw here could achieve is to turn a plans problem into a failed act,
+ * which is exactly what `D1` exists to make unreachable.
+ *
+ * `D7` — ONE LINE PER FILL, CLEAN OR WARNED. A clean fill writes a line too. The argument
+ * is asymmetric detection: "warned then, clean now" is visible either way, but "clean
+ * then, warns now" — a fill consistent with its plan when recorded, which now violates it
+ * because the plan was narrowed retroactively — is visible only under `D7`. It is also
+ * what makes a MISSING line informative rather than ambiguous.
+ *
+ * EXPORTED, and the reason is a real seam rather than a testing convenience. The lax-`asOf`
+ * arm above is unreachable through this file's prompts — `isObservedAtStamp` already
+ * round-trips the date half of the stamp `asOf` is sliced from — so the only way to pin
+ * `S1a`'s ordering against the day someone "simplifies" the guard into a `catch` is to
+ * drive this function directly.
+ *
+ * The outer `try` is a LAST RESORT, not `S1a`'s fix. The guard above is the fix; this
+ * catches whatever an injected boundary does that its contract said it would not.
+ */
+export async function reconcileRecordedFill(
+  io: ReconcileTrailIo,
+  fill: RecordedFillFacts,
+): Promise<void> {
+  try {
+    // The id travels into every diagnostic below and onto the plans report page. An id
+    // that could forge a row is never interpolated — not even into stderr, which is read
+    // by an operator and captured by CI.
+    const renderable = isRenderableRecordId(fill.positionId);
+    const label = renderable
+      ? `'${fill.positionId}'`
+      : "the position this fill names (its id is not renderable, so it is withheld here)";
+
+    const lookup = await lookUpPlanForFill(io, fill);
+    const reconciliation = reconcileAgainstPlan({ lookup, lotTier: fill.lotTier });
+    const record: ReconciliationRecord = {
+      positionId: fill.positionId,
+      eventId: fill.eventId,
+      fillKind: fill.fillKind,
+      asOf: fill.asOf,
+      toldAt: io.toldAt(),
+      lotTier: fill.lotTier,
+      declared: reconciliation.declared,
+      mismatches: reconciliation.mismatches,
+    };
+
+    // WARN AND RECORD — never print-only, and never record-only. The warning is what the
+    // operator sees now; the line is what a reader sees later, and neither substitutes
+    // for the other.
+    const verdict = classifyReconciliation(reconciliation);
+    if (verdict === "warned") {
+      io.err(
+        `PLAN MISMATCH — ${label} disagrees with the plan in force: ` +
+          `${reconciliation.mismatches
+            .map((mismatch) =>
+              mismatch === "tierNotInPlan"
+                ? `the lot's capital tier '${fill.lotTier}' is not among the tiers that plan ` +
+                  `declares`
+                : `no plan is in force for it — the sidecar declares none, or declares an ` +
+                  `explicit ending`,
+            )
+            .join("; ")}. The fill IS recorded and nothing about it changed: a plan is a ` +
+          `declaration of intent, not an authorization.`,
+      );
+    } else if (verdict === "indeterminate") {
+      io.err(
+        `PLAN NOT CHECKED — ${label} could not be reconciled, because ${io.plansPath} ` +
+          `could not be read at the moment of the telling. The fill IS recorded. The trail ` +
+          `line records this as INDETERMINATE, which a reader renders UNKNOWN and never clean.`,
+      );
+    }
+
+    if (!renderable) {
+      // Checked rather than caught: `serializeReconciliationRecord` refuses this with a
+      // throw, and `isRenderableRecordId` is exported precisely so this path does not
+      // have to rely on catching one.
+      warnTrail(io, "the position id is not renderable, so no line could be written");
+      return;
+    }
+
+    await io.appendReconciliation(io.reconciliationsPath, record);
+  } catch (error) {
+    // Deliberately not "the append failed": this arm also covers a boundary that threw
+    // where its contract said it would not, and naming the append would misreport which.
+    warnTrail(io, "the reconciliation could not be completed", error);
+  }
+}
+
+/**
+ * The loud stderr warn every trail failure degrades to (`D6`).
+ *
+ * Loud because the alternative is silence: the fill is already durable and the caller
+ * gets no signal, so this line is the only trace that the trail is now missing one. It
+ * quotes no line and names no figure — the resolved path and the failure's own message
+ * are the whole of what travels.
+ *
+ * **IT CANNOT THROW, and that is a correctness property rather than defensiveness.**
+ * This is the LAST RESORT on a path whose whole contract is "returns normally on every
+ * path": {@link reconcileRecordedFill}'s `catch` calls it, and the sink it writes to is
+ * often the very thing that threw. `pnpm record-fill 2>&1 | head` with the pager closed
+ * makes `err` throw EPIPE, and an unguarded warn there would re-throw out of the catch,
+ * out of `recordFill`, and exit the CLI 1 — for a fill already durable on both files.
+ * So a dead sink is swallowed: there is nowhere left to say anything, and failing the
+ * act to complain about it is the one outcome `D1` forbids outright.
+ */
+function warnTrail(io: ReconcileTrailIo, what: string, cause?: unknown): void {
+  const detail =
+    cause === undefined ? "" : `: ${cause instanceof Error ? cause.message : String(cause)}`;
+  try {
+    io.err(
+      `TRAIL NOT RECORDED — ${what}${detail}. The fill is durable and unchanged; only the ` +
+        `reconciliation trail line is missing (${io.reconciliationsPath}). A reader that finds ` +
+        `no line for this fill reports UNKNOWN, never clean.`,
+    );
+  } catch {
+    // The error sink is gone. There is nowhere left to report that, and reporting it
+    // is not worth failing an act that already landed.
+  }
 }
 
 /**
@@ -528,6 +766,21 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
 
   // ---- 5. the ladder's Position: first fill OPENS, every fill after APPENDS ----
   const folded = await io.loadFolded();
+
+  // BORN-NESS, CAPTURED HERE AND USED AFTER THE ACT — the PRE-FILL set the trail's
+  // `declared.status` is derived from. Computed at the fold rather than at the reconcile
+  // so the ordering is a fact of this file rather than a comment about one: by the time
+  // the reconcile runs, the fill has landed and re-folding would answer `active` for a
+  // position that was `pending` at the moment the operator was told.
+  //
+  // Open positions AND closed ones, exactly as `pnpm plans` computes it: a position that
+  // has been closed was realized, so omitting the closed book would render a finished
+  // trade `pending` forever.
+  const existingPositionIds = new Set<string>([
+    ...folded.positions.map((position) => position.id),
+    ...(folded.closedPositions ?? []).map((closed) => closed.positionId),
+  ]);
+
   const reserve = folded.reserves.find((entry) => entry.id === filled.fundingReserveId);
   if (!reserve) {
     return reject(
@@ -678,5 +931,25 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
     `Recorded: ${act.order.filledQuantity} of ${act.order.id} filled at ${observedAt}, ` +
       `${act.event.type} '${act.event.id}' written.\n`,
   );
+
+  // ---- 9. THE TRAIL. Advisory, best-effort, and NOT part of the act (`D6`, #336).
+  //
+  // Everything above this line is unchanged by it. The act is durable, the rollback is
+  // closed over, the outcome is already decided, and this call cannot alter any of the
+  // three — it returns normally on every path, including every failure.
+  //
+  // It sits AFTER the `Recorded:` line deliberately. A warning printed before that line
+  // reads as a refusal, which is the one impression `D1` most needs this path not to
+  // give: the fill happened, it is on disk, and what follows is advice about a plan.
+  await reconcileRecordedFill(io, {
+    positionId:
+      act.event.type === "PositionOpened" ? act.event.position.id : act.event.positionId,
+    eventId: act.event.id,
+    fillKind: act.event.type,
+    asOf: act.event.asOf,
+    lotTier: tier,
+    existingPositionIds,
+  });
+
   return { status: "recorded", act, alsoCancelled };
 }
