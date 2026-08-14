@@ -29,11 +29,15 @@ describe("parseAsOfArg — the windowed-fold flag, fail-loud on a bad value", ()
   });
 
   it("fails loud on a malformed value", () => {
-    expect(() => parseAsOfArg(["node", "spine", "--as-of", "nope"])).toThrow(/--as-of/);
+    expect(() => parseAsOfArg(["node", "spine", "--as-of", "nope"])).toThrow(
+      "Missing or invalid value for --as-of (expected YYYY-MM-DD).",
+    );
   });
 
   it("fails loud on a missing value", () => {
-    expect(() => parseAsOfArg(["node", "spine", "--as-of"])).toThrow(/--as-of/);
+    expect(() => parseAsOfArg(["node", "spine", "--as-of"])).toThrow(
+      "Missing or invalid value for --as-of (expected YYYY-MM-DD).",
+    );
   });
 });
 

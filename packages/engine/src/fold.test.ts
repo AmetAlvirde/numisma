@@ -11,6 +11,8 @@ import {
   crossReferenceEvent,
   foldEvents,
   parseFundReview,
+  reserveDeltasForClose,
+  reserveDeltasForOpen,
   type FundReviewData,
   type PortfolioEvent,
   type PositionDecision,
@@ -826,5 +828,59 @@ describe("foldEvents — the seed is never mutated (defensive clone)", () => {
     expect(genesis.instruments[0]!.symbol).toBe("AAPL");
     expect(genesis.reserves[0]!.amount).toBe(1000);
     expect(genesis.positions[0]!.markPrice).toBe(150);
+  });
+});
+
+describe("tier-weighted deltas — the zero-cost degenerate fallback (pinned, not endorsed)", () => {
+  // PIN OF A DEGENERATE FALLBACK. `tierWeightedDeltas` normally splits a cash
+  // delta across the lots' Tiers by cost-basis weight, but when the lots carry no
+  // cost at all (`totalCost === 0`) there is no weight to split by, and it
+  // attributes the WHOLE delta to `lots[0].tier` — the FIRST LOT'S tier, not the
+  // first Tier in c1/c2/c3 order, and not a split. Coverage rationale §5 names
+  // this arm (`events/fold.ts:47-48`) as an open, reachable branch.
+  //
+  // These tests record what the code does today so the behavior cannot change
+  // silently; they are not an argument that attributing everything to one lot's
+  // Tier is the right answer.
+
+  it("attributes the whole close credit to the FIRST lot's Tier when every lot has zero cost", () => {
+    // Zero-cost lots across two Tiers, deliberately ordered c3-then-c1 so the
+    // answer distinguishes "the first lot's tier" (c3) from "the first Tier
+    // present in c1/c2/c3 order" (c1) — and from any proportional split, which
+    // would have to divide by a zero total cost.
+    const zeroCostLots: PositionLot[] = [
+      { quantity: 4, cost: 0, tier: "c3" },
+      { quantity: 6, cost: 0, tier: "c1" },
+    ];
+
+    const deltas = reserveDeltasForClose(zeroCostLots, 250);
+
+    expect(deltas).toEqual([{ tier: "c3", amount: 250 }]);
+  });
+
+  it("debits the same single Tier on the open leg, sign-flipped", () => {
+    const zeroCostLots: PositionLot[] = [
+      { quantity: 1, cost: 0, tier: "c2" },
+      { quantity: 1, cost: 0, tier: "c1" },
+    ];
+
+    expect(reserveDeltasForOpen(zeroCostLots, 80)).toEqual([{ tier: "c2", amount: -80 }]);
+  });
+
+  it("splits proportionally the moment ANY lot carries cost — the fallback is the exception", () => {
+    // Same Tier mix and lot order as the first case, but with real cost basis, so
+    // the normal path runs: two deltas, weighted 40/60, in c1/c2/c3 Tier order
+    // rather than lot order. Deleting the degenerate arm would have to make the
+    // first case look like this one (or NaN) — this is the contrast that gives
+    // the pin its teeth.
+    const costedLots: PositionLot[] = [
+      { quantity: 4, cost: 10, tier: "c3" },
+      { quantity: 6, cost: 10, tier: "c1" },
+    ];
+
+    expect(reserveDeltasForClose(costedLots, 250)).toEqual([
+      { tier: "c1", amount: 150 },
+      { tier: "c3", amount: 100 },
+    ]);
   });
 });

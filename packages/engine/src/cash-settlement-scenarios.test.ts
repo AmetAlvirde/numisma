@@ -74,7 +74,11 @@ describe("durable-log versioning — a legacy open/close fails loud with a migra
   });
 
   it("parseEvent refuses a record tagged newer than this build supports", () => {
-    const future = { ...legacyClose, schemaVersion: EVENT_SCHEMA_VERSION + 1, settlement: { reserveId: "tiered", proceeds: 360 } };
+    // Proceeds 600: the same gate-legal figure the migration test below uses (alt-pos
+    // expects 20 × last close 40 = 800; 600 is −25%, inside ±50%). parseEvent never
+    // consults the cross-ref gate, but a fixture that only the SHAPE gate would admit
+    // would be asserting about a record the ingest path could never hold.
+    const future = { ...legacyClose, schemaVersion: EVENT_SCHEMA_VERSION + 1, settlement: { reserveId: "tiered", proceeds: 600 } };
     const result = parseEvent(future);
     expect(result.kind).toBe("event-error");
     if (result.kind === "event-error") {
@@ -84,7 +88,8 @@ describe("durable-log versioning — a legacy open/close fails loud with a migra
   });
 
   it("accepts a current-version record carrying the schemaVersion marker", () => {
-    const v2 = { ...legacyClose, schemaVersion: EVENT_SCHEMA_VERSION, settlement: { reserveId: "tiered", proceeds: 360 } };
+    // Same gate-legal 600 as above, for the same reason.
+    const v2 = { ...legacyClose, schemaVersion: EVENT_SCHEMA_VERSION, settlement: { reserveId: "tiered", proceeds: 600 } };
     expect(parseEvent(v2).kind).toBe("ok");
   });
 
