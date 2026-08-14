@@ -27,6 +27,7 @@
     "db:provision": "tsx apps/web/src/projection/provision-projection.ts",
     "typecheck": "pnpm --filter @numisma/engine run typecheck && pnpm --filter @numisma/event-store run typecheck && pnpm --filter @numisma/preferences run typecheck && pnpm --filter @numisma/price-feed run typecheck && pnpm --filter @numisma/tui run typecheck && pnpm --filter @numisma/web run typecheck",
     "test": "vitest run",
+    "test:wrapper": "NUMISMA_WRAPPER_TEST=always vitest run apps/price-feed/src/wrapper-harness",
     "verify": "pnpm typecheck && pnpm test && pnpm smoke:startup",
     "coverage": "vitest run --coverage"
   },

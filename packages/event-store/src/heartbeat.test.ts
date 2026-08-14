@@ -383,9 +383,12 @@ describe("a run outside the mark window is not evidence that the day was marked"
  * breadcrumb exists for.
  *
  * TWO THINGS ARE CONTROLLED SO NOTHING HERE DEPENDS ON THE WALL CLOCK. The window
- * branch is forced by rewriting the script's own `MARK_HOUR` constant in a copy — 0
- * is always in-window, 99 never is — because the wrapper reads the CDMX hour itself
- * and no ambient `TZ` can move it. And the data dir is SEEDED, because a fresh
+ * branch is forced through the wrapper's own `NUMISMA_MARK_TZ` / `NUMISMA_MARK_HOUR`
+ * configuration (#315) — see {@link markWindowEnv}. It used to be forced by
+ * REWRITING the script's `MARK_HOUR=18` line in a copy, which worked but tested a
+ * file that no longer existed anywhere; the wrapper takes the window as
+ * configuration now, so the real bytes can be run unmodified. And the data dir is
+ * SEEDED, because a fresh
  * `mkdtemp` per run means no previous breadcrumb exists and the entire carry-forward
  * path goes unreached. An earlier version of this describe did both the other way
  * and its assertions were vacuous for part of every day.
@@ -396,11 +399,46 @@ describe("the wrapper's own bytes, read by the reader that must consume them", (
   );
 
   /**
+   * The wrapper configuration that puts a run on a chosen side of the mark window,
+   * with NO fake `date` binary, no clock manipulation and no edit to the script.
+   *
+   * BOTH BRANCHES ARE EXACT, NOT MERELY LIKELY, and that costs one small trick. The
+   * wrapper compares the current hour IN THE CONFIGURED ZONE against the configured
+   * hour, so "in" is free — hour 0 is at or below every hour there is. "out" needs a
+   * configured hour ABOVE the current one, and the only hour guaranteed to be above
+   * it is one measured against a zone we picked: this finds the fixed-offset
+   * `Etc/GMT±n` zone where it is currently the 00 hour and asks for 23. That leaves
+   * ~23 hours of margin before the two could meet, so no run of this suite can
+   * straddle the boundary — the failure mode the previous rewrite-the-script version
+   * was also written to avoid.
+   *
+   * `Etc/GMT+5` means UTC-5 (POSIX inverts the sign). Irrelevant here: both `Intl`
+   * below and the wrapper's `date` read the same tzdata, so they agree by
+   * construction whatever the label means.
+   */
+  function markWindowEnv(window: "in" | "out"): Record<string, string> {
+    for (let offset = -14; offset <= 12; offset += 1) {
+      const zone = `Etc/GMT${offset >= 0 ? "+" : "-"}${Math.abs(offset)}`;
+      const hour = Number(
+        new Intl.DateTimeFormat("en-GB", {
+          timeZone: zone,
+          hour: "2-digit",
+          hourCycle: "h23",
+        }).format(new Date()),
+      );
+      if (hour === 0) {
+        return { NUMISMA_MARK_TZ: zone, NUMISMA_MARK_HOUR: window === "in" ? "0" : "23" };
+      }
+    }
+    throw new Error("no fixed-offset zone is currently at hour 00 — impossible, so something moved");
+  }
+
+  /**
    * Run the wrapper and return the breadcrumb it left.
    *
-   * `window` rewrites ONE constant — the mark hour — so the in/out-of-window branch
-   * becomes an input rather than a function of the time of day. Everything else is
-   * the real script, including the `sed` carry-forward read and the printf.
+   * `window` makes the in/out-of-window branch an INPUT rather than a function of
+   * the time of day. Everything run is the real script, byte for byte, including the
+   * `sed` carry-forward read and the printf.
    */
   async function runWrapper(
     options: { window?: "in" | "out"; seed?: string } = {},
@@ -410,30 +448,38 @@ describe("the wrapper's own bytes, read by the reader that must consume them", (
     if (options.seed !== undefined) {
       await writeFile(join(dataDir, "job-heartbeat.json"), options.seed, "utf8");
     }
-    let script = wrapper;
-    if (options.window !== undefined) {
-      const forced = options.window === "in" ? "0" : "99";
-      const source = await readFile(wrapper, "utf8");
-      const rewritten = source.replace(/^MARK_HOUR=18$/m, `MARK_HOUR=${forced}`);
-      // Fail loudly rather than silently testing the unmodified script.
-      expect(rewritten).not.toBe(source);
-      script = join(dataDir, "run-daily-fetch.sh");
-      await writeFile(script, rewritten, "utf8");
-    }
     try {
-      execFileSync("/bin/bash", [script], {
+      execFileSync("/bin/bash", [wrapper], {
         env: {
           ...process.env,
+          ...(options.window === undefined ? {} : markWindowEnv(options.window)),
           NUMISMA_DATA_DIR: dataDir,
           NUMISMA_REPO_DIR: join(dataDir, "no-such-repo"),
           NUMISMA_PRICEFEED_ENV: join(dataDir, "no-such-env"),
           NUMISMA_PRICEFEED_LOG_DIR: join(dataDir, "logs"),
         },
         stdio: "ignore",
+        // A HARD CAP, because this call BLOCKS. `execFileSync` cannot be preempted by a
+        // vitest timer, so a run that ever stalled — a git credential prompt, a stalled
+        // socket — would wedge the worker rather than fail. This path dies at the `cd` in
+        // well under a second; a minute is orders of magnitude of slack.
+        timeout: 60_000,
       });
-    } catch {
+    } catch (error) {
       // EXPECTED: there is no repo to `cd` into, so the run dies early and non-zero.
       // That is the case the breadcrumb exists for, and the trap still fires.
+      //
+      // A TIMEOUT KILL LANDS HERE TOO, and it is not that. It arrives as a SIGNAL rather
+      // than an exit status, so swallowing it would report "the wrapper died early" about
+      // a wrapper that hung — and the assertions below would then fail on a missing file
+      // with no hint of why. Name it instead.
+      const signal = (error as { signal?: NodeJS.Signals | null }).signal ?? null;
+      if (signal !== null) {
+        throw new Error(
+          `the wrapper was killed by ${signal} rather than exiting: it hung instead of dying ` +
+            "at the `cd` into a nonexistent repo. That is a failure of this case, never a pass.",
+        );
+      }
     }
     return readFile(join(dataDir, "job-heartbeat.json"), "utf8");
   }
