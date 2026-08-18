@@ -259,6 +259,19 @@ export async function migrateLegacyLog(
   // `undefined` would quiet this path by destroying the distinction that separates an
   // empty log from an unreadable one. "Nothing to migrate" is a policy this migration
   // owns.
+  //
+  // IT RETURNS ABOVE `loadGenesis`, AND THAT PLACEMENT IS THE POINT, not an oversight —
+  // it is a real behaviour change and it is deliberate. An empty log in a data dir whose
+  // `genesis.json` is missing or corrupt now ends 0 with "No durable log to migrate",
+  // where before #345 it ended 1 naming `genesis.json`. That is the guard's own thesis
+  // applied consistently: an ABSENT log has always returned from here, above the genesis
+  // read, so a CONTENTLESS one — which #345 says is the same answer — has to leave through
+  // the same door or the two shapes are not really one seam. Genesis is loaded to
+  // cross-reference records against; with no records there is nothing to cross-reference,
+  // and demanding the operator repair a file this run was never going to read would be a
+  // refusal about nothing. Pinned in `migrate-legacy-log.test.ts` — the case that plants an
+  // empty log in a dir with no genesis at all — which is what goes red if this guard ever
+  // drifts below the read.
   if (raw === undefined || raw.trim().length === 0) {
     return { migratedCount: 0, unchangedCount: 0, outputPath: paths.log, discarded: [] };
   }
