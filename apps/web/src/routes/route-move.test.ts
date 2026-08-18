@@ -111,6 +111,10 @@ describe("D11: the route move", () => {
  *  - deleted `<DcaCard view={dca} />` from `index.tsx` and LEFT the import → "keeps the
  *    DCA card on `/`" red. Right reason: the bare `/DcaCard/` this replaced was satisfied
  *    by the import line alone, so the card could vanish from `/` with the suite green.
+ *  - (2026-08-17) stubbed `allWebSources()` to `[]` → "keeps the spot fetch to ONE call
+ *    site" red on its new non-empty floor, and green on everything else. Right reason:
+ *    that sweep's verdict is "no offender found", which an empty sweep also produces —
+ *    without the floor the guard passed while reading zero files.
  *
  * THREE OF THESE ASSERTIONS WERE WEAKER AT FIRST and matched this repo's own PROSE:
  * a bare `/DcaCard/`, a `loader…binance` proximity search, and a bare `api.binance.com`
@@ -190,6 +194,11 @@ describe("G-D13: the ladder route", () => {
     // every file that explains the 451, and those explanations are the point.
     const literal = /["'`]https:\/\/api\.binance\.com/;
     const others = allWebSources().filter((file) => !file.endsWith("binance-spot.ts"));
+    // FALSE-PASS FLOOR. `extra` being empty is also what a sweep over zero files
+    // produces, so the sweep has to prove it swept. A missing scan root now throws
+    // in the walker; this catches the other half — a root that exists but yields
+    // nothing. The sibling converted guards assert the same floor.
+    expect(others.length, "the one-call-site sweep scanned no web sources").toBeGreaterThan(0);
     const extra = others.filter((file) => literal.test(readFileSync(file, "utf-8")));
     expect(extra, extra.join("\n")).toEqual([]);
     expect(literal.test(spot)).toBe(true);
