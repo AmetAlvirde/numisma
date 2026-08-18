@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  MAX_NOTICE_LOST_DAYS,
   formatNoticeCheckFailure,
   formatOperatorNotice,
   type NoticeGapFindings,
@@ -31,6 +32,108 @@ function findings(lost: readonly LostDay[], venueDark: readonly VenueDarkDay[]):
 }
 
 const CLEAN = findings([], []);
+
+/**
+ * `count` consecutive authored lost dates, OLDEST FIRST — the order `computeGapReport`
+ * emits, which is the order the cap slices against.
+ *
+ * Authored from a fixed base rather than from today, so the fixtures do not drift; the
+ * dates are the whole payload (no price, no position, no balance).
+ */
+function lostRun(count: number): LostDay[] {
+  const base = Date.UTC(2026, 5, 1); // 2026-06-01
+  return Array.from({ length: count }, (_unused, index) => ({
+    date: new Date(base + index * 86_400_000).toISOString().slice(0, 10) as string,
+    reason: "no-anchor" as const,
+  }));
+}
+
+const RECOVERY = (date: string) =>
+  `Numisma: ${date} — recover with: pnpm prices:fetch --as-of=${date}`;
+
+/**
+ * The realistic near-term outage this cap was sized against: 08-14/08-15 unrecovered
+ * plus a three-day away weekend. Driven off the cap so the relationship — NOT the
+ * literal 5 — is what the suite asserts.
+ */
+const REALISTIC_LOST_DAYS = 5;
+
+describe("the notice's lost-day cap", () => {
+  it("sits comfortably above the realistic outage shape", () => {
+    expect(REALISTIC_LOST_DAYS).toBeLessThan(MAX_NOTICE_LOST_DAYS);
+  });
+
+  it("names EVERY lost day at the realistic outage shape, each with its own command", () => {
+    const lost = lostRun(REALISTIC_LOST_DAYS);
+    const lines = formatOperatorNotice([], findings(lost, []));
+
+    // The cap must never hide the debt it exists to surface: nothing withheld, and
+    // every single day still individually remediable from the notice alone.
+    expect(lines).toHaveLength(REALISTIC_LOST_DAYS * 2);
+    expect(lines.join("\n")).not.toContain("withheld");
+    for (const [index, { date }] of lost.entries()) {
+      expect(lines[index * 2]).toContain(date);
+      expect(lines[index * 2 + 1]).toBe(RECOVERY(date));
+    }
+  });
+
+  it("enumerates EXACTLY the cap with no tail line", () => {
+    const lost = lostRun(MAX_NOTICE_LOST_DAYS);
+    const lines = formatOperatorNotice([], findings(lost, []));
+
+    expect(lines).toHaveLength(MAX_NOTICE_LOST_DAYS * 2);
+    expect(lines.join("\n")).not.toContain("withheld");
+    for (const { date } of lost) {
+      expect(lines).toContain(RECOVERY(date));
+    }
+  });
+
+  it("withholds and COUNTS the moment one day more than the cap arrives", () => {
+    const lost = lostRun(MAX_NOTICE_LOST_DAYS + 1);
+    const lines = formatOperatorNotice([], findings(lost, []));
+
+    expect(lines).toHaveLength(MAX_NOTICE_LOST_DAYS * 2 + 1);
+    expect(lines.at(-1)).toBe(
+      "Numisma: 1 earlier lost day(s) withheld — enumerate them with pnpm gap-report.",
+    );
+  });
+
+  it("keeps the MOST RECENT lost days and withholds the earlier ones", () => {
+    const withheld = 4;
+    const lost = lostRun(MAX_NOTICE_LOST_DAYS + withheld);
+    const shown = lost.slice(withheld);
+    const hidden = lost.slice(0, withheld);
+    const joined = formatOperatorNotice([], findings(lost, [])).join("\n");
+
+    for (const { date } of shown) {
+      expect(joined).toContain(RECOVERY(date));
+    }
+    // The withheld head must not leak: not as a finding, not as a command, not at all.
+    for (const { date } of hidden) {
+      expect(joined).not.toContain(date);
+    }
+    expect(joined).toContain(
+      `Numisma: ${withheld} earlier lost day(s) withheld — enumerate them with pnpm gap-report.`,
+    );
+  });
+
+  it("puts the withheld tail after the shown days and before the venue-dark count", () => {
+    const lines = formatOperatorNotice(
+      [],
+      findings(lostRun(MAX_NOTICE_LOST_DAYS + 2), [
+        { date: "2026-08-11", source: "binance", expected: 4 },
+      ]),
+    );
+    expect(lines).toHaveLength(MAX_NOTICE_LOST_DAYS * 2 + 2);
+    expect(lines.at(-2)).toBe(
+      "Numisma: 2 earlier lost day(s) withheld — enumerate them with pnpm gap-report.",
+    );
+    expect(lines.at(-1)).toBe(
+      "Numisma: 1 venue-day(s) dark — not lost days: the feed ran and the days are " +
+        "anchored. Enumerate them with pnpm gap-report.",
+    );
+  });
+});
 
 describe("formatOperatorNotice", () => {
   it("says nothing at all when the job is healthy and the window is clean", () => {
