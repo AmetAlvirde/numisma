@@ -35,7 +35,9 @@ import type { CompositionReport } from "@numisma/engine";
 import { describe, expect, it } from "vitest";
 import {
   REPO_ROOT,
-  repoFiles,
+  workspaceGroups,
+  workspaceGroupsIn,
+  workspacePackageDirs,
 } from "../../../../ops/testkit/repo-sources.testkit.js";
 import { fundIdOf } from "./contract.ts";
 
@@ -93,55 +95,21 @@ const CONTRACT = resolve(HERE, "contract.ts");
 const READER = resolve(HERE, "snapshot-reader.ts");
 
 /**
- * The directories `pnpm-workspace.yaml` globs, READ FROM THE YAML rather than
- * hardcoded — a hardcoded `["packages", "apps"]` and the yaml can drift with no
- * signal, and a workspace group the walker does not know about is a group whose
- * packages it would treat as third-party (see `resolveWorkspaceModule`).
+ * The directories `pnpm-workspace.yaml` globs, from the SHARED walker — `packages`
+ * and `apps` today, in the order the manifest lists them. A workspace group the
+ * walker does not know about is a group whose packages this file would treat as
+ * third-party (see `resolveWorkspaceModule`), so where these come from matters.
  *
- * Only the `<dir>/*` glob shape is understood, which is the only shape this repo
- * uses. Anything else THROWS: an unrecognised glob means the walker's idea of
- * the workspace is no longer the yaml's, and that must be loud.
- *
- * ⛔ YES, THIS IS A CHARACTER-FOR-CHARACTER COPY OF `workspaceGroupsIn` IN
- * `ops/testkit/repo-sources.testkit.ts`, AND IT MUST STAY ONE. Ruled on: do not
- * import the shared version here, and do not file a TODO to. This suite's job
- * (see "derives its workspace groups from pnpm-workspace.yaml rather than a
- * hardcoded list", below) is to hold that walker to the manifest, and a check is
- * only a check if it reads the manifest INDEPENDENTLY. Sharing the parser would
- * compare the walker against itself — the test would pass unconditionally,
- * including on the very regression it exists to catch. The duplication IS the
- * independence.
+ * ⛔ THIS IMPORT IS THE SUBJECT, NOT A CONVENIENCE. The test "derives its workspace
+ * groups from pnpm-workspace.yaml rather than a hardcoded list" (below) holds THIS
+ * function to the manifest, so it has to be the real one: an assertion about a
+ * private copy would leave the shared parser — the one every other guard's census
+ * runs through — checked by nothing at all. The independence the test needs lives
+ * on the OTHER side of the comparison, in the hand-written inline parse in that
+ * test's body. Import more from the testkit here freely; the one thing that must
+ * never become an import is that inline parse.
  */
-function workspaceGroupsIn(yaml: string): string[] {
-  const groups: string[] = [];
-  let insidePackages = false;
-  for (const raw of yaml.split("\n")) {
-    const line = raw.replace(/#.*$/, "").trimEnd();
-    if (line.trim() === "") continue;
-    if (/^\S/.test(line)) {
-      insidePackages = line.trim() === "packages:";
-      continue;
-    }
-    if (!insidePackages) continue;
-    const glob = /^\s*-\s*["']?(?<glob>[^"'\s]+)["']?\s*$/
-      .exec(line)
-      ?.groups?.glob;
-    const dir = glob ? /^(?<dir>[^*]+)\/\*$/.exec(glob)?.groups?.dir : undefined;
-    if (!dir) {
-      throw new Error(
-        `pnpm-workspace.yaml declares a workspace glob this walker does not ` +
-          `understand (${line.trim()}) — only "<dir>/*" is handled, and a group ` +
-          `the walker cannot see would have its packages treated as third-party.`,
-      );
-    }
-    groups.push(dir);
-  }
-  return groups;
-}
-
-const WORKSPACE_GROUPS = workspaceGroupsIn(
-  readFileSync(resolve(REPO_ROOT_DIR, "pnpm-workspace.yaml"), "utf-8"),
-);
+const WORKSPACE_GROUPS = workspaceGroups();
 
 /**
  * The workspace's own packages, by published name — read from the layout rather
@@ -155,33 +123,20 @@ const workspacePackages = new Map<
   string,
   { dir: string; exports: Record<string, unknown> }
 >(
-  WORKSPACE_GROUPS.flatMap((group) =>
-    // The GROUPS stay yaml-derived (a test below locks that); only the per-group
-    // DIRECTORY CENSUS moves onto the shared gitignore-aware listing. The
-    // walker's own `workspacePackageDirs()` would have supplied both, but it
-    // hardcodes `apps|packages` — taking it would silently re-hardcode the group
-    // list this file deliberately reads from `pnpm-workspace.yaml` at runtime.
-    repoFiles()
-      .filter((file) => {
-        if (!file.startsWith(`${group}/`)) return false;
-        // Exactly one directory level below the group, as `<group>/*` means.
-        const within = file.slice(group.length + 1).split("/");
-        return within.length === 2 && within[1] === "package.json";
-      })
-      .flatMap((manifestPath) => {
-        const dir = resolve(REPO_ROOT_DIR, dirname(manifestPath));
-        const manifest = JSON.parse(
-          readFileSync(resolve(REPO_ROOT_DIR, manifestPath), "utf-8"),
-        ) as {
-          name?: string;
-          exports?: Record<string, unknown>;
-        };
-        if (!manifest.name) return [];
-        return [
-          [manifest.name, { dir, exports: manifest.exports ?? {} }] as const,
-        ];
-      }),
-  ),
+  // The shared gitignore-aware census, not a private re-derivation: it resolves
+  // the same set pnpm does, from the same yaml-derived groups as WORKSPACE_GROUPS
+  // above, and the test below is what holds those groups to the manifest.
+  workspacePackageDirs().flatMap((packageDir) => {
+    const dir = resolve(REPO_ROOT_DIR, packageDir);
+    const manifest = JSON.parse(
+      readFileSync(resolve(dir, "package.json"), "utf-8"),
+    ) as {
+      name?: string;
+      exports?: Record<string, unknown>;
+    };
+    if (!manifest.name) return [];
+    return [[manifest.name, { dir, exports: manifest.exports ?? {} }] as const];
+  }),
 );
 
 /**
@@ -486,9 +441,20 @@ describe("the module-graph walker's failure modes", () => {
   });
 
   it("derives its workspace groups from pnpm-workspace.yaml rather than a hardcoded list", () => {
-    // Independent read: if the walker ever goes back to hardcoding
-    // ["packages", "apps"], adding a group to the yaml reds this test instead
-    // of silently shrinking the walk.
+    // ⛔ THE PARSE BELOW IS THE ORACLE AND MUST STAY HAND-WRITTEN. It exists to
+    // hold the SUBJECT — `workspaceGroupsIn` / `workspaceGroups()` in
+    // `ops/testkit/repo-sources.testkit.ts`, which is what WORKSPACE_GROUPS above
+    // is — to what the manifest actually says. An oracle may not share an
+    // implementation with its subject: import the testkit parser here and the
+    // comparison becomes the walker against itself, green unconditionally,
+    // including on the exact regression this test exists to catch (the walker
+    // going back to a hardcoded ["packages", "apps"]).
+    //
+    // So: do NOT collapse this into a call to the shared parser, and do not file
+    // a TODO proposing it. It is deliberately a second, differently written
+    // reading of the same bytes. Duplication is the price of independence, and it
+    // is only owed HERE — everywhere else in this file the shared walker is the
+    // right call.
     const yaml = readFileSync(
       resolve(REPO_ROOT_DIR, "pnpm-workspace.yaml"),
       "utf-8",
@@ -499,9 +465,41 @@ describe("the module-graph walker's failure modes", () => {
       .slice(1)
       .filter((line) => /^\s+-\s/.test(line))
       .map((line) => line.replace(/^\s+-\s*/, "").trim());
+    // False-pass floor: an oracle that parsed nothing would otherwise agree with
+    // a walker that found nothing.
     expect(declared.length).toBeGreaterThan(0);
-    expect([...WORKSPACE_GROUPS].sort()).toEqual(
-      declared.map((glob) => glob.replace(/\/\*$/, "")).sort(),
+    // ORDER-SENSITIVE, deliberately. The walker documents its groups as being "in
+    // the order the manifest lists them", and this manifest lists `packages/*`
+    // before `apps/*` — so a sorted comparison would stay green against a
+    // hardcoded ["apps", "packages"], which is precisely the regression at issue.
+    expect([...WORKSPACE_GROUPS]).toEqual(
+      declared.map((glob) => glob.replace(/\/\*$/, "")),
+    );
+  });
+
+  /*
+   * The shared parser's own unit floor. It lives in this file rather than a new
+   * one because this is where the parser is already the subject of an assertion,
+   * and `ops/testkit/` has no unit-test file that covers it.
+   *
+   * The docstring on `workspaceGroupsIn` promises that an unrecognised manifest
+   * shape THROWS, "because there is no useful partial answer, only a confident
+   * wrong one". Two shapes used to return `[]` instead, and an empty group list is
+   * an empty workspace census in every guard downstream — the silent-shrink
+   * failure the whole walker exists to end.
+   */
+  it("throws rather than returning an empty census on a manifest shape it cannot read", () => {
+    // Flow style is valid YAML and valid pnpm; a formatter can produce it.
+    expect(() =>
+      workspaceGroupsIn('packages: ["packages/*", "apps/*"]\n'),
+    ).toThrow(/no workspace groups/i);
+    // A mis-cased or renamed key is the same defect wearing a different hat.
+    expect(() => workspaceGroupsIn("Packages:\n  - packages/*\n")).toThrow(
+      /no workspace groups/i,
+    );
+    // And the recognised shape still parses, in manifest order.
+    expect(workspaceGroupsIn("packages:\n  - packages/*\n  - apps/*\n")).toEqual(
+      ["packages", "apps"],
     );
   });
 

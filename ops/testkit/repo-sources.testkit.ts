@@ -18,6 +18,25 @@
  * `--exclude-standard`. Gitignore-aware and worktree-safe by construction rather
  * than by vigilance.
  *
+ * WHAT `--exclude-standard` ACTUALLY READS, AND THE RISK RULED ACCEPTED. It is not
+ * one source but three: the `.gitignore` files (root and nested, committed and
+ * shared), `.git/info/exclude`, and the user's `core.excludesFile`. The last two are
+ * PER-MACHINE and UNCOMMITTED, so in principle one developer's exclude file could
+ * hide a source file from every guard here on their machine alone and nowhere else.
+ * Ruled ACCEPTED, not overlooked: this checkout's `.git/info/exclude` is non-empty
+ * and entirely redundant with the root `.gitignore`, the guards also run in CI on a
+ * clean clone where only the committed `.gitignore` applies, and the alternative
+ * (`--exclude-from` with an explicit list) rebuilds the hand-maintained denylist
+ * this file exists to retire. If a machine-local exclude ever starts hiding real
+ * source, the fix is that exclude file, not this walker.
+ *
+ * SUBMODULES WOULD BE INVISIBLE — a note for whoever adds the first one. `git
+ * ls-files` reports a submodule as a single gitlink path (the directory itself),
+ * never its contents, so every guard converted to this walker would silently skip
+ * everything inside it. There is no `.gitmodules` in this repo today, so this is not
+ * a live gap; adding one means deciding, per guard, whether the submodule's sources
+ * are in scope and listing them explicitly if so.
+ *
  * WHY `--others` AND NOT `--cached` ALONE. These walks feed *guards*. `--cached`
  * alone lists only what is in the index, so a source file a developer has written
  * but not yet `git add`-ed would be invisible — and a guard that cannot see a new
@@ -210,18 +229,28 @@ export function sourceFiles(options: SourceFilesOptions = {}): string[] {
  * missing or unreadable manifest throws for the same reason — there is no useful
  * partial answer, only a confident wrong one.
  *
+ * A MANIFEST THAT YIELDS NO GROUPS AT ALL THROWS TOO, and that is not a formality.
+ * The line-oriented parse below only recognises a BLOCK-SEQUENCE `packages:` key;
+ * flow style (`packages: ["packages/*", "apps/*"]`) is equally valid YAML and
+ * equally valid pnpm, and a mis-cased or renamed key reads the same way. Both used
+ * to fall through to an empty list, which is the confident wrong answer in its purest
+ * form: every workspace census downstream would report zero packages and every guard
+ * built on one would pass while guarding nothing. A formatter reformatting the
+ * manifest is enough to take that path, so it must be loud.
+ *
  * Exported as a pure text-to-groups function so a caller with the yaml already in
  * hand can reuse it.
  *
- * ⛔ `apps/web/src/projection/contract.test.ts` CARRIES ITS OWN IDENTICAL COPY, AND
- * THAT DUPLICATION IS DELIBERATE — ruled on, not drift. Do not collapse it and do
- * not leave a TODO proposing the merge. That file exists to assert that this walker
- * derives its workspace groups FROM `pnpm-workspace.yaml` rather than hardcoding
- * them, and it can only assert that from an INDEPENDENT reading of the manifest.
- * Import this function there and the test compares the walker against itself: it
- * would pass unconditionally, including on the exact regression it was written to
- * catch. An oracle that shares its implementation with the thing it checks is not
- * an oracle.
+ * ⛔ `apps/web/src/projection/contract.test.ts` IMPORTS THIS FUNCTION AS ITS
+ * SUBJECT — that is correct and must stay. Its `WORKSPACE_GROUPS` is
+ * `workspaceGroups()`, and its test "derives its workspace groups from
+ * pnpm-workspace.yaml rather than a hardcoded list" holds THIS parser to what the
+ * manifest actually says. The independence that assertion needs sits on the other
+ * side of the comparison: an ad-hoc, hand-written parse inline in that test's body.
+ * THAT inline parse is the thing that must never be collapsed into a call to this
+ * function — do it and the test compares this walker against itself, passing
+ * unconditionally, including on the exact regression it was written to catch. An
+ * oracle that shares its implementation with the thing it checks is not an oracle.
  */
 export function workspaceGroupsIn(yaml: string): string[] {
   const groups: string[] = [];
@@ -244,6 +273,16 @@ export function workspaceGroupsIn(yaml: string): string[] {
       );
     }
     groups.push(dir);
+  }
+  if (groups.length === 0) {
+    throw new Error(
+      `pnpm-workspace.yaml yielded no workspace groups. This parser reads only a ` +
+        `block-sequence "packages:" key ("packages:" on its own line, then "  - ` +
+        `<dir>/*" entries); flow style (packages: ["packages/*"]) and a renamed or ` +
+        `mis-cased key both read as absent. Returning an empty list here would make ` +
+        `every workspace census silently empty, so it throws instead — check the ` +
+        `manifest's SHAPE, not its contents.`,
+    );
   }
   return groups;
 }
@@ -294,13 +333,30 @@ export function workspacePackageDirs(): string[] {
     .map((file) => file.slice(0, file.lastIndexOf("/")));
 }
 
-/** `dir` as a repo-root-relative POSIX prefix (`""` for the root itself). */
+/**
+ * `dir` as a repo-root-relative POSIX prefix (`""` for the root itself).
+ *
+ * A SCAN ROOT THAT DOES NOT EXIST THROWS, and that check is load-bearing rather
+ * than defensive. The `readdirSync` walks this walker replaced threw `ENOENT` on a
+ * missing directory, which made a renamed or moved source tree LOUD; a prefix match
+ * against `repoFiles()` has no such floor and would simply match nothing, so
+ * `sourceFiles({ dir: "apps/price-feed/srcTYPO" })` returns `[]` and every guard
+ * built on it passes while scanning nothing. Restoring the throw here fixes all
+ * callers at once, in the one place that already exists to reject a bad `dir`.
+ */
 function repoRelativeDir(dir: string): string {
   const absolute = isAbsolute(dir) ? dir : resolve(REPO_ROOT, dir);
   const rel = relative(REPO_ROOT, absolute);
-  if (rel === "") return "";
-  if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+  if (rel !== "" && (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel))) {
     throw new Error(`repo-sources: ${dir} is outside the repo root ${REPO_ROOT}`);
   }
+  if (!existsSync(absolute)) {
+    throw new Error(
+      `repo-sources: ${dir} does not exist under the repo root ${REPO_ROOT} — a ` +
+        `scan root that is not there would silently scan nothing, so it is an ` +
+        `error rather than an empty result. Check for a renamed or moved directory.`,
+    );
+  }
+  if (rel === "") return "";
   return rel.split(sep).join("/");
 }
