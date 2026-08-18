@@ -15,6 +15,7 @@ import { dirname, join } from "node:path";
 import type { PortfolioEvent } from "@numisma/engine";
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveEventStorePaths, type EventStorePaths } from "./event-store.js";
+import { LAUNCHD_ERA_START, defaultGapReportSince } from "./gap-report.js";
 import { HEARTBEAT_FILENAME } from "./heartbeat.js";
 import { MAX_NOTICE_LOST_DAYS } from "./operator-notice.js";
 import {
@@ -135,9 +136,10 @@ describe("writeOperatorNotice", () => {
  *
  * Every other test on this page passes `WINDOW`, two days wide, and that is exactly
  * how the ninety-line notice shipped: `operator-notice-cli.ts` passes NO window, so
- * the run gets the derivation's own floor (`LAUNCHD_ERA_START`) and a ceiling of
- * yesterday — a window that is forty-odd days wide today and one day wider every
- * day. A narrow explicit window cannot reach {@link MAX_NOTICE_LOST_DAYS} at all, so
+ * the run gets the composer's own floor (`defaultGapReportSince` — the era start
+ * today, a rolling 400-day floor from 2027-08-08) and a ceiling of yesterday — a
+ * window that is forty-odd days wide today and one day wider every day until then.
+ * A narrow explicit window cannot reach {@link MAX_NOTICE_LOST_DAYS} at all, so
  * the cap was proved only against hand-built `GapReport`s in `operator-notice.test.ts`
  * and never against the path that produced the defect. This closes that: the store is
  * real files, the composer runs end to end, and the argument list is the CLI's.
@@ -181,6 +183,50 @@ describe("writeOperatorNotice, called the way the CLI calls it", () => {
     // plus the one tail. Anything the notice adds beyond that is not lost-day noise.
     expect(lines.filter((line) => line.includes("lost")).length).toBeLessThanOrEqual(
       MAX_NOTICE_LOST_DAYS * 2 + 1,
+    );
+  });
+});
+
+/**
+ * THE FLOOR THE NOTICE SHARES WITH THE COMMAND IT TELLS THE OPERATOR TO RUN.
+ *
+ * The notice ends its venue-dark and its withheld-lost lines with "enumerate them
+ * with pnpm gap-report" — the BARE command, no `--since`. That promise is only kept
+ * if both surfaces open the same window, and the fix could not be made at the pointer:
+ * `pnpm gap-report --since=<era floor>` is an instruction the command REFUSES from
+ * 2027-08-08, because era-floor → yesterday crosses `MAX_WINDOW_DAYS` on exactly that
+ * date. Not "the default won't show it" — no invocation can.
+ *
+ * SO THE ASSERTION IS AGAINST `defaultGapReportSince` ITSELF, which is expressible at
+ * all only because that constant moved down into this package. And it is made TWICE:
+ * once at today's clock, where the two candidate floors happen to agree and the test
+ * proves only the binding, and once past 2027-08-08, where they actually diverge —
+ * which is where the whole date-bomb lives and the only place a regression would show.
+ */
+describe("the notice's default floor", () => {
+  it("is defaultGapReportSince, not a floor of its own", async () => {
+    const paths = await store(CRYPTO_MARKS);
+    expect(await loadOperatorNoticeLines(paths, NOW)).toEqual(
+      await loadOperatorNoticeLines(paths, NOW, { since: defaultGapReportSince(NOW) }),
+    );
+  });
+
+  it("is STILL defaultGapReportSince on a clock where the two old floors diverge", async () => {
+    const paths = await store(CRYPTO_MARKS);
+    const later = new Date("2027-09-01T20:00:00-06:00");
+
+    // The premise of the case: past this date the fixed era start and the rolling
+    // 400-day floor are different days. Driven, so the date is not restated.
+    expect(defaultGapReportSince(later)).not.toBe(LAUNCHD_ERA_START);
+
+    expect(await loadOperatorNoticeLines(paths, later)).toEqual(
+      await loadOperatorNoticeLines(paths, later, { since: defaultGapReportSince(later) }),
+    );
+    // And it is genuinely observable: the era floor opens a wider window, so it
+    // withholds more lost days. A test that could not tell the two apart would pass
+    // on the very regression it exists to catch.
+    expect(await loadOperatorNoticeLines(paths, later)).not.toEqual(
+      await loadOperatorNoticeLines(paths, later, { since: LAUNCHD_ERA_START }),
     );
   });
 });

@@ -8,7 +8,13 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import type { PortfolioEvent } from "@numisma/engine";
-import { heartbeatPath, resolveEventStorePaths, type EventStorePaths } from "@numisma/event-store";
+import {
+  LAUNCHD_ERA_START,
+  defaultGapReportSince,
+  heartbeatPath,
+  resolveEventStorePaths,
+  type EventStorePaths,
+} from "@numisma/event-store";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadLivenessLines } from "./liveness-lines.js";
 
@@ -135,6 +141,32 @@ describe("loadLivenessLines", () => {
       "Numisma: the daily price job FAILED on 2026-08-04 — exit 1 at step 'post-check'. " +
         "Nothing pushed this to you; that is why it is here.",
     ]);
+  });
+
+  /**
+   * THE FLOOR THE BANNER INHERITS. `app.ts` passes no window, which is the only call
+   * shape production makes, and the banner is the operator notice's PULL twin — the
+   * twin property binds the WINDOW, so a floor either surface picks for itself is the
+   * defect. Asserted past 2027-08-08 as well, where the fixed era start and the
+   * rolling 400-day floor are genuinely different days; before that they agree and the
+   * case would pass on the regression it exists to catch.
+   */
+  it("takes defaultGapReportSince as its floor when the caller supplies none", async () => {
+    const paths = await store({ events: healthyDay("2026-08-04") });
+    expect(await loadLivenessLines(paths, NOW)).toEqual(
+      await loadLivenessLines(paths, NOW, { since: defaultGapReportSince(NOW) }),
+    );
+
+    const later = new Date("2027-09-01T12:00:00Z");
+    expect(defaultGapReportSince(later)).not.toBe(LAUNCHD_ERA_START);
+    expect(await loadLivenessLines(paths, later)).toEqual(
+      await loadLivenessLines(paths, later, { since: defaultGapReportSince(later) }),
+    );
+    // Observably different from the floor it used to take: the wider era window
+    // withholds more days, and the tail line counts them.
+    expect(await loadLivenessLines(paths, later)).not.toEqual(
+      await loadLivenessLines(paths, later, { since: LAUNCHD_ERA_START }),
+    );
   });
 
   it("never throws, whatever it finds on disk", async () => {

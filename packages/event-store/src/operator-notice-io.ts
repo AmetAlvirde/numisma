@@ -15,7 +15,7 @@
 import { writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { EventStorePaths } from "./event-store.js";
-import type { GapWindow } from "./gap-report.js";
+import { defaultGapReportSince, type GapWindow } from "./gap-report.js";
 import { loadGapReport } from "./gap-report-io.js";
 import { loadHeartbeatLines } from "./heartbeat-io.js";
 import { formatOperatorNotice, type NoticeGapFindings } from "./operator-notice.js";
@@ -48,6 +48,24 @@ export function operatorNoticePath(paths: EventStorePaths): string {
  * heartbeat's staleness threshold and the gap report's ceiling are the same rule
  * (`dueThrough`), so evaluating them against two different clock reads is the one
  * way the two halves of one notice could contradict each other.
+ *
+ * ── THE FLOOR NOBODY SUPPLIED IS `defaultGapReportSince`, NOT THE ERA START ───
+ * A caller with no `since` gets the SAME floor `pnpm gap-report` gives itself —
+ * `LAUNCHD_ERA_START` or `MAX_WINDOW_DAYS` back from yesterday, whichever is later.
+ * That matters because THIS NOTICE TELLS THE OPERATOR TO RUN THAT COMMAND. Left on
+ * the derivation's fixed era floor, the two diverge on 2027-08-08 — `gap-report.json`
+ * and `operator-notice.txt` are written into one directory minutes apart from two
+ * different windows — and the cheap repair is refused by the code: a notice that
+ * printed `pnpm gap-report --since=<era floor>` would be naming a window wider than
+ * `MAX_WINDOW_DAYS`, which that command rejects outright. So it is not "the default
+ * won't show it" but "no invocation can".
+ *
+ * THE DEFAULT LIVES HERE, AT THE COMPOSER, AND NOT AT THE CLI. `apps/tui`'s
+ * `loadLivenessLines` does the identical thing for the identical reason. Putting it
+ * in the two shells instead would make the twin property a CONVENTION two apps have
+ * to remember; here it is structural, and a third caller inherits it for free.
+ * Today this changes nothing observable — the era start is later than 400 days back
+ * until 2027-08-08 — which is exactly why it has to be written down now.
  */
 export async function loadOperatorNoticeLines(
   paths: EventStorePaths,
@@ -56,7 +74,11 @@ export async function loadOperatorNoticeLines(
 ): Promise<string[]> {
   const [heartbeatLines, findings] = await Promise.all([
     loadHeartbeatLines(paths, now),
-    loadGapFindings(paths, { ...window, now }),
+    loadGapFindings(paths, {
+      ...window,
+      since: window.since ?? defaultGapReportSince(now),
+      now,
+    }),
   ]);
   return formatOperatorNotice(heartbeatLines, findings);
 }

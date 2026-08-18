@@ -11,10 +11,19 @@
  * already drives.
  *
  * ZERO-ARGUMENT, AND IT MUST STAY THAT WAY. An unattended step that takes a date is
- * a step that eventually writes the wrong one. The window is the derivation's own
- * default — the launchd era floor and a ceiling of yesterday — which is exactly what
- * the TUI's liveness banner uses, and this notice is that banner's push twin: the
- * two must not describe different windows.
+ * a step that eventually writes the wrong one. The window is the composer's own
+ * default — `defaultGapReportSince` and a ceiling of yesterday — which is exactly
+ * what the TUI's liveness banner uses, and this notice is that banner's push twin:
+ * the two must not describe different windows.
+ *
+ * THE TWIN PROPERTY BINDS THE WINDOW, NOT THE RENDERING, and the distinction is
+ * load-bearing: `operator-notice.ts` rules that the banner ENUMERATES venue-dark
+ * days while the notice COUNTS them, so the two surfaces are ALREADY REQUIRED to
+ * render one finding differently. A recency bound on the notice's venue-dark count
+ * (`MAX_NOTICE_VENUE_DARK_DAYS`) is therefore a rendering decision and no breach of
+ * the sentence above — the derivation still walks the whole shared window on both
+ * surfaces. Read the other way, this claim makes the notice unfixable, which is how
+ * #381 read it. Nothing here is retired.
  *
  * NO ENVIRONMENT OF ITS OWN. The notice is resolved from the SAME data dir as
  * `gap-report.json` and `job-heartbeat.json`, through the one rule in ADR-006
