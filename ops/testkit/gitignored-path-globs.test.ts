@@ -41,7 +41,13 @@
  * that hold in BOTH the main checkout and a fresh worktree.
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -55,7 +61,7 @@ import {
   globForIgnoredEntry,
   globsForIgnoredEntries,
 } from "./gitignored-path-globs.ts";
-import { repoFiles } from "./repo-sources.testkit.js";
+import { REPO_ROOT, repoFiles } from "./repo-sources.testkit.js";
 
 /** Whether `path` (repo-root-relative, POSIX) is matched by any of `globs`. */
 function matchesAny(globs: readonly string[], path: string): boolean {
@@ -95,18 +101,63 @@ describe("test discovery", () => {
    * `gitignoredPathGlobs()` returning `[]` would make every other assertion here
    * pass while the original bug came straight back.
    *
-   * WHY THIS LAYER IS ONLY TWO ASSERTIONS WIDE. Anything more specific about the
-   * live repo is a claim about WHICH CHECKOUT the suite is running in.
-   * `node_modules/` is the one ignored directory that exists in the main checkout
-   * and in every linked worktree alike, so it is the only named path this layer
-   * may mention. Everything about the derivation's behaviour — nested
-   * `.gitignore` files, anchoring, escaping, empty directories, and the
+   * WHY NON-EMPTINESS IS THE STRONGEST CLAIM AVAILABLE HERE, AND WHY NO PATH IS
+   * NAMED. An earlier version also asserted `toContain("node_modules/**")`, which
+   * is the exact class this module retires: a claim about WHICH CHECKOUT the suite
+   * is running in. A pnpm store-linked or symlinked `node_modules`, a CI cache
+   * restored outside the tree, or a `--modules-dir` install emits no such entry,
+   * and the guard goes red on completely correct code. `> 0` has none of that
+   * fragility and is still not vacuous: running vitest at all requires an install,
+   * an install puts at least one ignored directory somewhere on disk, and git
+   * reports it — so this holds in the main checkout, in a fresh linked worktree,
+   * and on a cold CI runner alike.
+   *
+   * BUT IT IS NOT THE SAME STRENGTH AS THE TRACKED-TEXT GUARD BELOW, and the
+   * difference is worth being honest about. `.gitignore`'s bytes are identical in
+   * every checkout of a commit, so reading them is environment-independent BY
+   * CONSTRUCTION. `> 0` is an empirical claim about how installs behave — very
+   * robust, not a tautology, and still the same KIND of claim as the
+   * `node_modules/**` one just deleted, only far harder to falsify. It is kept
+   * because the no-op direction genuinely needs a pin and nothing stronger is
+   * available at this layer; if it ever goes red on correct code, delete it rather
+   * than weaken it, because the fixture below is what actually guards the
+   * behaviour. Everything about the derivation's BEHAVIOUR —
+   * nested `.gitignore` files, anchoring, escaping, empty directories, and the
    * deliberate silence about ignored paths that are not on disk — is asserted
    * against the authored fixture repo below, where it holds on every machine.
    */
   it("contributes real globs in any checkout", () => {
     expect(contributedGlobs.length).toBeGreaterThan(0);
-    expect(contributedGlobs).toContain("node_modules/**");
+  });
+
+  /**
+   * THE ONE GUARD LEFT ON THE REAL REPO'S OWN IGNORE RULES, and it is not a
+   * relapse into the live-state class the rest of this file retires. `.gitignore`
+   * is a TRACKED file: at a given commit its bytes are identical in the main
+   * checkout, in every linked worktree, and on every CI runner. Reading its TEXT
+   * is therefore environment-independent by construction — unlike asking git what
+   * it currently ignores ON DISK, which is a fact about one working tree.
+   *
+   * WHAT BREAKS IF THIS LINE GOES AWAY. #362: agent worktrees live under
+   * `.claude/worktrees/`, so without `.claude/` in the root `.gitignore` every
+   * worktree's copy of the tree is collected a second time — the same test files
+   * discovered twice, from two paths. Moving the `.claude/` assertion into the
+   * fixture repo (where it belongs, because that is where it is exercisable in
+   * every checkout) proved the DERIVATION handles the rule, but left nothing at
+   * all watching whether this repo still declares it. Delete the line and the
+   * fixture stays green, the whole suite stays green, and #362 is simply back —
+   * green while running the wrong set of tests, which is the fail-toward-green
+   * mode this entire module exists to prevent.
+   */
+  it("still declares .claude/ in the repo's own tracked .gitignore", () => {
+    // Tracked, not merely present: if `.gitignore` ever stopped being a file git
+    // knows about, reading it off disk would be reading an untracked local file
+    // and the claim would quietly become checkout-specific again.
+    expect(repoFiles()).toContain(".gitignore");
+    const lines = readFileSync(join(REPO_ROOT, ".gitignore"), "utf8")
+      .split("\n")
+      .map((line) => line.trim());
+    expect(lines).toContain(".claude/");
   });
 });
 
@@ -118,17 +169,70 @@ describe("test discovery", () => {
  * (the nested `.gitignore`, in a worktree) or was exercised only by accident of
  * what happened to be sitting on disk.
  *
- * HERMETIC ON PURPOSE. `--exclude-standard` reads `.git/info/exclude` and the
- * user's GLOBAL `core.excludesFile` as well as the repo's `.gitignore` files, so
- * a fixture that did not neutralise both would assert something different on a
- * machine whose owner globally ignores, say, `coverage/`. The repo-local
- * `core.excludesFile` override points at an empty file inside `.git/`, and
- * `.git/info/exclude` is truncated. No commit is made — `--others --ignored`
- * reads the working tree — but the non-ignored files ARE staged, for the reason
- * recorded at the `git add -A` below.
+ * HERMETIC ON PURPOSE, ON TWO AXES. `--exclude-standard` reads `.git/info/exclude`
+ * and the user's GLOBAL `core.excludesFile` as well as the repo's `.gitignore`
+ * files, so a fixture that did not neutralise them would assert something
+ * different on a machine whose owner globally ignores, say, `coverage/`. That is
+ * the CONFIG axis: the repo-local `core.excludesFile` override points at an empty
+ * file inside `.git/`, and `.git/info/exclude` is truncated.
+ *
+ * The second axis is the ENVIRONMENT, and it is the dangerous one. Every git
+ * process here — the fixture's own `git()` helper and the `gitignoredPathGlobs()`
+ * call under test — would otherwise inherit `process.env`. `GIT_DIR`,
+ * `GIT_WORK_TREE` and `GIT_INDEX_FILE` outrank both `-C` and `cwd`, so under
+ * `git bisect run pnpm test`, or inside a hook, or in any wrapper that exports
+ * them, this fixture's `git add -A` would stage the developer's REAL working tree.
+ * `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` sit ABOVE repo-local
+ * config in git's precedence order, so they beat the `core.excludesFile` override
+ * the config axis relies on, and `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` can point
+ * git's config lookup anywhere. So both git surfaces run under `hermeticGitEnv()`,
+ * an ALLOWLIST rather than a denylist of variables to drop — see the note there.
+ *
+ * No commit is made — `--others --ignored` reads the working tree — but the
+ * non-ignored files ARE staged, for the reason recorded at the `git add -A` below.
  */
+/**
+ * The variables a git subprocess in this file is allowed to see, and NOTHING else.
+ *
+ * AN ALLOWLIST, DELIBERATELY — the same argument the module under test makes about
+ * escaping instead of detecting. A denylist of hostile variables (`GIT_DIR`,
+ * `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_CONFIG_*`, …) would be correct only for
+ * as long as the list is complete, and git's environment surface is large and
+ * growing: `GIT_COMMON_DIR`, `GIT_OBJECT_DIRECTORY`, `GIT_NAMESPACE`,
+ * `GIT_CEILING_DIRECTORIES`, `GIT_ATTR_NOSYSTEM` and more all steer discovery or
+ * config. Naming what may pass THROUGH closes the whole class at once, including
+ * variables git has not shipped yet, and its failure mode is a loud broken
+ * subprocess rather than a quietly redirected one.
+ *
+ * `HOME` is pointed inside the fixture and `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM`
+ * at `/dev/null`, which is belt AND braces with the repo-local `core.excludesFile`
+ * override: the override alone is enough, but only while nothing above it in the
+ * precedence order is set, and this env is exactly what guarantees that.
+ */
+const GIT_ENV_PASSTHROUGH = [
+  "PATH",
+  // Windows needs these three to spawn a process at all; absent elsewhere.
+  "SystemRoot",
+  "SYSTEMROOT",
+  "COMSPEC",
+] as const;
+
+function hermeticGitEnv(home: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    HOME: home,
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_SYSTEM: "/dev/null",
+  };
+  for (const name of GIT_ENV_PASSTHROUGH) {
+    const value = process.env[name];
+    if (value !== undefined) env[name] = value;
+  }
+  return env;
+}
+
 describe("gitignoredPathGlobs against an authored fixture repo", () => {
   let fixtureRoot: string;
+  let fixtureEnv: NodeJS.ProcessEnv;
   let globs: string[];
 
   /** Write one fixture file, creating its parent directories. */
@@ -140,18 +244,30 @@ describe("gitignoredPathGlobs against an authored fixture repo", () => {
 
   /** Run one git command inside the fixture, output discarded. */
   function git(...args: string[]): void {
-    execFileSync("git", ["-C", fixtureRoot, ...args], { stdio: "ignore" });
+    execFileSync("git", ["-C", fixtureRoot, ...args], {
+      stdio: "ignore",
+      env: fixtureEnv,
+    });
   }
 
   beforeAll(() => {
     fixtureRoot = mkdtempSync(join(tmpdir(), "gitignored-path-globs-"));
+    const home = join(fixtureRoot, ".git-home");
+    mkdirSync(home, { recursive: true });
+    fixtureEnv = hermeticGitEnv(home);
     git("init");
-    // Neutralise the ambient environment: an empty global excludes file, and an
-    // empty per-repo exclude. Both live inside `.git/`, so neither is itself a
-    // path `ls-files` can report.
+    // Neutralise the ambient CONFIG: an empty global excludes file, and an empty
+    // per-repo exclude. Both live inside `.git/`, so neither is itself a path
+    // `ls-files` can report. (The ambient ENVIRONMENT is neutralised by
+    // `fixtureEnv` above, which every git process here runs under.)
     writeFileSync(join(fixtureRoot, ".git", "empty-excludes"), "", "utf8");
     git("config", "core.excludesFile", join(fixtureRoot, ".git", "empty-excludes"));
-    writeFileSync(join(fixtureRoot, ".git", "info", "exclude"), "", "utf8");
+    // `init.templateDir` can produce a `.git/` with no `info/` directory at all,
+    // in which case writing straight to `info/exclude` dies ENOENT and errors
+    // every test in this describe.
+    const excludeFile = join(fixtureRoot, ".git", "info", "exclude");
+    mkdirSync(dirname(excludeFile), { recursive: true });
+    writeFileSync(excludeFile, "", "utf8");
 
     // ---- The authored layout. ------------------------------------------
     // Root ignores: two directories that exist and are wholly ignored, one that
@@ -182,11 +298,19 @@ describe("gitignoredPathGlobs against an authored fixture repo", () => {
     // so everything ignored above stays unstaged and therefore still "other".
     git("add", "-A");
 
-    globs = gitignoredPathGlobs(fixtureRoot);
+    // The env matters just as much HERE as in `git()`: `gitignoredPathGlobs`
+    // spawns its own git, and without the seam that process would inherit an
+    // ambient `GIT_DIR` and answer about a different repository entirely while
+    // looking perfectly healthy.
+    globs = gitignoredPathGlobs(fixtureRoot, { env: fixtureEnv });
   });
 
   afterAll(() => {
-    rmSync(fixtureRoot, { recursive: true, force: true });
+    // `mkdtempSync` can throw, leaving `fixtureRoot` undefined; `rmSync` would
+    // then throw ERR_INVALID_ARG_TYPE from the cleanup and bury the real cause.
+    if (fixtureRoot !== undefined) {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
   });
 
   it("derives exactly one anchored glob per ignored path that is on disk", () => {
@@ -256,6 +380,20 @@ describe("gitignoredPathGlobs against an authored fixture repo", () => {
     expect(matchesAny(globs, "{tmp,scratch}/note.test.ts")).toBe(true);
     expect(matchesAny(globs, "tmp/note.test.ts")).toBe(false);
     expect(matchesAny(globs, "scratch/note.test.ts")).toBe(false);
+  });
+
+  /**
+   * THE PRECONDITION ON `root`, MADE LOUD. `git ls-files` descends only from its
+   * cwd and reports relative paths, so a `root` one level down does not fail — it
+   * returns `.tanstack/**` where discovery needed `pkg/web/.tanstack/**`, a glob
+   * that reads correctly and excludes nothing. Prose alone would leave that
+   * silent, and silent-and-plausible is the exact failure this module exists to
+   * close, so the seam refuses instead.
+   */
+  it("refuses a root that is not the repository toplevel", () => {
+    expect(() =>
+      gitignoredPathGlobs(join(fixtureRoot, "pkg", "web"), { env: fixtureEnv }),
+    ).toThrow(/not a repository toplevel/);
   });
 
   /** Over-exclusion, the failure that hides itself, on an authored file list. */
