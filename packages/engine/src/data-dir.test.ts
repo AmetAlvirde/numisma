@@ -3,8 +3,10 @@
 // config, each carrying "keep in sync" comments. Now there is ONE copy in the
 // engine (`resolveDataDir`) that every plane imports, so cross-plane drift is
 // structurally impossible — but this enumerated-input contract is retained as the
-// anti-regression guard: if anyone changes the `~`-expansion, the empty/whitespace
-// fall-through, the absolute-normalization, or the relative-rejection, it fails here.
+// anti-regression guard: if anyone changes the `~`-expansion, the UNSET-ONLY
+// fall-through, the blank-value refusal (#348 — a set-but-empty knob is a
+// misconfigured one, not an absent one), the absolute-normalization, or the
+// relative-rejection, it fails here.
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -17,12 +19,41 @@ describe("resolveDataDir — the single durable-ledger data-root resolver", () =
     expect(resolveDataDir({})).toBe(ACCUMULUS_DEFAULT);
   });
 
-  it("treats an empty value as unset (fall-through to the default)", () => {
-    expect(resolveDataDir({ NUMISMA_DATA_DIR: "" })).toBe(ACCUMULUS_DEFAULT);
+  it("REFUSES an empty value rather than treating it as unset (#348)", () => {
+    expect(() => resolveDataDir({ NUMISMA_DATA_DIR: "" })).toThrow(
+      /NUMISMA_DATA_DIR is set to an empty value/,
+    );
   });
 
-  it("treats a whitespace-only value as unset (fall-through to the default)", () => {
-    expect(resolveDataDir({ NUMISMA_DATA_DIR: "  " })).toBe(ACCUMULUS_DEFAULT);
+  it("REFUSES a whitespace-only value rather than treating it as unset (#348)", () => {
+    expect(() => resolveDataDir({ NUMISMA_DATA_DIR: "  " })).toThrow(
+      /NUMISMA_DATA_DIR is set to an empty value/,
+    );
+    expect(() => resolveDataDir({ NUMISMA_DATA_DIR: "\t\n" })).toThrow(
+      /NUMISMA_DATA_DIR is set to an empty value/,
+    );
+  });
+
+  it("the blank refusal names the consequence AND the two ways out", () => {
+    // An operator reading this must be able to tell the blank case apart from the
+    // unset case: the whole defect was that a misconfigured knob was indistinguishable
+    // from an absent one, and the message is where that distinction becomes visible.
+    let message = "";
+    try {
+      resolveDataDir({ NUMISMA_DATA_DIR: "" });
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toMatch(/not .?unset.?/i);
+    expect(message).toMatch(/REAL default ledger/);
+    expect(message).toMatch(/Unset NUMISMA_DATA_DIR/);
+    expect(message).toMatch(/absolute path/);
+  });
+
+  it("a GENUINELY unset knob still defaults — blank refusal must not swallow `undefined`", () => {
+    expect(resolveDataDir({})).toBe(ACCUMULUS_DEFAULT);
+    expect(resolveDataDir({ NUMISMA_DATA_DIR: undefined })).toBe(ACCUMULUS_DEFAULT);
+    expect(() => resolveDataDir({})).not.toThrow();
   });
 
   it("expands a bare `~` to the home directory", () => {
