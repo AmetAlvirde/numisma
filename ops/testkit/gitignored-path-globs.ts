@@ -90,11 +90,27 @@ export function globsForIgnoredEntries(
  * `--directory --no-empty-directory` collapses a wholly-ignored directory to one
  * entry instead of listing every file inside it (15 entries here, not tens of
  * thousands of `node_modules` files), and `-z` keeps paths with spaces intact.
- * `cwd: REPO_ROOT` is imported rather than re-derived — the walker and discovery
- * agreeing on one root is the point, and inside a linked worktree that root is the
- * worktree's own.
+ * The default root is `REPO_ROOT`, imported rather than re-derived — the walker
+ * and discovery agreeing on one root is the point, and inside a linked worktree
+ * that root is the worktree's own.
+ *
+ * WHY `root` IS A PARAMETER. It is the seam that makes this derivation testable
+ * without depending on WHICH CHECKOUT the suite happens to be running in. Git
+ * lists only ignored paths that EXIST ON DISK — correct, and the reason the
+ * exclude form is safe — but it also means the answer is a fact about one working
+ * tree rather than about the repo. A fresh linked worktree has no `.claude/`, no
+ * `coverage/`, no `apps/web/.tanstack/`, so a guard asserting against the live
+ * result was green in the main checkout and red in every worktree; worse, the
+ * assertion that most needed exercising — that the derivation reaches NESTED
+ * `.gitignore` files and anchors them to their own directory — could never run
+ * where this board actually does its work. Point `root` at an AUTHORED fixture
+ * repo instead and the behaviour under test (nested ignores, anchoring, escaping
+ * through a real git round-trip, `--no-empty-directory`, and the deliberate
+ * silence about ignored paths that do not exist on disk) is pinned identically on
+ * every machine. The default is unchanged, so `vitest.config.ts` calls this
+ * exactly as it did before.
  */
-export function gitignoredPathGlobs(): string[] {
+export function gitignoredPathGlobs(root: string = REPO_ROOT): string[] {
   const listing = execFileSync(
     "git",
     [
@@ -106,7 +122,7 @@ export function gitignoredPathGlobs(): string[] {
       "--no-empty-directory",
       "-z",
     ],
-    { cwd: REPO_ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+    { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
   );
   return globsForIgnoredEntries(
     listing.split("\0").filter((entry) => entry !== ""),
