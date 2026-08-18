@@ -3,11 +3,17 @@
  *
  * Everything written here is SYNTHETIC and hand-authored — invented instrument
  * marks with round prices, a hand-built heartbeat. Nothing is seeded from a real
- * run's output. What is asserted is the shell's four jobs and nothing more: the
- * path it picks, that a clean window leaves an EMPTY file, that a dirty one carries
- * both signals in cause-then-effect order, that it OVERWRITES rather than appends
- * or merges, and — the one case the rest of the file cannot reach — what it writes
- * WHEN NO WINDOW IS PASSED, which is the only call shape production ever makes.
+ * run's output. What is asserted is the shell's jobs and nothing more: the path it
+ * picks, that a clean window leaves an EMPTY file, that a dirty one enumerates the
+ * lost days, that it OVERWRITES rather than appends or merges, and — the one case
+ * the rest of the file cannot reach — what it writes WHEN NO WINDOW IS PASSED,
+ * which is the only call shape production ever makes.
+ *
+ * THE HEARTBEAT FIXTURE IS HERE TO PROVE A SILENCE. Since #376 the notice is purely
+ * the DATA channel, so a FAILED breadcrumb on disk must reach the file in no form at
+ * all — see the two cases below that seed one. The job half lives in the wrapper's
+ * bash, and all three heartbeat triggers live on in the TUI banner, whose own suite
+ * is untouched by this ruling.
  */
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -101,17 +107,40 @@ describe("writeOperatorNotice", () => {
     expect((await stat(written)).size).toBe(0);
   });
 
-  it("carries the heartbeat's cause before the lost days it explains", async () => {
+  /**
+   * THE #376 CASE, PINNED POSITIVELY RATHER THAN BY OMISSION.
+   *
+   * A breadcrumb describing a FAILED previous run sits on disk — the exact bytes
+   * step 0 read at the top of this same run — and the window is clean, because the
+   * run composing the notice has just landed the marks. The notice must be EMPTY.
+   * Anything else is the false FAILED on the recovery path: a sentence in the
+   * present tense, about the job, written by the run that already fixed it.
+   *
+   * If anyone re-adds a job half to the composer, this is the case that goes red.
+   */
+  it("says NOTHING about the job when a FAILED breadcrumb sits beside a clean window", async () => {
+    const paths = await store(CRYPTO_MARKS);
+    await seedFailedHeartbeat(paths, "2026-08-14T18:30:00-06:00");
+    const written = await writeOperatorNotice(paths, { now: NOW, window: WINDOW });
+    expect(await readFile(written, "utf8")).toBe("");
+  });
+
+  it("carries the lost days a FAILED breadcrumb does not get to speak about", async () => {
     const paths = await store([]);
     await seedFailedHeartbeat(paths, "2026-08-14T18:30:00-06:00");
     const written = await writeOperatorNotice(paths, { now: NOW, window: WINDOW });
-    const lines = (await readFile(written, "utf8")).trimEnd().split("\n");
-    expect(lines[0]).toContain("FAILED on 2026-08-14");
-    expect(lines.some((line) => line.includes("NO DATA"))).toBe(true);
+    const body = await readFile(written, "utf8");
+    const lines = body.trimEnd().split("\n");
+    // The data half is untouched by the job half's removal: the days are still named
+    // and each still carries its own move.
+    expect(lines[0]).toContain("NO DATA");
     expect(lines).toContain(
       "Numisma: 2026-08-16 — recover with: pnpm prices:fetch --as-of=2026-08-16",
     );
-    expect(await readFile(written, "utf8")).toMatch(/\n$/);
+    // And the breadcrumb on disk reaches the file in no form at all.
+    expect(lines.every((line) => !line.includes("daily price job"))).toBe(true);
+    expect(lines.every((line) => !line.includes("FAILED"))).toBe(true);
+    expect(body).toMatch(/\n$/);
   });
 
   it("OVERWRITES a previous run's notice rather than appending to it", async () => {

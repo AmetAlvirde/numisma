@@ -6,18 +6,16 @@
  * RESOLVED {@link EventStorePaths}, so the caller's `NUMISMA_DATA_DIR` resolution is
  * honoured rather than re-derived, and one store resolution serves the process.
  *
- * IT CANNOT REJECT. Both halves already refuse to throw — `loadHeartbeatLines`
- * treats an unreadable breadcrumb as absent, and the gap derivation's failure is
- * caught here and rendered AS A LINE rather than swallowed. The write itself is the
- * one operation left that can fail, and it is left to the caller: the CLI entry that
- * runs inside the wrapper decides what a disk failure means for the run.
+ * IT CANNOT REJECT. The gap derivation's failure is caught here and rendered AS A
+ * LINE rather than swallowed. The write itself is the one operation left that can
+ * fail, and it is left to the caller: the CLI entry that runs inside the wrapper
+ * decides what a disk failure means for the run.
  */
 import { writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { EventStorePaths } from "./event-store.js";
 import { defaultGapReportSince, type GapWindow } from "./gap-report.js";
 import { loadGapReport } from "./gap-report-io.js";
-import { loadHeartbeatLines } from "./heartbeat-io.js";
 import { formatOperatorNotice, type NoticeGapFindings } from "./operator-notice.js";
 
 /**
@@ -42,12 +40,22 @@ export function operatorNoticePath(paths: EventStorePaths): string {
 }
 
 /**
- * Derive both signals for ONE instant and render the notice. Empty means healthy.
+ * Derive the data findings for ONE instant and render the notice. Empty means healthy.
  *
- * `now` IS PASSED ONCE AND SHARED, for `liveness-lines.ts`' reason verbatim: the
- * heartbeat's staleness threshold and the gap report's ceiling are the same rule
- * (`dueThrough`), so evaluating them against two different clock reads is the one
- * way the two halves of one notice could contradict each other.
+ * ONE AWAIT, BECAUSE THERE IS ONE SIGNAL. This composed the heartbeat lines
+ * alongside the gap findings until #376; `operator-notice.ts`' header holds the
+ * ruling and the reason re-adding the second await is not a small convenience.
+ * `loadHeartbeatLines` is untouched and still has the TUI banner, a LIVE PULL
+ * surface, as its consumer.
+ *
+ * `now` IS STILL READ ONCE AND PASSED IN, but no longer for `liveness-lines.ts`'
+ * reason: with the heartbeat gone there is no second half here to contradict. The
+ * reason now is REPRODUCIBILITY AND SCOPE — `now` fixes the window's ceiling
+ * (`dueThrough`) and its floor (`defaultGapReportSince`) from one clock read, so the
+ * floor and the ceiling of a single notice can never straddle a midnight, and a test
+ * can name the instant instead of racing it. THE CALLER OWNS THE CLOCK: the CLI
+ * reads it once and hands it to this composer and to nothing else, which is what
+ * lets the wrapper's step 5b be a pure function of the store plus one instant.
  *
  * ── THE FLOOR NOBODY SUPPLIED IS `defaultGapReportSince`, NOT THE ERA START ───
  * A caller with no `since` gets the SAME floor `pnpm gap-report` gives itself —
@@ -72,15 +80,12 @@ export async function loadOperatorNoticeLines(
   now: Date,
   window: Omit<GapWindow, "now"> = {},
 ): Promise<string[]> {
-  const [heartbeatLines, findings] = await Promise.all([
-    loadHeartbeatLines(paths, now),
-    loadGapFindings(paths, {
-      ...window,
-      since: window.since ?? defaultGapReportSince(now),
-      now,
-    }),
-  ]);
-  return formatOperatorNotice(heartbeatLines, findings);
+  const findings = await loadGapFindings(paths, {
+    ...window,
+    since: window.since ?? defaultGapReportSince(now),
+    now,
+  });
+  return formatOperatorNotice(findings);
 }
 
 /** The one `try` in the module — the derivation's failure, carried as data. */
