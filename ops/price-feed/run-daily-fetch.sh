@@ -966,9 +966,28 @@ pnpm gap-report -- --write
 #     dashboard only to someone who opens the dashboard, gap-report.json only to
 #     someone who opens the file. On 2026-08-14/15 all three were right the whole
 #     time and nobody looked for three days, at the machine. This step writes the
-#     same two signals into one well-known file the shell profile cats, so the next
-#     new terminal is where the loss arrives. No new derivation: it composes
-#     primitives `pnpm gap-report` already uses.
+#     DATA findings into one well-known file the shell profile cats, so the next new
+#     terminal is where the loss arrives. No new derivation: it composes primitives
+#     `pnpm gap-report` already uses.
+#
+#     IT SAYS NOTHING ABOUT THE JOB, AND THAT IS #376's RULING. The notice composed
+#     the heartbeat lines here until then, and this is the one moment they are
+#     guaranteed to be misread: the EXIT trap is EXIT-ONLY, so at 5b the breadcrumb
+#     still holds the PREVIOUS run's bytes — exactly what step 0 read at the top of
+#     this same run. Not staler, identically sourced and DIFFERENTLY SCOPED: step 0
+#     says the PREVIOUS run failed, `formatHeartbeatWarning` says "the daily price
+#     job FAILED", present tense, about the job. On a recovery run — the previous
+#     run died at `prices-fetch`, this run is landing the missed days right now —
+#     the file is right and the sentence is wrong, and the run writing it is the run
+#     that just fixed it. So the channels split by LANGUAGE: this notice is the DATA
+#     half, and the job half is bash that knows its own run — step 0 today, correctly
+#     scoped to the PREVIOUS run and reaching the two paths this step never sees at
+#     all. The TUI banner keeps all three heartbeat triggers; it is a live PULL
+#     surface, read at the moment the operator looks. Writing an in-progress
+#     heartbeat before this line instead was refused on `write_heartbeat`'s own cost:
+#     its first act after capturing $? is a SIGKILL of the watchdog and a reap of its
+#     sleep, so an early write would leave this step AND `backfill`, the longest one,
+#     with no timeout at all.
 #
 #     AFTER step 5, and that placement is the whole reliability argument. By here the
 #     toolchain has been resolved (step 1), the fetch, the ingest and the commit have

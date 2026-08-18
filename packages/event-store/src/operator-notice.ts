@@ -5,17 +5,17 @@
  * failed on 2026-08-14/15 was not detection but ARRIVAL: the TUI named both lost
  * days correctly, live, the whole time, and nobody opened the TUI for three days
  * while sitting at the machine. Every surface in this repo is PULL-ONLY. This
- * module composes the same two signals into a file the shell profile cats on every
- * new terminal, so the first moment the operator is back is unmissable. It adds no
+ * module composes the DATA findings into a file the shell profile cats on every new
+ * terminal, so the first moment the operator is back is unmissable. It adds no
  * derivation of any kind.
  *
  * ── WHY IT LIVES HERE AND NOT IN THE TUI ──────────────────────────────────────
- * It sits beside the primitives it composes — `loadHeartbeatLines`,
- * `loadGapReport`, `formatLostDays` are all already exported from this package.
- * The alternative, reaching into `apps/tui`'s `loadLivenessLines`, is AN APP
- * IMPORTING AN APP: `gap-lines.ts` records that a prototype did exactly that
- * through a computed specifier `tsc` could not follow, and that both the bridge and
- * its hand-written interface were deleted for it.
+ * It sits beside the primitives it composes — `loadGapReport` and `formatLostDays`
+ * are both already exported from this package. The alternative, reaching into
+ * `apps/tui`'s `loadLivenessLines`, is AN APP IMPORTING AN APP: `gap-lines.ts`
+ * records that a prototype did exactly that through a computed specifier `tsc`
+ * could not follow, and that both the bridge and its hand-written interface were
+ * deleted for it.
  *
  * ── IT IS NOT THE BANNER, AND MUST NOT BE UNIFIED WITH IT ─────────────────────
  * The notice and the TUI banner do NOT share a rendering, deliberately. The banner
@@ -72,11 +72,60 @@
  *     above ({@link MAX_NOTICE_VENUE_DARK_DAYS}), which is what stops the count
  *     itself from becoming the permanent line the enumeration was refused for.
  *
- * ── ORDER IS THE CAUSE, THEN THE EFFECT ───────────────────────────────────────
- * Heartbeat lines (the job) first, data findings second — the same order, and for
- * the same reason, as `liveness-lines.ts`: a failed run is WHY the days went
- * missing, and reading the consequence before the reason is the wrong way round on
- * a channel scanned in two seconds.
+ * ── IT DOES NOT SPEAK FOR THE JOB, AND THAT IS THE ADMISSION RULE AGAIN ───────
+ * This composer once opened with the heartbeat lines — the job's status first, the
+ * data findings second, cause before effect, the ordering `liveness-lines.ts` still
+ * keeps and still needs. That ordering is gone from here because ITS FIRST TERM IS
+ * GONE. The heartbeat half was composed at step 5b of the wrapper, and 5b is the
+ * one moment it is guaranteed to be misread.
+ *
+ * THE MECHANISM, STATED CORRECTLY, because the obvious statement of it is wrong and
+ * every remedy that chases freshness buys the wrong thing. The EXIT trap is
+ * EXIT-ONLY, so at 5b the breadcrumb still holds run N−1's bytes EXACTLY AS STEP 0
+ * SAW THEM AT THE TOP OF THIS SAME RUN. The two read the same file. 5b is not
+ * STALER — it is identically sourced and DIFFERENTLY SCOPED. Step 0 says "the
+ * PREVIOUS daily price job run FAILED" and adds a scope line; `formatHeartbeatWarning`
+ * says "the daily price job FAILED on <date>", present tense, about the job. On a
+ * recovery run the file is right and the sentence is wrong.
+ *
+ * Said the way it is worth remembering: **5b's job half was written by a run that
+ * knows its own status and reads someone else's.**
+ *
+ * PRICED AGAINST THE ADMISSION RULE, on the recovery run that motivated this — N−1
+ * died at `prices-fetch` three days ago and run N is landing three days of marks
+ * right now — the three heartbeat triggers come apart:
+ *
+ *   - `exitCode !== 0`: true of N−1 and NOT ACTIONABLE, because the run writing the
+ *     line just fixed it. Step 0 already carries this, correctly scoped, and step 0
+ *     reaches the two paths 5b never sees at all (an unresolvable `pnpm`/`node`, and
+ *     a run that died partway).
+ *   - STALENESS: true of N−1 and NOT ACTIONABLE — run N recorded the day minutes
+ *     earlier. Not lost but UPGRADED: every case it fires on, the lost-day half
+ *     names better, with the day's own dated `pnpm prices:fetch --as-of=` line —
+ *     dated, actionable, self-extinguishing, which the staleness line is not. The
+ *     one case it caught that the gap half does not is "marks landed from a manual
+ *     fetch but the job never ran", and under the admission rule that is not
+ *     actionable: the data is there.
+ *   - FUTURE-DATED: the only real loss, and it is small. That breadcrumb is
+ *     overwritten by every run's own EXIT trap, so the anomaly is ALREADY visible
+ *     only between N−1's death and N's finish. It survives on the TUI, live.
+ *
+ * Two of the three are ANTI-CORRELATED with the truth of the run composing them.
+ *
+ * THE ALTERNATIVE IS REFUSED BY THE BASH, NOT BY TASTE. "Write an in-progress
+ * heartbeat before 5b" would make the file describe THIS run — and `write_heartbeat`'s
+ * first act after capturing `$?` is a SIGKILL of the watchdog plus a `pgrep -P` reap
+ * of its `sleep`, so an early write would leave 5b AND `backfill`, the longest step,
+ * running with no timeout. It buys back only the future-dated trigger.
+ *
+ * SO THE CHANNELS SPLIT BY LANGUAGE: this notice is purely the DATA channel, and the
+ * job channel is purely bash — the wrapper's step 0, which knows its own run's scope
+ * because it is inside it. `formatHeartbeatWarning`,
+ * `loadHeartbeatLines` and `heartbeat.ts` are UNTOUCHED and the TUI banner keeps all
+ * three triggers: it is a LIVE PULL surface reading the same primitive at the moment
+ * the operator looks, which is the one context in which "the job failed" is a
+ * currently-true sentence. If `loadHeartbeatLines` ends up with only the banner as a
+ * consumer, THAT IS CORRECT AND NOT A CLEANUP OPPORTUNITY.
  *
  * ── EMPTY MEANS HEALTHY ───────────────────────────────────────────────────────
  * A clean window returns NO LINES, and the shell writes an EMPTY FILE — not an "all
@@ -208,22 +257,20 @@ export const MAX_NOTICE_LOST_DAYS = 10;
 export const MAX_NOTICE_VENUE_DARK_DAYS = 7;
 
 /**
- * The heartbeat lines, then the data findings, for one instant. EMPTY when there is
- * nothing to say.
+ * The data findings for one instant. EMPTY when there is nothing to say.
  *
- * `heartbeatLines` arrives already rendered (`loadHeartbeatLines`) rather than being
- * derived here, for the same reason the report does: this half owns COMPOSITION and
- * nothing else.
+ * ONE ARGUMENT, AND THE MISSING ONE IS THE POINT. This took `heartbeatLines` first
+ * until #376; the header records why the job half came off this channel and why
+ * re-adding it is not a small convenience. The findings arrive already derived
+ * rather than being computed here, for the reason this half exists at all: it owns
+ * COMPOSITION and nothing else, so every rendering decision — including the broken
+ * one — is exercised by a synchronous test with no disk.
  */
-export function formatOperatorNotice(
-  heartbeatLines: readonly string[],
-  findings: NoticeGapFindings,
-): string[] {
+export function formatOperatorNotice(findings: NoticeGapFindings): string[] {
   if (findings.kind === "failed") {
-    return [...heartbeatLines, formatNoticeCheckFailure(findings.error)];
+    return [formatNoticeCheckFailure(findings.error)];
   }
   return [
-    ...heartbeatLines,
     ...formatLostDayFindings(findings.report),
     ...formatVenueDarkCount(findings.report),
   ];

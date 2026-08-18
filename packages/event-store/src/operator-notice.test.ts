@@ -96,7 +96,7 @@ describe("the notice's lost-day cap", () => {
 
   it("names EVERY lost day at the realistic outage shape, each with its own command", () => {
     const lost = lostRun(REALISTIC_LOST_DAYS);
-    const lines = formatOperatorNotice([], findings(lost, []));
+    const lines = formatOperatorNotice(findings(lost, []));
 
     // The cap must never hide the debt it exists to surface: nothing withheld, and
     // every single day still individually remediable from the notice alone.
@@ -110,7 +110,7 @@ describe("the notice's lost-day cap", () => {
 
   it("enumerates EXACTLY the cap with no tail line", () => {
     const lost = lostRun(MAX_NOTICE_LOST_DAYS);
-    const lines = formatOperatorNotice([], findings(lost, []));
+    const lines = formatOperatorNotice(findings(lost, []));
 
     expect(lines).toHaveLength(MAX_NOTICE_LOST_DAYS * 2);
     expect(lines.join("\n")).not.toContain("withheld");
@@ -121,7 +121,7 @@ describe("the notice's lost-day cap", () => {
 
   it("withholds and COUNTS the moment one day more than the cap arrives", () => {
     const lost = lostRun(MAX_NOTICE_LOST_DAYS + 1);
-    const lines = formatOperatorNotice([], findings(lost, []));
+    const lines = formatOperatorNotice(findings(lost, []));
 
     expect(lines).toHaveLength(MAX_NOTICE_LOST_DAYS * 2 + 1);
     expect(lines.at(-1)).toBe(
@@ -134,7 +134,7 @@ describe("the notice's lost-day cap", () => {
     const lost = lostRun(MAX_NOTICE_LOST_DAYS + withheld);
     const shown = lost.slice(withheld);
     const hidden = lost.slice(0, withheld);
-    const joined = formatOperatorNotice([], findings(lost, [])).join("\n");
+    const joined = formatOperatorNotice(findings(lost, [])).join("\n");
 
     for (const { date } of shown) {
       expect(joined).toContain(RECOVERY(date));
@@ -150,7 +150,6 @@ describe("the notice's lost-day cap", () => {
 
   it("puts the withheld tail after the shown days and before the venue-dark count", () => {
     const lines = formatOperatorNotice(
-      [],
       findings(lostRun(MAX_NOTICE_LOST_DAYS + 2), [
         { date: "2026-08-11", source: "binance", expected: 4 },
       ]),
@@ -175,11 +174,11 @@ describe("the notice's lost-day cap", () => {
  */
 describe("the notice's venue-dark recency bound", () => {
   it("says NOTHING AT ALL about a venue-dark day older than the window", () => {
-    expect(formatOperatorNotice([], findings([], [dark(NEWEST_REFUSED)]))).toEqual([]);
+    expect(formatOperatorNotice(findings([], [dark(NEWEST_REFUSED)]))).toEqual([]);
   });
 
   it("still counts the OLDEST day the window admits", () => {
-    expect(formatOperatorNotice([], findings([], [dark(OLDEST_ADMITTED)]))).toEqual([
+    expect(formatOperatorNotice(findings([], [dark(OLDEST_ADMITTED)]))).toEqual([
       VENUE_DARK(1),
     ]);
   });
@@ -189,7 +188,7 @@ describe("the notice's venue-dark recency bound", () => {
       dark(daysBeforeUntil(offset)),
     );
     const outside = [dark(NEWEST_REFUSED), dark(daysBeforeUntil(MAX_NOTICE_VENUE_DARK_DAYS + 30))];
-    expect(formatOperatorNotice([], findings([], [...outside, ...inside]))).toEqual([
+    expect(formatOperatorNotice(findings([], [...outside, ...inside]))).toEqual([
       VENUE_DARK(MAX_NOTICE_VENUE_DARK_DAYS),
     ]);
   });
@@ -199,7 +198,7 @@ describe("the notice's venue-dark recency bound", () => {
     // window to achieve it would age 2026-08-14/15 out of the notice, which is the one
     // outcome this channel exists to prevent.
     const stale = { date: NEWEST_REFUSED, reason: "no-anchor" as const };
-    expect(formatOperatorNotice([], findings([stale], [dark(NEWEST_REFUSED)]))).toEqual([
+    expect(formatOperatorNotice(findings([stale], [dark(NEWEST_REFUSED)]))).toEqual([
       `Numisma: ${NEWEST_REFUSED} — NO DATA. No event of any kind carries this date; the day is lost.`,
       RECOVERY(NEWEST_REFUSED),
     ]);
@@ -210,33 +209,33 @@ describe("the notice's venue-dark recency bound", () => {
       kind: "report",
       report: { ...report([], [dark(UNTIL)]), since: UNTIL, calendarDays: 1 },
     };
-    expect(formatOperatorNotice([], narrow)).toEqual([VENUE_DARK(1)]);
+    expect(formatOperatorNotice(narrow)).toEqual([VENUE_DARK(1)]);
   });
 });
 
 describe("formatOperatorNotice", () => {
   it("says nothing at all when the job is healthy and the window is clean", () => {
-    expect(formatOperatorNotice([], CLEAN)).toEqual([]);
+    expect(formatOperatorNotice(CLEAN)).toEqual([]);
   });
 
-  it("puts the heartbeat's cause before the data's effect", () => {
-    const lines = formatOperatorNotice(
-      ["Numisma: the price feed has not completed since 2026-08-13."],
-      findings([{ date: "2026-08-14", reason: "no-anchor" }], []),
-    );
-    expect(lines[0]).toBe("Numisma: the price feed has not completed since 2026-08-13.");
-    expect(lines.slice(1).some((line) => line.includes("2026-08-14"))).toBe(true);
-  });
-
-  it("still speaks for a failed job on a clean window", () => {
-    expect(formatOperatorNotice(["Numisma: the last run exited 127."], CLEAN)).toEqual([
-      "Numisma: the last run exited 127.",
-    ]);
+  /**
+   * #376's ruling, pinned at the SIGNATURE.
+   *
+   * This composer took `heartbeatLines` first, and at the wrapper's step 5b that half
+   * was written by a run that knows its own status and reads someone else's. The
+   * arity is the ruling made mechanical: a job half cannot come back without editing
+   * this line, and `operator-notice-io.test.ts` pins the same absence against a real
+   * FAILED breadcrumb on disk. The TUI banner keeps all three triggers — it reads the
+   * same primitive live, which is the one context where "the job failed" is a
+   * currently-true sentence.
+   */
+  it("TAKES THE FINDINGS AND NOTHING ELSE — the job is not this channel's to report", () => {
+    expect(formatOperatorNotice).toHaveLength(1);
+    expect(formatOperatorNotice(CLEAN)).toEqual([]);
   });
 
   it("ENUMERATES each lost day and names its own recovery command", () => {
     const lines = formatOperatorNotice(
-      [],
       findings(
         [
           { date: "2026-08-14", reason: "no-anchor" },
@@ -261,7 +260,7 @@ describe("formatOperatorNotice", () => {
       { date: "2026-08-11", source: "twelvedata", expected: 6 },
       { date: "2026-08-11", source: "binance", expected: 4 },
     ];
-    const lines = formatOperatorNotice([], findings([], entries));
+    const lines = formatOperatorNotice(findings([], entries));
     expect(lines).toEqual([VENUE_DARK(3)]);
     // The accumulating rows must not reach the notice at all: no date and no venue
     // name from the venue-dark side may appear anywhere in it.
@@ -276,7 +275,7 @@ describe("formatOperatorNotice", () => {
     // `venue-calendar.ts` accepts the holiday false positive ONLY on the condition
     // that every surface rendering this expectation says so in its own message. The
     // line must carry the clause, not merely the count.
-    const [line] = formatOperatorNotice([], findings([], [dark("2026-08-12")]));
+    const [line] = formatOperatorNotice(findings([], [dark("2026-08-12")]));
     expect(line).toContain("the market was closed for a holiday");
     // And it must name its own scope: a count whose window is invisible reads as total.
     expect(line).toContain(`in the last ${MAX_NOTICE_VENUE_DARK_DAYS} days`);
@@ -286,7 +285,6 @@ describe("formatOperatorNotice", () => {
   it("carries both kinds, lost first, when the window has both", () => {
     expect(
       formatOperatorNotice(
-        [],
         findings(
           [{ date: "2026-08-15", reason: "no-marks" }],
           [{ date: "2026-08-11", source: "binance", expected: 4 }],
@@ -302,7 +300,6 @@ describe("formatOperatorNotice", () => {
   it("pairs each recovery command with ITS OWN lost date, not the first one", () => {
     const dates = ["2026-08-02", "2026-08-14", "2026-08-15"];
     const lines = formatOperatorNotice(
-      [],
       findings(
         dates.map((date) => ({ date, reason: "no-anchor" }) as LostDay),
         [],
@@ -317,23 +314,17 @@ describe("formatOperatorNotice", () => {
   });
 
   it("reports a BROKEN check as a line rather than swallowing it", () => {
-    const lines = formatOperatorNotice([], {
+    const lines = formatOperatorNotice({
       kind: "failed",
       error: new Error("log line 12 quarantined"),
     });
     expect(lines).toEqual(["Numisma: lost days were NOT checked (log line 12 quarantined)."]);
   });
 
-  it("keeps the heartbeat lines even when the gap check itself broke", () => {
+  it("says the check broke and NOTHING BESIDE IT on a non-Error throw", () => {
     expect(
-      formatOperatorNotice(["Numisma: the last run exited 127."], {
-        kind: "failed",
-        error: "no such file",
-      }),
-    ).toEqual([
-      "Numisma: the last run exited 127.",
-      "Numisma: lost days were NOT checked (no such file).",
-    ]);
+      formatOperatorNotice({ kind: "failed", error: "no such file" }),
+    ).toEqual(["Numisma: lost days were NOT checked (no such file)."]);
   });
 });
 
