@@ -206,7 +206,9 @@ archival, magnitude-threshold env plumbing, `parseAsOfArg`); its read-path unit
 tests moved with the code into `packages/event-store/src/event-store.test.ts`.
 
 - **`packages/engine/src/events/*.ts`** (93.85% lines, re-measured at `8393bf6`) —
-  the covered core is the fold itself (`events/fold.ts`, 98.02% lines) and the ingest
+  the covered core is the fold itself (`events/fold.ts` — its figure and its
+  vintage are quoted ONLY in its own paragraph below, so the two cannot drift
+  apart) and the ingest
   cross-reference (`events/crossref.ts`, 97.61% lines), exercised by
   `event-ingest.test.ts` and `fold.test.ts` — and, since the date-ordering
   gates landed, by `position-born-by.test.ts` (29 tests) and
@@ -224,8 +226,9 @@ tests moved with the code into `packages/event-store/src/event-store.test.ts`.
   `positionId`/`funding.reserveId`/`funding.amount` fields).
   `events/crossref.ts` (re-measured 2026-08-08, after PR #261) adds `:330-333`
   (the `_never` exhaustiveness latch on the event-type switch — unreachable at
-  runtime by construction, same category as `events/fold.ts`'s
-  `:737-740,742-743` and the other `_never` rows in §7), `:558-562`
+  runtime by construction, same category as `events/fold.ts`'s own `_never`
+  latch, cited once in the `fold.ts` paragraph below and deliberately not
+  renumbered here as well, and the other `_never` rows in §7), `:558-562`
   (`ReserveOpened` colliding with an
   existing position id), `:1090-1097` (`PositionTrimmed`'s settlement-proceeds
   deviation-threshold rejection), `:1141-1142` (`PositionAddedTo`'s
@@ -237,21 +240,30 @@ tests moved with the code into `packages/event-store/src/event-store.test.ts`.
   already-closed rejection branches this bullet used to cite as open — they
   measure covered in the fresh run.)
 
-  `events/fold.ts` (re-measured at `a253dcd`, after #371) has **three** ranges
-  open — the same three as the previous vintage, all renumbered by that change:
+  `events/fold.ts` (98.04% lines, re-measured at `69df85b`, after #371) has
+  **three** ranges open — the same three as the previous vintage, all renumbered
+  since. The ranges below are the UNCOVERED-LINE report (v8 provider,
+  the "Uncovered Line #s" column), which is the unit the rest of this file uses;
+  a branch-location span is a different measurement and is not what is quoted
+  here:
 
-  - `:718-720` — the `Withdraw` arm's `recordSkip(event, order,
+  - `:732-733` — the `Withdraw` arm's `recordSkip(event, order,
     "reserve-absent")`, taken when `applyToReserve` finds no such reserve. A
-    Discard-Channel skip record rather than a numeric guard. Cited as
-    `:691-692` before; only the lines moved.
-  - `:781-787` — the `foldEvents` exhaustiveness latch (`const _never:
+    Discard-Channel skip record rather than a numeric guard. The `if` at `:731`
+    is covered — the arm runs on every applying `Withdraw` — so the range starts
+    inside it. Cited as `:691-692` before; only the lines moved.
+  - `:794-797,799-800` — the `foldEvents` exhaustiveness latch (`const _never:
     never = event; throw new Error(...)`), categorized like the other `_never`
     latch rows (§7's `skip-message.ts`/`orders/ingest.ts`/`orders/select.ts`):
     unreachable at runtime by construction, kept live so a new verb fails the
-    build rather than falling through silently. Cited as `:737-740,742-743`
+    build rather than falling through silently. NOT CONTIGUOUS, and the hole is
+    not a typo: `:798` is the last line of the thrown message's string
+    concatenation and measures covered, so writing this as `:794-800` would
+    claim an uncovered line that is not one. Cited as `:737-740,742-743` before
+    — the same shape, the same hole — and only the lines moved.
+  - `:1119-1120` — the zero-`totalQuantity` early `return 0` in
+    `weightedAverageCost`. The `if` at `:1118` is covered. Cited as `:1045-1046`
     before; only the lines moved.
-  - `:1088-1090` — the zero-`totalQuantity` early `return 0` in
-    `weightedAverageCost`. Cited as `:1045-1046` before; only the lines moved.
 
   The `Transfer` arm's own `reserve-absent` skip is NO LONGER among them. #371
   replaced its two per-leg `applyToReserve` failure branches with a single
@@ -272,10 +284,12 @@ tests moved with the code into `packages/event-store/src/event-store.test.ts`.
   carrying no provenance whatsoever… Not a bad attribution: an invented one."
   Both arms measure covered. And **`:649-650`, the lot-selection helper's
   zero-`tierTotal` early return, is no longer uncovered** — the helper still
-  exists (`splitTierRemoval`, `fold.ts:987`, its `if (tierTotal === 0)` early
-  return at `:996-998`), it simply measures covered. The
-  `PriceMarked`-carries-`usdMxn` FX-update branch this bullet used to name is
-  covered too.
+  exists (`splitTierRemoval`, `fold.ts:1044`, its `if (tierTotal === 0)` early
+  return at `:1053-1055`), it simply measures covered. Those two numbers are
+  re-measured at `69df85b` with the rest of this paragraph; #371 moved them and
+  the first re-measurement pass renumbered the open ranges above without
+  reaching this sentence. The `PriceMarked`-carries-`usdMxn` FX-update branch
+  this bullet used to name is covered too.
 - **`packages/event-store/src/event-store.ts`** (the read path, 96.03% lines) —
   the covered core is `loadEventLog`'s quarantine handling and
   `loadFoldedReview`'s fail-loud fold, exercised by
