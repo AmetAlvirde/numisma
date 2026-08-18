@@ -906,3 +906,95 @@ describe("tier-weighted deltas — the zero-cost arm attributes in canonical Tie
     ]);
   });
 });
+
+describe("tier-weighted deltas — a lot-less cash leg is DISCARDED, not attributed (#329)", () => {
+  // Any lot at all puts a key in `costByTier`, so "no Tier is present" is reachable
+  // ONLY when the lots array is empty. The old code returned a full-magnitude delta on
+  // the `?? "c1"` fallback — it MINTED c1 capital for a cash movement carrying no
+  // provenance whatsoever, and `applyReserveDelta` booked it as real. That is not a bad
+  // attribution, it is an invented one. An empty delta list is the discard; the fold
+  // records it on ADR-020's Discard Channel as `provenance-absent`.
+
+  /** Genesis holding one funded reserve and no positions. */
+  function reserveGenesis(): FundReviewData {
+    const genesis = emptyGenesis();
+    genesis.reserves = [
+      {
+        id: "desk-usd",
+        portfolioId: "core",
+        tempo: "Reserve",
+        executionMode: "live",
+        accountId: "binance-usd",
+        currency: "USD",
+        amount: 1000,
+      },
+    ];
+    return genesis;
+  }
+
+  /** A PositionOpened carrying no lots at all — the only shape that reaches the arm. */
+  function lotlessOpen(reserveId: string): PositionOpenedEvent {
+    return opened(
+      "evt-lotless-open",
+      "2026-06-02",
+      {
+        id: "ghost-core",
+        portfolioId: "core",
+        tempo: "Capital",
+        executionMode: "live",
+        accountId: "binance-usd",
+        instrumentId: "btc-usd",
+        direction: "long",
+        currency: "USD",
+        lots: [],
+      },
+      { reserveId, amount: 400 },
+    );
+  }
+
+  it("returns an empty delta list for empty lots on both legs", () => {
+    expect(reserveDeltasForOpen([], 400)).toEqual([]);
+    expect(reserveDeltasForClose([], 250)).toEqual([]);
+  });
+
+  it("records one provenance-absent skip AND leaves the reserve balance untouched", () => {
+    // Both halves matter. The skip record alone would stay green while the phantom c1
+    // debit still ran; the balance alone would not prove the drop was reported.
+    const folded = foldEvents(reserveGenesis(), [lotlessOpen("desk-usd")]);
+
+    expect(folded.skipped).toEqual([
+      {
+        eventId: "evt-lotless-open",
+        index: 0,
+        verb: "PositionOpened",
+        reason: "provenance-absent",
+        detail: expect.any(String),
+      },
+    ]);
+    expect(folded.data.reserves).toHaveLength(1);
+    expect(folded.data.reserves[0]!.amount).toBe(1000);
+  });
+
+  it("keeps the new reason's prose free of figures and of event content", () => {
+    const folded = foldEvents(reserveGenesis(), [lotlessOpen("desk-usd")]);
+
+    const skip = folded.skipped[0]!;
+    expect(skip.reason).toBe("provenance-absent");
+    expect(skip.detail).not.toMatch(/\d/); // no figure of any kind
+    expect(skip.detail).not.toContain(skip.verb); // the verb has its own field
+    expect(skip.detail).not.toContain(skip.eventId);
+    expect(skip.detail).not.toContain("desk-usd");
+    expect(skip.detail).not.toContain("ghost-core");
+    expect(skip.detail.length).toBeGreaterThan(0);
+  });
+
+  it("reports provenance-absent and NOT reserve-absent when the reserve is also missing", () => {
+    // Precedence is a decision: there is nothing to apply, so whether the reserve
+    // exists is moot, and a reserve miss that never happened must not be reported.
+    // One event, one finding, on this path.
+    const folded = foldEvents(reserveGenesis(), [lotlessOpen("no-such-reserve")]);
+
+    expect(folded.skipped).toHaveLength(1);
+    expect(folded.skipped[0]!.reason).toBe("provenance-absent");
+  });
+});
