@@ -323,6 +323,52 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
       expect(await readFile(logPath, "utf8")).toBe("\n\n\n");
       expect(await litter(dir)).toEqual([]);
     });
+
+    /**
+     * THE ORDERING HALF OF THE #345 GUARD, WHICH THE TWO CASES ABOVE DO NOT PIN. Both of
+     * them plant a valid `genesis.json`, so both stay green whether the guard sits above
+     * `loadGenesis` (`event-store.ts`) or below it. This case is the one that cares WHERE
+     * it sits: with no genesis on disk at all, an empty log exits 0 with the "no log"
+     * sentence only if the guard returns FIRST. Move it below the read and this run exits
+     * 1 naming `genesis.json` instead — which is exactly the mutation this case exists to
+     * catch, and the reason it is worth its spawn.
+     *
+     * IT IS ALSO A BEHAVIOUR CHANGE THIS PR MADE AND NOTHING ELSE RECORDED. Before #345 an
+     * empty log plus a missing genesis DID exit 1 naming `genesis.json`. The change is
+     * deliberate and consistent — the case two blocks up, `says 'No durable log to
+     * migrate' … when the log is absent`, already returns above the genesis read for an
+     * ABSENT log, and #345's whole claim is that a contentless log is the same answer as a
+     * missing one. Two shapes cannot be "one seam" and then take different doors out. This
+     * case is where that consistency is written down as behaviour rather than as a comment.
+     *
+     * The contrast case lives at the bottom of this file (`exits 1 when the data dir has no
+     * genesis to migrate against`): same missing genesis, but a log WITH CONTENT, which
+     * still refuses. Nothing here softens that — a run that has records to migrate still
+     * needs the genesis to cross-reference them against.
+     */
+    it("needs no genesis at all to report an empty log as nothing to migrate (exit 0)", async () => {
+      // NOT `syntheticDataDir` — that helper always plants a genesis, which is the whole
+      // thing this case must NOT have. A bare temp dir holding one empty file.
+      const dir = await tempDir();
+      const logPath = join(dir, "events.jsonl");
+      await writeFile(logPath, "", "utf8");
+      expect(await exists(join(dir, "genesis.json"))).toBe(false);
+
+      const result = runMigrate({ dataDir: dir, cwd: await workingDir() });
+
+      expectExited(result);
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe(`No durable log to migrate at ${logPath}.\n`);
+      // AND NOTHING ON STDERR: no genesis complaint leaks out alongside the 0. An exit code
+      // that says "fine" over a stderr that names a broken file is the worst of both.
+      expect(result.stderr).toBe("");
+      expect(result.stderr).not.toMatch(/genesis/);
+      // Byte-for-byte: the run that says it migrated nothing wrote nothing, and did not
+      // conjure a genesis on the way past either.
+      expect(await readFile(logPath, "utf8")).toBe("");
+      expect(await exists(join(dir, "genesis.json"))).toBe(false);
+      expect(await litter(dir)).toEqual([]);
+    });
   });
 
   describe("the mapping is read from the CWD, NOT from NUMISMA_DATA_DIR", () => {

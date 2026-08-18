@@ -171,7 +171,13 @@ interface ShellRun {
   stderr: string;
 }
 
-describe("import-orders-cli — the shell's own contract (argv, exit codes, env, readline)", () => {
+// NOT "readline", WHICH THIS TITLE USED TO CLAIM. Every case here is a `spawnSync` with a
+// piped stdin, so `process.stdin.isTTY` is falsy in all of them and the `isTTY` guard in
+// `ask` returns before `createInterface` is ever called. No case in this file constructs a
+// readline interface, and therefore none can observe one being closed. What IS pinned is
+// the no-terminal branch in front of it — the notice, its placement at the first
+// unanswerable question, and the empty answer the domain then refuses on.
+describe("import-orders-cli — the shell's own contract (argv, exit codes, env, no-terminal stdin)", () => {
   const createdDirs: string[] = [];
 
   afterEach(async () => {
@@ -226,10 +232,18 @@ describe("import-orders-cli — the shell's own contract (argv, exit codes, env,
   }
 
   /**
-   * The readline lifecycle assertion, made on EVERY path: the process ended on its own.
-   * `rl.close()` lives in a `finally`, so a path that lost it would leave stdin open and
-   * the process alive until the runner's timeout killed it — which is a signal, not a
-   * status.
+   * THE TERMINATION ASSERTION, MADE ON EVERY PATH: the process ended on its own rather than
+   * being killed by the runner's timeout, which arrives as a signal instead of a status.
+   *
+   * IT IS NOT A READLINE-LIFECYCLE ASSERTION, WHICH IS WHAT THIS DOC USED TO IMPLY. The
+   * `finally { rl?.close() }` in the shell is never exercised from here: no case in this
+   * file has a TTY on stdin, so `rl` is `undefined` on every one of them and deleting the
+   * whole `finally` block leaves all of them green. The close is correct — verified by hand
+   * against a real pty — and it is what keeps a REAL interview from leaving stdin open, but
+   * both halves of its lifecycle, the `createInterface` and the `close`, are observable only
+   * from a terminal, and a spawned test cannot stand in one. What this function actually
+   * holds down is that no path here HANGS — which, on a piped stdin, is a claim about the
+   * no-terminal branch returning promptly rather than about an interface being closed.
    */
   function expectExited(run: ShellRun): void {
     expect(run.signal).toBeNull();
@@ -294,8 +308,19 @@ describe("import-orders-cli — the shell's own contract (argv, exit codes, env,
     // And the unreadable row was reported on the error channel, where per-row problems go.
     expect(run.stderr).toContain(`${csv}:2 skipped`);
     // The operator was never taken into the interview: every readable rung was already on
-    // file, so there was nothing to attribute. The funding prompt's own text is the proof.
-    expect(run.stdout).not.toMatch(/Funding reserve for this batch/);
+    // file, so there was nothing to attribute.
+    //
+    // THE PROOF IS THE MISSING NO-TERMINAL NOTICE, not the missing prompt text. Asserting
+    // that `Funding reserve for this batch` never reaches stdout was the obvious probe and
+    // it went vacuous under #346: that string exists only as the argument handed to `ask`
+    // (`import-orders-funding-declaration.ts:68`), and a spawned run takes the no-terminal
+    // branch, which returns "" WITHOUT writing the question anywhere. The absence proved
+    // nothing — it holds on a run that asked and on a run that did not. The notice does
+    // discriminate: `ask` writes it the first time it is called on a stdin that is no
+    // terminal, so stderr staying clean of it is the observable fact that NO QUESTION WAS
+    // PUT AT ALL. Its twin is the no-terminal block below, where a run that DOES reach the
+    // funding question writes exactly that notice — same probe, opposite sign.
+    expect(run.stderr).not.toMatch(/No terminal on stdin/);
   });
 
   it("exits 0 on imported and leaves no temp sibling beside the sidecar it wrote", async () => {
@@ -354,9 +379,11 @@ describe("import-orders-cli — the shell's own contract (argv, exit codes, env,
     const dir = await dataDir();
     const csv = await exportFile(dir, [FRESH_ROW]);
 
-    // `resolveOrdersPath()` throws inside the try, AFTER the readline was constructed —
-    // so this path exercises both the catch (message to stderr, exit 1) and the `finally`
-    // that must still close the prompt.
+    // `resolveOrdersPath()` throws INSIDE the try, so this path exercises the outer catch:
+    // the message reaches stderr and the run exits 1. It does NOT exercise the `finally`'s
+    // `rl?.close()` in any meaningful sense — stdin here is a pipe, no question was ever
+    // put, and `rl` is `undefined`, so the optional call is a no-op. What the `finally`
+    // costs on this path is exactly the nothing the `?.` was written to cost.
     const run = runImport([csv], { dataDir: "data" });
 
     expectExited(run);
@@ -423,8 +450,17 @@ describe("import-orders-cli — the shell's own contract (argv, exit codes, env,
           "the batch — and there is nowhere to conduct it, so every question goes " +
           "unanswered. Run it from a terminal.",
       );
-      // ONCE, not once per question. Repeating it would bury the flow's refusal in copies.
-      expect(run.stderr.match(/No terminal on stdin/g)).toHaveLength(1);
+      // WHAT IT HONESTLY DOES NOT PIN, in the voice this file uses for that: the notice is
+      // written ONCE PER RUN rather than once per question, and no spawn can see it. This
+      // used to carry a `toHaveLength(1)` count over the notice, which could not fail — a
+      // no-terminal run puts EXACTLY ONE question. `import-orders.ts:586` asks the funding
+      // batch question, gets "", and `:588` refuses the whole import; every later question
+      // (the override pass, the rung walk) sits past that refusal, and no export shape,
+      // argv, or data-dir state reaches one. Delete the `toldThereIsNoTerminal` flag
+      // entirely, write the notice unconditionally, and all nine cases here stay green.
+      // The flag is kept anyway — it is a boolean, and the rung walk on the far side of the
+      // funding wall can put thirty questions, which is the shape that makes the difference
+      // between one notice and thirty legible. Counting a one-element set proved none of it.
       // AND THE FLOW'S OWN SENTENCE, on the flow's own channel, in the flow's own voice —
       // `no-reserve-declared`, asserted end-to-end for the first time. Two refusals, two
       // layers, one story: the shell says why there was no answer, the domain says what it
@@ -433,8 +469,19 @@ describe("import-orders-cli — the shell's own contract (argv, exit codes, env,
         "REFUSED — no funding reserve was declared for this batch",
       );
       expect(run.stderr).toContain(`Nothing was written to ${join(dir, "orders.jsonl")}.`);
-      // THE INTERNAL IS GONE. This is the regression the whole change exists to kill, and a
-      // readline constructed anywhere on this path would bring it straight back.
+      // THE INTERNAL IS GONE FROM THIS PATH — the piped, non-TTY one, which is the path
+      // every unattended caller and every test in this file takes, and where a readline
+      // constructed anywhere would bring `readline was closed` straight back.
+      //
+      // SAID PRECISELY, BECAUSE THE BROADER CLAIM IS FALSE. This is not "no readline
+      // internal ever reaches the operator again". At a REAL terminal, Ctrl-D on the
+      // funding question still surfaces Node's own `Aborted with Ctrl+D` on stderr with
+      // exit 1 — no shell sentence, no `no-reserve-declared`. Reproduced by hand on this
+      // commit (`printf '\004' | script -q /dev/null tsx …`). A BLANK LINE at the same
+      // terminal refuses correctly, in both voices, so this is a gap in the TTY branch
+      // rather than a regression of the fix: what #346 killed is a piped run reporting a
+      // readline internal instead of naming the missing terminal, and that is dead. The
+      // Ctrl-D case is tracked separately; nothing here should be widened to cover it.
       expect(run.stderr).not.toMatch(/readline was closed/);
       // Refused means refused: no sidecar, and no staging sibling of one either.
       expect(await readdir(dir)).not.toContain("orders.jsonl");
