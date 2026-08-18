@@ -953,10 +953,11 @@ pressure the channel exists to apply. The date is repeated inside the command li
 on purpose, so a line that reaches you alone — grepped, quoted into a standup,
 wrapped by a narrow terminal — still says which day it recovers.
 
-**Venue-dark days are COUNTED on one line and never enumerated**:
+**Venue-dark days are COUNTED on one line, never enumerated, and only the RECENT
+ones are counted at all**:
 
 ```text
-Numisma: 3 venue-day(s) dark — not lost days: the feed ran and the days are anchored. Enumerate them with pnpm gap-report.
+Numisma: 3 venue-day(s) dark in the last 7 days — not lost days: the feed ran and the days are anchored, and the venue was silent or the market was closed for a holiday. Enumerate them with pnpm gap-report.
 ```
 
 The asymmetry is deliberate and it is the decision this channel lives or dies on.
@@ -968,6 +969,33 @@ schedule, inside the fix. So the notice carries the number and names
 `pnpm gap-report`, which enumerates them on demand. (The TUI banner *does*
 enumerate them, correctly — a pulled surface has a different noise budget. The
 two renderings differ on purpose and must not be unified.)
+
+**The count is not your running total — it is bounded to the last
+`MAX_NOTICE_VENUE_DARK_DAYS` days** (seven, in
+`packages/event-store/src/operator-notice.ts`), which is why the line names the
+window out loud. Counting *all* of them would have re-created, in one line, the
+permanence the enumeration was refused for: the store's oldest venue-dark day is
+a holiday no command can clear, so an unbounded count is a line that prints
+forever and an "empty means healthy" notice that can never be empty again. Under
+the bound the count **self-extinguishes by age** instead: a market holiday is
+counted for a week and then goes quiet, and a recent venue outage's day drops off
+the same way once the marks land or the week passes. Seven keeps the channel
+empty roughly four days in five on a healthy store; the docstring on the constant
+carries the arithmetic and the recorded flip trigger (three, if ~70 noisy days a
+year still proves too many).
+
+Two consequences worth holding on to when you read the line:
+
+- **An empty notice does not mean every venue-dark day you ever had was
+  cleared.** It means none fell in the last seven days. Nothing was cleared —
+  venue-dark days are still permanent, and the derivation still knows all of
+  them.
+- **`pnpm gap-report` will usually enumerate MORE than the notice counted**, and
+  that is the design, not a disagreement: the report walks the whole window, the
+  notice only admits the recent tail. The bound is presentation-only and applied
+  at the leaf — the derivation window is never narrowed to achieve it, because
+  that would age out **lost** days too, which is the one outcome this channel
+  exists to prevent.
 
 **A `lost days were NOT checked (…)` line** means the **derivation itself broke** —
 the checker, not the data:

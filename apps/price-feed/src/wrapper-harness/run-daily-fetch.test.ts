@@ -1954,9 +1954,16 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
    *
    * THE RUN SUCCEEDS, so this is the no-writer case end to end (#376): step 0 has no
    * breadcrumb to speak from, the EXIT trap's branch is gated on a non-zero exit, and the
-   * unarmed fake at 5b writes nothing. On a fresh machine's FIRST healthy run the file must
-   * therefore not exist at all — the strongest form of "say nothing, write nothing" the
-   * channel has.
+   * unarmed fake at 5b writes nothing. IN THIS HARNESS, therefore, no writer touches the
+   * file and it must not exist at all — the strongest form of "say nothing, write nothing"
+   * the two BASH writers have.
+   *
+   * SAID PRECISELY, BECAUSE THE PRODUCTION SENTENCE IS THE OPPOSITE: with a real toolchain
+   * a fresh machine's first healthy run DOES create `operator-notice.txt`, empty, because
+   * `writeOperatorNoticeFile` always writes including the empty case — that unconditional
+   * write is the self-clearing contract. What this case isolates is the bash half: with 5b
+   * inert, `undefined` vs `""` separates "no bash writer spoke" from "step 0 truncated
+   * unconditionally", and only the first is correct.
    */
   it(
     `case 9c — no heartbeat means no notice, ${RUNS_PER_CASE} consecutive times`,

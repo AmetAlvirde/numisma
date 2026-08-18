@@ -96,9 +96,14 @@
  * right now — the three heartbeat triggers come apart:
  *
  *   - `exitCode !== 0`: true of N−1 and NOT ACTIONABLE, because the run writing the
- *     line just fixed it. Step 0 already carries this, correctly scoped, and step 0
+ *     line just fixed it. The bash already carries this, correctly scoped, and it
  *     reaches the two paths 5b never sees at all (an unresolvable `pnpm`/`node`, and
- *     a run that died partway).
+ *     a run that died partway). Since the wrapper's EXIT trap began calling
+ *     `write_operator_failure_notice`, the PRIMARY carrier is the trap, and it speaks
+ *     about THIS run at the moment it dies rather than about N−1 on the next fire —
+ *     which is why the FAILED sentence stopped being anti-correlated with the truth
+ *     of the run composing it. Step 0 is now the BACKSTOP for the same fact (see
+ *     below).
  *   - STALENESS: true of N−1 and NOT ACTIONABLE — run N recorded the day minutes
  *     earlier. Not lost but UPGRADED: every case it fires on, the lost-day half
  *     names better, with the day's own dated `pnpm prices:fetch --as-of=` line —
@@ -119,8 +124,22 @@
  * running with no timeout. It buys back only the future-dated trigger.
  *
  * SO THE CHANNELS SPLIT BY LANGUAGE: this notice is purely the DATA channel, and the
- * job channel is purely bash — the wrapper's step 0, which knows its own run's scope
- * because it is inside it. `formatHeartbeatWarning`,
+ * job channel is purely bash. That bash is now TWO WRITERS OF ONE FILE, and which one
+ * speaks is the difference between reporting a death and remembering one:
+ *
+ *   - THE WRAPPER'S `EXIT` TRAP is the PRIMARY writer. It fires inside the failing run
+ *     on a non-zero exit, so it knows its own run's status and its own run's scope
+ *     because it is inside it, and a run that dies at step 3 reports itself the moment
+ *     it dies instead of waiting for the next fire.
+ *   - THE WRAPPER'S STEP 0 is the BACKSTOP. It reads the previous run's breadcrumb at
+ *     the top of the next run, so it is deliberately scoped to run N−1 — inside run N,
+ *     speaking about N−1. On every ordinary failure it re-asserts what the trap already
+ *     wrote, one run apart. The residue it covers ALONE is the death with no trap at
+ *     all — SIGKILL to the shell, an OOM kill, a power loss — plus the run that dies
+ *     before the trap is installed. On those nothing else in this repo ever speaks.
+ *
+ * `run-daily-fetch.sh`'s own step 0 and step 5b blocks say the same thing; the three
+ * must be kept in agreement. `formatHeartbeatWarning`,
  * `loadHeartbeatLines` and `heartbeat.ts` are UNTOUCHED and the TUI banner keeps all
  * three triggers: it is a LIVE PULL surface reading the same primitive at the moment
  * the operator looks, which is the one context in which "the job failed" is a
@@ -175,8 +194,11 @@ export function formatNoticeCheckFailure(error: unknown): string {
  * THE MOST LOST DAYS THIS CHANNEL WILL ENUMERATE before it withholds the rest.
  *
  * Everything above enumerates correctly and unusably. The CLI passes no window, so
- * production gets the derivation's default (~90 days): smoke-run against a store with
- * no log at all, this composer wrote NINETY LINES on first contact. A notice that long
+ * production gets the COMPOSER's floor — `loadOperatorNoticeLines` fills in
+ * `defaultGapReportSince(now)`, which is the era start today and a rolling 400-day
+ * floor from 2027-08-08, so `computeGapReport`'s own `LAUNCHD_ERA_START` default is
+ * never reached from this path. Measured against that floor: smoke-run against a
+ * store with no log at all, this composer wrote NINETY LINES on first contact. A notice that long
  * on a channel that prints on every new terminal trains its reader to skip it on day
  * one — which reproduces #357 INSIDE the fix for #357. The bound is the one property
  * that did not survive rerouting off the TUI's `loadLivenessLines` (D3 chose it partly
@@ -376,6 +398,21 @@ function formatWithheldLostDays(withheld: number): string {
  * resolve to and is reproducible in a test besides. A report narrower than the bound
  * simply filters nothing — no clamp is needed, because the floor only ever moves
  * earlier than the report's own.
+ *
+ * THE ARITHMETIC, CHECKED AND RECORDED SO IT IS NOT RE-DERIVED: `floor = until − 6`
+ * with `date >= floor` is `[until − 6, until]`, exactly seven calendar days inclusive,
+ * pinned from both sides off the constant by `operator-notice.test.ts`'
+ * `OLDEST_ADMITTED` / `NEWEST_REFUSED` pair. Two residual wrinkles, both
+ * PRESENTATION-ONLY and both accepted:
+ *
+ *   - "in the last 7 days" is measured from `until`, which is YESTERDAY, so the window
+ *     the operator reads as "the last 7 days" is `[today − 7, today − 1]`: a day dark
+ *     exactly seven days before the morning they read it is still counted, and today
+ *     never is (it cannot be — it is not due yet). Fixing the wording would cost either
+ *     a clock read in this pure half or the clumsier "in the 7 days ending <until>".
+ *   - A caller handing in a report NARROWER than the bound still gets "in the last 7
+ *     days", naming a window the report did not open. Unreachable from the zero-argument
+ *     CLI; the test pins the filter-nothing behaviour deliberately.
  */
 function formatVenueDarkCount(report: GapReport): string[] {
   const floor = addDays(report.until, -(MAX_NOTICE_VENUE_DARK_DAYS - 1));
