@@ -116,6 +116,14 @@ async function loadGapFindings(
  * being replaced wholesale is correct. The single `writeFile` with no `flag` is what
  * makes that non-negotiable in code rather than in a comment.
  *
+ * AND SINCE #376 THE STALENESS RUNS THE OTHER WAY TOO, WHICH IS FINE FOR THE SAME
+ * REASON. The wrapper's EXIT trap is a THIRD writer of this file and the only one that
+ * writes AFTER this one — on a non-zero exit it replaces whatever landed here with the
+ * failure of the run that just died. So this writer's output is what is stale in that
+ * direction: it describes data findings from a run that then failed, and a report of the
+ * failure is what the operator can act on today. Every writer of this file overwrites,
+ * none of them merge, and the last one to speak is the one with the newest fact.
+ *
  * NOT ATOMIC, AND IT DOES NOT CREATE THE DIRECTORY — both accepted, for
  * `writeGapReportFile`'s reasons unchanged. This is a small single-writer file in a
  * directory that by construction already holds the log it was derived from, and a
