@@ -1,0 +1,23 @@
+{
+  // The typecheck for repo TOOLING — `ops/**` and the root vitest config.
+  //
+  // Every package tsconfig includes only its own `src`/`tests`, and the root
+  // `tsconfig.json` has no `include` and no script that runs it, so this
+  // directory was seen by NOTHING. `repo-sources.testkit.ts` survived only by
+  // accident, being imported transitively from included files. That matters here
+  // more than usual: `gitignored-path-globs.test.ts` reaches structurally into
+  // `vitest.config.ts`'s exported shape, and a vitest major renaming `test.exclude`
+  // would otherwise surface as a runtime `undefined` INSIDE A GUARD rather than a
+  // red typecheck.
+  //
+  // `allowImportingTsExtensions` is set HERE ONLY, never in the shared root config
+  // the six packages extend: `vitest.config.ts` imports `./ops/testkit/*.ts` with
+  // an explicit `.ts` extension (vite resolves it; NodeNext otherwise rejects it),
+  // and that permission has no business leaking into product builds.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowImportingTsExtensions": true
+  },
+  "include": ["ops/**/*.ts", "vitest.config.ts"]
+}
