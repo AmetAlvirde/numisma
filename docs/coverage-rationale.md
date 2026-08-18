@@ -237,21 +237,28 @@ tests moved with the code into `packages/event-store/src/event-store.test.ts`.
   already-closed rejection branches this bullet used to cite as open — they
   measure covered in the fresh run.)
 
-  `events/fold.ts` (re-measured at `8393bf6`, after #329) has **three** ranges
-  open, and every line number this paragraph used to carry has moved:
+  `events/fold.ts` (re-measured at `a253dcd`, after #371) has **three** ranges
+  open — the same three as the previous vintage, all renumbered by that change:
 
-  - `:691-692` — the `Withdraw` arm's `recordSkip(event, order,
+  - `:718-720` — the `Withdraw` arm's `recordSkip(event, order,
     "reserve-absent")`, taken when `applyToReserve` finds no such reserve. A
-    Discard-Channel skip record rather than a numeric guard, and a branch this
-    paragraph never named before.
-  - `:737-740,742-743` — the `foldEvents` exhaustiveness latch (`const _never:
+    Discard-Channel skip record rather than a numeric guard. Cited as
+    `:691-692` before; only the lines moved.
+  - `:781-787` — the `foldEvents` exhaustiveness latch (`const _never:
     never = event; throw new Error(...)`), categorized like the other `_never`
     latch rows (§7's `skip-message.ts`/`orders/ingest.ts`/`orders/select.ts`):
     unreachable at runtime by construction, kept live so a new verb fails the
-    build rather than falling through silently. Cited as `:492-498` before;
-    only the lines moved.
-  - `:1045-1046` — the zero-`totalQuantity` early `return 0` in
-    `weightedAverageCost`. Cited as `:688-689` before; only the lines moved.
+    build rather than falling through silently. Cited as `:737-740,742-743`
+    before; only the lines moved.
+  - `:1088-1090` — the zero-`totalQuantity` early `return 0` in
+    `weightedAverageCost`. Cited as `:1045-1046` before; only the lines moved.
+
+  The `Transfer` arm's own `reserve-absent` skip is NO LONGER among them. #371
+  replaced its two per-leg `applyToReserve` failure branches with a single
+  pre-flight existence check that the new both-legs-or-neither tests exercise
+  directly, so that branch measures covered where its predecessor did not. The
+  `Withdraw` arm above is now the only `reserve-absent` record in the file that
+  no test reaches.
 
   Two claims this paragraph used to make are now false and are withdrawn rather
   than renumbered. **The `:47-48` c1-fallback branch no longer exists:** #329
