@@ -225,6 +225,10 @@ export interface MigrationReport {
  * deliberate one-time reconstruction, NOT a runtime append path — append-only still
  * holds going forward. Idempotent: re-running a clean log migrates nothing.
  *
+ * A log with nothing in it to migrate — absent, empty, or blank lines only — returns a
+ * zero report and touches no disk at all, so the caller's "no durable log" sentence is
+ * true of the bytes as well as of the counts (#345; the guard carries the reasoning).
+ *
  * IT ALSO REPORTS WHAT THE FOLD DROPPED, and this is the path where that matters most:
  * #293 names the legacy migration as the one the ingest gates cannot cover. The
  * cross-reference below runs the fold (`buildEventReference`), so its discards are in
@@ -236,7 +240,39 @@ export async function migrateLegacyLog(
   cashLegs: Map<string, SuppliedCashLeg>,
 ): Promise<MigrationReport> {
   const raw = await readOptional(paths.log);
-  if (raw === undefined) {
+  // A CONTENTLESS LOG IS THE SAME ANSWER AS A MISSING ONE (#345): nothing to migrate,
+  // nothing written, and the file left byte-for-byte as the operator left it.
+  //
+  // Two shapes reach here as "contentless" and they are ONE seam, not two cases: an
+  // existing empty log, and one holding only blank lines. The loop below trims each line
+  // and skips the empty ones, so neither shape can ever yield a record — but without this
+  // guard both still fell through to `writeLogImage` and were replaced by a single
+  // newline byte, while `migratedCount + unchangedCount === 0` sent the shell down its
+  // "No durable log to migrate" branch. The report was a lie about a write that happened,
+  // on the one tool in the repo that rewrites the whole durable log. Hence the predicate
+  // is the loop's own rule hoisted above the write — no content once blank lines are
+  // discarded — rather than an `=== ""` check that would fix half of it.
+  //
+  // THE GUARD BELONGS HERE, NOT IN `readOptional`. That helper maps ENOENT alone to
+  // `undefined`, and its other callers read it for exactly that: "absent" and "present
+  // but empty" are different facts about the disk. Widening it to fold `""` into
+  // `undefined` would quiet this path by destroying the distinction that separates an
+  // empty log from an unreadable one. "Nothing to migrate" is a policy this migration
+  // owns.
+  //
+  // IT RETURNS ABOVE `loadGenesis`, AND THAT PLACEMENT IS THE POINT, not an oversight —
+  // it is a real behaviour change and it is deliberate. An empty log in a data dir whose
+  // `genesis.json` is missing or corrupt now ends 0 with "No durable log to migrate",
+  // where before #345 it ended 1 naming `genesis.json`. That is the guard's own thesis
+  // applied consistently: an ABSENT log has always returned from here, above the genesis
+  // read, so a CONTENTLESS one — which #345 says is the same answer — has to leave through
+  // the same door or the two shapes are not really one seam. Genesis is loaded to
+  // cross-reference records against; with no records there is nothing to cross-reference,
+  // and demanding the operator repair a file this run was never going to read would be a
+  // refusal about nothing. Pinned in `migrate-legacy-log.test.ts` — the case that plants an
+  // empty log in a dir with no genesis at all — which is what goes red if this guard ever
+  // drifts below the read.
+  if (raw === undefined || raw.trim().length === 0) {
     return { migratedCount: 0, unchangedCount: 0, outputPath: paths.log, discarded: [] };
   }
 
