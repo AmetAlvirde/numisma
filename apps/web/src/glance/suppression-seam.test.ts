@@ -17,10 +17,11 @@
  *  3. the keys the push emits really do empty the reader's slots, end to end, ONE KEY
  *     AT A TIME, so each key is proven load-bearing rather than merely imported.
  */
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { sourceFiles } from "../../../../ops/testkit/repo-sources.testkit.js";
 import type { SnapshotAnchor } from "../projection/contract.ts";
 import { SUPPRESSION_KEYS } from "../projection/contract.ts";
 import { loadAnchorFixture } from "../push/anchor-fixture.ts";
@@ -69,10 +70,9 @@ describe("no production module hand-types a suppression key", () => {
   const COMMENT = /\/\*[\s\S]*?\*\/|\/\/[^\n]*/g;
 
   /** Every non-test module under `apps/web/src`, minus the keys' declared home. */
-  const scanned = readdirSync(SRC, { recursive: true, encoding: "utf-8" })
-    .filter((rel) => rel.endsWith(".ts") && !rel.endsWith(".test.ts"))
-    .filter((rel) => resolve(SRC, rel) !== resolve(SRC, "projection/contract.ts"))
-    .map((rel) => resolve(SRC, rel))
+  const scanned = sourceFiles({ dir: SRC, as: "absolute" })
+    .filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts"))
+    .filter((file) => file !== resolve(SRC, "projection/contract.ts"))
     .sort();
 
   it("walks the whole source tree, not a list that can go stale", () => {

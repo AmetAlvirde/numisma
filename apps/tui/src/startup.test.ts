@@ -236,10 +236,21 @@ describe("prepareStartup — ingests, surfaces the report, and wires the fold lo
     ]);
   });
 
-  it("propagates a fail-loud ingest rejection without emitting a count", async () => {
+  it("propagates an ingest rejection VERBATIM, without wrapping it or emitting a count", async () => {
     const paths = await makeStore({ inbox: [openBtc()] });
     const emitted: string[] = [];
 
+    // THE ERROR-INSTANCE MATCHER BELOW IS DELIBERATE, and it is a LOCAL EXCEPTION —
+    // the `--as-of` matchers above stay on the substring form on purpose, since what
+    // they pin is one distinguishing phrase inside a longer authored message.
+    // This one is different: the string it names is thrown by the stub just below,
+    // so a SUBSTRING match would assert only that the stub's own text survived
+    // somewhere in the result — which it would even if `prepareStartup` started
+    // re-throwing `new Error("startup failed: " + cause.message)`. Wrapping is the
+    // realistic regression here, and the property worth holding is that the ingest
+    // rejection reaches the host UNCHANGED so the host can report the real cause.
+    // vitest compares `message` for EQUALITY when given an Error instance, so this
+    // form — and only this form — tests production rather than the stub.
     await expect(
       prepareStartup(paths, ["node", "app"], {
         emit: (line) => emitted.push(line),
@@ -247,7 +258,7 @@ describe("prepareStartup — ingests, surfaces the report, and wires the fold lo
           throw new Error("cross-reference: unknown instrumentId");
         },
       }),
-    ).rejects.toThrow(/cross-reference/);
+    ).rejects.toThrow(new Error("cross-reference: unknown instrumentId"));
     // No count is surfaced for a rejected startup — the host surfaces the error instead.
     expect(emitted).toEqual([]);
   });
