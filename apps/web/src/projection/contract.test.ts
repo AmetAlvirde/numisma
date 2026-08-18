@@ -25,7 +25,6 @@ import {
   existsSync,
   mkdtempSync,
   readFileSync,
-  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -34,6 +33,10 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import type { CompositionReport } from "@numisma/engine";
 import { describe, expect, it } from "vitest";
+import {
+  REPO_ROOT,
+  repoFiles,
+} from "../../../../ops/testkit/repo-sources.testkit.js";
 import { fundIdOf } from "./contract.ts";
 
 // The fixture the push shell + reader share. Its fundName is the canonical
@@ -83,7 +86,9 @@ function runtimeImportsOf(source: string): string[] {
   return specifiers;
 }
 
-const REPO_ROOT_DIR = resolve(HERE, "../../../..");
+// The checkout this file belongs to, from git rather than from counting `..`
+// segments — and the same root `repoFiles()` expresses its paths against.
+const REPO_ROOT_DIR = REPO_ROOT;
 const CONTRACT = resolve(HERE, "contract.ts");
 const READER = resolve(HERE, "snapshot-reader.ts");
 
@@ -140,16 +145,24 @@ const workspacePackages = new Map<
   string,
   { dir: string; exports: Record<string, unknown> }
 >(
-  WORKSPACE_GROUPS.flatMap((group) => {
-    const groupDir = resolve(REPO_ROOT_DIR, group);
-    if (!existsSync(groupDir)) return [];
-    return readdirSync(groupDir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .flatMap((entry) => {
-        const dir = join(groupDir, entry.name);
-        const manifestPath = join(dir, "package.json");
-        if (!existsSync(manifestPath)) return [];
-        const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as {
+  WORKSPACE_GROUPS.flatMap((group) =>
+    // The GROUPS stay yaml-derived (a test below locks that); only the per-group
+    // DIRECTORY CENSUS moves onto the shared gitignore-aware listing. The
+    // walker's own `workspacePackageDirs()` would have supplied both, but it
+    // hardcodes `apps|packages` — taking it would silently re-hardcode the group
+    // list this file deliberately reads from `pnpm-workspace.yaml` at runtime.
+    repoFiles()
+      .filter((file) => {
+        if (!file.startsWith(`${group}/`)) return false;
+        // Exactly one directory level below the group, as `<group>/*` means.
+        const within = file.slice(group.length + 1).split("/");
+        return within.length === 2 && within[1] === "package.json";
+      })
+      .flatMap((manifestPath) => {
+        const dir = resolve(REPO_ROOT_DIR, dirname(manifestPath));
+        const manifest = JSON.parse(
+          readFileSync(resolve(REPO_ROOT_DIR, manifestPath), "utf-8"),
+        ) as {
           name?: string;
           exports?: Record<string, unknown>;
         };
@@ -157,8 +170,8 @@ const workspacePackages = new Map<
         return [
           [manifest.name, { dir, exports: manifest.exports ?? {} }] as const,
         ];
-      });
-  }),
+      }),
+  ),
 );
 
 /**
