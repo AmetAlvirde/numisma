@@ -217,20 +217,48 @@ describe("loadEventLog — log-line quarantine", () => {
     // because it is committed and the run that wrote it is gone. So they must count the
     // same thing, by construction rather than by two definitions happening to agree.
     //
-    // ONE `Transfer` with both legs absent is the shape that separates them: it writes two
-    // skip RECORDS (each leg records independently, spec #323 slice A) about ONE event.
-    // A raw `skipped.length` says 2 where the verdict says 1.
+    // THE FIXTURE CHANGED IN #371, AND SO DID WHY IT WORKS. This used to be ONE
+    // `Transfer` with both legs absent, which wrote two skip RECORDS about ONE event
+    // because each leg reported for itself — a raw `skipped.length` said 2 where the
+    // verdict said 1. That arm now checks both reserves before either moves and records
+    // ONCE, so no single event can produce two records any more and that shape no longer
+    // separates the two numbers. Two DISTINCT dropped events do.
     const paths = await makeStore({
-      log: `${JSON.stringify(openBtc())}\n${JSON.stringify(transferBothLegsGhost())}\n`,
+      log:
+        `${JSON.stringify(openBtc())}\n` +
+        `${JSON.stringify(closeGhost())}\n` +
+        `${JSON.stringify(transferBothLegsGhost())}\n`,
     });
     const folded = await loadFoldedReview(paths);
-    expect(folded.skipped).toHaveLength(2); // two records…
+    expect(folded.skipped).toHaveLength(2);
 
     const digest = deriveHeadDigest(folded, "transfer-both-ghost", "0.7.2");
     const verdict = unattendedFoldVerdict(folded);
 
-    expect(digest.discardedEventCount).toBe(1); // …one event.
+    expect(digest.discardedEventCount).toBe(2);
     expect(verdict.messages[0]).toContain(`${digest.discardedEventCount} event(s)`);
+  });
+
+  it("no single event yields two skip records — the two counts cannot diverge on one fold", async () => {
+    // THE INVARIANT THAT REPLACED THE OLD FIXTURE (#371). Every reason in the closed
+    // vocabulary now means the fold applied NOTHING, and each arm records once and
+    // stops, so within a single fold `skipped.length` and `discardedEventCount` agree by
+    // construction. The `Transfer` missing BOTH reserves is the event that used to break
+    // this and is kept here as the standing tripwire on it.
+    //
+    // `dedupeFoldSkips` is NOT thereby vestigial: ingest re-folds the whole log once per
+    // accepted event (ADR-015), so the SAME standing drop is seen n times across n folds.
+    // That repeat is what it collapses, and it is exercised on the ingest path.
+    const paths = await makeStore({
+      log: `${JSON.stringify(openBtc())}\n${JSON.stringify(transferBothLegsGhost())}\n`,
+    });
+    const folded = await loadFoldedReview(paths);
+
+    expect(folded.skipped).toHaveLength(1);
+    expect(folded.skipped[0]!.reason).toBe("reserve-absent");
+    expect(deriveHeadDigest(folded, "transfer-both-ghost", "0.7.2").discardedEventCount).toBe(
+      folded.skipped.length,
+    );
   });
 
   it("says NOTHING over a clean log — the daily run stays byte-identical", async () => {

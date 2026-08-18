@@ -46,12 +46,18 @@ const SKIP_DETAIL: Record<FoldSkipReason, string> = {
     "The fold has no record of this event's target position — it was never opened in " +
     "this window, or it was already retired — so the event was read and then dropped. " +
     "No state moved.",
+  // BOTH CASH-LEG REASONS SAY "THE EVENT", NOT "THE LEG" (#371). The fold drops the
+  // whole event on either, so prose naming only the leg understated the discard on
+  // exactly the arms where the rest of the event used to carry on.
+  //
+  // "a reserve" rather than "the reserve": a Transfer names two, and either one being
+  // absent raises this.
   "reserve-absent":
-    "The fold has no record of the reserve this event's cash leg names, so that leg was " +
-    "read and then dropped. No balance moved.",
+    "The fold has no record of a reserve this event's cash leg names, so the event was " +
+    "read and then dropped. No state moved.",
   "provenance-absent":
     "This event's cash leg has no cost-basis provenance to inherit — the fold has no " +
-    "lots to attribute it across — so the leg was read and then dropped. No balance moved.",
+    "lots to attribute it across — so the event was read and then dropped. No state moved.",
 };
 
 /**
@@ -713,18 +719,34 @@ export function foldEvents(
           recordSkip(event, order, "reserve-absent");
         }
         break;
-      case "Transfer":
-        // ONE RECORD PER MISSED LEG, not per event. A Transfer whose destination is
-        // absent still debits the source: cash leaves and never arrives, and reserves
-        // are left quietly unbalanced. That is precisely the state the channel exists
-        // to stop being silent about, so each leg reports for itself.
-        if (!applyToReserve(reserves, event.fromReserveId, [{ tier: event.tier, amount: -event.amount }])) {
+      case "Transfer": {
+        // BOTH LEGS OR NEITHER (#371). A Transfer names two reserves and moves one
+        // amount between them, so a missing reserve on either side means the movement
+        // cannot complete. This arm USED TO apply each leg independently and report per
+        // leg, which let a Transfer whose destination was absent still debit the source:
+        // cash left and never arrived, and the reserves were left quietly unbalanced.
+        // That is the silent-and-unbalanced state the Discard Channel exists to end, not
+        // a state worth reaching in order to report it. So both reserves are checked
+        // BEFORE either leg applies, and a miss applies neither.
+        //
+        // ONE RECORD PER EVENT, not per leg. `dedupeFoldSkips` keys on
+        // (`eventId`, `reason`), so two `reserve-absent` records for a single Transfer
+        // would BOTH survive dedupe — inflating `discardedEventCount` and emitting two
+        // `formatFoldDiscards` lines for one drop. The channel would over-report the
+        // very thing it exists to report exactly once. This is the same precedence
+        // reasoning `applyTieredLeg` makes for `provenance-absent` over `reserve-absent`.
+        //
+        // The existence check is deliberately separate from `applyToReserve`'s own
+        // boolean: that boolean reports whether a leg APPLIED, and by the time it could
+        // answer for the second leg the first has already moved.
+        if (!reserves.has(event.fromReserveId) || !reserves.has(event.toReserveId)) {
           recordSkip(event, order, "reserve-absent");
+          break;
         }
-        if (!applyToReserve(reserves, event.toReserveId, [{ tier: event.tier, amount: event.amount }])) {
-          recordSkip(event, order, "reserve-absent");
-        }
+        applyToReserve(reserves, event.fromReserveId, [{ tier: event.tier, amount: -event.amount }]);
+        applyToReserve(reserves, event.toReserveId, [{ tier: event.tier, amount: event.amount }]);
         break;
+      }
       case "ReserveOpened":
         // Birth an EMPTY Reserve. NAV-neutral BY CONSTRUCTION: the event carries no
         // amount and no lots, so there is nothing here that could move the fund — the
