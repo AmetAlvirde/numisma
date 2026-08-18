@@ -202,11 +202,36 @@ export function readOverride(raw: string | undefined): WrapperTestOverride {
   );
 }
 
+/**
+ * Run git and return its output with TRAILING whitespace removed AND LEADING WHITESPACE
+ * LEFT ALONE. The asymmetry is a bug fix, and the bug is worth keeping written down.
+ *
+ * This used to `.trim()`. Every other caller — `rev-parse`, `merge-base`, `diff` — wants
+ * exactly that: a SHA or a newline-separated path list, with no leading whitespace to lose,
+ * and a trailing newline to drop. But `status --porcelain` emits a TWO-COLUMN STATUS FIELD,
+ * and a tracked-modified file is reported as `" M path"` — with a leading space.
+ * {@link parsePorcelain} takes `line.slice(3)` because that is where the path starts. A
+ * `.trim()` over the WHOLE output eats the leading space of the FIRST LINE ONLY, so that
+ * one entry — and only that one — came back a character short:
+ * `ops/price-feed/run-daily-fetch.sh` arrived as `ps/price-feed/run-daily-fetch.sh`,
+ * matched nothing in the path set, and the harness printed
+ * `harness skipped: no changes under ops/price-feed/**` with the wrapper visibly modified.
+ *
+ * THAT IS THE WORST DIRECTION FOR THIS PARTICULAR DEFECT TO FAIL IN. §7's whole asymmetry
+ * is that the trigger fails toward RUNNING, because failing open here costs one slow test
+ * run and failing closed buys silence. This failed closed, silently, on exactly the input
+ * the trigger exists to catch: an uncommitted edit to the subject.
+ *
+ * It survived because the test that covers it wrote the wrapper into a FRESH fixture dir,
+ * where git reports `"?? path"` — no leading space, unharmed by the trim, green forever
+ * over a shape the real producer never emits for an edit to a tracked file. The test now
+ * commits the fixture first and modifies it, so the ` M` form is what is exercised.
+ */
 function git(repoRoot: string, args: readonly string[]): string {
   return execFileSync("git", ["-C", repoRoot, ...args], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
-  }).trim();
+  }).replace(/\s+$/, "");
 }
 
 /**
