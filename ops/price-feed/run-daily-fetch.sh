@@ -90,12 +90,29 @@ TIMED_OUT=false
 HEARTBEAT_FILE="$DATA_DIR/job-heartbeat.json"
 # THE DELIVERY CHANNEL'S ONE FILE, named ONCE here beside the breadcrumb it is derived
 # from. Step 0 below writes it in bash and step 5b rewrites it through
-# `pnpm operator-notice`, and the two MUST agree on the path — which is why there is no
-# `NUMISMA_*` override for it and must never be one. The TS half resolves it from the same
-# data dir through ADR-006's single rule (`operator-notice-io.ts`,
-# `OPERATOR_NOTICE_FILENAME`), so a second knob here would be a second way for the writer
-# and the reader to end up in different directories. For a channel whose healthy state is
-# an empty file, that failure is not a missing message: it is silence that reads as health.
+# `pnpm operator-notice`, and the two MUST agree on the path. There is deliberately no
+# notice-specific `NUMISMA_*` override and there must never be one: the TS half resolves
+# the same name from the same data dir through ADR-006's single rule
+# (`operator-notice-io.ts`, `OPERATOR_NOTICE_FILENAME`), so a second knob here would be a
+# second way for the writer and the reader to end up in different directories. For a
+# channel whose healthy state is an empty file, that failure is not a missing message: it
+# is silence that reads as health.
+#
+# WHAT THAT DOES *NOT* BUY, STATED PLAINLY BECAUSE AN EARLIER VERSION OF THIS COMMENT
+# CLAIMED IT DID. Having no override of its own does not make the two halves agree, because
+# the DATA DIR they hang off can still diverge inside one run. `DATA_DIR` is resolved at the
+# top of this file (line 59), and `$ENV_FILE` is sourced much later under `set -a`, which
+# EXPORTS every assignment in it. So a `NUMISMA_DATA_DIR=` line in the private token file
+# splits the run in two: bash `$DATA_DIR` — and therefore this variable, `$HEARTBEAT_FILE`,
+# and the `git -C "$DATA_DIR"` in steps 3 and 4 — keeps the PRE-SOURCE value, while step
+# 5b's `resolveDataDirDefault()` sees the exported one and writes `operator-notice.txt`
+# into the POST-SOURCE directory. Two writers, two directories, one `cat` in the profile.
+# The resolution order is not this channel's to change (`job-heartbeat.json` and
+# `gap-report.json` have had the same exposure since before this file grew a notice), so
+# what is recorded here is the true shape of it: THE ONE SUPPORTED CONFIGURATION IS THAT
+# `NUMISMA_DATA_DIR` IS NOT SET IN `$ENV_FILE`. That file is for provider tokens; put the
+# data dir in the LaunchAgent plist's `EnvironmentVariables`, which is in the environment
+# before line 59 runs and therefore cannot split anything.
 OPERATOR_NOTICE_FILE="$DATA_DIR/operator-notice.txt"
 
 # --- was this run even CAPABLE of marking? (#185 S2) -------------------------
@@ -299,6 +316,27 @@ if [[ -n "$PREVIOUS_EXIT_CODE" && -n "$PREVIOUS_LAST_STEP" ]]; then
     # notice has exactly one well-known name and no history, and a file that accumulated
     # would be a log nobody reads. Guarded because a full or read-only data dir must cost a
     # notice, never the run.
+    #
+    # THE TRADE THIS `>` MAKES, RECORDED BECAUSE IT CUTS AGAINST THE BLOCK ABOVE. The clean
+    # branch refuses to touch the file precisely because the previous run's step 5b may have
+    # named real lost days — and this branch then deletes those same lines. Across a
+    # MULTI-DAY OUTAGE that inverts the standing-debt purpose in the exact case step 0 was
+    # written for: run N-1 enumerates 08-14 and 08-15 with a `pnpm prices:fetch --as-of=`
+    # line each, run N dies at step 3, and every run after it prints only "the previous run
+    # FAILED" — no dated recovery command anywhere, for as long as the outage lasts, even
+    # though those dates were still accurate the whole time. Lost days are permanent, so
+    # what is discarded never went stale.
+    #
+    # IT IS STILL THE RIGHT CALL HERE, and the reason is that the alternative is worse than
+    # it looks. Preserving them means READING the file back before the `>` and prepending —
+    # pure bash, doable — but what would be prepended is unvalidated text of unknown age
+    # from a file this step cannot date, carried forward run after run with nothing that can
+    # ever retire it. Step 5b is the only writer that knows whether a lost-day line is still
+    # true, and on the outage above step 5b is precisely what is not running. A stale
+    # enumeration standing under a fresh FAILED line is a channel telling the operator two
+    # things of different vintages in one voice, which is the credibility spend this whole
+    # design refuses. So: one bounded, currently-true message, and `NOTICE_SCOPE_LINE` above
+    # says out loud that lost days are not in it. The cost is real and it is accepted.
     printf '%s\n%s\n' "$NOTICE_FAILED_LINE" "$NOTICE_SCOPE_LINE" \
       > "$OPERATOR_NOTICE_FILE" 2>/dev/null || true
   fi

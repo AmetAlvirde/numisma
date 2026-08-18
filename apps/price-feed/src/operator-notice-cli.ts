@@ -31,20 +31,31 @@
  * failed to write. That one case goes to stderr, into the run log the wrapper tees,
  * and the run continues. This is the only channel left at that point, and saying
  * nothing would be the failure this whole increment exists to remove.
+ *
+ * SO NEITHER ARM CALLS `process.exit`, AND THAT IS WHAT KEEPS THE PROMISE ABOVE.
+ * Exiting 0 is not something this file has to do; it is what already happens. The
+ * rejection is handled by the second argument below, so nothing goes unhandled and
+ * the process leaves with 0 on its own once the event loop drains. An explicit
+ * `process.exit(0)` would add no guarantee and would take one away: under the wrapper
+ * both streams are a PIPE into a `tee` process substitution, writes to a pipe are
+ * ASYNCHRONOUS, and `process.exit` terminates without flushing them. It would drop
+ * exactly the disk-failure diagnostic this comment just called the only channel left,
+ * and drop it ONLY in the deployed shape — against an interactive TTY the write is
+ * synchronous, so nothing is ever seen to go missing while testing by hand.
  */
 import { resolveDataDirDefault, resolveEventStorePaths, writeOperatorNotice } from "@numisma/event-store";
 
 writeOperatorNotice(resolveEventStorePaths(resolveDataDirDefault()), { now: new Date() }).then(
   (path) => {
     console.log(`[operator-notice] wrote ${path}`);
-    process.exit(0);
   },
   (error: unknown) => {
+    // HANDLED, AND THEN NOTHING — the handling is what makes the exit 0, and the
+    // absence of a `process.exit` is what lets this line reach the run log. See the
+    // header; the run must reach `backfill`, and it must reach it knowing this.
     console.error(
       "[operator-notice] could NOT write the notice:",
       error instanceof Error ? error.message : error,
     );
-    // Exit 0 ON PURPOSE — see the header. The run must reach `backfill`.
-    process.exit(0);
   },
 );
