@@ -101,6 +101,16 @@ const READER = resolve(HERE, "snapshot-reader.ts");
  * Only the `<dir>/*` glob shape is understood, which is the only shape this repo
  * uses. Anything else THROWS: an unrecognised glob means the walker's idea of
  * the workspace is no longer the yaml's, and that must be loud.
+ *
+ * ⛔ YES, THIS IS A CHARACTER-FOR-CHARACTER COPY OF `workspaceGroupsIn` IN
+ * `ops/testkit/repo-sources.testkit.ts`, AND IT MUST STAY ONE. Ruled on: do not
+ * import the shared version here, and do not file a TODO to. This suite's job
+ * (see "derives its workspace groups from pnpm-workspace.yaml rather than a
+ * hardcoded list", below) is to hold that walker to the manifest, and a check is
+ * only a check if it reads the manifest INDEPENDENTLY. Sharing the parser would
+ * compare the walker against itself — the test would pass unconditionally,
+ * including on the very regression it exists to catch. The duplication IS the
+ * independence.
  */
 function workspaceGroupsIn(yaml: string): string[] {
   const groups: string[] = [];

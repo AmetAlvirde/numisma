@@ -211,10 +211,17 @@ export function sourceFiles(options: SourceFilesOptions = {}): string[] {
  * partial answer, only a confident wrong one.
  *
  * Exported as a pure text-to-groups function so a caller with the yaml already in
- * hand can reuse it. `contract.test.ts` still carries its own equivalent copy; making
- * it share this one is a later change, deliberately not made here — that file's
- * assertions were verified against its own parser and this is not the change to
- * invalidate that proof in.
+ * hand can reuse it.
+ *
+ * ⛔ `apps/web/src/projection/contract.test.ts` CARRIES ITS OWN IDENTICAL COPY, AND
+ * THAT DUPLICATION IS DELIBERATE — ruled on, not drift. Do not collapse it and do
+ * not leave a TODO proposing the merge. That file exists to assert that this walker
+ * derives its workspace groups FROM `pnpm-workspace.yaml` rather than hardcoding
+ * them, and it can only assert that from an INDEPENDENT reading of the manifest.
+ * Import this function there and the test compares the walker against itself: it
+ * would pass unconditionally, including on the exact regression it was written to
+ * catch. An oracle that shares its implementation with the thing it checks is not
+ * an oracle.
  */
 export function workspaceGroupsIn(yaml: string): string[] {
   const groups: string[] = [];
