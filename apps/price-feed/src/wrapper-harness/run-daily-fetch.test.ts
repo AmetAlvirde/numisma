@@ -437,13 +437,63 @@ describe("wrapper harness — the arming trigger (always runs)", () => {
       expect(result.reason).toContain("ops/price-feed/**");
     }, GIT_FIXTURE_TIMEOUT_MS);
 
-    it("sees an UNCOMMITTED wrapper edit — the moment you most want the suite", () => {
+    /**
+     * THE SHAPE THE REAL PRODUCER EMITS — a TRACKED wrapper, MODIFIED IN PLACE.
+     *
+     * This test used to write the wrapper into a fresh fixture dir, where git reports
+     * `"?? ops/price-feed/run-daily-fetch.sh"`. That form has NO leading whitespace, so it
+     * survived `git()`'s old whole-output `.trim()` intact and this test passed for as long
+     * as the defect lived. The form an actual uncommitted wrapper edit takes is `" M path"`
+     * — the two-column porcelain status field, leading space and all — and the trim ate that
+     * space on the FIRST line of the output, leaving `parsePorcelain`'s `line.slice(3)` one
+     * character short: `ps/price-feed/run-daily-fetch.sh`, matching nothing, so the harness
+     * skipped with the wrapper visibly modified. The test passed because it pinned a shape
+     * the real producer never emits, which is the failure mode this whole suite is built to
+     * refuse.
+     *
+     * THE WRAPPER IS THE ONLY DIRTY FILE, and that is deliberate rather than minimal: the
+     * old trim damaged the FIRST line of the output and no other, so a fixture with an
+     * alphabetically earlier dirty path would have absorbed the damage somewhere harmless
+     * and gone green over the same bug. Alone, the wrapper IS line one, and the character
+     * it used to lose is the character this assertion is about.
+     */
+    it("sees an UNCOMMITTED edit to the TRACKED wrapper — the moment you most want the suite", () => {
+      const { dir, git } = makeTempRepo();
+      writeIn(dir, WRAPPER_RELATIVE_PATH, "# authored fixture standing in for the wrapper\n");
+      git("add", "-A");
+      git("commit", "--quiet", "-m", "base");
+      git("update-ref", "refs/remotes/origin/main", "HEAD");
+      // Tracked and now modified in place, which git reports as ` M <path>` — leading
+      // space and all. Writing it into a fresh dir instead would produce `?? <path>`, and
+      // that is the shape the defect could not touch.
+      writeIn(dir, WRAPPER_RELATIVE_PATH, "# authored fixture, edited in place\n");
+
+      const changed = resolveTriggerFacts(dir).changedPaths;
+      expect(changed).toContain(WRAPPER_RELATIVE_PATH);
+      expect(
+        decideArming({
+          changedPaths: changed,
+          base: { kind: "resolved", sha: git("rev-parse", "HEAD") },
+          pathSet: TRIGGER_PATH_SET,
+          platform: HARNESS_PLATFORM,
+          override: "auto",
+        }).run,
+        "the trigger skipped on a modified tracked wrapper — the exact silence §7 forbids",
+      ).toBe(true);
+    }, GIT_FIXTURE_TIMEOUT_MS);
+
+    /**
+     * AND THE UNTRACKED SHAPE STILL ARMS — kept, because it is a real case and not merely
+     * the old test's residue: a brand-new wrapper, or a whole new harness directory, arrives
+     * as `??` and is exactly what `--untracked-files=all` was added for.
+     */
+    it("sees a BRAND-NEW untracked wrapper — the `??` shape `--untracked-files=all` exists for", () => {
       const { dir, git } = makeTempRepo();
       writeIn(dir, "README.md", "authored fixture\n");
       git("add", "-A");
       git("commit", "--quiet", "-m", "base");
       git("update-ref", "refs/remotes/origin/main", "HEAD");
-      writeIn(dir, WRAPPER_RELATIVE_PATH, "# authored fixture, uncommitted\n");
+      writeIn(dir, WRAPPER_RELATIVE_PATH, "# authored fixture, never committed\n");
 
       expect(resolveTriggerFacts(dir).changedPaths).toContain(WRAPPER_RELATIVE_PATH);
     }, GIT_FIXTURE_TIMEOUT_MS);
