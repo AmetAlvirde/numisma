@@ -3,6 +3,8 @@ import { fileURLToPath } from "node:url";
 
 import { defaultExclude, defineConfig } from "vitest/config";
 
+import { gitignoredDirGlobs } from "./ops/testkit/gitignore-dir-globs.ts";
+
 // Test DISCOVERY is derived from `.gitignore` — deliberately, and it must stay
 // derived. Do not "simplify" this into a literal list of directory names.
 //
@@ -28,16 +30,17 @@ import { defaultExclude, defineConfig } from "vitest/config";
 // SKIPPED rather than mistranslated. Over-excluding would silently delete real
 // tests from the suite — a worse outcome than the bug this fixes — while
 // under-excluding merely leaves vitest's own defaults doing their job.
-function gitignoredDirGlobs(): string[] {
+//
+// The parser itself lives in `ops/testkit/gitignore-dir-globs.ts` as a pure
+// `(text) => globs` function, and only the file read stays here. It was moved out
+// so it could be tested at all: a private function in a config file has no
+// importer, and this is the one piece of discovery machinery that fails toward
+// green — a widened glob deletes tests and the shortened suite still passes.
+// `gitignore-dir-globs.test.ts` pins every skip case with authored fixtures and
+// holds the discovery floor.
+function excludedDirGlobs(): string[] {
   const gitignore = fileURLToPath(new URL(".gitignore", import.meta.url));
-  return readFileSync(gitignore, "utf8")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "" && !line.startsWith("#"))
-    // Trailing-slash directory form only; anything else is skipped (see above).
-    .filter((line) => line.endsWith("/"))
-    .filter((line) => !/[!*?[\]/]/.test(line.slice(0, -1)))
-    .map((line) => `**/${line}**`);
+  return gitignoredDirGlobs(readFileSync(gitignore, "utf8"));
 }
 
 export default defineConfig({
@@ -45,7 +48,7 @@ export default defineConfig({
     // `exclude` REPLACES vitest's defaults rather than merging with them, so
     // `defaultExclude` must be spread first — dropping it would start
     // collecting tests out of node_modules.
-    exclude: [...defaultExclude, ...gitignoredDirGlobs()],
+    exclude: [...defaultExclude, ...excludedDirGlobs()],
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
