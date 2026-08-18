@@ -5,8 +5,9 @@
  * marks with round prices, a hand-built heartbeat. Nothing is seeded from a real
  * run's output. What is asserted is the shell's four jobs and nothing more: the
  * path it picks, that a clean window leaves an EMPTY file, that a dirty one carries
- * both signals in cause-then-effect order, and that it OVERWRITES rather than
- * appends or merges.
+ * both signals in cause-then-effect order, that it OVERWRITES rather than appends
+ * or merges, and — the one case the rest of the file cannot reach — what it writes
+ * WHEN NO WINDOW IS PASSED, which is the only call shape production ever makes.
  */
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -15,6 +16,7 @@ import type { PortfolioEvent } from "@numisma/engine";
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveEventStorePaths, type EventStorePaths } from "./event-store.js";
 import { HEARTBEAT_FILENAME } from "./heartbeat.js";
+import { MAX_NOTICE_LOST_DAYS } from "./operator-notice.js";
 import {
   OPERATOR_NOTICE_FILENAME,
   loadOperatorNoticeLines,
@@ -125,6 +127,61 @@ describe("writeOperatorNotice", () => {
     await writeFile(operatorNoticePath(paths), "Numisma: STALE NEWS from the last run.\n", "utf8");
     const written = await writeOperatorNotice(paths, { now: NOW, window: WINDOW });
     expect(await readFile(written, "utf8")).toBe("");
+  });
+});
+
+/**
+ * THE CALL SHAPE PRODUCTION ACTUALLY MAKES — no window at all.
+ *
+ * Every other test on this page passes `WINDOW`, two days wide, and that is exactly
+ * how the ninety-line notice shipped: `operator-notice-cli.ts` passes NO window, so
+ * the run gets the derivation's own floor (`LAUNCHD_ERA_START`) and a ceiling of
+ * yesterday — a window that is forty-odd days wide today and one day wider every
+ * day. A narrow explicit window cannot reach {@link MAX_NOTICE_LOST_DAYS} at all, so
+ * the cap was proved only against hand-built `GapReport`s in `operator-notice.test.ts`
+ * and never against the path that produced the defect. This closes that: the store is
+ * real files, the composer runs end to end, and the argument list is the CLI's.
+ *
+ * THE FIXTURE IS AUTHORED — dates and instrument ids only, round prices, nothing
+ * seeded from a real run. The two anchored days are the weekend `WINDOW` covers, so
+ * the newest LOST day is the Friday before them, and everything back to the era floor
+ * is lost behind it: forty-odd lost days with no arithmetic in the test.
+ *
+ * NOTHING HERE RESTATES THE CAP. The counts are driven off the exported constant, so
+ * retuning it moves the test with it and only REMOVING the bound turns it red.
+ */
+describe("writeOperatorNotice, called the way the CLI calls it", () => {
+  const RECOVERY = /^Numisma: (\d{4}-\d{2}-\d{2}) — recover with: pnpm prices:fetch --as-of=\1$/;
+  const WITHHELD = /^Numisma: (\d+) earlier lost day\(s\) withheld — enumerate them with pnpm gap-report\.$/;
+
+  it("CAPS the enumeration and names the withheld tail when no window is passed", async () => {
+    const paths = await store(CRYPTO_MARKS);
+
+    // No `window` key at all — `operator-notice-cli.ts`'s exact argument shape.
+    const written = await writeOperatorNotice(paths, { now: NOW });
+    const lines = (await readFile(written, "utf8")).trimEnd().split("\n");
+
+    const recovery = lines.filter((line) => RECOVERY.test(line));
+    expect(recovery).toHaveLength(MAX_NOTICE_LOST_DAYS);
+
+    const withheld = lines.filter((line) => WITHHELD.test(line));
+    expect(withheld).toHaveLength(1);
+    expect(Number(WITHHELD.exec(withheld[0] as string)?.[1])).toBeGreaterThan(0);
+
+    // The MOST RECENT lost days survive the cap and the earliest are the ones
+    // withheld: the Friday before the anchored weekend is enumerated with its own
+    // command, and the era floor — the oldest day the default window can reach —
+    // is not named at all.
+    expect(lines).toContain(
+      "Numisma: 2026-08-14 — recover with: pnpm prices:fetch --as-of=2026-08-14",
+    );
+    expect(lines.every((line) => !line.includes("2026-07-03"))).toBe(true);
+
+    // The whole point of the bound: a finding line and a command line per shown day,
+    // plus the one tail. Anything the notice adds beyond that is not lost-day noise.
+    expect(lines.filter((line) => line.includes("lost")).length).toBeLessThanOrEqual(
+      MAX_NOTICE_LOST_DAYS * 2 + 1,
+    );
   });
 });
 
