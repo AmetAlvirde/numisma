@@ -29,7 +29,15 @@ function accumulusDataDirDefault(): string {
  * plane can drift onto a divergent ghost ledger.
  *
  * Resolution rule (must stay byte-identical across planes):
- *   - unset, empty, or whitespace-only  → the accumulus default (`~/Dev/accumulus/data`).
+ *   - UNSET (`undefined`)                → the accumulus default (`~/Dev/accumulus/data`).
+ *     Nobody configured this knob, so the default is the answer.
+ *   - PRESENT but empty or whitespace-only → REJECTED loudly (#348). A set-but-empty
+ *     env var is a MISCONFIGURED knob, not an absent one — `NUMISMA_DATA_DIR="${SCRATCH}"`
+ *     with `SCRATCH` unset is exactly how it happens — and the cost of guessing which
+ *     one it meant is a write to the REAL ledger. The relative-path arm below already
+ *     refuses a present-but-unusable value for this reason; empty is the same class of
+ *     mistake with a worse blast radius (relative lands on a wrong-but-scratch dir,
+ *     empty lands on the operator's real accumulus data).
  *   - `~` or `~/…`                       → `~`-expanded against `homedir()`, then made absolute.
  *   - an absolute path                   → normalized via `resolve()`.
  *   - a RELATIVE path (e.g. `data`)      → REJECTED loudly (D6). A relative value
@@ -45,8 +53,17 @@ export function resolveDataDir(
   env: Record<string, string | undefined> = process.env,
 ): string {
   const fromEnv = env.NUMISMA_DATA_DIR;
-  if (fromEnv && fromEnv.trim() !== "") {
+  if (fromEnv !== undefined) {
     const raw = fromEnv.trim();
+    if (raw === "") {
+      throw new Error(
+        `NUMISMA_DATA_DIR is set to an empty value (got "${fromEnv}"). ` +
+          `An empty value is not "unset": accepting it would silently send every write ` +
+          `to the REAL default ledger instead of the store this deployment meant to ` +
+          `configure. Unset NUMISMA_DATA_DIR to choose the default deliberately, or ` +
+          `give it an absolute path.`,
+      );
+    }
     if (raw === "~" || raw.startsWith("~/")) {
       return resolve(join(homedir(), raw.slice(1)));
     }

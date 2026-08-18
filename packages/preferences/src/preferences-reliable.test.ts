@@ -595,6 +595,89 @@ describe("resolvePreferencesPath — R-M3 no-arg resolves under accumulus, never
   });
 });
 
+// #348, the other half of R-M3. The no-arg case above was already guarded; the BLANK
+// case was not, and it had a hole of exactly the shape R-M3 forbids. `resolvePreferencesPath`
+// took its default as a default PARAMETER (`dataDir = resolveDataDir()`), and a JS default
+// parameter fires on `undefined` and on NOTHING ELSE — so an explicit `""` walked straight
+// past it into `resolve("")`, which is the process's CWD. Measured before the fix:
+// `resolvePreferencesPath("")` returned `<cwd>/preferences.jsonl`. That is the same live
+// split-brain the block above exists to prevent, entered through the door it did not watch.
+describe("resolvePreferencesPath — a BLANK dataDir is REFUSED, not defaulted and never CWD (#348)", () => {
+  // The `undefined` case below must be measured against the DEFAULT, so the ambient
+  // env override (if the developer running this has one) is lifted for it. Local to this
+  // block rather than shared with the one above so neither can restore the other's save.
+  function withoutDataDirEnv<T>(fn: () => T): T {
+    const saved = process.env.NUMISMA_DATA_DIR;
+    try {
+      delete process.env.NUMISMA_DATA_DIR;
+      return fn();
+    } finally {
+      if (saved === undefined) {
+        delete process.env.NUMISMA_DATA_DIR;
+      } else {
+        process.env.NUMISMA_DATA_DIR = saved;
+      }
+    }
+  }
+
+  it("the CWD path is never produced — the specific regression, named in the failure", () => {
+    const cwdFlavoured = join(process.cwd(), "preferences.jsonl");
+    let produced: string | undefined;
+    try {
+      produced = resolvePreferencesPath("");
+    } catch {
+      produced = undefined;
+    }
+    expect(
+      produced,
+      `resolvePreferencesPath("") must never resolve against the process CWD (${cwdFlavoured})`,
+    ).not.toBe(cwdFlavoured);
+    // And a return of any OTHER path is equally a failure to refuse — including a quiet
+    // fall-through to the accumulus default, which would hide a misconfigured knob as an
+    // absent one and serve the phone a floor from the real ledger the caller did not pick.
+    expect(
+      produced,
+      'resolvePreferencesPath("") must throw rather than return any path at all',
+    ).toBeUndefined();
+  });
+
+  it("refuses both spellings of blank, in the resolver's own voice", () => {
+    expect(() => resolvePreferencesPath("")).toThrow(
+      /preferences data directory must not be empty/,
+    );
+    // Whitespace-only is the spelling a shell produces most often and the one a bare
+    // `=== ""` check would wave through.
+    expect(() => resolvePreferencesPath("   ")).toThrow(
+      /preferences data directory must not be empty/,
+    );
+    expect(() => resolvePreferencesPath("\t\n")).toThrow(
+      /preferences data directory must not be empty/,
+    );
+  });
+
+  it("the refusal names the consequence AND the two ways out", () => {
+    let message = "";
+    try {
+      resolvePreferencesPath("");
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toMatch(/not .?unset.?/i);
+    expect(message).toMatch(/working directory/);
+    expect(message).toMatch(/Pass no data directory/);
+    expect(message).toMatch(/absolute path/);
+  });
+
+  it("a GENUINELY absent override still defaults — the refusal must not swallow `undefined`", () => {
+    withoutDataDirEnv(() => {
+      expect(resolvePreferencesPath(undefined)).toBe(
+        join(resolveDataDir(), "preferences.jsonl"),
+      );
+      expect(() => resolvePreferencesPath()).not.toThrow();
+    });
+  });
+});
+
 /**
  * The UNATTENDED-CALLER POLICY (spec #320 seam C). It is a NAMED FUNCTION over the
  * envelope rather than a convention, precisely so these assertions are possible: the

@@ -108,12 +108,15 @@ const RECONCILIATIONS_FILE_NAME = "reconciliations.jsonl";
 
 /**
  * Resolve the trail path under ADR-006's invariant — absolute and homedir-derived,
- * never CWD-relative. The three cases (unset/blank → the accumulus default, absolute
- * → verbatim, relative → a loud throw) live once in {@link resolveSidecarPath}.
+ * never CWD-relative. The four cases (unset → the accumulus default, blank/whitespace
+ * → a loud throw, absolute → verbatim, relative → a loud throw) live once in
+ * {@link resolveSidecarPath}.
  *
  * This is the ONE function in this module that can throw, and it throws for the
- * resolver's stated reason: a relative data dir splits the store. A caller on the
- * fill path resolves the path once, up front, outside the best-effort write.
+ * resolver's two stated reasons: a relative data dir splits the store, and a blank one
+ * is a misconfigured knob that would otherwise default the trail onto the operator's
+ * REAL ledger. A caller on the fill path resolves the path once, up front, outside the
+ * best-effort write.
  */
 export function resolveReconciliationsPath(dataDir?: string): string {
   return resolveSidecarPath(RECONCILIATIONS_FILE_NAME, dataDir);
