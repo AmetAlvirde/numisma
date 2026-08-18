@@ -172,6 +172,8 @@ describe("derived MXN marks are pre-checked at USD×FIX, not the raw USD quote (
     const derived = deriveMxnMark(quote("nu-mxn", 11), { rate: 20, date: "2026-07-03" });
     const result: FetchRunResult = {
       quotes: [quote("nu-mxn", 11)],
+      asOf: "2026-07-03",
+      notOwed: [],
       totalCount: 1,
       storedCount: 1,
       emittedCount: 1,
@@ -208,6 +210,8 @@ describe("loadSpineReference + scanFetchedMarks — reads the real genesis/log o
   function runResult(price: number): FetchRunResult {
     return {
       quotes: [quote("btc", price)],
+      asOf: "2026-07-03",
+      notOwed: [],
       totalCount: 1,
       storedCount: 1,
       emittedCount: 1,
@@ -396,6 +400,8 @@ describe("scanFetchedMarks folds the pending inbox exactly as ingestInbox does",
   function resultWith(marks: object[], emittedCount: number): FetchRunResult {
     return {
       quotes: [],
+      asOf: "2026-07-03",
+      notOwed: [],
       totalCount: marks.length,
       storedCount: marks.length,
       emittedCount,

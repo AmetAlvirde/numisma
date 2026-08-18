@@ -45,12 +45,15 @@ import { describe, expect, it } from "vitest";
 // coverage instrumentation attributes the crossing to the barrel itself.
 import * as priceFeed from "./index.js";
 import type {
+  BinanceFetchOptions,
   EquitiesFetchOptions,
   FetchFailure,
   FetchOptions,
   FetchRunResult,
   FixFetchOptions,
   MarkRejection,
+  MarkSkip,
+  NotOwed,
   PriceFeedConfig,
   PriceFeedPaths,
   ProviderCredentials,
@@ -98,12 +101,18 @@ type TypeSurface = {
   credentials: ProviderCredentials;
   observation: ProviderObservation;
   fetchOptions: FetchOptions;
+  binanceFetchOptions: BinanceFetchOptions;
   equitiesFetchOptions: EquitiesFetchOptions;
   providerFetchResult: ProviderFetchResult;
   fixFetchOptions: FixFetchOptions;
   paths: PriceFeedPaths;
   runResult: FetchRunResult;
   failure: FetchFailure;
+  // Deliberately added with the recovery slice: `FetchRunResult` publishes
+  // `notOwed` and `staleMarkSkips`, so their element types must be nameable
+  // through the same front door or the result type is only half-published.
+  notOwed: NotOwed;
+  markSkip: MarkSkip;
   runOptions: RunOptions;
   rejection: MarkRejection;
   spineReferencePaths: SpineReferencePaths;
