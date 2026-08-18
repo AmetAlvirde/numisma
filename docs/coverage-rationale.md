@@ -237,7 +237,7 @@ tests moved with the code into `packages/event-store/src/event-store.test.ts`.
   already-closed rejection branches this bullet used to cite as open — they
   measure covered in the fresh run.)
 
-  `events/fold.ts` (re-measured at `7269a9f`, after #329) has **three** ranges
+  `events/fold.ts` (re-measured at `8393bf6`, after #329) has **three** ranges
   open, and every line number this paragraph used to carry has moved:
 
   - `:691-692` — the `Withdraw` arm's `recordSkip(event, order,
@@ -265,7 +265,8 @@ tests moved with the code into `packages/event-store/src/event-store.test.ts`.
   carrying no provenance whatsoever… Not a bad attribution: an invented one."
   Both arms measure covered. And **`:649-650`, the lot-selection helper's
   zero-`tierTotal` early return, is no longer uncovered** — the helper still
-  exists (now `fold.ts:993-1008`), it simply measures covered. The
+  exists (`splitTierRemoval`, `fold.ts:987`, its `if (tierTotal === 0)` early
+  return at `:996-998`), it simply measures covered. The
   `PriceMarked`-carries-`usdMxn` FX-update branch this bullet used to name is
   covered too.
 - **`packages/event-store/src/event-store.ts`** (the read path, 96.03% lines) —
@@ -571,8 +572,8 @@ individually itemized with its own paragraph. Grouped by package.
 | File | Lines | Uncovered | What's there |
 | --- | --- | --- | --- |
 | `heartbeat.ts` | 97.82% | `:199-200` | One branch past the documented "taken as written for v2, never synthesized" guard. |
-| `preferences.ts` | 98.68% lines, 95.16% branch | `:225-226` | Re-measured at `7269a9f`. Spec #320 made the loader total, so **the non-`ENOENT` rethrow this row originally named no longer exists** — that path is the `load-failed` arm of the returned envelope and is covered, as is the split-denominator guard the original row's other citation pointed at. The row's later `:214`/`:225` pair has gone stale the same way: `String(error)` is no longer how the `load-failed` message is built, and the `?? ""` arm of `lines[index]` (now `:251`) measures covered. What remains is one arm and it is not a behavior: `:225-226` is `readFailureCode`'s `return "unknown-read-error"` — the non-`Error` fallback, reachable only if something other than an `Error` is thrown out of `readFile`. |
-| `orders.ts` (preferences package) | 94.64% lines, 90.9% branch | `:71-73` | Re-measured at `7269a9f`. Two of this row's three original citations pointed **past the end of the file** — `orders.ts` is 145 lines — because the code they named moved out: the non-`ENOENT` rethrow on the sidecar read (cited `:181-182`) and the lock-contention retry path in the advisory file lock (cited `:222-223,225-227,229-230`, `open(lockPath, "wx")` racing another writer) now live in the shared `sidecar-io.ts` and are not in this file at all. What is left is the row's first citation, at its new lines: `:71-73` is `defaultWarn`'s `console.warn` fallback when no `warn` is injected. |
+| `preferences.ts` | 98.72% lines, 95.45% branch | `:244-245` | Re-measured at `8393bf6`. Spec #320 made the loader total, so **the non-`ENOENT` rethrow this row originally named no longer exists** — that path is the `load-failed` arm of the returned envelope and is covered, as is the split-denominator guard the original row's other citation pointed at. The row's later `:214`/`:225` pair has gone stale the same way: `String(error)` is no longer how the `load-failed` message is built, and the `?? ""` arm of `lines[index]` — the blank-line guard in `loadPreferences`'s line walk — measures covered. What remains is one arm and it is not a behavior: `:244-245` is `readFailureCode`'s `return "unknown-read-error"` — the non-`Error` fallback, reachable only if something other than an `Error` is thrown out of `readFile`. |
+| `orders.ts` (preferences package) | 94.64% lines, 90.9% branch | `:73-75` | Re-measured at `8393bf6`. Two of this row's three original citations pointed **past the end of the file** — `orders.ts` is 147 lines — because the code they named moved out: the non-`ENOENT` rethrow on the sidecar read (cited `:181-182`) and the lock-contention retry path in the advisory file lock (cited `:222-223,225-227,229-230`, `open(lockPath, "wx")` racing another writer) now live in the shared `sidecar-io.ts` and are not in this file at all. What is left is the row's first citation, at its new lines: `:73-75` is `defaultWarn`'s `console.warn` fallback when no `warn` is injected. |
 
 None of the above is claimed unreachable. Each is a real branch this table now
 names instead of omits — closing the gap finding 3 identified, without

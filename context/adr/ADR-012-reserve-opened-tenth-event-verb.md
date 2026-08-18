@@ -118,10 +118,12 @@ authoritative and the money did arrive. That is exactly the failure
 `Transfer`'s own doc claims to prevent — tier "rides across so moving cash
 cannot launder its provenance." The fix, now built into `foldEvents`'s
 `ReserveOpened` arm (`fold.ts`, cited by name) and its cross-reference shadow
-(`packages/engine/src/events/crossref.ts:551`): the Reserve is born with an
+(`buildEventReference`, `packages/engine/src/events/crossref.ts:551`): the
+Reserve is born with an
 **empty array**, not an absent field. An empty array is truthy, so the first
-credit pushes a real tier lot; `packages/engine/src/compose/canonical.ts:386`
-reads a length-0 lot array as untiered, so a Reserve born and never funded
+credit pushes a real tier lot; `buildReserveTierContributions`
+(`packages/engine/src/compose/canonical.ts:392-393`) reads a length-0 lot array
+as untiered, so a Reserve born and never funded
 still composes correctly into the tier rollup. NAV-neutrality is unharmed —
 empty lots sum to zero. **Generalized, this is the nugget worth keeping:**
 "structurally impossible" is a claim about a specific encoding, not about an
