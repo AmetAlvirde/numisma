@@ -49,7 +49,9 @@ import {
  * the window's tail is where the still-actionable damage is.
  *
  * Exported because the test must DRIVE the bound rather than restate it; the same
- * reason `MAX_WINDOW_DAYS` is exported from `gap-report-core.ts`.
+ * reason `MAX_WINDOW_DAYS` is exported from `@numisma/event-store` — a constant this
+ * app now has a real relationship to, since `liveness-lines.ts` takes its window
+ * floor from `defaultGapReportSince`, which is that width applied.
  */
 export const MAX_GAP_LINES = 7;
 
@@ -65,8 +67,9 @@ export const MAX_GAP_LINES = 7;
  * and by D7 fires on ~9-10 market holidays a year. The starving line is the one whose
  * own text says *the day is not lost*.
  *
- * It is not a rare shape either: this app passes no `since`, so the floor is the fixed
- * `LAUNCHD_ERA_START` and the window grows by a day every day. On holidays alone the
+ * It is not a rare shape either: this app passes no `since`, so the floor is
+ * `defaultGapReportSince` — the era start until 2027-08-08 and a rolling 400-day floor
+ * after it — and the window grows by a day every day until then. On holidays alone the
  * venue-dark side crosses the cap within about a year, permanently, on the one surface
  * that is read daily and the only automatic one that names permanent data loss.
  *
@@ -88,8 +91,9 @@ export function formatGapCheckFailure(error: unknown): string {
  * Derive the lost days and render them.
  *
  * EMPTY MEANS CLEAN — the caller stays quiet, which is the whole point of putting
- * this on a channel the operator sees every single day. The window's floor defaults
- * to the launchd era and its ceiling is pinned to yesterday by the derivation, so
+ * this on a channel the operator sees every single day. The window's floor is filled
+ * in by `loadLivenessLines` (`defaultGapReportSince`) when the caller supplies none,
+ * and its ceiling is pinned to yesterday by the derivation, so
  * this can never accuse the day still in progress.
  *
  * Bounded to {@link MAX_GAP_LINES} — see that constant. A CLEAN WINDOW STILL

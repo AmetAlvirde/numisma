@@ -20,7 +20,12 @@
  * neither can throw — a liveness report that stops the dashboard mounting is worse
  * than no liveness report at all.
  */
-import { loadHeartbeatLines, type EventStorePaths, type GapWindow } from "@numisma/event-store";
+import {
+  defaultGapReportSince,
+  loadHeartbeatLines,
+  type EventStorePaths,
+  type GapWindow,
+} from "@numisma/event-store";
 import { loadGapLines } from "./gap-lines.js";
 
 /**
@@ -29,6 +34,16 @@ import { loadGapLines } from "./gap-lines.js";
  * `now` is passed ONCE and shared: the heartbeat's staleness threshold and the gap
  * report's ceiling are the same rule (`dueThrough`), so evaluating them against two
  * different clock reads is the one way they could contradict each other.
+ *
+ * THE FLOOR NOBODY SUPPLIED IS `defaultGapReportSince` — the same floor
+ * `pnpm gap-report` and the operator notice take. `app.ts` passes no window at all,
+ * so before this the banner floored at the FIXED `LAUNCHD_ERA_START` while the
+ * command floored 400 days back from yesterday, and the two started describing
+ * different windows on 2027-08-08. Defaulting HERE rather than at `app.ts` is what
+ * makes the shared floor structural: the notice's `loadOperatorNoticeLines` does the
+ * identical thing at its own composer, so the twin binding survives a new caller
+ * that never read this comment. Nothing observable changes until 2027-08-08, which
+ * is the whole reason it had to be written before then.
  */
 export async function loadLivenessLines(
   paths: EventStorePaths,
@@ -37,7 +52,7 @@ export async function loadLivenessLines(
 ): Promise<string[]> {
   const [heartbeat, gaps] = await Promise.all([
     loadHeartbeatLines(paths, now),
-    loadGapLines(paths, { ...window, now }),
+    loadGapLines(paths, { ...window, since: window.since ?? defaultGapReportSince(now), now }),
   ]);
   return [...heartbeat, ...gaps];
 }
