@@ -27,6 +27,11 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { OPERATOR_NOTICE_FILENAME } from "@numisma/event-store";
+import {
+  FAKE_NOTICE_PAYLOAD_NAME,
+  FAKE_NOTICE_TARGET_NAME,
+  setFakeBehavior,
+} from "./fake-bin.testkit.js";
 
 /** Authored instants for the seeds below. Never a captured value. */
 const AUTHORED_SEED_STARTED_AT = "2001-02-03T04:00:00Z";
@@ -105,16 +110,30 @@ export function seedHeartbeatOutcome(dataDir: string, outcome: SeededOutcome): v
 }
 
 /**
- * THE SENTINEL NOTICE — an authored file standing in for one a previous run's step 5b left
- * behind, naming a loss that is still real.
+ * THE SENTINEL NOTICE — an authored file standing in for one a step 5b left behind, naming
+ * a loss that is still real.
  *
  * The date and the command are shaped like the notice's own lost-day pair, but the date is
- * an authored one this repo has never run on: the case asserts this text survives BYTE FOR
- * BYTE, so it must be impossible for any real derivation to have produced it.
+ * an authored one this repo has never run on: the cases assert this text either survives
+ * BYTE FOR BYTE or is gone ENTIRELY, so it must be impossible for any real derivation to
+ * have produced it.
+ *
+ * It serves both 5b's: seeded on disk it is the PREVIOUS run's notice (what step 0 must
+ * leave alone), and written by the fake mid-run it is THIS run's notice (what the EXIT
+ * trap must replace when the run dies afterwards).
  */
 export const AUTHORED_SENTINEL_NOTICE =
   "Numisma: 2001-02-03 is a LOST DAY (authored harness fixture, not a real finding).\n" +
   "Numisma: 2001-02-03 — recover with: pnpm prices:fetch --as-of=2001-02-03\n";
+
+/**
+ * The shortest span of {@link AUTHORED_SENTINEL_NOTICE} nothing else could have written.
+ *
+ * The case that asserts the sentinel is GONE needs a needle rather than the whole hay:
+ * `not.toContain` on the full two-line body would also pass if a writer had kept the first
+ * line and dropped the second, which is precisely the half-append this channel refuses.
+ */
+export const AUTHORED_SENTINEL_FRAGMENT = "is a LOST DAY (authored harness fixture";
 
 /** Put the sentinel notice on disk where step 0 would find it. */
 export function seedOperatorNotice(dataDir: string, body: string): void {
@@ -153,3 +172,40 @@ export function readOperatorNotice(dataDir: string): string | undefined {
 export function expectedFailureFragment(outcome: SeededOutcome): string {
   return `exit ${outcome.exitCode} at step '${outcome.lastStep}'`;
 }
+
+/**
+ * ARM THE FAKE `pnpm operator-notice` TO ACTUALLY WRITE (#376).
+ *
+ * Until this existed the fake succeeded without touching anything, so every notice on disk
+ * at the end of a run was step 0's by elimination. The EXIT trap now writes the same file
+ * too, which turns "who wrote last" into a real question — and answering it needs a step 5b
+ * that leaves bytes behind.
+ *
+ * BEHAVIOR AND FIXTURES ARE SET TOGETHER, deliberately: the behavior fails closed on a
+ * missing payload, and a caller that could arm one without the other would be able to
+ * produce that failure from a test rather than from the fake.
+ *
+ * THE TARGET IS DERIVED FROM {@link OPERATOR_NOTICE_FILENAME}, not retyped — the same
+ * imported constant the rest of this module resolves its path from, so the fake writes
+ * where both the wrapper's bash and the real CLI would.
+ */
+export function armFakeOperatorNoticeWrite(caseDir: string, dataDir: string, body: string): void {
+  writeFileSync(join(caseDir, FAKE_NOTICE_TARGET_NAME), operatorNoticeFixturePath(dataDir), "utf8");
+  writeFileSync(join(caseDir, FAKE_NOTICE_PAYLOAD_NAME), body, "utf8");
+  setFakeBehavior(caseDir, "operator-notice", "writes-operator-notice");
+}
+
+/**
+ * WHICH OF THE TWO BASH WRITERS PRODUCED THE FILE STANDING ON DISK.
+ *
+ * Step 0 and the EXIT trap share `write_operator_failure_notice` and therefore share the
+ * FAILED line VERBATIM — that is the point of the shared writer, and it is also why the
+ * failure line alone cannot say who wrote. The one thing the two callers vary is the scope
+ * line's tail, which names the run that will replace the file: from step 0 the run that is
+ * starting, from the trap the one after it. So these two fragments are the only
+ * discriminator the channel has, and asserting on them is asserting on the seam.
+ */
+export const STEP_0_SCOPE_TAIL = "the run now starting replaces this file";
+
+/** The trap's tail — see {@link STEP_0_SCOPE_TAIL}. */
+export const EXIT_TRAP_SCOPE_TAIL = "the next run replaces this file";

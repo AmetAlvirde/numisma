@@ -174,6 +174,61 @@ HEARTBEAT_FILE="$DATA_DIR/job-heartbeat.json"
 # before line 59 runs and therefore cannot split anything.
 OPERATOR_NOTICE_FILE="$DATA_DIR/operator-notice.txt"
 
+# --- THE ONE FAILED-NOTICE WRITER, SHARED BY BOTH BASH SITES (#376) ----------
+# TWO SITES WRITE "the job failed" INTO THIS FILE and there is exactly one wording for it.
+# Step 0 speaks about the run that ENDED before this one; the EXIT trap speaks about the
+# run that is ending right now. Left as two `printf`s they would drift into two dialects of
+# one sentence on the one channel the operator reads in two seconds — which is the
+# vocabulary split this codebase refuses everywhere else (step 0's own comment already
+# borrows `formatHeartbeatWarning`'s voice for exactly this reason). So: one function, one
+# wording, and the only thing a caller may vary is named below.
+#
+# THE FAILED LINE IS VERBATIM FROM BOTH SITES, INCLUDING "the previous … run". That reads
+# correctly from the trap too, and not by luck: nothing `cat`s this file during the run
+# that wrote it. The operator meets it at the next shell prompt, by which time the run the
+# trap described is, in fact, the previous one.
+#
+# WHAT DIFFERS IS THE SCOPE LINE'S TAIL — WHICH RUN WILL REPLACE THIS FILE. From step 0
+# that is "the run now starting"; from the trap the starting run is already over, so it is
+# "the next run". That is the whole of the argument, and it is an argument rather than a
+# whole line so the two cannot drift.
+#
+# `$1` exit code · `$2` step name · `$3` the tail above.
+#
+# IT CANNOT FAIL ITS CALLER. Both call sites are places where an error would cost more than
+# the notice: step 0 runs under `set -euo pipefail` before the toolchain is even resolved,
+# and the trap must never replace the exit code it was installed to record. Every command
+# is guarded and the function returns 0 unconditionally.
+#
+# DEFINED HERE, BESIDE THE PATH IT WRITES, AND THAT PLACEMENT IS LOAD-BEARING: it must
+# exist before step 0 runs and before `trap write_heartbeat EXIT` is installed, and both of
+# those are further down. It reads `$OPERATOR_NOTICE_FILE`, assigned one line above, so the
+# `set -u`-inside-a-trap hazard this file documents for `MARK_WINDOW` cannot reach it —
+# there is no path on which the trap can fire before line 175 has run.
+write_operator_failure_notice() {
+  notice_exit_code="$1"
+  notice_last_step="$2"
+  notice_replacing_run="$3"
+  # `formatHeartbeatWarning`'s voice and its closing clause, deliberately — the operator
+  # must not have to learn two vocabularies for one job. What is dropped is the DATE it ran
+  # on, because that is a clock read neither caller makes; what is added is line two, which
+  # bounds the claim so a reader never mistakes this for a lost-day report.
+  notice_failed_line="Numisma: the previous daily price job run FAILED — exit"
+  notice_failed_line="$notice_failed_line $notice_exit_code at step '$notice_last_step'."
+  notice_failed_line="$notice_failed_line Nothing pushed this to you; that is why it is here."
+  notice_scope_line="Numisma: written by the wrapper in pure bash, so it says nothing about"
+  notice_scope_line="$notice_scope_line lost days yet — $notice_replacing_run replaces this file"
+  notice_scope_line="$notice_scope_line wholesale if it reaches its own notice step."
+  # OVERWRITE, NEVER APPEND, and one `printf` for both lines so it stays that way: the
+  # notice has exactly one well-known name and no history, and a file that accumulated
+  # would be a log nobody reads. Guarded because a full or read-only data dir must cost a
+  # notice, never the run.
+  printf '%s\n%s\n' "$notice_failed_line" "$notice_scope_line" \
+    > "$OPERATOR_NOTICE_FILE" 2>/dev/null || true
+  return 0
+}
+# ----------------------------------------------------------------------------
+
 # --- was this run even CAPABLE of marking? (#185 S2) -------------------------
 # `RunAtLoad true` means this script now fires at ANY hour — a 09:00 login is an
 # ordinary trigger. Such a run stores quotes and emits ZERO marks (the mark-instant
@@ -302,13 +357,24 @@ fi
 
 # --- 0) did the PREVIOUS run finish? (#357 slice 3) --------------------------
 # THE ONE STEP THAT RUNS BEFORE THE TOOLCHAIN EXISTS, and that is its whole reason to be.
-# Step 5b writes this same file through `pnpm operator-notice` and says everything this
-# says and more — but only on a run that GETS to step 5b. The two failures this channel was
-# built for are exactly the runs that do not: an unresolvable `pnpm` or `node` (the two
+# Step 5b writes this same file through `pnpm operator-notice` and — since #376 — says only
+# what the DATA says, on a run that gets there at all. The failures this channel was built
+# for are exactly the runs that do not get there: an unresolvable `pnpm` or `node` (the two
 # `exit 127`s further down) and a run that died partway. On either, every node-shaped
 # writer in this repo is unreachable, so the one thing left that can speak must depend on
 # nothing that could itself be the missing thing. `sed` and a `printf` into a file depend on
 # nothing — the same argument, verbatim, that makes `write_heartbeat` above pure bash.
+#
+# WHAT THIS STEP IS *AFTER* #376, SAID PLAINLY BECAUSE AN EARLIER VERSION OF THIS COMMENT
+# CLAIMED MORE. It is no longer the only bash channel for a partway death: the EXIT trap now
+# calls `write_operator_failure_notice` too, on a non-zero exit, so a run that dies at step
+# 3 reports itself the moment it dies rather than waiting for the NEXT fire to notice. That
+# leaves step 0 as a BACKSTOP re-asserting a fact the trap has usually already written —
+# and the residue it covers alone is real and unreachable from anywhere else: a death with
+# no trap at all. SIGKILL to this shell, an OOM kill, a power loss. On those the heartbeat
+# is the previous run's and nothing has spoken, so this step is the only thing that ever
+# will. On every other path it writes the same sentence twice, one run apart, which is the
+# cheapest possible form of that insurance.
 #
 # IT IS A PURE EQUALITY READ OF TWO FIELDS: NO DATE MATH, NO THRESHOLD, NO CLOCK. That is a
 # decision, not an unfinished implementation. "Too long since the last good run" is
@@ -361,21 +427,6 @@ if [[ -n "$PREVIOUS_EXIT_CODE" && -n "$PREVIOUS_LAST_STEP" ]]; then
   # exact false all-clear it was built to end. Self-clearing belongs to step 5b ALONE,
   # which runs only once the day's work is actually done.
   if [[ "$PREVIOUS_EXIT_CODE" != "0" || "$PREVIOUS_LAST_STEP" != "complete" ]]; then
-    # `formatHeartbeatWarning`'s voice and its closing clause, deliberately — the operator
-    # must not have to learn two vocabularies for one job. What is dropped is the DATE it
-    # ran on, because that is a clock read this step does not make; what is added is line
-    # two, which bounds the claim so a reader never mistakes this for a lost-day report.
-    NOTICE_FAILED_LINE="Numisma: the previous daily price job run FAILED — exit"
-    NOTICE_FAILED_LINE="$NOTICE_FAILED_LINE $PREVIOUS_EXIT_CODE at step '$PREVIOUS_LAST_STEP'."
-    NOTICE_FAILED_LINE="$NOTICE_FAILED_LINE Nothing pushed this to you; that is why it is here."
-    NOTICE_SCOPE_LINE="Numisma: written by the wrapper before the toolchain was resolved, so it"
-    NOTICE_SCOPE_LINE="$NOTICE_SCOPE_LINE says nothing about lost days yet — the run now starting replaces"
-    NOTICE_SCOPE_LINE="$NOTICE_SCOPE_LINE this file wholesale if it reaches its own notice step."
-    # OVERWRITE, NEVER APPEND, and one `printf` for both lines so it stays that way: the
-    # notice has exactly one well-known name and no history, and a file that accumulated
-    # would be a log nobody reads. Guarded because a full or read-only data dir must cost a
-    # notice, never the run.
-    #
     # THE TRADE THIS `>` MAKES, RECORDED BECAUSE IT CUTS AGAINST THE BLOCK ABOVE. The clean
     # branch refuses to touch the file precisely because the previous run's step 5b may have
     # named real lost days — and this branch then deletes those same lines. Across a
@@ -394,10 +445,15 @@ if [[ -n "$PREVIOUS_EXIT_CODE" && -n "$PREVIOUS_LAST_STEP" ]]; then
     # true, and on the outage above step 5b is precisely what is not running. A stale
     # enumeration standing under a fresh FAILED line is a channel telling the operator two
     # things of different vintages in one voice, which is the credibility spend this whole
-    # design refuses. So: one bounded, currently-true message, and `NOTICE_SCOPE_LINE` above
-    # says out loud that lost days are not in it. The cost is real and it is accepted.
-    printf '%s\n%s\n' "$NOTICE_FAILED_LINE" "$NOTICE_SCOPE_LINE" \
-      > "$OPERATOR_NOTICE_FILE" 2>/dev/null || true
+    # design refuses. So: one bounded, currently-true message, and the scope line in
+    # `write_operator_failure_notice` (`notice_scope_line`, defined with the writer near the
+    # top of this file) says out loud that lost days are not in it. The cost is real and it
+    # is accepted.
+    #
+    # THE TAIL IS "the run now starting" BECAUSE THAT IS WHERE THIS CALLER STANDS — the run
+    # this file is about is over, and the one that will replace this text has not reached
+    # its notice step yet. The trap's call passes "the next run" for the mirror reason.
+    write_operator_failure_notice "$PREVIOUS_EXIT_CODE" "$PREVIOUS_LAST_STEP" "the run now starting"
   fi
 fi
 # ----------------------------------------------------------------------------
@@ -530,6 +586,42 @@ write_heartbeat() {
     printf '{\n  "schemaVersion": 2,\n  "startedAt": "%s",\n  "finishedAt": "%s",\n  "exitCode": %d,\n  "lastStep": "%s",\n  "markWindow": %s\n}\n' \
       "$STARTED_AT" "$HEARTBEAT_FINISHED_AT" "$HEARTBEAT_STATUS" "$HEARTBEAT_LAST_STEP" "$MARK_WINDOW" \
       > "$HEARTBEAT_FILE" 2>/dev/null || true
+  fi
+  # --- and the OPERATOR NOTICE, on a non-zero exit only (#376) --------------
+  # THE FALSE ALL-CLEAR THIS CLOSES. Since #376 took the job half off step 5b, the notice is
+  # a pure data channel: a 23:00 fire whose data really is clean writes an EMPTY notice at
+  # 23:04, then wedges at `backfill` at 23:49. The 08:00 terminal prints nothing at all, and
+  # step 0 does not speak until 18:00 — nineteen hours of an all-clear standing over a run
+  # that is known to have failed, on the channel built because a lost day reached no one.
+  # The heartbeat above already holds the whole diagnosis by then; it is simply not the file
+  # the operator's shell prints.
+  #
+  # ON A ZERO EXIT THIS TOUCHES THE FILE NOT AT ALL. Not a truncate, not a `:>`, nothing —
+  # the same restraint as step 0's clean branch and for the same reason: step 5b has already
+  # written the truth about this run's data, and clearing it here would delete a real
+  # lost-day enumeration minutes after the only writer that could produce it.
+  #
+  # `$HEARTBEAT_LAST_STEP`, NOT `$LAST_STEP` — the DECORATED name the breadcrumb just
+  # recorded. `timeout:backfill` is the whole diagnosis in one field, and the notice and the
+  # heartbeat naming one failure two different ways is the same vocabulary split this
+  # channel's shared writer exists to prevent.
+  #
+  # THE TRADE, INHERITED AND RESTATED SO IT IS NOT REDISCOVERED: on a run that dies AFTER
+  # 5b, this `>` discards the lost-day enumeration 5b wrote minutes ago. That content is not
+  # stale — but from here it is unmaintainable text of unknown vintage, exactly as step 0's
+  # `>` comment above already ruled, and a bounded currently-true message beats a preserved
+  # one nothing can retire. What changes is only WHEN the same content is discarded: here,
+  # at the moment of failure, instead of at the next fire up to nineteen hours later. Same
+  # loss, operator informed a day sooner. Appending under 5b's lines is rejected for the
+  # reason that comment gives at length.
+  #
+  # Guarded like everything else in this trap, and reached only under the `[[ -d "$DATA_DIR"
+  # ]]` return above: a failure here must never replace the exit code the trap exists to
+  # record, and this runs on every exit path including both `exit 127`s, where
+  # `write_operator_failure_notice` is reachable because it is defined beside
+  # `$OPERATOR_NOTICE_FILE` far above either of them.
+  if [[ "$HEARTBEAT_STATUS" -ne 0 ]]; then
+    write_operator_failure_notice "$HEARTBEAT_STATUS" "$HEARTBEAT_LAST_STEP" "the next run" || true
   fi
   return 0
 }
@@ -966,9 +1058,33 @@ pnpm gap-report -- --write
 #     dashboard only to someone who opens the dashboard, gap-report.json only to
 #     someone who opens the file. On 2026-08-14/15 all three were right the whole
 #     time and nobody looked for three days, at the machine. This step writes the
-#     same two signals into one well-known file the shell profile cats, so the next
-#     new terminal is where the loss arrives. No new derivation: it composes
-#     primitives `pnpm gap-report` already uses.
+#     DATA findings into one well-known file the shell profile cats, so the next new
+#     terminal is where the loss arrives. No new derivation: it composes primitives
+#     `pnpm gap-report` already uses.
+#
+#     IT SAYS NOTHING ABOUT THE JOB, AND THAT IS #376's RULING. The notice composed
+#     the heartbeat lines here until then, and this is the one moment they are
+#     guaranteed to be misread: the EXIT trap is EXIT-ONLY, so at 5b the breadcrumb
+#     still holds the PREVIOUS run's bytes — exactly what step 0 read at the top of
+#     this same run. Not staler, identically sourced and DIFFERENTLY SCOPED: step 0
+#     says the PREVIOUS run failed, `formatHeartbeatWarning` says "the daily price
+#     job FAILED", present tense, about the job. On a recovery run — the previous
+#     run died at `prices-fetch`, this run is landing the missed days right now —
+#     the file is right and the sentence is wrong, and the run writing it is the run
+#     that just fixed it. So the channels split by LANGUAGE: this notice is the DATA
+#     half, and the job half is bash — two writers of this same file, reaching the two
+#     paths this step never sees at all. The PRIMARY one is the EXIT trap, which calls
+#     `write_operator_failure_notice` from inside the failing run and is therefore
+#     scoped to THIS run at the moment it dies. Step 0 is the BACKSTOP: it reads the
+#     previous run's breadcrumb, so it is deliberately scoped to the PREVIOUS run, and
+#     what it covers alone is a death with no trap at all — SIGKILL, OOM, power loss —
+#     plus a run that dies before the trap is installed. Step 0's own block above says
+#     this in the same words. The TUI banner keeps all three heartbeat triggers; it
+#     is a live PULL surface, read at the moment the operator looks. Writing an in-progress
+#     heartbeat before this line instead was refused on `write_heartbeat`'s own cost:
+#     its first act after capturing $? is a SIGKILL of the watchdog and a reap of its
+#     sleep, so an early write would leave this step AND `backfill`, the longest one,
+#     with no timeout at all.
 #
 #     AFTER step 5, and that placement is the whole reliability argument. By here the
 #     toolchain has been resolved (step 1), the fetch, the ingest and the commit have

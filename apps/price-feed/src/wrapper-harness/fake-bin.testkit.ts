@@ -67,13 +67,28 @@ import { join } from "node:path";
  *   itself. Case 3, and the exact historical shape: the grandchild outlived the group
  *   TERM while holding the inherited write end of the log pipe, so `tee` never saw EOF
  *   and both sat in the run's process group holding launchd's per-label job slot.
+ * - `writes-operator-notice` — copies an authored payload over an authored target path,
+ *   then succeeds. The ONLY behavior that has an effect outside the case's bookkeeping,
+ *   and it exists for one reason (#376): step 5b is now a real writer of
+ *   `operator-notice.txt` and the EXIT trap is a second one, so "the trap replaced what 5b
+ *   wrote" is a claim about ORDERING between two writers that a fake succeeding silently
+ *   cannot express. Both the path and the body come from files
+ *   ({@link armFakeOperatorNoticeWrite}) rather than from this module, so the fake stays a
+ *   dumb copier and the AUTHORED text lives beside the case that asserts it.
  */
 export type FakeBehavior =
   | "succeeds"
   | "hangs"
   | "exits-127"
   | "ignores-term"
-  | "hangs-with-term-deaf-grandchild";
+  | "hangs-with-term-deaf-grandchild"
+  | "writes-operator-notice";
+
+/** The file holding the absolute path `writes-operator-notice` copies ONTO. */
+export const FAKE_NOTICE_TARGET_NAME = "operator-notice-target";
+
+/** The file holding the authored body `writes-operator-notice` copies FROM. */
+export const FAKE_NOTICE_PAYLOAD_NAME = "operator-notice-payload";
 
 /**
  * The authored TERM-deaf child's filename. It is matched against `ps` output, so case 3
@@ -211,6 +226,28 @@ case "\${BEHAVIOR}" in
     "\${CASE_DIR}/bin/${TERM_DEAF_CHILD_NAME}" &
     printf 'fake pnpm: %s hanging after forking a TERM-deaf grandchild (authored fixture)\\n' "\${COMMAND}"
     hang_until_released
+    exit 0
+    ;;
+  writes-operator-notice)
+    # STANDS IN FOR STEP 5b'S WRITE, and it is a plain copy on purpose: the harness never
+    # runs the real notice CLI, so the only thing this may claim to be is "a writer that
+    # put authored bytes at that path before the run went on". What those bytes MEAN is
+    # the asserting case's business, not this fake's.
+    #
+    # FAIL CLOSED, LOUDLY. A missing payload or target would otherwise leave this behaving
+    # exactly like \`succeeds\` — and the case that armed it would then "prove" the trap
+    # replaced a file nobody ever wrote, which is the one way it could pass while
+    # asserting nothing.
+    if [[ ! -f "\${CASE_DIR}/${FAKE_NOTICE_TARGET_NAME}" || ! -f "\${CASE_DIR}/${FAKE_NOTICE_PAYLOAD_NAME}" ]]; then
+      printf 'fake pnpm: %s was told to write the operator notice with no authored payload\\n' "\${COMMAND}" >&2
+      exit 96
+    fi
+    NOTICE_TARGET="$(cat "\${CASE_DIR}/${FAKE_NOTICE_TARGET_NAME}")"
+    if ! cat "\${CASE_DIR}/${FAKE_NOTICE_PAYLOAD_NAME}" > "\${NOTICE_TARGET}"; then
+      printf 'fake pnpm: %s could not write the authored notice to %s\\n' "\${COMMAND}" "\${NOTICE_TARGET}" >&2
+      exit 96
+    fi
+    printf 'fake pnpm: %s wrote the authored notice payload (authored fixture)\\n' "\${COMMAND}"
     exit 0
     ;;
   *)

@@ -6,18 +6,16 @@
  * RESOLVED {@link EventStorePaths}, so the caller's `NUMISMA_DATA_DIR` resolution is
  * honoured rather than re-derived, and one store resolution serves the process.
  *
- * IT CANNOT REJECT. Both halves already refuse to throw — `loadHeartbeatLines`
- * treats an unreadable breadcrumb as absent, and the gap derivation's failure is
- * caught here and rendered AS A LINE rather than swallowed. The write itself is the
- * one operation left that can fail, and it is left to the caller: the CLI entry that
- * runs inside the wrapper decides what a disk failure means for the run.
+ * IT CANNOT REJECT. The gap derivation's failure is caught here and rendered AS A
+ * LINE rather than swallowed. The write itself is the one operation left that can
+ * fail, and it is left to the caller: the CLI entry that runs inside the wrapper
+ * decides what a disk failure means for the run.
  */
 import { writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { EventStorePaths } from "./event-store.js";
-import type { GapWindow } from "./gap-report.js";
+import { defaultGapReportSince, type GapWindow } from "./gap-report.js";
 import { loadGapReport } from "./gap-report-io.js";
-import { loadHeartbeatLines } from "./heartbeat-io.js";
 import { formatOperatorNotice, type NoticeGapFindings } from "./operator-notice.js";
 
 /**
@@ -42,23 +40,52 @@ export function operatorNoticePath(paths: EventStorePaths): string {
 }
 
 /**
- * Derive both signals for ONE instant and render the notice. Empty means healthy.
+ * Derive the data findings for ONE instant and render the notice. Empty means healthy.
  *
- * `now` IS PASSED ONCE AND SHARED, for `liveness-lines.ts`' reason verbatim: the
- * heartbeat's staleness threshold and the gap report's ceiling are the same rule
- * (`dueThrough`), so evaluating them against two different clock reads is the one
- * way the two halves of one notice could contradict each other.
+ * ONE AWAIT, BECAUSE THERE IS ONE SIGNAL. This composed the heartbeat lines
+ * alongside the gap findings until #376; `operator-notice.ts`' header holds the
+ * ruling and the reason re-adding the second await is not a small convenience.
+ * `loadHeartbeatLines` is untouched and still has the TUI banner, a LIVE PULL
+ * surface, as its consumer.
+ *
+ * `now` IS STILL READ ONCE AND PASSED IN, but no longer for `liveness-lines.ts`'
+ * reason: with the heartbeat gone there is no second half here to contradict. The
+ * reason now is REPRODUCIBILITY AND SCOPE — `now` fixes the window's ceiling
+ * (`dueThrough`) and its floor (`defaultGapReportSince`) from one clock read, so the
+ * floor and the ceiling of a single notice can never straddle a midnight, and a test
+ * can name the instant instead of racing it. THE CALLER OWNS THE CLOCK: the CLI
+ * reads it once and hands it to this composer and to nothing else, which is what
+ * lets the wrapper's step 5b be a pure function of the store plus one instant.
+ *
+ * ── THE FLOOR NOBODY SUPPLIED IS `defaultGapReportSince`, NOT THE ERA START ───
+ * A caller with no `since` gets the SAME floor `pnpm gap-report` gives itself —
+ * `LAUNCHD_ERA_START` or `MAX_WINDOW_DAYS` back from yesterday, whichever is later.
+ * That matters because THIS NOTICE TELLS THE OPERATOR TO RUN THAT COMMAND. Left on
+ * the derivation's fixed era floor, the two diverge on 2027-08-08 — `gap-report.json`
+ * and `operator-notice.txt` are written into one directory minutes apart from two
+ * different windows — and the cheap repair is refused by the code: a notice that
+ * printed `pnpm gap-report --since=<era floor>` would be naming a window wider than
+ * `MAX_WINDOW_DAYS`, which that command rejects outright. So it is not "the default
+ * won't show it" but "no invocation can".
+ *
+ * THE DEFAULT LIVES HERE, AT THE COMPOSER, AND NOT AT THE CLI. `apps/tui`'s
+ * `loadLivenessLines` does the identical thing for the identical reason. Putting it
+ * in the two shells instead would make the twin property a CONVENTION two apps have
+ * to remember; here it is structural, and a third caller inherits it for free.
+ * Today this changes nothing observable — the era start is later than 400 days back
+ * until 2027-08-08 — which is exactly why it has to be written down now.
  */
 export async function loadOperatorNoticeLines(
   paths: EventStorePaths,
   now: Date,
   window: Omit<GapWindow, "now"> = {},
 ): Promise<string[]> {
-  const [heartbeatLines, findings] = await Promise.all([
-    loadHeartbeatLines(paths, now),
-    loadGapFindings(paths, { ...window, now }),
-  ]);
-  return formatOperatorNotice(heartbeatLines, findings);
+  const findings = await loadGapFindings(paths, {
+    ...window,
+    since: window.since ?? defaultGapReportSince(now),
+    now,
+  });
+  return formatOperatorNotice(findings);
 }
 
 /** The one `try` in the module — the derivation's failure, carried as data. */
@@ -88,6 +115,14 @@ async function loadGapFindings(
  * ingest, the commit and the post-check — so the previous failure is stale news and
  * being replaced wholesale is correct. The single `writeFile` with no `flag` is what
  * makes that non-negotiable in code rather than in a comment.
+ *
+ * AND SINCE #376 THE STALENESS RUNS THE OTHER WAY TOO, WHICH IS FINE FOR THE SAME
+ * REASON. The wrapper's EXIT trap is a THIRD writer of this file and the only one that
+ * writes AFTER this one — on a non-zero exit it replaces whatever landed here with the
+ * failure of the run that just died. So this writer's output is what is stale in that
+ * direction: it describes data findings from a run that then failed, and a report of the
+ * failure is what the operator can act on today. Every writer of this file overwrites,
+ * none of them merge, and the last one to speak is the one with the newest fact.
  *
  * NOT ATOMIC, AND IT DOES NOT CREATE THE DIRECTORY — both accepted, for
  * `writeGapReportFile`'s reasons unchanged. This is a small single-writer file in a

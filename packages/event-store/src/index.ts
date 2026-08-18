@@ -22,9 +22,11 @@ export {
 // async shell (`gap-report-io.js`).
 export {
   LAUNCHD_ERA_START,
+  MAX_WINDOW_DAYS,
   REPORT_TIME_ZONE,
   boundedEraFloor,
   computeGapReport,
+  defaultGapReportSince,
   dueThrough,
   formatGapReport,
   formatGapSummary,
@@ -55,10 +57,11 @@ export {
   writeGapReportFile,
 } from "./gap-report-io.js";
 
-// The operator notice (#357): the liveness banner's PUSH twin. The same two signals
-// the TUI prints, composed into a file the shell profile cats on every new terminal
-// — because every other surface in this repo is pull-only, and a lost day nobody
-// goes looking for stays lost. It adds no derivation: the composition is pure
+// The operator notice (#357): the liveness banner's PUSH twin. The DATA half of what
+// the TUI prints — the gap findings only; the job half is the wrapper's bash (#376,
+// see `operator-notice.ts`) — composed into a file the shell profile cats on every new
+// terminal, because every other surface in this repo is pull-only, and a lost day
+// nobody goes looking for stays lost. It adds no derivation: the composition is pure
 // (`operator-notice.js`) and the disk touch is its one shell
 // (`operator-notice-io.js`).
 export {

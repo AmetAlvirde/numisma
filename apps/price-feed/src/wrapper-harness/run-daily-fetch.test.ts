@@ -138,8 +138,12 @@ import {
 import {
   AUTHORED_CLEAN_OUTCOME,
   AUTHORED_FAILED_OUTCOME,
+  AUTHORED_SENTINEL_FRAGMENT,
   AUTHORED_SENTINEL_NOTICE,
   AUTHORED_WEDGED_OUTCOME,
+  EXIT_TRAP_SCOPE_TAIL,
+  STEP_0_SCOPE_TAIL,
+  armFakeOperatorNoticeWrite,
   expectedFailureFragment,
   readOperatorNotice,
   seedHeartbeatOutcome,
@@ -1772,14 +1776,28 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
   // the suite header already gives about `launchctl` — this harness delivers the signal,
   // not the sender.
   //
-  // ALL FOUR RUN OUT OF THE MARK WINDOW, so no run stamps itself and the heartbeat
-  // assertions stay about step 0 rather than about the carry-forward contract cases 6 and
-  // 8 own. And all four end the run EARLY — before step 5b — on purpose: a run that
-  // reached 5b would have the fake `pnpm operator-notice` succeed without writing anything,
-  // and the file's final contents would then be step 0's by default rather than by proof.
-  // Ending early is also the only shape production actually produces here, which is the
-  // trap this board has paid for before: a guard that pins a shape the real producer never
-  // emits is a guard that cannot fail.
+  // ALL FIVE RUN OUT OF THE MARK WINDOW, so no run stamps itself and the heartbeat
+  // assertions stay about the notice rather than about the carry-forward contract cases 6
+  // and 8 own.
+  //
+  // ── THERE ARE NOW TWO BASH WRITERS, AND THAT SETS THESE CASES' SHAPE (#376) ──────────
+  // The EXIT trap writes this same file, through the same shared function, on any non-zero
+  // exit — because a notice that carries only DATA findings is EMPTY on a run whose data
+  // was clean and which then died at `backfill`, and an empty notice reads as health for as
+  // long as it takes the next fire to notice. The trap is therefore the LAST writer on
+  // every failing run, which is exactly what 9e asserts.
+  //
+  // The consequence for 9a-9c is that step 0's own write is no longer observable at the end
+  // of a run that FAILED: the trap has overwritten it by then, correctly. So those three
+  // now run to COMPLETION and read the file afterwards. That is not a weaker vehicle, it is
+  // two claims for the price of one — the notice standing at the end of a clean run can
+  // only be what step 0 left there, AND the trap's zero-exit restraint (it must not
+  // truncate, `:>`, or otherwise touch the file when the run succeeded) is what makes that
+  // sentence true. A trap that cleared the file unconditionally fails all three at once.
+  //
+  // WHICH WRITER WROTE IS ASSERTED THROUGH THE SCOPE TAIL, never through the FAILED line:
+  // the two callers share that line verbatim on purpose, and `STEP_0_SCOPE_TAIL` /
+  // `EXIT_TRAP_SCOPE_TAIL` are the only place they differ.
 
   /**
    * CASE 9a · THE PREVIOUS RUN FAILED, SO THE NOTICE SAYS SO — naming BOTH fields.
@@ -1788,6 +1806,13 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
    * PATH problem on this machine and exit 124 at `timeout:backfill` is a wedged network
    * call, and a notice that could not tell them apart would send the operator to the wrong
    * place on the one channel that reaches them unasked.
+   *
+   * THE RUN ITSELF IS HEALTHY, and since #376 that is the only shape in which this claim
+   * can be read at all: on a failing run the EXIT trap overwrites step 0's lines with this
+   * run's own failure, which is the whole point of the trap. A clean run leaves the trap
+   * silent, so the file still holds what step 0 put there — a notice about the PREVIOUS run
+   * standing over a successful one, which is exactly what production does until step 5b
+   * replaces it.
    */
   it(
     `case 9a — a FAILED previous heartbeat is written into the notice, ${RUNS_PER_CASE} consecutive times`,
@@ -1796,10 +1821,6 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
         const options = markCaseOptions("out", CASE_OPTIONS);
         const dirs = makeCaseDir(options);
         seedHeartbeatOutcome(dirs.dataDir, AUTHORED_FAILED_OUTCOME);
-        // THIS run dies at `prices-fetch`, which is a DIFFERENT step from the seeded
-        // `resolve-tools`. Without that difference "step 0 reported the previous run" and
-        // "something reported this one" would be the same observation.
-        setFakeBehavior(dirs.caseDir, "prices:fetch", "exits-127");
         const label = `case 9a run ${run}/${RUNS_PER_CASE}`;
 
         const record = await launchWrapper({
@@ -1812,9 +1833,9 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
         });
 
         assertTriple(record, dirs.caseDir, {
-          exitCode: 127,
-          lastStep: "prices-fetch",
-          pnpmReached: ["prices:fetch"],
+          exitCode: 0,
+          lastStep: "complete",
+          pnpmReached: WRAPPER_PNPM_COMMANDS,
           mark: options.mark,
           label,
         });
@@ -1832,13 +1853,18 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
         expect(notice ?? "", `${label}: the notice's lines do not begin \`Numisma: \``).toMatch(
           /^Numisma: /,
         );
-        // AND IT IS THE PREVIOUS RUN'S OUTCOME, NOT THIS ONE'S. This run died at
-        // `prices-fetch`; a notice naming that step would mean step 0 had somehow read a
-        // heartbeat written after it, which is the one thing its placement rules out.
+        // AND IT WAS STEP 0 THAT WROTE IT. The FAILED line is shared verbatim with the EXIT
+        // trap, so only the scope tail can say which caller produced the file — and a trap
+        // that had written here on a ZERO exit would have replaced a real notice with one
+        // about a run that succeeded.
         expect(
           notice ?? "",
-          `${label}: the notice named THIS run's step — step 0 cannot know it`,
-        ).not.toContain("prices-fetch");
+          `${label}: the notice standing after a CLEAN run is not step 0's — something else wrote it`,
+        ).toContain(STEP_0_SCOPE_TAIL);
+        expect(
+          notice ?? "",
+          `${label}: the EXIT trap wrote a notice on a run that exited 0`,
+        ).not.toContain(EXIT_TRAP_SCOPE_TAIL);
       }
     },
     600_000,
@@ -1858,10 +1884,16 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
    * exists to end. Self-clearing is step 5b's job alone, because step 5b runs only once the
    * day's work is actually done.
    *
-   * So: an authored sentinel notice, a CLEAN heartbeat, and a run that dies before 5b. The
+   * So: an authored sentinel notice, a CLEAN heartbeat, and a run that finishes. The
    * sentinel must survive BYTE FOR BYTE — `toBe`, never `toContain`, because a step 0 that
    * appended to it rather than truncating it would also be wrong and `toContain` would
    * shrug.
+   *
+   * AND IT IS NOW THE SAME CASE FOR THE EXIT TRAP (#376). Two writers of one file are held
+   * to one restraint here: the run exits 0, so the trap's notice branch must not fire, and
+   * a trap that wrote unconditionally would delete this sentinel just as surely as a step 0
+   * that truncated. `pnpm operator-notice` is deliberately left UNARMED, so the fake writes
+   * nothing at 5b and the bytes on disk at the end can only be the seed.
    */
   it(
     `case 9b — a CLEAN previous heartbeat leaves the notice untouched, ${RUNS_PER_CASE} consecutive times`,
@@ -1871,7 +1903,6 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
         const dirs = makeCaseDir(options);
         seedOperatorNotice(dirs.dataDir, AUTHORED_SENTINEL_NOTICE);
         seedHeartbeatOutcome(dirs.dataDir, AUTHORED_CLEAN_OUTCOME);
-        setFakeBehavior(dirs.caseDir, "prices:fetch", "exits-127");
         const label = `case 9b run ${run}/${RUNS_PER_CASE}`;
 
         const record = await launchWrapper({
@@ -1884,23 +1915,24 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
         });
 
         assertTriple(record, dirs.caseDir, {
-          exitCode: 127,
-          lastStep: "prices-fetch",
-          pnpmReached: ["prices:fetch"],
+          exitCode: 0,
+          lastStep: "complete",
+          pnpmReached: WRAPPER_PNPM_COMMANDS,
           mark: options.mark,
           label,
         });
 
-        // THE RUN REALLY DID DIE BEFORE 5b, stated rather than assumed: if it had reached
-        // the notice step, the fake would have "succeeded" without writing and the survival
-        // below would prove nothing about step 0's restraint.
+        // THE RUN REALLY DID REACH 5b, stated rather than assumed: the unarmed fake writing
+        // nothing there is what makes the survival below attributable to the two bash
+        // writers rather than to a run that stopped before anything could write.
         expect(
           existsSync(join(dirs.caseDir, "sentinels", sentinelNameFor("operator-notice"))),
-          `${label}: the run reached step 5b, so this case cannot say what step 0 did`,
-        ).toBe(false);
+          `${label}: the run never reached step 5b, so this case cannot say what it proves`,
+        ).toBe(true);
         expect(
           readOperatorNotice(dirs.dataDir),
-          `${label}: step 0 rewrote or truncated a notice a HEALTHY previous run had left — ` +
+          `${label}: a notice a HEALTHY previous run had left was rewritten or truncated — ` +
+            "by step 0 at the start, or by the EXIT trap on a run that exited 0; either way " +
             "an empty file over a real lost day reads as health",
         ).toBe(AUTHORED_SENTINEL_NOTICE);
       }
@@ -1919,6 +1951,19 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
    * The assertion is `toBeUndefined`, and the distinction from `""` is the case: an empty
    * notice is the healthy SELF-CLEARED state, and a step 0 that truncated unconditionally
    * would produce exactly that and sail past a reader which flattened the two.
+   *
+   * THE RUN SUCCEEDS, so this is the no-writer case end to end (#376): step 0 has no
+   * breadcrumb to speak from, the EXIT trap's branch is gated on a non-zero exit, and the
+   * unarmed fake at 5b writes nothing. IN THIS HARNESS, therefore, no writer touches the
+   * file and it must not exist at all — the strongest form of "say nothing, write nothing"
+   * the two BASH writers have.
+   *
+   * SAID PRECISELY, BECAUSE THE PRODUCTION SENTENCE IS THE OPPOSITE: with a real toolchain
+   * a fresh machine's first healthy run DOES create `operator-notice.txt`, empty, because
+   * `writeOperatorNoticeFile` always writes including the empty case — that unconditional
+   * write is the self-clearing contract. What this case isolates is the bash half: with 5b
+   * inert, `undefined` vs `""` separates "no bash writer spoke" from "step 0 truncated
+   * unconditionally", and only the first is correct.
    */
   it(
     `case 9c — no heartbeat means no notice, ${RUNS_PER_CASE} consecutive times`,
@@ -1927,7 +1972,6 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
         const options = markCaseOptions("out", CASE_OPTIONS);
         const dirs = makeCaseDir(options);
         // Deliberately no seed of any kind — `makeCaseDir` leaves a fresh data dir.
-        setFakeBehavior(dirs.caseDir, "prices:fetch", "exits-127");
         const label = `case 9c run ${run}/${RUNS_PER_CASE}`;
 
         const record = await launchWrapper({
@@ -1940,17 +1984,18 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
         });
 
         assertTriple(record, dirs.caseDir, {
-          exitCode: 127,
-          lastStep: "prices-fetch",
-          pnpmReached: ["prices:fetch"],
+          exitCode: 0,
+          lastStep: "complete",
+          pnpmReached: WRAPPER_PNPM_COMMANDS,
           mark: options.mark,
           label,
         });
 
         expect(
           readOperatorNotice(dirs.dataDir),
-          `${label}: step 0 invented a failure report on a machine with no breadcrumb — ` +
-            "cry-wolf on day one, from the one channel whose only asset is being believed",
+          `${label}: a failure report was invented on a machine with no breadcrumb and a ` +
+            "run that succeeded — cry-wolf on day one, from the one channel whose only " +
+            "asset is being believed",
         ).toBeUndefined();
       }
     },
@@ -1971,8 +2016,16 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
    * the fake bin: the isolation contract still passes (every entry is absolute and inside
    * the case dir), the real `pnpm` is in neither the prepend nor the inherited launchd
    * PATH, and the wrapper's own `command -v pnpm` guard is what ends the run. That the
-   * notice is on disk afterwards is the proof that step 0 ran BEFORE that guard and
+   * notice is on disk afterwards is the proof that the channel ran BEFORE that guard and
    * survived it.
+   *
+   * WHICH OF THE TWO BASH WRITERS IS ON TRIAL HERE CHANGED WITH #376, and the case is
+   * sharper for it. Both write on this path — step 0 about the SEEDED wedged run, then the
+   * EXIT trap about THIS run's exit 127 — and the trap is last. So the file at the end must
+   * name `resolve-tools`, not the seed, and that single assertion carries two facts: the
+   * notice channel still speaks with no toolchain at all, and the trap is the writer that
+   * stands. Step 0's own bytes are unobservable from here for the same reason; 9a is where
+   * they are read.
    */
   it(
     `case 9d — the notice survives an unresolvable toolchain, ${RUNS_PER_CASE} consecutive times`,
@@ -2013,12 +2066,110 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
         const notice = readOperatorNotice(dirs.dataDir);
         expect(
           notice,
-          `${label}: with the toolchain gone there is no other writer — step 0 said nothing`,
+          `${label}: with the toolchain gone there is no node-shaped writer — the bash ` +
+            "channel said nothing at all",
         ).toBeDefined();
         expect(
           notice ?? "",
-          `${label}: the notice does not name the previous wedged run`,
-        ).toContain(expectedFailureFragment(AUTHORED_WEDGED_OUTCOME));
+          `${label}: the notice does not name THIS run's refusal, which is the failure the ` +
+            "operator has to act on",
+        ).toContain(expectedFailureFragment({ exitCode: 127, lastStep: "resolve-tools" }));
+        expect(
+          notice ?? "",
+          `${label}: the standing notice is not the EXIT trap's — the trap writes last on ` +
+            "every failing run, including this one, where nothing node-shaped ever ran",
+        ).toContain(EXIT_TRAP_SCOPE_TAIL);
+        // AND THE SEED IS GONE. Step 0 wrote it moments earlier; a notice still naming the
+        // PREVIOUS wedged run would mean the trap never fired on an `exit 127` — the exact
+        // path the whole pure-bash argument is built on.
+        expect(
+          notice ?? "",
+          `${label}: the notice still names the PREVIOUS wedged run — the EXIT trap did not ` +
+            "fire on the toolchain refusal",
+        ).not.toContain(expectedFailureFragment(AUTHORED_WEDGED_OUTCOME));
+      }
+    },
+    600_000,
+  );
+
+  /**
+   * CASE 9e · THE NEW SEAM — TWO WRITERS, ONE FILE, ORDERING MATTERS (#376).
+   *
+   * Since the job half came off step 5b, the notice carries DATA findings only. So a 23:00
+   * fire whose data is genuinely clean writes an EMPTY notice at 23:04 and then wedges at
+   * `backfill` at 23:49: the 08:00 terminal prints nothing, step 0 does not speak until the
+   * 18:00 fire, and an all-clear stands over a known-failed run for nineteen hours — on the
+   * channel that exists because a lost day reached no one. The EXIT trap closes that by
+   * writing the same file, through the same shared function, on a non-zero exit.
+   *
+   * THE FAKE `pnpm operator-notice` ACTUALLY WRITES HERE, and that is what makes this a
+   * case rather than a restatement of 9d. Everywhere else the fake succeeds silently, so
+   * "the trap wrote" and "nobody else wrote" are the same observation. Armed with an
+   * authored payload, 5b leaves bytes on disk mid-run and the run then dies AFTER it — so
+   * the assertion is about ORDER: the trap's lines are there and the payload is not.
+   *
+   * THAT THE PAYLOAD IS DISCARDED IS THE RULED TRADE, NOT AN ACCIDENT. Those lines were
+   * true — but from the trap's position they are unmaintainable text of unknown vintage,
+   * and the wrapper's own step 0 comment already ruled that a bounded currently-true
+   * message beats a preserved one nothing can retire. The same bytes were discarded before
+   * this change too, by step 0 at the NEXT fire; all that moves is when the operator finds
+   * out. The `not.toContain` below is that ruling, written where it can go red.
+   *
+   * NOTHING HERE GOES NEAR THE REAL CLI. The payload is authored, the target path comes
+   * from the same imported `OPERATOR_NOTICE_FILENAME` the rest of this module uses, and the
+   * pnpm sentinel proves the fake — not a real toolchain — is what ran.
+   */
+  it(
+    `case 9e — the EXIT trap REPLACES step 5b's notice when the run dies after it, ${RUNS_PER_CASE} consecutive times`,
+    async () => {
+      for (let run = 1; run <= RUNS_PER_CASE; run += 1) {
+        const options = markCaseOptions("out", CASE_OPTIONS);
+        const dirs = makeCaseDir(options);
+        // No heartbeat seed: step 0 must stay SILENT, so the only writers in this run are
+        // 5b and the trap and the ordering claim cannot be satisfied by a leftover.
+        armFakeOperatorNoticeWrite(dirs.caseDir, dirs.dataDir, AUTHORED_SENTINEL_NOTICE);
+        // The step AFTER the notice, which is the whole geometry of the hole: everything
+        // 5b knows was already written, and the run then failed.
+        setFakeBehavior(dirs.caseDir, "backfill", "exits-127");
+        const label = `case 9e run ${run}/${RUNS_PER_CASE}`;
+
+        const record = await launchWrapper({
+          caseDir: dirs.caseDir,
+          wrapperPath: WRAPPER_PATH,
+          env: caseEnv(dirs, options),
+          groupLeader: true,
+          settleDeadlineMs: SETTLE_DEADLINE_MS,
+          maxWaitMs: 60_000,
+        });
+
+        assertTriple(record, dirs.caseDir, {
+          exitCode: 127,
+          lastStep: "backfill",
+          pnpmReached: WRAPPER_PNPM_COMMANDS,
+          mark: options.mark,
+          label,
+        });
+
+        const notice = readOperatorNotice(dirs.dataDir);
+        expect(
+          notice,
+          `${label}: no notice at all after a run that died past 5b — the file the fake ` +
+            "wrote is gone and nothing replaced it",
+        ).toBeDefined();
+        expect(
+          notice ?? "",
+          `${label}: the notice does not name THIS run's failure, so the terminal prints an ` +
+            "all-clear over a run that died at backfill",
+        ).toContain(expectedFailureFragment({ exitCode: 127, lastStep: "backfill" }));
+        expect(
+          notice ?? "",
+          `${label}: the standing notice is not the EXIT trap's`,
+        ).toContain(EXIT_TRAP_SCOPE_TAIL);
+        expect(
+          notice ?? "",
+          `${label}: step 5b's lines are still there — the trap APPENDED rather than ` +
+            "replacing, which puts two vintages in one voice",
+        ).not.toContain(AUTHORED_SENTINEL_FRAGMENT);
       }
     },
     600_000,

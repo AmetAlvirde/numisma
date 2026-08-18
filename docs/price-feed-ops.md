@@ -766,11 +766,29 @@ Every surface this repo has is **pull-only**. The TUI banner derives the lost da
 live and correctly, and says so only to someone who opens the TUI; the dashboard
 only to someone who opens the dashboard; `gap-report.json` only to someone who
 opens the file. On 2026-08-14/15 all three were right the whole time and nobody
-looked for three days, at the machine. Step 5b of the wrapper
-(`pnpm operator-notice`) closes that by writing the same two signals — the job
-heartbeat and the gap findings — into one well-known plain-text file. This section
-is the other half: getting your shell to read it. It adds no detection; it is a
+looked for three days, at the machine. The wrapper closes that by writing one
+well-known plain-text file that your shell prints unasked. This section is the
+other half: getting your shell to read it. It adds no detection; it is a
 transport.
+
+**Three writers, one file, and each speaks for a different failure** (#376):
+
+| Writer | When | What it says |
+| --- | --- | --- |
+| Step 5b (`pnpm operator-notice`) | every run that reaches it | the **data** findings only — lost days and the venue-dark count. Rewritten in full, so a healthy run truncates it to empty |
+| The wrapper's `EXIT` trap | any run that exits **non-zero** | this run **FAILED**, with its exit code and the step it died at. Replaces whatever stood there |
+| Step 0 | at the start of a run, when the **previous** heartbeat says that run did not finish clean | the same FAILED sentence, about the previous run |
+
+The two bash writers share one function and one wording (`write_operator_failure_notice`
+in `ops/price-feed/run-daily-fetch.sh`), so there is exactly one phrasing of "the job
+failed" to learn. They differ in one clause — which run will replace the file. The trap
+is what stops an all-clear standing over a known-failed run overnight: a run whose data
+was clean writes an *empty* notice at 5b and may still die at `backfill` minutes later.
+Step 0 remains as the backstop for the one death the trap cannot report — a `SIGKILL`,
+an OOM kill, a power loss — where no trap runs at all.
+
+**On a run that exits 0 the trap touches the file not at all**, which is what lets
+step 5b's findings (or an untouched previous notice) stand.
 
 **The file.** `operator-notice.txt`, in the resolved data dir beside the durable
 log, next to `gap-report.json` and `job-heartbeat.json`
@@ -886,7 +904,8 @@ A clean machine prints nothing on a new shell. That is the whole contract, and i
 is why there is nothing to configure and nothing to maintain:
 
 - The file is **rewritten in full on every run**, including the healthy case,
-  where it is truncated to empty. The channel self-clears.
+  where step 5b truncates it to empty. The channel self-clears. A failing run is
+  rewritten in full too, by the `EXIT` trap — never appended to.
 - **No rotation and no history.** It is a notice, not a log. One fixed name, one
   current state.
 - **No dismissal state anywhere in the design** — so there is none to get wrong,
@@ -894,14 +913,31 @@ is why there is nothing to configure and nothing to maintain:
 
 ### What it means when it does print
 
-Lines arrive in one order, always: **the job first, the data second** — a failed
-run is *why* days went missing, and reading the consequence before the reason is
-the wrong way round on a channel scanned in two seconds.
+You are reading **either a job report or a data report, never both mixed** — the
+file has one writer at a time and the last one to write wins.
 
-**Job lines** (from `job-heartbeat.json`) name a run that failed and the step it
-died at, a breadcrumb dated ahead of today (a wrong machine clock), or a job that
-has not completed since some date. These are the wrapper-level failures; triage
-them with the sections above.
+**A job report** is two lines from bash, and it is the whole file when it is
+there:
+
+```text
+Numisma: the previous daily price job run FAILED — exit 124 at step 'timeout:backfill'. Nothing pushed this to you; that is why it is here.
+Numisma: written by the wrapper in pure bash, so it says nothing about lost days yet — the next run replaces this file wholesale if it reaches its own notice step.
+```
+
+The exit code and the step are the triage — `exit 127 at step 'resolve-tools'` is
+a `PATH` problem on this machine, `exit 124 at step 'timeout:backfill'` is a wedged
+call the watchdog ended — and the sections above are where to take them. The second
+line is the bound: a job report says **nothing** about lost days, so read it as
+"the run failed", never as "and the data is fine". Run `pnpm gap-report` for that.
+The next run's step 5b replaces this file with the data report below.
+
+Note what a job report *never* carries any more (#376): the future-dated
+breadcrumb and the "has not completed since" staleness line. Both live on in the
+TUI banner, which reads the same heartbeat live; neither is actionable on the one
+channel that arrives unasked, because the run printing it has usually just fixed
+the thing it names.
+
+**A data report** is what step 5b writes, and it is everything below.
 
 **Lost days are ENUMERATED, one per day, each followed by its own recovery
 command**:
@@ -917,10 +953,11 @@ pressure the channel exists to apply. The date is repeated inside the command li
 on purpose, so a line that reaches you alone — grepped, quoted into a standup,
 wrapped by a narrow terminal — still says which day it recovers.
 
-**Venue-dark days are COUNTED on one line and never enumerated**:
+**Venue-dark days are COUNTED on one line, never enumerated, and only the RECENT
+ones are counted at all**:
 
 ```text
-Numisma: 3 venue-day(s) dark — not lost days: the feed ran and the days are anchored. Enumerate them with pnpm gap-report.
+Numisma: 3 venue-day(s) dark in the last 7 days — not lost days: the feed ran and the days are anchored, and the venue was silent or the market was closed for a holiday. Enumerate them with pnpm gap-report.
 ```
 
 The asymmetry is deliberate and it is the decision this channel lives or dies on.
@@ -932,6 +969,33 @@ schedule, inside the fix. So the notice carries the number and names
 `pnpm gap-report`, which enumerates them on demand. (The TUI banner *does*
 enumerate them, correctly — a pulled surface has a different noise budget. The
 two renderings differ on purpose and must not be unified.)
+
+**The count is not your running total — it is bounded to the last
+`MAX_NOTICE_VENUE_DARK_DAYS` days** (seven, in
+`packages/event-store/src/operator-notice.ts`), which is why the line names the
+window out loud. Counting *all* of them would have re-created, in one line, the
+permanence the enumeration was refused for: the store's oldest venue-dark day is
+a holiday no command can clear, so an unbounded count is a line that prints
+forever and an "empty means healthy" notice that can never be empty again. Under
+the bound the count **self-extinguishes by age** instead: a market holiday is
+counted for a week and then goes quiet, and a recent venue outage's day drops off
+the same way once the marks land or the week passes. Seven keeps the channel
+empty roughly four days in five on a healthy store; the docstring on the constant
+carries the arithmetic and the recorded flip trigger (three, if ~70 noisy days a
+year still proves too many).
+
+Two consequences worth holding on to when you read the line:
+
+- **An empty notice does not mean every venue-dark day you ever had was
+  cleared.** It means none fell in the last seven days. Nothing was cleared —
+  venue-dark days are still permanent, and the derivation still knows all of
+  them.
+- **`pnpm gap-report` will usually enumerate MORE than the notice counted**, and
+  that is the design, not a disagreement: the report walks the whole window, the
+  notice only admits the recent tail. The bound is presentation-only and applied
+  at the leaf — the derivation window is never narrowed to achieve it, because
+  that would age out **lost** days too, which is the one outcome this channel
+  exists to prevent.
 
 **A `lost days were NOT checked (…)` line** means the **derivation itself broke** —
 the checker, not the data:
