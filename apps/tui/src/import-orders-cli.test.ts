@@ -23,7 +23,9 @@
  * door, the same shape `record-fill-cli.test.ts` uses. `input` is always supplied so the
  * readline prompt gets EOF or an authored answer instead of hanging, and every runner call
  * carries a `timeout` so a shell that failed to close its prompt surfaces as a KILLED
- * process rather than as a stuck suite.
+ * process rather than as a stuck suite. A spawn's stdin is a PIPE, never a terminal, which
+ * is not merely an incidental property of this harness — since #346 it is the condition the
+ * last block below tests, and the reason `no-reserve-declared` is assertable at all.
  *
  * EVERY FIXTURE IS AUTHORED — invented ids, an invented instrument, round decade prices,
  * round balances. Nothing is seeded from, or shaped by, a real export, a real ladder or a
@@ -368,9 +370,10 @@ describe("import-orders-cli — the shell's own contract (argv, exit codes, env,
     // so running the same refusal under two different values shows the resolution
     // FOLLOWING the env var rather than merely happening to sit somewhere plausible.
     //
-    // THE OTHER TWO RESOLVERS SIT BEHIND THE PROMPT and cannot be reached from a spawned
-    // run — see the interview-wall case below, and #346, for why — so what is pinned here
-    // is the reachable one plus the negative that matters: no run of this shell falls back
+    // THE OTHER TWO RESOLVERS SIT BEHIND THE PROMPT and STILL cannot be reached from a
+    // spawned run: #346 made a piped run refuse the interview rather than answer it, which
+    // moved the wall without removing it — see the no-terminal block below — so what is
+    // pinned here is the reachable one plus the negative that matters: no run falls back
     // to the real accumulus root. `resolvePlansPath` and `resolveEventStorePaths` share
     // `resolveDataDir` with `resolveOrdersPath`, and that agreement is pinned at the
     // resolver (`packages/preferences/src/plans-reliable.test.ts`, the data-dir drift
@@ -390,43 +393,84 @@ describe("import-orders-cli — the shell's own contract (argv, exit codes, env,
     expect(two.stderr).not.toMatch(/accumulus/);
   });
 
-  it("reaches the funding prompt on good inputs and still exits, closing the readline", async () => {
-    // THE CONTROL CASE, and a finding in its own right. A fresh rung has nothing on file
-    // to compare against, so the flow runs the export read, the header parse, the sidecar
-    // load and the changed-claim partition and then ASKS — and the shell's own readline,
-    // constructed over a PIPE that carries no terminal, has already seen end-of-input by
-    // the time the question is put. The prompt rejects, the outer catch reports it, and
-    // the run exits 1 through the same `finally` every other path uses.
+  describe("a stdin that is no terminal — the interview has nowhere to happen (#346)", () => {
+    // THE CASE THIS BLOCK REPLACED asserted `readline was closed`, a readline internal that
+    // reached the operator verbatim: `createInterface` was constructed at module scope and
+    // eagerly consumed a piped stdin, so the stream had already ended by the time the first
+    // question was put. The shell now builds the interface AT the first question, and when
+    // stdin is no terminal it never builds one at all — it says so in its own voice and
+    // returns an empty answer, which is the one honest answer an unattended run can give.
     //
-    // What that buys the assertions above: this run proves the shell STARTS and gets all
-    // the way through the reads on good inputs, so a refusal elsewhere in this file is the
-    // shell's own decision rather than a process that could not run at all. What it also
-    // records is the wall: the interactive half of this flow — the funding declaration,
-    // the rung picks, the plans read and the fold behind them — is not exercisable from a
-    // non-interactive spawn, and the `no-reserve-declared` refusal is unreachable here.
-    //
-    // FILED AS #346: `createInterface` is constructed at `import-orders-cli.ts:28` and
-    // eagerly consumes stdin, so by the time the first `ask` runs a piped stdin has already
-    // ended and `rl.question` rejects — which is why piping answers to `pnpm orders:import`
-    // cannot work, and why `no-reserve-declared` at `import-orders.ts:588` is unreachable
-    // without a TTY.
-    const dir = await dataDir();
-    const csv = await exportFile(dir, [FRESH_ROW]);
+    // WHAT THAT UNLOCKS is the first test in this repo of `no-reserve-declared`
+    // (`import-orders.ts:588`). That refusal fires only when `declareFunding` returns
+    // undefined, which happens only on an empty batch answer — so before this change it was
+    // reachable exclusively from a TTY, i.e. from nowhere a test can stand. The shell
+    // returning "" rather than throwing is what puts it under a spawn.
 
-    const run = runImport([csv], { dataDir: dir });
+    it("names the missing terminal, lets the FLOW refuse, exits 1, writes nothing", async () => {
+      const dir = await dataDir();
+      // A fresh rung: nothing on file to compare it against, so it is ADMITTED and the
+      // flow reaches the funding interview. The only export shape that gets this far.
+      const csv = await exportFile(dir, [FRESH_ROW]);
 
-    expectExited(run);
-    expect(run.status).toBe(1);
-    // It did NOT fail on any of the reads before the prompt — no refusal was raised.
-    expect(run.stderr).not.toMatch(/REFUSED/);
-    // DELIBERATELY A NODE-INTERNAL STRING, not a contract of ours. `ERR_USE_AFTER_CLOSE`
-    // is the most precise available probe for "the prompt was actually put": no message of
-    // ours is emitted between the last read and the question. The tradeoff is owned here —
-    // a Node release that rewords it breaks this case, and the fix is to re-derive the new
-    // wording rather than to weaken the probe, because a looser match would stop
-    // distinguishing "reached the prompt" from "died earlier for some other reason".
-    expect(run.stderr).toMatch(/readline was closed/);
-    // Nothing was written on the way to the prompt: the sidecar is still absent.
-    expect(await readdir(dir)).not.toContain("orders.jsonl");
+      const run = runImport([csv], { dataDir: dir });
+
+      expectExited(run);
+      expect(run.status).toBe(1);
+      // THE SHELL'S SENTENCE — a consequence, not a rule, and not a readline internal.
+      expect(run.stderr).toContain(
+        "No terminal on stdin: this import is an interview — it asks which reserve funds " +
+          "the batch — and there is nowhere to conduct it, so every question goes " +
+          "unanswered. Run it from a terminal.",
+      );
+      // ONCE, not once per question. Repeating it would bury the flow's refusal in copies.
+      expect(run.stderr.match(/No terminal on stdin/g)).toHaveLength(1);
+      // AND THE FLOW'S OWN SENTENCE, on the flow's own channel, in the flow's own voice —
+      // `no-reserve-declared`, asserted end-to-end for the first time. Two refusals, two
+      // layers, one story: the shell says why there was no answer, the domain says what it
+      // did about it.
+      expect(run.stderr).toContain(
+        "REFUSED — no funding reserve was declared for this batch",
+      );
+      expect(run.stderr).toContain(`Nothing was written to ${join(dir, "orders.jsonl")}.`);
+      // THE INTERNAL IS GONE. This is the regression the whole change exists to kill, and a
+      // readline constructed anywhere on this path would bring it straight back.
+      expect(run.stderr).not.toMatch(/readline was closed/);
+      // Refused means refused: no sidecar, and no staging sibling of one either.
+      expect(await readdir(dir)).not.toContain("orders.jsonl");
+      expect(await litter(dir)).toEqual([]);
+    });
+
+    it("stays SILENT about the terminal on a run that never asks a question", async () => {
+      // THE PAYOFF OF BUILDING LAZILY, stated as behaviour the operator can see. Every
+      // readable rung here is already on file, so nothing is admitted and no question is
+      // ever put — and a shell that announced the missing terminal at STARTUP, rather than
+      // at the first unanswerable question, would scold a run that had nothing to ask.
+      //
+      // The mutation this is pinned against is moving the NOTICE out of `ask` and up to
+      // the shell's opening lines: this case goes red, the case above stays green — which
+      // is exactly the difference between "lazy" and "loud".
+      //
+      // WHAT IT HONESTLY DOES NOT PIN, said out loud so nobody reads more into it: moving
+      // `createInterface` itself back to module scope leaves all nine cases green, because
+      // the `isTTY` guard returns before `rl` is ever touched and a spawned stdin is never
+      // a terminal. The interface's laziness is a STRUCTURAL claim — it is what lets the
+      // `finally` close only what was built — and no test standing outside a TTY can
+      // observe it. The guard, the notice's placement, and the empty-answer composition
+      // are the three things these two cases actually hold down.
+      const dir = await dataDir({
+        "orders.jsonl": `${serializeOrderRecord(placementOnFile())}\n`,
+      });
+      const csv = await exportFile(dir, [RESTATED_ROW]);
+
+      const run = runImport([csv], { dataDir: dir });
+
+      expectExited(run);
+      expect(run.status).toBe(0);
+      expect(run.stderr).not.toMatch(/No terminal on stdin/);
+      expect(run.stderr).not.toMatch(/readline was closed/);
+      // It really did the work — this is a successful import, not a silent early exit.
+      expect(run.stdout).toMatch(/Imported .*: 0 order\(s\) appended/);
+    });
   });
 });
