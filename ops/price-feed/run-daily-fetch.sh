@@ -56,7 +56,66 @@ PATH_PREPEND="${NUMISMA_PATH_PREPEND:-$HOME/.asdf/shims:$HOME/Library/pnpm:/opt/
 # The durable data root. RESOLVED HERE, not at step 3 where it is used for the
 # commit, because the heartbeat trap below must know where to write BEFORE the
 # exit-127 checks — which are the very failures the heartbeat exists to record.
-DATA_DIR="${NUMISMA_DATA_DIR:-$HOME/Dev/accumulus/data}"
+#
+# THE MISSING COLON IS THE POINT. This read used `${NUMISMA_DATA_DIR:-...}`, and the
+# colon form substitutes the default when the variable is unset OR EMPTY — so it
+# collapsed two cases the TS side (#348) deliberately holds apart. `NUMISMA_DATA_DIR=""`
+# in the plist is not "I did not configure this", it is "I configured this and my
+# expansion produced nothing" — `NUMISMA_DATA_DIR="${SCRATCH}"` with `SCRATCH` unset is
+# exactly how it happens — and the colon form answered that by pointing the whole run,
+# heartbeat, commit and all, at the operator's REAL accumulus ledger without a word.
+#
+# The colon form is also wrong in the OTHER direction, and worse: it does not
+# substitute for whitespace. `NUMISMA_DATA_DIR="   "` is non-empty to bash, so it
+# survived verbatim as a LITERAL relative path, and `HEARTBEAT_FILE` (below) and the
+# `git -C "$DATA_DIR"` at the commit step then resolved it against whatever directory
+# the job happened to start in — the split-brain arm ADR-006 exists to forbid.
+#
+# So: `${VAR-default}` (no colon) substitutes for UNSET ONLY, and blank in either
+# spelling is refused outright below. Unset → the default, deliberately. Set-but-blank
+# → a loud non-zero exit. Anything else → verbatim. Byte-identical to what
+# `resolveDataDir` does in TS, which is the only way this wrapper and the code it
+# drives can be said to agree.
+DATA_DIR="${NUMISMA_DATA_DIR-$HOME/Dev/accumulus/data}"
+# A blank `DATA_DIR` can ONLY mean a set-but-blank env var: the default above is never
+# blank. Stripping every space/tab/newline and testing what is left catches `""` and
+# `"   "` with one predicate.
+#
+# WHERE THIS REFUSAL SURFACES, AND WHY IT IS NOT THE PER-RUN LOG. It lands on the
+# INHERITED stderr, which under launchd is the plist's StandardErrorPath —
+# `~/Library/Logs/numisma/launchd.price-feed.err.log`. That is the file to open when a
+# scheduled run appears to have done nothing at all. It is NOT `price-feed-<stamp>.log`,
+# because that file does not exist yet: `mkdir -p "$LOG_DIR"`, the `LOG_FILE=`
+# assignment and the `exec … tee` redirect all sit far below this block, and this check
+# cannot move down to join them, because it must run BEFORE the
+# `HEARTBEAT_FILE="$DATA_DIR/job-heartbeat.json"` assignment — which is itself above all
+# three. (Named rather than pinned to line numbers on purpose: this file is edited often
+# enough that a cited line is a lie waiting to happen, and #348 is a PR about exactly
+# that class of rot. `LOG_DIR` is read from its OWN env var near the top and does not
+# depend on `DATA_DIR`, so a blank data dir does not blind the logging; the per-run log
+# is simply not open yet.)
+#
+# There is therefore NO HEARTBEAT for this failure, and that is deliberate, not an
+# oversight in a wrapper whose heartbeat exists precisely to record failures. The
+# heartbeat is written INTO `$DATA_DIR`, and the whole finding here is that we do not
+# have a trustworthy one. Guessing a fallback location so that something gets written
+# is the exact defect #348 kills: inventing a path for a knob the operator got wrong.
+# A future edit that "helpfully" relocates this check to get a breadcrumb out of it
+# would reintroduce the bug — the run must die before it can name a directory.
+#
+# Exit 78 is sysexits.h's EX_CONFIG. It is picked to NOT collide with the codes this
+# wrapper already speaks — 1 (a step failed), 124 (watchdog), 127 (pnpm/node missing),
+# 143 (someone else's SIGTERM) — so a reader of the launchd error log can tell "the
+# environment handed me a broken knob" apart from "the run tried and failed".
+if [[ -z "${DATA_DIR//[[:space:]]/}" ]]; then
+  echo "FATAL: NUMISMA_DATA_DIR is set to a blank value (got '$NUMISMA_DATA_DIR')." >&2
+  echo "A blank value is not 'unset': using it would silently send this run's marks," >&2
+  echo "heartbeat and git commit either to the REAL default ledger or to whatever" >&2
+  echo "directory the scheduler happened to start in. Unset NUMISMA_DATA_DIR to choose" >&2
+  echo "the default deliberately, or give it an absolute path." >&2
+  echo "No heartbeat was written: it lives under NUMISMA_DATA_DIR, which is what is broken." >&2
+  exit 78
+fi
 # Wall-clock ceiling on the WHOLE run, enforced by the watchdog below. Must stay
 # comfortably under the 3600s gap between scheduled fires; the reasoning and the
 # guard are at the watchdog itself. 0 disables it (manual debugging only).

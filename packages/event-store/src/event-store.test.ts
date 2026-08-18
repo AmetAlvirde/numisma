@@ -249,3 +249,86 @@ describe("loadEventLog — log-line quarantine", () => {
     expect(await exists(quarantineLogPath(paths.log))).toBe(false);
   });
 });
+
+// #348. `resolveEventStorePaths` owns the two most consequential paths in the repo —
+// `genesis.json` and the append-only `events.jsonl` — and it took its default as a
+// default PARAMETER (`dataDir = resolveDataDirDefault()`). A JS default parameter fires
+// on `undefined` and on NOTHING ELSE, so an explicit `""` walked past it into
+// `resolve("")`, which is the process's CWD. Measured before the fix:
+// `resolveEventStorePaths("").log` was `<cwd>/events.jsonl`. That is not a stale read —
+// there is no ledger there, so a caller whose env expansion came out blank would find no
+// genesis, seed a SECOND one beside wherever the job started, and append to it. Every
+// fixture here is a string; nothing in this block touches a filesystem, let alone a real
+// data dir.
+describe("resolveEventStorePaths — a BLANK dataDir is REFUSED, not defaulted and never CWD (#348)", () => {
+  it("the CWD paths are never produced — the specific regression, named in the failure", () => {
+    const cwdLog = resolve(process.cwd(), "events.jsonl");
+    let produced: EventStorePaths | undefined;
+    try {
+      produced = resolveEventStorePaths("");
+    } catch {
+      produced = undefined;
+    }
+    expect(
+      produced?.log,
+      `resolveEventStorePaths("") must never resolve the event log against the process CWD (${cwdLog})`,
+    ).not.toBe(cwdLog);
+    // Any other returned root is equally a failure to refuse — a quiet fall-through to
+    // the default would append this deployment's events to the REAL accumulus ledger.
+    expect(
+      produced,
+      'resolveEventStorePaths("") must throw rather than return any paths at all',
+    ).toBeUndefined();
+  });
+
+  it("refuses both spellings of blank, in the resolver's own voice", () => {
+    expect(() => resolveEventStorePaths("")).toThrow(
+      /event-store data directory must not be empty/,
+    );
+    // Whitespace-only is what a shell produces most often, and what a bare `=== ""`
+    // check would wave through.
+    expect(() => resolveEventStorePaths("   ")).toThrow(
+      /event-store data directory must not be empty/,
+    );
+    expect(() => resolveEventStorePaths("\t\n")).toThrow(
+      /event-store data directory must not be empty/,
+    );
+  });
+
+  it("the refusal names the consequence AND the two ways out", () => {
+    let message = "";
+    try {
+      resolveEventStorePaths("");
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toMatch(/not .?unset.?/i);
+    expect(message).toMatch(/working directory/);
+    expect(message).toMatch(/second genesis and event log/i);
+    expect(message).toMatch(/Pass no data directory/);
+    expect(message).toMatch(/absolute path/);
+  });
+
+  it("a GENUINELY absent override still defaults — the refusal must not swallow `undefined`", () => {
+    const saved = process.env.NUMISMA_DATA_DIR;
+    const authoredRoot = resolve("/tmp/numisma-authored-store-348");
+    try {
+      process.env.NUMISMA_DATA_DIR = authoredRoot;
+      // No filesystem call is made — this is pure path algebra against an authored root.
+      expect(resolveEventStorePaths(undefined).log).toBe(resolve(authoredRoot, "events.jsonl"));
+      expect(resolveEventStorePaths().genesis).toBe(resolve(authoredRoot, "genesis.json"));
+      expect(() => resolveEventStorePaths()).not.toThrow();
+    } finally {
+      if (saved === undefined) {
+        delete process.env.NUMISMA_DATA_DIR;
+      } else {
+        process.env.NUMISMA_DATA_DIR = saved;
+      }
+    }
+  });
+
+  it("an ABSOLUTE dataDir is still honored verbatim — existing callers are unchanged", () => {
+    const explicit = resolve("/tmp/numisma-explicit-store-348");
+    expect(resolveEventStorePaths(explicit).log).toBe(resolve(explicit, "events.jsonl"));
+  });
+});

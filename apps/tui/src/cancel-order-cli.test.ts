@@ -99,10 +99,13 @@ describe("cancel-order-cli — the shell's argv, env and exit-code contract", ()
    *
    * `dataDir` is REQUIRED and is the LITERAL `NUMISMA_DATA_DIR` value — a case that wants
    * to exercise the relative-path refusal passes the relative string here. There is
-   * deliberately no default: `resolveDataDir` treats `""` exactly like an unset var
-   * (`packages/engine/src/data-dir.ts:47` gates on `fromEnv.trim() !== ""`) and falls back
-   * to the REAL accumulus ledger, so a runner that let the value be omitted would put a
-   * live write one forgotten argument away. Omitting it is a type error, not a fallback.
+   * deliberately no default, and the refusal in `resolveDataDir` does not supply one: an
+   * omitted argument would spread `NUMISMA_DATA_DIR: undefined` into the child env, which
+   * is an UNSET var, and unset is the one case that still falls back to the REAL accumulus
+   * ledger — a live write one forgotten argument away. A blank value no longer sneaks
+   * through that gap either: `resolveDataDir` now REFUSES `""` and whitespace outright
+   * rather than treating them as unset, so there is no spelling of "nothing" this runner
+   * could pass that lands somewhere safe. Omitting it is a type error, not a fallback.
    */
   function runCancel(
     args: readonly string[],
