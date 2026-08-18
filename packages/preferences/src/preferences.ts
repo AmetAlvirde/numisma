@@ -51,9 +51,28 @@ import {
  * hypothetical: a CWD-relative read here would silently serve the phone a Reserve floor
  * from a different file than the one the fund appends to (ADR-004). An explicit `dataDir`
  * is still honored verbatim for callers (e.g. tests) that pass one.
+ *
+ * A blank or whitespace-only `dataDir` is REFUSED (#348), and the refusal is the reason
+ * this is written as an explicit `undefined` check rather than as a default PARAMETER.
+ * A JS default parameter fires on `undefined` and on nothing else, so `""` used to sail
+ * straight past it into `resolve("")` — which is the process's CWD, the one arm ADR-006
+ * exists to forbid. The phone's Reserve floor would then be read from
+ * `<wherever-the-job-started>/preferences.jsonl`, a file nobody writes, and the answer
+ * would be a plausible wrong number rather than an error. `undefined` still means nobody
+ * configured this and still takes the default; `""` means somebody configured it and got
+ * the expansion wrong, and that is not something this resolver may guess at.
  */
-export function resolvePreferencesPath(dataDir = resolveDataDir()): string {
-  return join(resolve(dataDir), "preferences.jsonl");
+export function resolvePreferencesPath(dataDir?: string): string {
+  if (dataDir !== undefined && dataDir.trim() === "") {
+    throw new Error(
+      `a preferences data directory must not be empty (got "${dataDir}"). ` +
+        `An empty value is not "unset": resolving it would land on the process's ` +
+        `working directory, serving a Reserve floor from a file nothing writes. ` +
+        `Pass no data directory at all to use the default deliberately, or pass an ` +
+        `absolute path.`,
+    );
+  }
+  return join(resolve(dataDir ?? resolveDataDir()), "preferences.jsonl");
 }
 
 const SPLIT_BASES: readonly SplitBasis[] = ["highWaterMark", "perClose"];
