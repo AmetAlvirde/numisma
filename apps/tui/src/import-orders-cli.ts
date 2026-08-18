@@ -29,7 +29,46 @@ if (!csvPath) {
   process.stderr.write("usage: pnpm orders:import <path/to/open-orders-export.csv>\n");
   process.exitCode = 1;
 } else {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  // THE PROMPT IS BUILT AT THE FIRST QUESTION, NEVER AT STARTUP (#346). `createInterface`
+  // eagerly consumes stdin, so constructing it here — which is where it used to live —
+  // ended a piped stream before any question was put, and the first `ask` rejected with
+  // `readline was closed`: a readline internal, printed verbatim to the operator by the
+  // outer catch below. Memoized, so the several questions of one interview share one
+  // interface, and a run that never asks never builds one.
+  let rl: ReturnType<typeof createInterface> | undefined;
+  let toldThereIsNoTerminal = false;
+
+  /**
+   * The prompt channel — and, on a stdin that is no terminal, the place that says so.
+   *
+   * IT RETURNS RATHER THAN THROWS, DELIBERATELY. Throwing here would unwind through the
+   * outer catch and end the run in the shell, which would leave `no-reserve-declared`
+   * (`import-orders.ts:588`) unreachable forever — the flow's own refusal for a batch
+   * nobody funded, reached only when `declareFunding` gets an empty batch answer. Returning
+   * "" hands the domain the one answer a run with no terminal can honestly give, and the
+   * domain then refuses in its own voice. Two sentences, one story: the shell names WHY
+   * there is no answer, the flow names WHAT IT DID about it.
+   *
+   * The notice is written ONCE per run, not once per question: the operator learns there is
+   * no terminal from the first unanswerable question, and repeating it would bury the
+   * flow's refusal under copies of the shell's.
+   */
+  const ask = (question: string): Promise<string> => {
+    if (!process.stdin.isTTY) {
+      if (!toldThereIsNoTerminal) {
+        toldThereIsNoTerminal = true;
+        process.stderr.write(
+          "No terminal on stdin: this import is an interview — it asks which reserve funds " +
+            "the batch — and there is nowhere to conduct it, so every question goes " +
+            "unanswered. Run it from a terminal.\n",
+        );
+      }
+      return Promise.resolve("");
+    }
+    rl ??= createInterface({ input: process.stdin, output: process.stdout });
+    return rl.question(question);
+  };
+
   try {
     // THE FOLD IS TAKEN, AND ITS DISCARD SUMMARY RENDERED, BEFORE THE IMPORT BEGINS —
     // the same placement and the same argument as `record-fill-cli.ts`. `fundReview()`
@@ -66,7 +105,7 @@ if (!csvPath) {
         // unreadable one costs, which is the proposal and nothing else.
         plansPath: resolvePlansPath(),
         loadPlans,
-        ask: (question) => rl.question(question),
+        ask,
         out: (message) => process.stdout.write(message),
         err: (message) => process.stderr.write(`${message}\n`),
       },
@@ -86,7 +125,10 @@ if (!csvPath) {
       // qualification, each opening on its own gap and naming its own money direction)
       // are the real channel. If this import is ever automated or piped, the exit code
       // becomes the only surface left and this branch must be revisited BEFORE that lands,
-      // not after. (#183 DECIDED this and is closed; the accepted cost and that re-trigger
+      // not after. THAT TRIGGER HAS NOT FIRED: #346 made a piped run REFUSE at the first
+      // question rather than answer it, which is the opposite of automating the import —
+      // the operator is still the only channel, and this 0 still means what it said.
+      // (#183 DECIDED this and is closed; the accepted cost and that re-trigger
       // are recorded in ADR-014, `a skipped export row: not persisted, because it could
       // never be retired`, under `context/adr/`.)
       process.exitCode = 0;
@@ -95,6 +137,9 @@ if (!csvPath) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;
   } finally {
-    rl.close();
+    // ONLY IF ONE WAS EVER BUILT. `?.` is the whole point of the lazy construction above:
+    // a run that never prompted must not construct an interface here just to close it,
+    // which would consume stdin on the way out for no reason at all.
+    rl?.close();
   }
 }
