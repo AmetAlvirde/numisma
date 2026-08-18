@@ -147,6 +147,32 @@ LAST_STEP="startup"
 # a flag, and the decoration happens once, at print time.
 TIMED_OUT=false
 HEARTBEAT_FILE="$DATA_DIR/job-heartbeat.json"
+# THE DELIVERY CHANNEL'S ONE FILE, named ONCE here beside the breadcrumb it is derived
+# from. Step 0 below writes it in bash and step 5b rewrites it through
+# `pnpm operator-notice`, and the two MUST agree on the path. There is deliberately no
+# notice-specific `NUMISMA_*` override and there must never be one: the TS half resolves
+# the same name from the same data dir through ADR-006's single rule
+# (`operator-notice-io.ts`, `OPERATOR_NOTICE_FILENAME`), so a second knob here would be a
+# second way for the writer and the reader to end up in different directories. For a
+# channel whose healthy state is an empty file, that failure is not a missing message: it
+# is silence that reads as health.
+#
+# WHAT THAT DOES *NOT* BUY, STATED PLAINLY BECAUSE AN EARLIER VERSION OF THIS COMMENT
+# CLAIMED IT DID. Having no override of its own does not make the two halves agree, because
+# the DATA DIR they hang off can still diverge inside one run. `DATA_DIR` is resolved at the
+# top of this file (line 59), and `$ENV_FILE` is sourced much later under `set -a`, which
+# EXPORTS every assignment in it. So a `NUMISMA_DATA_DIR=` line in the private token file
+# splits the run in two: bash `$DATA_DIR` — and therefore this variable, `$HEARTBEAT_FILE`,
+# and the `git -C "$DATA_DIR"` in steps 3 and 4 — keeps the PRE-SOURCE value, while step
+# 5b's `resolveDataDirDefault()` sees the exported one and writes `operator-notice.txt`
+# into the POST-SOURCE directory. Two writers, two directories, one `cat` in the profile.
+# The resolution order is not this channel's to change (`job-heartbeat.json` and
+# `gap-report.json` have had the same exposure since before this file grew a notice), so
+# what is recorded here is the true shape of it: THE ONE SUPPORTED CONFIGURATION IS THAT
+# `NUMISMA_DATA_DIR` IS NOT SET IN `$ENV_FILE`. That file is for provider tokens; put the
+# data dir in the LaunchAgent plist's `EnvironmentVariables`, which is in the environment
+# before line 59 runs and therefore cannot split anything.
+OPERATOR_NOTICE_FILE="$DATA_DIR/operator-notice.txt"
 
 # --- was this run even CAPABLE of marking? (#185 S2) -------------------------
 # `RunAtLoad true` means this script now fires at ANY hour — a 09:00 login is an
@@ -205,13 +231,13 @@ MARK_WINDOW=false
 # NOTHING, and stamping it would record the failure as evidence the day was covered.
 #
 # DELIBERATELY NOT "exit 0". The exit code covers the whole pipeline, but the marks
-# land at step 2. A run that fails at `gap-report` or `backfill` (steps 5-6) has
-# already appended and committed the day — gating on exit 0 would leave that evening
-# unstamped, so the next morning would claim "nothing recorded" for a day the log
-# plainly holds, and contradict the gap report standing next to it. Cry-wolf is the
-# failure this channel was designed around; under-stamping trades one false negative
-# for a false positive rather than fixing anything.
-MARKS_LANDED_STEPS="commit post-check gap-report backfill complete"
+# land at step 2. A run that fails at `gap-report`, `operator-notice` or `backfill`
+# (steps 5-6) has already appended and committed the day — gating on exit 0 would
+# leave that evening unstamped, so the next morning would claim "nothing recorded"
+# for a day the log plainly holds, and contradict the gap report standing next to it.
+# Cry-wolf is the failure this channel was designed around; under-stamping trades one
+# false negative for a false positive rather than fixing anything.
+MARKS_LANDED_STEPS="commit post-check gap-report operator-notice backfill complete"
 
 # The heartbeat has ONE slot, so an out-of-window run OVERWRITES the evening run's
 # breadcrumb. Carrying the last in-window finish forward is what stops that erasing
@@ -270,6 +296,108 @@ if [[ -f "$HEARTBEAT_FILE" ]]; then
   # reader enforces, so anything accepted here is accepted there.
   if [[ ! "$CARRIED_MARK_WINDOW_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$ ]]; then
     CARRIED_MARK_WINDOW_AT=""
+  fi
+fi
+# ----------------------------------------------------------------------------
+
+# --- 0) did the PREVIOUS run finish? (#357 slice 3) --------------------------
+# THE ONE STEP THAT RUNS BEFORE THE TOOLCHAIN EXISTS, and that is its whole reason to be.
+# Step 5b writes this same file through `pnpm operator-notice` and says everything this
+# says and more — but only on a run that GETS to step 5b. The two failures this channel was
+# built for are exactly the runs that do not: an unresolvable `pnpm` or `node` (the two
+# `exit 127`s further down) and a run that died partway. On either, every node-shaped
+# writer in this repo is unreachable, so the one thing left that can speak must depend on
+# nothing that could itself be the missing thing. `sed` and a `printf` into a file depend on
+# nothing — the same argument, verbatim, that makes `write_heartbeat` above pure bash.
+#
+# IT IS A PURE EQUALITY READ OF TWO FIELDS: NO DATE MATH, NO THRESHOLD, NO CLOCK. That is a
+# decision, not an unfinished implementation. "Too long since the last good run" is
+# `dueThrough`'s rule, it lives in TypeScript, and apps/price-feed/src/schedule-window.test.ts
+# exists precisely because a second copy of a contract in bash has nothing forcing the two
+# to agree. A staleness threshold here would be that second copy, on the one channel where
+# a disagreement reads as an all-clear. A rule that needs a pin is a rule worth not
+# creating: every instant comparison stays in step 5b, which has the whole contract.
+#
+# PLACED BESIDE THE CARRY READ ABOVE rather than down at `resolve-tools`, because both
+# blocks want the same thing from the same file — the PREVIOUS run's breadcrumb, while it
+# is still on disk unmodified by this run's EXIT trap. Two readers of one file belong
+# together, and sitting here it is also, by construction, ahead of every step that needs a
+# tool. Note what this costs: the per-run log does not exist yet (`exec > >(tee …)` is
+# further down), so this block says nothing on stdout. The file IS the channel; an echo
+# here would go only to the scheduler's unread stdout, which is the failure mode this
+# whole increment exists to leave behind.
+#
+# IT CANNOT FAIL THE RUN. Under `set -euo pipefail` a delivery channel that aborted the
+# pipeline it reports on would be worse than no channel; every command is guarded exactly
+# the way the carry read's are, and both reads fail closed to an empty string.
+PREVIOUS_EXIT_CODE=""
+PREVIOUS_LAST_STEP=""
+if [[ -f "$HEARTBEAT_FILE" ]]; then
+  PREVIOUS_EXIT_CODE="$(sed -n \
+    's/.*"exitCode"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+    "$HEARTBEAT_FILE" 2>/dev/null | head -n1)" || PREVIOUS_EXIT_CODE=""
+  PREVIOUS_LAST_STEP="$(sed -n \
+    's/.*"lastStep"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+    "$HEARTBEAT_FILE" 2>/dev/null | head -n1)" || PREVIOUS_LAST_STEP=""
+fi
+# SPEAK ONLY ON A POSITIVE READ OF BOTH FIELDS. A heartbeat that is absent, truncated or
+# unparseable says NOTHING and writes NOTHING. A machine that has never run this job would
+# otherwise be told, on its first morning, that the last run failed — cry-wolf on day one,
+# spent from the only account this channel has. Absence of evidence is not evidence here:
+# the gap report and the heartbeat's own TUI reader both cover the "never ran" shape, and
+# neither of them needs this file to invent a claim it cannot support.
+if [[ -n "$PREVIOUS_EXIT_CODE" && -n "$PREVIOUS_LAST_STEP" ]]; then
+  # CLEAN IS `exitCode` 0 *AND* `lastStep` complete, and nothing else is. `timeout:backfill`
+  # is not clean: that run appended the day's marks and then wedged, and the wedge is the
+  # part worth saying out loud — the heartbeat's own writer decorates the step name for
+  # exactly that reason, so an equality against `complete` catches it for free.
+  #
+  # ON A CLEAN PREVIOUS RUN THIS TOUCHES THE FILE NOT AT ALL. Not a truncate, not a `:>`,
+  # nothing — and that restraint is the correctness argument of the whole block. The file
+  # standing here was written by the PREVIOUS run's step 5b and may name real lost days.
+  # Clearing it at the START of a run, before this run has proved it can do anything, and
+  # then dying at step 3 would leave an EMPTY notice standing over a real loss: `cat` prints
+  # nothing, the operator reads silence as health, and the channel has manufactured the
+  # exact false all-clear it was built to end. Self-clearing belongs to step 5b ALONE,
+  # which runs only once the day's work is actually done.
+  if [[ "$PREVIOUS_EXIT_CODE" != "0" || "$PREVIOUS_LAST_STEP" != "complete" ]]; then
+    # `formatHeartbeatWarning`'s voice and its closing clause, deliberately — the operator
+    # must not have to learn two vocabularies for one job. What is dropped is the DATE it
+    # ran on, because that is a clock read this step does not make; what is added is line
+    # two, which bounds the claim so a reader never mistakes this for a lost-day report.
+    NOTICE_FAILED_LINE="Numisma: the previous daily price job run FAILED — exit"
+    NOTICE_FAILED_LINE="$NOTICE_FAILED_LINE $PREVIOUS_EXIT_CODE at step '$PREVIOUS_LAST_STEP'."
+    NOTICE_FAILED_LINE="$NOTICE_FAILED_LINE Nothing pushed this to you; that is why it is here."
+    NOTICE_SCOPE_LINE="Numisma: written by the wrapper before the toolchain was resolved, so it"
+    NOTICE_SCOPE_LINE="$NOTICE_SCOPE_LINE says nothing about lost days yet — the run now starting replaces"
+    NOTICE_SCOPE_LINE="$NOTICE_SCOPE_LINE this file wholesale if it reaches its own notice step."
+    # OVERWRITE, NEVER APPEND, and one `printf` for both lines so it stays that way: the
+    # notice has exactly one well-known name and no history, and a file that accumulated
+    # would be a log nobody reads. Guarded because a full or read-only data dir must cost a
+    # notice, never the run.
+    #
+    # THE TRADE THIS `>` MAKES, RECORDED BECAUSE IT CUTS AGAINST THE BLOCK ABOVE. The clean
+    # branch refuses to touch the file precisely because the previous run's step 5b may have
+    # named real lost days — and this branch then deletes those same lines. Across a
+    # MULTI-DAY OUTAGE that inverts the standing-debt purpose in the exact case step 0 was
+    # written for: run N-1 enumerates 08-14 and 08-15 with a `pnpm prices:fetch --as-of=`
+    # line each, run N dies at step 3, and every run after it prints only "the previous run
+    # FAILED" — no dated recovery command anywhere, for as long as the outage lasts, even
+    # though those dates were still accurate the whole time. Lost days are permanent, so
+    # what is discarded never went stale.
+    #
+    # IT IS STILL THE RIGHT CALL HERE, and the reason is that the alternative is worse than
+    # it looks. Preserving them means READING the file back before the `>` and prepending —
+    # pure bash, doable — but what would be prepended is unvalidated text of unknown age
+    # from a file this step cannot date, carried forward run after run with nothing that can
+    # ever retire it. Step 5b is the only writer that knows whether a lost-day line is still
+    # true, and on the outage above step 5b is precisely what is not running. A stale
+    # enumeration standing under a fresh FAILED line is a channel telling the operator two
+    # things of different vintages in one voice, which is the credibility spend this whole
+    # design refuses. So: one bounded, currently-true message, and `NOTICE_SCOPE_LINE` above
+    # says out loud that lost days are not in it. The cost is real and it is accepted.
+    printf '%s\n%s\n' "$NOTICE_FAILED_LINE" "$NOTICE_SCOPE_LINE" \
+      > "$OPERATOR_NOTICE_FILE" 2>/dev/null || true
   fi
 fi
 # ----------------------------------------------------------------------------
@@ -789,7 +917,7 @@ if git -C "$DATA_DIR" rev-parse --git-dir >/dev/null 2>&1; then
   echo "[$STAMP] post-check OK: durable log committed clean in $DATA_DIR."
 fi
 
-# Steps 5 and 6 are the DERIVED surfaces, and they run in this order for a reason
+# Steps 5, 5b and 6 are the DERIVED surfaces, and they run in this order for a reason
 # stated once here: THE LOCAL ONE FIRST, THE NETWORKED ONE SECOND. Under `set -e` a
 # failing step aborts every step after it, so ordering decides what a partial run
 # still delivers. `gap-report` needs no credential and no network — it is a pure
@@ -823,6 +951,53 @@ fi
 #    every other step had already succeeded.
 LAST_STEP="gap-report"
 pnpm gap-report -- --write
+
+# 5b) Rewrite operator-notice.txt beside gap-report.json — THE DELIVERY HALF.
+#
+#     NUMBERED 5b RATHER THAN 6 ON PURPOSE: this is the same derived-surface step
+#     as 5, on the same local-first side of the boundary above, and the run's step
+#     numbers are quoted by name in docs/price-feed-ops.md, launchagent-reinstall.md
+#     and the plist. Renumbering `backfill` to 7 would silently rot four documents
+#     to save one letter.
+#
+#     WHY THE NOTICE WRITES HERE. Step 5 fixed the standup's file; it did not fix
+#     ARRIVAL. Every surface this repo has is PULL-ONLY — the TUI banner derives the
+#     lost days live and correctly and says so only to someone who opens the TUI, the
+#     dashboard only to someone who opens the dashboard, gap-report.json only to
+#     someone who opens the file. On 2026-08-14/15 all three were right the whole
+#     time and nobody looked for three days, at the machine. This step writes the
+#     same two signals into one well-known file the shell profile cats, so the next
+#     new terminal is where the loss arrives. No new derivation: it composes
+#     primitives `pnpm gap-report` already uses.
+#
+#     AFTER step 5, and that placement is the whole reliability argument. By here the
+#     toolchain has been resolved (step 1), the fetch, the ingest and the commit have
+#     run, step 4 has verified the durable log landed clean, and step 5 has just
+#     re-derived the report from that verified log. A notice written earlier would be
+#     a notice written by a run that had not yet proven it could do anything.
+#
+#     IT REPLACES THE FILE WHOLESALE — never appends, never merges, and there is no
+#     dismissal state anywhere in the design. A later step 0 writes this SAME file in
+#     bash before `resolve-tools`, reporting the PREVIOUS run's failure; reaching this
+#     line means steps 1-4 of THIS run were clean, so that report is stale news and
+#     overwriting it is the correct outcome rather than a lost message. A clean window
+#     truncates the file to EMPTY, which is how the channel self-clears: `cat` of an
+#     empty file prints nothing, so a healthy machine has a silent shell.
+#
+#     IT CANNOT FAIL THE RUN. The command exits 0 unconditionally (see its header) —
+#     under `set -e` a notice writer that went red would abort the run before
+#     `backfill`, which is a delivery channel taking down the pipeline it reports on.
+#     A derivation that breaks is written INTO the notice as a line rather than
+#     swallowed; only a disk failure is left, and that goes to this log.
+#
+#     ZERO-ARGUMENT and no environment of its own: it resolves the same data dir as
+#     step 5 through ADR-006's one rule, so the notice cannot land in a different
+#     directory from the report it agrees with. Like gap-report.json it falls through
+#     accumulus's allowlist .gitignore to /data/* (ignored, untracked) and is invisible
+#     to step 4's strict arm, which names five durable files and does not pass
+#     `--ignored`.
+LAST_STEP="operator-notice"
+pnpm operator-notice
 
 # 6) Refresh the hosted projection. `backfill`, NOT `push`, and the difference is
 #    the whole reason this step can be unattended: `push` writes ONE row — the

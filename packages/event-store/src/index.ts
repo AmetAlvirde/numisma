@@ -54,3 +54,22 @@ export {
   loadGapReport,
   writeGapReportFile,
 } from "./gap-report-io.js";
+
+// The operator notice (#357): the liveness banner's PUSH twin. The same two signals
+// the TUI prints, composed into a file the shell profile cats on every new terminal
+// — because every other surface in this repo is pull-only, and a lost day nobody
+// goes looking for stays lost. It adds no derivation: the composition is pure
+// (`operator-notice.js`) and the disk touch is its one shell
+// (`operator-notice-io.js`).
+export {
+  formatNoticeCheckFailure,
+  formatOperatorNotice,
+  type NoticeGapFindings,
+} from "./operator-notice.js";
+export {
+  OPERATOR_NOTICE_FILENAME,
+  loadOperatorNoticeLines,
+  operatorNoticePath,
+  writeOperatorNotice,
+  writeOperatorNoticeFile,
+} from "./operator-notice-io.js";

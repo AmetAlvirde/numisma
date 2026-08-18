@@ -135,6 +135,16 @@ import {
   processesInPgid,
   type RunRecord,
 } from "./launcher.testkit.js";
+import {
+  AUTHORED_CLEAN_OUTCOME,
+  AUTHORED_FAILED_OUTCOME,
+  AUTHORED_SENTINEL_NOTICE,
+  AUTHORED_WEDGED_OUTCOME,
+  expectedFailureFragment,
+  readOperatorNotice,
+  seedHeartbeatOutcome,
+  seedOperatorNotice,
+} from "./operator-notice.testkit.js";
 import { REPETITION_FLOOR, resolveRunCount } from "./repetition.testkit.js";
 
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
@@ -445,13 +455,63 @@ describe("wrapper harness — the arming trigger (always runs)", () => {
       expect(result.reason).toContain("ops/price-feed/**");
     }, GIT_FIXTURE_TIMEOUT_MS);
 
-    it("sees an UNCOMMITTED wrapper edit — the moment you most want the suite", () => {
+    /**
+     * THE SHAPE THE REAL PRODUCER EMITS — a TRACKED wrapper, MODIFIED IN PLACE.
+     *
+     * This test used to write the wrapper into a fresh fixture dir, where git reports
+     * `"?? ops/price-feed/run-daily-fetch.sh"`. That form has NO leading whitespace, so it
+     * survived `git()`'s old whole-output `.trim()` intact and this test passed for as long
+     * as the defect lived. The form an actual uncommitted wrapper edit takes is `" M path"`
+     * — the two-column porcelain status field, leading space and all — and the trim ate that
+     * space on the FIRST line of the output, leaving `parsePorcelain`'s `line.slice(3)` one
+     * character short: `ps/price-feed/run-daily-fetch.sh`, matching nothing, so the harness
+     * skipped with the wrapper visibly modified. The test passed because it pinned a shape
+     * the real producer never emits, which is the failure mode this whole suite is built to
+     * refuse.
+     *
+     * THE WRAPPER IS THE ONLY DIRTY FILE, and that is deliberate rather than minimal: the
+     * old trim damaged the FIRST line of the output and no other, so a fixture with an
+     * alphabetically earlier dirty path would have absorbed the damage somewhere harmless
+     * and gone green over the same bug. Alone, the wrapper IS line one, and the character
+     * it used to lose is the character this assertion is about.
+     */
+    it("sees an UNCOMMITTED edit to the TRACKED wrapper — the moment you most want the suite", () => {
+      const { dir, git } = makeTempRepo();
+      writeIn(dir, WRAPPER_RELATIVE_PATH, "# authored fixture standing in for the wrapper\n");
+      git("add", "-A");
+      git("commit", "--quiet", "-m", "base");
+      git("update-ref", "refs/remotes/origin/main", "HEAD");
+      // Tracked and now modified in place, which git reports as ` M <path>` — leading
+      // space and all. Writing it into a fresh dir instead would produce `?? <path>`, and
+      // that is the shape the defect could not touch.
+      writeIn(dir, WRAPPER_RELATIVE_PATH, "# authored fixture, edited in place\n");
+
+      const changed = resolveTriggerFacts(dir).changedPaths;
+      expect(changed).toContain(WRAPPER_RELATIVE_PATH);
+      expect(
+        decideArming({
+          changedPaths: changed,
+          base: { kind: "resolved", sha: git("rev-parse", "HEAD") },
+          pathSet: TRIGGER_PATH_SET,
+          platform: HARNESS_PLATFORM,
+          override: "auto",
+        }).run,
+        "the trigger skipped on a modified tracked wrapper — the exact silence §7 forbids",
+      ).toBe(true);
+    }, GIT_FIXTURE_TIMEOUT_MS);
+
+    /**
+     * AND THE UNTRACKED SHAPE STILL ARMS — kept, because it is a real case and not merely
+     * the old test's residue: a brand-new wrapper, or a whole new harness directory, arrives
+     * as `??` and is exactly what `--untracked-files=all` was added for.
+     */
+    it("sees a BRAND-NEW untracked wrapper — the `??` shape `--untracked-files=all` exists for", () => {
       const { dir, git } = makeTempRepo();
       writeIn(dir, "README.md", "authored fixture\n");
       git("add", "-A");
       git("commit", "--quiet", "-m", "base");
       git("update-ref", "refs/remotes/origin/main", "HEAD");
-      writeIn(dir, WRAPPER_RELATIVE_PATH, "# authored fixture, uncommitted\n");
+      writeIn(dir, WRAPPER_RELATIVE_PATH, "# authored fixture, never committed\n");
 
       expect(resolveTriggerFacts(dir).changedPaths).toContain(WRAPPER_RELATIVE_PATH);
     }, GIT_FIXTURE_TIMEOUT_MS);
@@ -1367,7 +1427,7 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
    *
    * Cases 2, 3 and 4 hang at the FIRST step, so their run has nothing to accomplish before
    * the ceiling and 3 seconds is generous. Case 6 has to get all the way to the LAST step
-   * first — four fake `pnpm` invocations plus the wrapper's whole git step against the
+   * first — five fake `pnpm` invocations plus the wrapper's whole git step against the
    * case's own repo (`rev-parse`, the explicit `add`, `diff --cached` and the `status`
    * post-check) — and only then wedge. What it does NOT traverse is a `git commit`: the
    * fixture commits an EMPTY `events.jsonl` and the fake `spine` writes nothing, so
@@ -1422,8 +1482,8 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
    * CASE 6 · THE CRY-WOLF RUN — a timeout AFTER the day's marks are already in the log.
    *
    * Cases 2 and 3 hang at `prices-fetch`, so nothing landed and nothing may be stamped.
-   * This one succeeds through `spine`, `commit`, `post-check` and `gap-report` and wedges
-   * at `backfill` — the derived, networked step — so the marks ARE in the log and an
+   * This one succeeds through `spine`, `commit`, `post-check`, `gap-report` and the
+   * `operator-notice` step and wedges at `backfill` — the derived, networked step — so the marks ARE in the log and an
    * in-window run must say so even though it exited 124. Under-stamping here is what
    * would make the next morning claim "nothing recorded" for a day the log plainly holds.
    *
@@ -1469,11 +1529,11 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
         expect(record.watchdogFired, `${label}: the watchdog left no calling card`).toBe(true);
         assertGraceBoundedSettle(record, label, options);
 
-        // THE HANG CAME FROM THE DISPATCH, and it is proven rather than assumed. Three
+        // THE HANG CAME FROM THE DISPATCH, and it is proven rather than assumed. Four
         // `succeeds` and one `hangs`, selected by the fake on its FIRST ARGUMENT — which
         // is the capability a single-behavior fake does not have and the reason this case
         // is expressible at all.
-        for (const command of ["prices:fetch", "spine", "gap-report"]) {
+        for (const command of ["prices:fetch", "spine", "gap-report", "operator-notice"]) {
           expect(
             dispatchedBehavior(dirs.caseDir, command),
             `${label}: the fake did not take its \`succeeds\` branch for \`${command}\``,
@@ -1692,6 +1752,273 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
           `${label}: the wrapper promoted a failed run's \`finishedAt\` into a marked-day ` +
             "stamp — a day that was never covered now reads as covered",
         ).not.toBe(AUTHORED_PRIOR_STAMP);
+      }
+    },
+    600_000,
+  );
+
+  // ── CASE 9 · STEP 0, THE NOTICE WRITTEN BEFORE THE TOOLCHAIN EXISTS (#357 S3) ─────
+  //
+  // Step 5b writes `operator-notice.txt` through `pnpm operator-notice` and says more than
+  // step 0 ever can. It also only runs on a run that GETS there. The two failures this
+  // whole channel was built for are the runs that do not — an unresolvable `pnpm`/`node`,
+  // and a run that died partway — and on the first of those every node-shaped writer in
+  // the repo is unreachable. So the wrapper writes the same file in bash, before
+  // `resolve-tools`, from a positive read of the PREVIOUS run's heartbeat.
+  //
+  // WHAT THESE FOUR CASES ASSERT IS THE FILE'S CONTENT ON DISK, never a log line and never
+  // a notifier. There is no notifier to fake: the transport is `cat` from a shell profile,
+  // so the file IS the delivery. Nothing here touches launchd or a plist, for the reason
+  // the suite header already gives about `launchctl` — this harness delivers the signal,
+  // not the sender.
+  //
+  // ALL FOUR RUN OUT OF THE MARK WINDOW, so no run stamps itself and the heartbeat
+  // assertions stay about step 0 rather than about the carry-forward contract cases 6 and
+  // 8 own. And all four end the run EARLY — before step 5b — on purpose: a run that
+  // reached 5b would have the fake `pnpm operator-notice` succeed without writing anything,
+  // and the file's final contents would then be step 0's by default rather than by proof.
+  // Ending early is also the only shape production actually produces here, which is the
+  // trap this board has paid for before: a guard that pins a shape the real producer never
+  // emits is a guard that cannot fail.
+
+  /**
+   * CASE 9a · THE PREVIOUS RUN FAILED, SO THE NOTICE SAYS SO — naming BOTH fields.
+   *
+   * Exit code and step, not merely "the last run failed": exit 127 at `resolve-tools` is a
+   * PATH problem on this machine and exit 124 at `timeout:backfill` is a wedged network
+   * call, and a notice that could not tell them apart would send the operator to the wrong
+   * place on the one channel that reaches them unasked.
+   */
+  it(
+    `case 9a — a FAILED previous heartbeat is written into the notice, ${RUNS_PER_CASE} consecutive times`,
+    async () => {
+      for (let run = 1; run <= RUNS_PER_CASE; run += 1) {
+        const options = markCaseOptions("out", CASE_OPTIONS);
+        const dirs = makeCaseDir(options);
+        seedHeartbeatOutcome(dirs.dataDir, AUTHORED_FAILED_OUTCOME);
+        // THIS run dies at `prices-fetch`, which is a DIFFERENT step from the seeded
+        // `resolve-tools`. Without that difference "step 0 reported the previous run" and
+        // "something reported this one" would be the same observation.
+        setFakeBehavior(dirs.caseDir, "prices:fetch", "exits-127");
+        const label = `case 9a run ${run}/${RUNS_PER_CASE}`;
+
+        const record = await launchWrapper({
+          caseDir: dirs.caseDir,
+          wrapperPath: WRAPPER_PATH,
+          env: caseEnv(dirs, options),
+          groupLeader: true,
+          settleDeadlineMs: SETTLE_DEADLINE_MS,
+          maxWaitMs: 60_000,
+        });
+
+        assertTriple(record, dirs.caseDir, {
+          exitCode: 127,
+          lastStep: "prices-fetch",
+          pnpmReached: ["prices:fetch"],
+          mark: options.mark,
+          label,
+        });
+
+        const notice = readOperatorNotice(dirs.dataDir);
+        expect(
+          notice,
+          `${label}: step 0 wrote no notice at all for a previous run that failed`,
+        ).toBeDefined();
+        expect(notice ?? "", `${label}: the notice does not name the previous failure`).toContain(
+          expectedFailureFragment(AUTHORED_FAILED_OUTCOME),
+        );
+        // The house voice, asserted so the notice cannot drift into a second vocabulary for
+        // a channel the operator reads in two seconds.
+        expect(notice ?? "", `${label}: the notice's lines do not begin \`Numisma: \``).toMatch(
+          /^Numisma: /,
+        );
+        // AND IT IS THE PREVIOUS RUN'S OUTCOME, NOT THIS ONE'S. This run died at
+        // `prices-fetch`; a notice naming that step would mean step 0 had somehow read a
+        // heartbeat written after it, which is the one thing its placement rules out.
+        expect(
+          notice ?? "",
+          `${label}: the notice named THIS run's step — step 0 cannot know it`,
+        ).not.toContain("prices-fetch");
+      }
+    },
+    600_000,
+  );
+
+  /**
+   * CASE 9b · THE WRITE RULE — a clean previous run leaves the file COMPLETELY ALONE.
+   *
+   * This is the case the whole block turns on, and the argument is worth restating where
+   * someone might otherwise "tidy" step 0 into an unconditional write.
+   *
+   * The file standing on disk at the start of a run was written by the PREVIOUS run's step
+   * 5b, and it may name real lost days. Truncate it here — at the start, before this run
+   * has proved it can do anything — and then die at step 3, and the operator is left with
+   * an EMPTY notice over a real loss. `cat` of an empty file prints nothing, empty is the
+   * channel's HEALTHY state, and the channel has manufactured the exact false all-clear it
+   * exists to end. Self-clearing is step 5b's job alone, because step 5b runs only once the
+   * day's work is actually done.
+   *
+   * So: an authored sentinel notice, a CLEAN heartbeat, and a run that dies before 5b. The
+   * sentinel must survive BYTE FOR BYTE — `toBe`, never `toContain`, because a step 0 that
+   * appended to it rather than truncating it would also be wrong and `toContain` would
+   * shrug.
+   */
+  it(
+    `case 9b — a CLEAN previous heartbeat leaves the notice untouched, ${RUNS_PER_CASE} consecutive times`,
+    async () => {
+      for (let run = 1; run <= RUNS_PER_CASE; run += 1) {
+        const options = markCaseOptions("out", CASE_OPTIONS);
+        const dirs = makeCaseDir(options);
+        seedOperatorNotice(dirs.dataDir, AUTHORED_SENTINEL_NOTICE);
+        seedHeartbeatOutcome(dirs.dataDir, AUTHORED_CLEAN_OUTCOME);
+        setFakeBehavior(dirs.caseDir, "prices:fetch", "exits-127");
+        const label = `case 9b run ${run}/${RUNS_PER_CASE}`;
+
+        const record = await launchWrapper({
+          caseDir: dirs.caseDir,
+          wrapperPath: WRAPPER_PATH,
+          env: caseEnv(dirs, options),
+          groupLeader: true,
+          settleDeadlineMs: SETTLE_DEADLINE_MS,
+          maxWaitMs: 60_000,
+        });
+
+        assertTriple(record, dirs.caseDir, {
+          exitCode: 127,
+          lastStep: "prices-fetch",
+          pnpmReached: ["prices:fetch"],
+          mark: options.mark,
+          label,
+        });
+
+        // THE RUN REALLY DID DIE BEFORE 5b, stated rather than assumed: if it had reached
+        // the notice step, the fake would have "succeeded" without writing and the survival
+        // below would prove nothing about step 0's restraint.
+        expect(
+          existsSync(join(dirs.caseDir, "sentinels", sentinelNameFor("operator-notice"))),
+          `${label}: the run reached step 5b, so this case cannot say what step 0 did`,
+        ).toBe(false);
+        expect(
+          readOperatorNotice(dirs.dataDir),
+          `${label}: step 0 rewrote or truncated a notice a HEALTHY previous run had left — ` +
+            "an empty file over a real lost day reads as health",
+        ).toBe(AUTHORED_SENTINEL_NOTICE);
+      }
+    },
+    600_000,
+  );
+
+  /**
+   * CASE 9c · NO HEARTBEAT AT ALL — say nothing, write nothing.
+   *
+   * A fresh machine that has never run this job has no breadcrumb, and telling it on its
+   * first morning that the last run failed is cry-wolf on day one, spent from the only
+   * account this channel has. Step 0 speaks only on a POSITIVE read of both fields, so an
+   * absent — or truncated, or hand-mangled — heartbeat produces no file at all.
+   *
+   * The assertion is `toBeUndefined`, and the distinction from `""` is the case: an empty
+   * notice is the healthy SELF-CLEARED state, and a step 0 that truncated unconditionally
+   * would produce exactly that and sail past a reader which flattened the two.
+   */
+  it(
+    `case 9c — no heartbeat means no notice, ${RUNS_PER_CASE} consecutive times`,
+    async () => {
+      for (let run = 1; run <= RUNS_PER_CASE; run += 1) {
+        const options = markCaseOptions("out", CASE_OPTIONS);
+        const dirs = makeCaseDir(options);
+        // Deliberately no seed of any kind — `makeCaseDir` leaves a fresh data dir.
+        setFakeBehavior(dirs.caseDir, "prices:fetch", "exits-127");
+        const label = `case 9c run ${run}/${RUNS_PER_CASE}`;
+
+        const record = await launchWrapper({
+          caseDir: dirs.caseDir,
+          wrapperPath: WRAPPER_PATH,
+          env: caseEnv(dirs, options),
+          groupLeader: true,
+          settleDeadlineMs: SETTLE_DEADLINE_MS,
+          maxWaitMs: 60_000,
+        });
+
+        assertTriple(record, dirs.caseDir, {
+          exitCode: 127,
+          lastStep: "prices-fetch",
+          pnpmReached: ["prices:fetch"],
+          mark: options.mark,
+          label,
+        });
+
+        expect(
+          readOperatorNotice(dirs.dataDir),
+          `${label}: step 0 invented a failure report on a machine with no breadcrumb — ` +
+            "cry-wolf on day one, from the one channel whose only asset is being believed",
+        ).toBeUndefined();
+      }
+    },
+    600_000,
+  );
+
+  /**
+   * CASE 9d · THE LOAD-BEARING ONE — step 0 speaks THROUGH a broken toolchain.
+   *
+   * Without this case slice 3 has no reason to exist. Every other notice this repo writes
+   * is written by node, and the failure the channel was built for is precisely the one
+   * where node cannot be found: launchd hands the job a bare
+   * `/usr/bin:/bin:/usr/sbin:/sbin`, and if the prepend does not resolve `pnpm` — or
+   * resolves it while asdf's `node` stays behind an absent shims dir — the run dies at
+   * `resolve-tools` with exit 127 and nothing node-shaped ever runs.
+   *
+   * SO THE PREPEND HERE HOLDS NO TOOLS AT ALL. An empty directory inside the case dir, not
+   * the fake bin: the isolation contract still passes (every entry is absolute and inside
+   * the case dir), the real `pnpm` is in neither the prepend nor the inherited launchd
+   * PATH, and the wrapper's own `command -v pnpm` guard is what ends the run. That the
+   * notice is on disk afterwards is the proof that step 0 ran BEFORE that guard and
+   * survived it.
+   */
+  it(
+    `case 9d — the notice survives an unresolvable toolchain, ${RUNS_PER_CASE} consecutive times`,
+    async () => {
+      for (let run = 1; run <= RUNS_PER_CASE; run += 1) {
+        const options = markCaseOptions("out", CASE_OPTIONS);
+        const dirs = makeCaseDir(options);
+        // The wedged shape, chosen so the notice's contents cannot be confused with this
+        // run's own outcome: this run exits 127 at `resolve-tools`, the seed says 124 at
+        // `timeout:backfill`, and a `timeout:` step name is also the case that proves
+        // "clean" is an equality against `complete` rather than a check for a bare step.
+        seedHeartbeatOutcome(dirs.dataDir, AUTHORED_WEDGED_OUTCOME);
+        const toollessBin = join(dirs.caseDir, "toolless-bin");
+        mkdirSync(toollessBin, { recursive: true });
+        const label = `case 9d run ${run}/${RUNS_PER_CASE}`;
+
+        const record = await launchWrapper({
+          caseDir: dirs.caseDir,
+          wrapperPath: WRAPPER_PATH,
+          env: { ...caseEnv(dirs, options), NUMISMA_PATH_PREPEND: toollessBin },
+          groupLeader: true,
+          settleDeadlineMs: SETTLE_DEADLINE_MS,
+          maxWaitMs: 60_000,
+        });
+
+        // The wrapper's own named refusal, not a bare 127 from somewhere else in the run.
+        expect(record.logText, `${label}: the wrapper did not refuse an unresolvable pnpm`).toContain(
+          "FATAL: 'pnpm' not found on PATH",
+        );
+        assertTriple(record, dirs.caseDir, {
+          exitCode: 127,
+          lastStep: "resolve-tools",
+          pnpmReached: [],
+          mark: options.mark,
+          label,
+        });
+
+        const notice = readOperatorNotice(dirs.dataDir);
+        expect(
+          notice,
+          `${label}: with the toolchain gone there is no other writer — step 0 said nothing`,
+        ).toBeDefined();
+        expect(
+          notice ?? "",
+          `${label}: the notice does not name the previous wedged run`,
+        ).toContain(expectedFailureFragment(AUTHORED_WEDGED_OUTCOME));
       }
     },
     600_000,
