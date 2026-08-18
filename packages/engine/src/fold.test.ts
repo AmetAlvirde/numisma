@@ -831,23 +831,29 @@ describe("foldEvents — the seed is never mutated (defensive clone)", () => {
   });
 });
 
-describe("tier-weighted deltas — the zero-cost degenerate fallback (pinned, not endorsed)", () => {
-  // PIN OF A DEGENERATE FALLBACK. `tierWeightedDeltas` normally splits a cash
-  // delta across the lots' Tiers by cost-basis weight, but when the lots carry no
-  // cost at all (`totalCost === 0`) there is no weight to split by, and it
-  // attributes the WHOLE delta to `lots[0].tier` — the FIRST LOT'S tier, not the
-  // first Tier in c1/c2/c3 order, and not a split. Coverage rationale §5 names
-  // this arm (`events/fold.ts:47-48`) as an open, reachable branch.
+describe("tier-weighted deltas — the zero-cost arm attributes in canonical Tier order (#329)", () => {
+  // RULED BEHAVIOUR, NOT A PIN. `tierWeightedDeltas` normally splits a cash delta
+  // across the lots' Tiers by cost-basis weight, but when the lots carry no cost
+  // at all (`totalCost === 0`) there is no weight to split by. It attributes the
+  // WHOLE delta to the canonically FIRST Tier that holds a lot — `present[0]`, in
+  // c1/c2/c3 order — never to `lots[0].tier`.
   //
-  // These tests record what the code does today so the behavior cannot change
-  // silently; they are not an argument that attributing everything to one lot's
-  // Tier is the right answer.
+  // WHY ORDER, NOT INSERTION. Keying on `lots[0]` made the answer depend on array
+  // order, so two callers holding the same position with the same lots ordered
+  // differently credited different Tiers. Nothing else in the function behaves
+  // that way: the proportional path iterates `present`, which is already
+  // canonical. `present[0]` is order-independent, and it degenerates to the old
+  // answer whenever exactly one Tier holds lots — the common shape.
+  //
+  // WHY NOT AN EVEN SPLIT across `present`: with every cost weight zero there is
+  // no cost-basis weight to split by, and an even split would invent a weighting
+  // the data does not carry (and drag in residual handling).
 
-  it("attributes the whole close credit to the FIRST lot's Tier when every lot has zero cost", () => {
+  it("attributes the whole close credit to the canonically first present Tier when every lot has zero cost", () => {
     // Zero-cost lots across two Tiers, deliberately ordered c3-then-c1 so the
-    // answer distinguishes "the first lot's tier" (c3) from "the first Tier
-    // present in c1/c2/c3 order" (c1) — and from any proportional split, which
-    // would have to divide by a zero total cost.
+    // answer distinguishes "the first Tier present in c1/c2/c3 order" (c1) from
+    // "the first lot's tier" (c3) — and from any proportional split, which would
+    // have to divide by a zero total cost.
     const zeroCostLots: PositionLot[] = [
       { quantity: 4, cost: 0, tier: "c3" },
       { quantity: 6, cost: 0, tier: "c1" },
@@ -855,7 +861,7 @@ describe("tier-weighted deltas — the zero-cost degenerate fallback (pinned, no
 
     const deltas = reserveDeltasForClose(zeroCostLots, 250);
 
-    expect(deltas).toEqual([{ tier: "c3", amount: 250 }]);
+    expect(deltas).toEqual([{ tier: "c1", amount: 250 }]);
   });
 
   it("debits the same single Tier on the open leg, sign-flipped", () => {
@@ -864,7 +870,23 @@ describe("tier-weighted deltas — the zero-cost degenerate fallback (pinned, no
       { quantity: 1, cost: 0, tier: "c1" },
     ];
 
-    expect(reserveDeltasForOpen(zeroCostLots, 80)).toEqual([{ tier: "c2", amount: -80 }]);
+    expect(reserveDeltasForOpen(zeroCostLots, 80)).toEqual([{ tier: "c1", amount: -80 }]);
+  });
+
+  it("returns the identical delta list however the same zero-cost lots are ordered", () => {
+    // The defect stated as a property: attribution must be a function of WHICH
+    // Tiers hold lots, not of the order the caller happened to build the array in.
+    const c3First: PositionLot[] = [
+      { quantity: 4, cost: 0, tier: "c3" },
+      { quantity: 6, cost: 0, tier: "c2" },
+    ];
+    const c2First: PositionLot[] = [
+      { quantity: 6, cost: 0, tier: "c2" },
+      { quantity: 4, cost: 0, tier: "c3" },
+    ];
+
+    expect(reserveDeltasForClose(c3First, 250)).toEqual(reserveDeltasForClose(c2First, 250));
+    expect(reserveDeltasForOpen(c3First, 80)).toEqual(reserveDeltasForOpen(c2First, 80));
   });
 
   it("splits proportionally the moment ANY lot carries cost — the fallback is the exception", () => {

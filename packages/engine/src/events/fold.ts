@@ -87,7 +87,11 @@ export function dedupeFoldSkips(skipped: readonly SkippedFoldEvent[]): SkippedFo
 /** Cost-basis weight of each Tier in a position's lots (the provenance the cash
  * leg inherits). Returns signed `amount` per present Tier summing exactly to
  * `total`, with any float residual folded into the last Tier so the reserve's
- * authoritative `amount` lands exact. */
+ * authoritative `amount` lands exact.
+ *
+ * ZERO-COST LOTS get one delta, not a split: with every cost weight zero there is
+ * no cost-basis weight to split by, so the whole delta lands on the canonically
+ * first Tier that holds a lot (#329). */
 function tierWeightedDeltas(lots: PositionLot[], total: number, sign: 1 | -1): TierDelta[] {
   const costByTier = new Map<CapitalTier, number>();
   let totalCost = 0;
@@ -97,9 +101,20 @@ function tierWeightedDeltas(lots: PositionLot[], total: number, sign: 1 | -1): T
     totalCost += cost;
   }
   const present = TIERS.filter((tier) => costByTier.has(tier));
-  if (present.length === 0 || totalCost === 0) {
-    // Degenerate (zero-cost lots): attribute everything to the first lot's Tier.
+  if (present.length === 0) {
+    // No lots at all. Left exactly as it was; ruled on separately (#329).
     return [{ tier: lots[0]?.tier ?? "c1", amount: sign * total }];
+  }
+  if (totalCost === 0) {
+    // Zero-cost lots: no cost-basis weight to split by, so the whole delta goes to
+    // `present[0]` — the canonically first Tier holding a lot, in c1/c2/c3 order.
+    // Keying on `lots[0].tier` instead made attribution depend on ARRAY INSERTION
+    // ORDER, so two callers with the same lots ordered differently credited
+    // different Tiers (#329). An even split across `present` was rejected: with
+    // every weight zero it would invent a weighting the data does not carry.
+    // `present[0]` is order-independent and matches the old answer whenever
+    // exactly one Tier holds lots — the common shape.
+    return [{ tier: present[0]!, amount: sign * total }];
   }
   const deltas: TierDelta[] = [];
   let allocated = 0;
