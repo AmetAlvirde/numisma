@@ -96,25 +96,36 @@ describe("resolvePlansPath — ADR-006's invariant, at every door", () => {
     // whatever directory a script started in is a split-brain ledger — so `""` must
     // never become a path at all. It used to fall through to the default instead;
     // that hid a MISCONFIGURED knob as an ABSENT one and aimed it at the real ledger.
-    expect(() => resolvePlansPath("")).toThrow(
-      /sidecar data directory must not be empty/,
-    );
-    expect(() => resolvePlansPath("   ")).toThrow(
-      /sidecar data directory must not be empty/,
-    );
-
-    // The CWD point still holds, and the throw is now what enforces it: `""` yields no
-    // path at all, so nothing it returns can be CWD-flavoured. Pinned as a value check
-    // and not just as `toThrow`, because the failure mode this guards is a RETURN of
-    // `resolve("")/plans.jsonl` — which a throw-shaped assertion alone would not name.
+    // The CWD hazard is checked FIRST, and as a VALUE, because it is the specific
+    // regression this test exists for: a resolver that RETURNS `resolve("")/plans.jsonl`
+    // must fail with the offending path in the message, not with a generic "expected a
+    // throw" that leaves the reader to work out which wrong path it produced.
+    const cwdFlavoured = join(process.cwd(), "plans.jsonl");
     let produced: string | undefined;
     try {
       produced = resolvePlansPath("");
     } catch {
       produced = undefined;
     }
-    expect(produced).toBeUndefined();
-    expect(produced).not.toBe(join(process.cwd(), "plans.jsonl"));
+    expect(
+      produced,
+      `resolvePlansPath("") must never resolve against the process CWD (${cwdFlavoured})`,
+    ).not.toBe(cwdFlavoured);
+    // Behind it: a return of any OTHER path — including a silent fall-through to the
+    // accumulus default, the pre-#348 behaviour — is equally a failure to refuse.
+    expect(
+      produced,
+      'resolvePlansPath("") must throw rather than return any path at all',
+    ).toBeUndefined();
+
+    // And the refusal must be the resolver's own, with its own wording, for both
+    // spellings of blank — not some incidental downstream error.
+    expect(() => resolvePlansPath("")).toThrow(
+      /sidecar data directory must not be empty/,
+    );
+    expect(() => resolvePlansPath("   ")).toThrow(
+      /sidecar data directory must not be empty/,
+    );
   });
 
   it("a GENUINELY absent override still defaults — the refusal must not swallow `undefined`", () => {
