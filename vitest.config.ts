@@ -1,7 +1,51 @@
-import { defineConfig } from "vitest/config";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+import { defaultExclude, defineConfig } from "vitest/config";
+
+// Test DISCOVERY is derived from `.gitignore` — deliberately, and it must stay
+// derived. Do not "simplify" this into a literal list of directory names.
+//
+// Why: vitest's default excludes cover node_modules/dist/.git/.cache, but not
+// `.claude/`, which this repo's execution model fills with ONE GIT WORKTREE PER
+// LANE (`.claude/worktrees/<lane>`). Each worktree is a *different branch*.
+// Without this, a repo-root `vitest run` collected every worktree's copy of the
+// suite — measured at 312 files where the branch itself has 156 — so the merge
+// gate (the full suite, run in the main checkout) was executing other lanes'
+// unmerged work-in-progress and reporting the verdict as this branch's. One
+// lane's broken WIP turns the gate red on an unrelated PR.
+//
+// A hardcoded `"**/.claude/**"` would close today's instance and none of the
+// class: the next agent tool to land gets a line in `.gitignore`, not here.
+// `.gitignore` is already the single list of "paths that are not this repo's
+// source" (`.agents/ .claude/ .codex/ .cursor/ .opencode/ node_modules/ ...`),
+// so discovery reads it instead of keeping a second copy in sync. This mirrors
+// the gitignore-aware source walker that replaced the SKIPPED_DIRS denylist.
+//
+// The parser is deliberately narrow: comments, blanks, and the trailing-slash
+// DIRECTORY form only. Negations (`!`), anchored paths, globs and bare entries
+// (which may name a file, e.g. `.vercel`) are AMBIGUOUS here, so they are
+// SKIPPED rather than mistranslated. Over-excluding would silently delete real
+// tests from the suite — a worse outcome than the bug this fixes — while
+// under-excluding merely leaves vitest's own defaults doing their job.
+function gitignoredDirGlobs(): string[] {
+  const gitignore = fileURLToPath(new URL(".gitignore", import.meta.url));
+  return readFileSync(gitignore, "utf8")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !line.startsWith("#"))
+    // Trailing-slash directory form only; anything else is skipped (see above).
+    .filter((line) => line.endsWith("/"))
+    .filter((line) => !/[!*?[\]/]/.test(line.slice(0, -1)))
+    .map((line) => `**/${line}**`);
+}
 
 export default defineConfig({
   test: {
+    // `exclude` REPLACES vitest's defaults rather than merging with them, so
+    // `defaultExclude` must be spread first — dropping it would start
+    // collecting tests out of node_modules.
+    exclude: [...defaultExclude, ...gitignoredDirGlobs()],
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
