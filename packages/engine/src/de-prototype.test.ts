@@ -47,6 +47,23 @@ function tsFiles(dir: string): string[] {
 
 describe("de-prototype: prototype markers are stripped from engine + TUI source", () => {
   const files = SCAN_DIRS.flatMap(tsFiles);
+
+  // FALSE-PASS FLOOR. Every assertion below is "no offender found", which is also
+  // exactly what an empty scan produces. `repoRelativeDir` now throws on a scan
+  // root that does not exist, so a renamed directory is loud — but a root that
+  // exists and yields nothing (a walker regression, an extension filter that stops
+  // matching) would still turn all three guards green while guarding zero files.
+  // The sibling converted guards (orders-stay-off-the-wire, suppression-seam,
+  // rung-state-seam) already assert this floor; it belongs here too.
+  it("scans a non-empty set, so a green above means checked rather than skipped", () => {
+    expect(files.length).toBeGreaterThan(0);
+    // Per-root, not just in aggregate: one silently-empty root would otherwise
+    // hide behind the other two.
+    for (const dir of SCAN_DIRS) {
+      expect(tsFiles(dir), `no .ts sources scanned under ${dir}`).not.toEqual([]);
+    }
+  });
+
   for (const marker of MARKERS) {
     it(`leaves no "${marker}" prototype marker anywhere under engine/src or tui/src`, () => {
       const offenders = files.filter((file) => readFileSync(file, "utf8").includes(marker));
