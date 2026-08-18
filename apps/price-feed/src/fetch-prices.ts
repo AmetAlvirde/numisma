@@ -92,6 +92,7 @@ import { fetchBanxicoFix } from "./banxico-provider.js";
 import { emitMarksToInbox } from "./inbox.js";
 import { resolvePriceFeedPaths } from "./paths.js";
 import { upsertQuote } from "./price-store.js";
+import { PriceFetchRefusal } from "./refusal.js";
 
 /** One instrument that could not be fetched, with the symbol-attributable reason. */
 export interface FetchFailure {
@@ -339,8 +340,11 @@ export async function runPriceFetch(options: RunOptions = {}): Promise<FetchRunR
  * obligation to check belongs to the function that holds the invariant — a
  * programmatic caller must not be able to route around it.
  *
- * Two rules, and both refusals throw a plain `Error` carrying a sentence an operator
- * can act on (the CLI renders it; it does not compose it):
+ * Two rules, and both refusals throw a `PriceFetchRefusal` carrying a sentence an
+ * operator can act on (the CLI renders it as that sentence and nothing else; it does
+ * not compose it). The TYPE is what earns the bare rendering: an unexpected fault
+ * further down this function — a failed `mkdir`, an atomic-write error, a defect in
+ * `buildMarks` — is not a refusal and keeps its stack.
  *
  *  1. A REAL calendar day, via `isIsoCalendarDate` — shape AND round-trip. A
  *     shape-only regex accepts `"2026-02-30"`, which then silently becomes March 2 in
@@ -353,13 +357,13 @@ export async function runPriceFetch(options: RunOptions = {}): Promise<FetchRunR
 function validateAsOfOverride(asOf: string | undefined, today: string): string | undefined {
   if (asOf === undefined) return undefined;
   if (!isIsoCalendarDate(asOf)) {
-    throw new Error(
+    throw new PriceFetchRefusal(
       `asOf "${asOf}" is not a real calendar date. Give a day that exists, in YYYY-MM-DD ` +
         `form — a near-miss like 2026-02-30 is refused, never quietly read as March 2.`,
     );
   }
   if (asOf >= today) {
-    throw new Error(
+    throw new PriceFetchRefusal(
       `asOf "${asOf}" is not in the past: the current trading day is ${today}, and a ` +
         `recovery run marks against a day strictly earlier than it. To mark ${today}, ` +
         `run the daily job with no asOf — "recover today" is just "run the daily job".`,

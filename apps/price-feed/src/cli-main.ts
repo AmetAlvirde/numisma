@@ -59,6 +59,7 @@ import { DEFAULT_CONFIG, type PriceFeedConfig } from "./config.js";
 import { parsePriceFetchArgs } from "./cli-args.js";
 import { runPriceFetch, type FetchRunResult, type RunOptions } from "./fetch-prices.js";
 import { resolvePriceFeedPaths } from "./paths.js";
+import { PriceFetchRefusal } from "./refusal.js";
 import { scanFetchedMarks, type RejectionScan } from "./rejection-check.js";
 
 /** Every seam the command reaches through, so a test can drive it in memory. */
@@ -85,9 +86,13 @@ interface AbsentInstrument {
 }
 
 /**
- * Run the whole command and return its exit code. Never throws: an argument refusal
- * and a `runPriceFetch` refusal are both rendered as a single readable sentence, so
- * an operator who mistyped a date gets a sentence rather than a stack trace.
+ * Run the whole command and return its exit code.
+ *
+ * An argument refusal and a `runPriceFetch` `asOf` refusal — both `PriceFetchRefusal`
+ * — are rendered as a single readable sentence and exit 1, so an operator who
+ * mistyped a date gets a correction rather than a stack trace. Any OTHER throw is a
+ * genuine fault and is re-thrown with its stack intact for `cli.ts` to print, on the
+ * recovery path and the live path alike.
  */
 export async function runPriceFetchCli(deps: PriceFetchCliDeps): Promise<number> {
   const log = deps.log ?? ((line: string) => console.log(line));
@@ -101,7 +106,10 @@ export async function runPriceFetchCli(deps: PriceFetchCliDeps): Promise<number>
   try {
     asOf = parsePriceFetchArgs(deps.argv).asOf;
   } catch (error) {
-    logError(`prices:fetch — ${messageOf(error)}`);
+    // The parser throws `PriceFetchRefusal` and nothing else; anything else escaping
+    // it is a defect in the parser itself and must keep its stack.
+    if (!(error instanceof PriceFetchRefusal)) throw error;
+    logError(`prices:fetch — ${error.message}`);
     return 1;
   }
   const recovering = asOf !== undefined;
@@ -115,12 +123,16 @@ export async function runPriceFetchCli(deps: PriceFetchCliDeps): Promise<number>
   try {
     result = await run(options);
   } catch (error) {
-    // On the recovery path the only thing that throws before any IO is R2.2's
-    // validation refusal (not a real calendar day, or not strictly in the past), and
-    // an operator who just typed a date needs its sentence, not a stack. The live
-    // path keeps the original stack-preserving behaviour — there, a throw IS a bug.
-    if (recovering) {
-      logError(`prices:fetch — ${messageOf(error)}`);
+    // ⚠️ GATED ON THE ERROR TYPE, NOT ON THE PATH. R2.2's validation refusal (not a
+    // real calendar day, or not strictly in the past) is what an operator who just
+    // typed a date needs as a sentence rather than a stack. Everything else that can
+    // reach here — an EACCES from `mkdir`, an atomic-write failure in the store or
+    // the inbox, a defect inside `buildMarks` — is a genuine fault and keeps its
+    // stack, on BOTH paths. Gating on `asOf !== undefined` instead would strip the
+    // stack from exactly those faults on the recovery path, which is the newer, less
+    // exercised half of the command and the one where a bug is hardest to see.
+    if (error instanceof PriceFetchRefusal) {
+      logError(`prices:fetch — ${error.message}`);
       return 1;
     }
     throw error;
@@ -288,8 +300,4 @@ function reportSpineScan(
     log(`  Note: could not pre-check marks against the spine guard — ${scan.unavailableReason}`);
     log("  `pnpm spine` remains the authoritative guard; run it to validate the marks.");
   }
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

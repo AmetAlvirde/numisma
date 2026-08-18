@@ -13,9 +13,9 @@ runPriceFetchCli({ argv: process.argv.slice(2) })
     process.exitCode = exitCode;
   })
   .catch((error: unknown) => {
-    // Reached only by an unexpected fault on the live daily path — the operator-
-    // facing refusals are rendered as plain sentences inside `runPriceFetchCli`.
-    // A genuine bug keeps its stack.
+    // Reached only by an unexpected fault, on either path — the operator-facing
+    // refusals (`PriceFetchRefusal`) are rendered as plain sentences inside
+    // `runPriceFetchCli` and never get here. A genuine bug keeps its stack.
     console.error(error instanceof Error ? (error.stack ?? error.message) : String(error));
     process.exitCode = 1;
   });

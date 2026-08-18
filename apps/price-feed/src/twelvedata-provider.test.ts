@@ -326,6 +326,60 @@ describe("fetchTwelveDataDailyCloses — targetDate window", () => {
     });
   });
 
+  /**
+   * ⚠️ A DELIBERATE TIGHTENING OF §4 R1.1, which says "keep reading `values[0]`".
+   *
+   * `values[0]` is right only while the exclusive one-day window is guaranteed to
+   * return exactly one row. If that ever slipped, Twelve Data's newest-first default
+   * ordering would put the NEIGHBOUR day first — and while the stale-bar gate would
+   * correctly withhold the MARK, the quote store is written before that gate, so
+   * `<dataDir>/prices/<id>.jsonl` would take the wrong day's price under the target
+   * `asOf`. Silent wrong data is the thing this lane exists to close, so on the
+   * pinned path the row is chosen BY DATE. The live path is untouched (pinned below).
+   */
+  function twoRowResponse(): Response {
+    // Newest-first, as Twelve Data orders by default: the neighbour day leads.
+    return new Response(
+      JSON.stringify({
+        meta: { symbol: "AAPL", interval: "1day" },
+        values: [
+          { datetime: "2026-07-01", open: "1", high: "2", low: "0.5", close: "212.44", volume: "10" },
+          { datetime: TARGET, open: "1", high: "2", low: "0.5", close: "198.10", volume: "10" },
+        ],
+        status: "ok",
+      }),
+      { status: 200 },
+    );
+  }
+
+  it("selects the row DATED on the target day, not whichever row came first", async () => {
+    const result = await fetchOne(AAPL, {
+      ...OPTS,
+      fetchImpl: fetchWith(() => twoRowResponse()),
+      targetDate: TARGET,
+    });
+
+    expect(result?.error).toBeUndefined();
+    expect(result?.observation?.observationDate).toBe(TARGET);
+    // The number is the load-bearing half: `values[0]` would store 212.44 under the
+    // target date, in the price store, before the stale-bar gate can withhold it.
+    expect(result?.observation?.close).toBe(198.1);
+  });
+
+  it("fails the symbol, naming the date, when NO row carries the target day", async () => {
+    // Same channel a zero-row payload already uses — a symbol-attributable failure
+    // that names the date, never a neighbouring bar quietly stored as the target's.
+    const result = await fetchOne(AAPL, {
+      ...OPTS,
+      fetchImpl: fetchWith(() => windowedResponse("2026-07-01", "212.44")),
+      targetDate: TARGET,
+    });
+
+    expect(result?.observation).toBeUndefined();
+    expect(result?.error).toMatch(/AAPL/);
+    expect(result?.error).toMatch(new RegExp(TARGET));
+  });
+
   it("requests an end_date strictly ONE DAY AFTER start_date (the end is exclusive)", async () => {
     const spy = spyOn(() => windowedResponse(TARGET, "198.10"));
     await fetchOne(AAPL, { ...OPTS, fetchImpl: spy.fetchImpl, targetDate: TARGET });
@@ -395,6 +449,33 @@ describe("fetchTwelveDataDailyCloses — targetDate window", () => {
 // for the recovery change: with no `targetDate` the request must stay byte-identical
 // to what production sends today — `outputsize=1`, and no date parameters at all.
 describe("fetchTwelveDataDailyCloses — live path pinned (no targetDate)", () => {
+  it("still takes values[0] when a live response carries more than one row", async () => {
+    // The date-selecting branch must not leak onto the live path: with no target
+    // date there is nothing to match against, and `outputsize=1`'s newest bar is
+    // whatever leads the array. Reading anything else here would be a behaviour
+    // change to the nightly 18:00 job.
+    const result = await fetchOne(AAPL, {
+      ...OPTS,
+      fetchImpl: fetchWith(
+        () =>
+          new Response(
+            JSON.stringify({
+              meta: { symbol: "AAPL", interval: "1day" },
+              values: [
+                { datetime: "2026-07-03", close: "212.44" },
+                { datetime: "2026-07-02", close: "198.10" },
+              ],
+              status: "ok",
+            }),
+            { status: 200 },
+          ),
+      ),
+    });
+
+    expect(result?.observation?.observationDate).toBe("2026-07-03");
+    expect(result?.observation?.close).toBe(212.44);
+  });
+
   it("sends outputsize=1 and NO date params", async () => {
     let seen = "";
     const spy: typeof fetch = ((url: string | URL | Request) => {
