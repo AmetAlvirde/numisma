@@ -17,7 +17,7 @@
  */
 export type { PriceFeedConfig, ProviderCredentials } from "./config.js";
 export { DEFAULT_CONFIG, readCredentialsFromEnv } from "./config.js";
-export { fetchBinanceDailyClose } from "./binance-provider.js";
+export { fetchBinanceDailyClose, type BinanceFetchOptions } from "./binance-provider.js";
 export type { ProviderObservation, FetchOptions } from "./provider.js";
 export {
   fetchTwelveDataDailyCloses,
@@ -32,6 +32,12 @@ export {
   type FetchRunResult,
   type FetchFailure,
   type RunOptions,
+  // `FetchRunResult`'s own member types. Without these a front-door consumer can
+  // READ `result.notOwed` / `result.staleMarkSkips` but cannot name the element
+  // type to hold one in a variable or a signature — which is a published surface
+  // that is not actually usable.
+  type NotOwed,
+  type MarkSkip,
 } from "./fetch-prices.js";
 export {
   loadSpineReference,

@@ -576,3 +576,357 @@ describe("runPriceFetch — crypto marks the settled UTC candle, gated uniformly
     expect(inbox.map((e) => e.id)).not.toContain(`pm-aapl-${AS_OF}`);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// R2 — the `asOf` override (lost-day recovery). Every fixture below is authored
+// here by hand: no captured provider payload, no line from the real ledger.
+//
+// The calendar these dates rest on: 2026-08-13 Thu, 08-14 Fri, 08-15 Sat,
+// 08-16 Sun, 08-17 Mon. Twelve Data is a `weekdays` venue and Binance `daily`,
+// so a Friday owes all 13 and a Saturday owes only the 4 crypto.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Mon 2026-08-17 09:00 CDMX — a real instant, and BEFORE the 18:00 mark time. */
+const RECOVERY_NOW = new Date("2026-08-17T15:00:00.000Z");
+/** The trading day `RECOVERY_NOW` derives to, i.e. the one an override must precede. */
+const RECOVERY_TODAY = "2026-08-17";
+/** Fri — a past trading day every venue owed a mark on. */
+const RECOVERY_AS_OF = "2026-08-14";
+/** Sat — a past day only the `daily` venue owed a mark on. */
+const SATURDAY_AS_OF = "2026-08-15";
+
+/** `YYYY-MM-DD` → the `DD/MM/YYYY` Banxico publishes its FIX under. */
+function banxicoFecha(isoDate: string): string {
+  const [year, month, day] = isoDate.split("-");
+  return `${day}/${month}/${year}`;
+}
+
+/**
+ * A mock that answers only DATE-PINNED requests, and derives every bar date from
+ * the request itself rather than from a constant. That is deliberate: if the
+ * orchestrator ever stopped translating `asOf` into each provider's `targetDate`,
+ * the pinning parameters would vanish and the bars would come back misdated, so
+ * these tests would fail rather than quietly pass on the live-path request.
+ *
+ * Every URL is pushed to `urls` so a test can assert on the requests ACTUALLY
+ * CONSTRUCTED, not merely on the shape of the result.
+ */
+function recoveryMockFetch(urls: string[] = []): typeof fetch {
+  return ((url: string | URL | Request) => {
+    const href = typeof url === "string" ? url : url.toString();
+    urls.push(href);
+    if (href.includes("banxico.org.mx")) {
+      // `/datos/<start>/<end>` — the pinned Banxico window.
+      const window = /\/datos\/(\d{4}-\d{2}-\d{2})\//.exec(href);
+      return Promise.resolve(
+        window
+          ? fixResponse(String(FIX_RATE), banxicoFecha(window[1]!))
+          : new Response("unpinned FIX request", { status: 400, statusText: "Bad Request" }),
+      );
+    }
+    if (href.includes("api.binance.com")) {
+      const symbol = Object.keys(CRYPTO_CLOSES).find((s) => href.includes(`symbol=${s}`));
+      const startTime = /[?&]startTime=(\d+)/.exec(href);
+      if (symbol === undefined || startTime === null) {
+        return Promise.resolve(new Response("[]", { status: 200 }));
+      }
+      // A date-pinned Binance window returns exactly ONE row: the target UTC day.
+      const row = klineRow(Number(startTime[1]), CRYPTO_CLOSES[symbol]!);
+      return Promise.resolve(new Response(JSON.stringify([row]), { status: 200 }));
+    }
+    if (href.includes("api.twelvedata.com")) {
+      const startDate = /[?&]start_date=([^&]+)/.exec(href);
+      const symbols = decodeURIComponent(/[?&]symbol=([^&]+)/.exec(href)![1]!).split(",");
+      if (startDate === null) {
+        return Promise.resolve(
+          new Response("unpinned equities request", { status: 400, statusText: "Bad Request" }),
+        );
+      }
+      const datetime = decodeURIComponent(startDate[1]!);
+      const keyed: Record<string, unknown> = {};
+      for (const symbol of symbols) {
+        keyed[symbol] = { status: "ok", values: [{ datetime, close: String(EQUITY_CLOSES[symbol]) }] };
+      }
+      const body = symbols.length === 1 ? keyed[symbols[0]!] : keyed;
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    }
+    return Promise.resolve(new Response("[]", { status: 200 }));
+  }) as typeof fetch;
+}
+
+/**
+ * The LIVE (un-pinned) Saturday: Binance's newest two 1d candles are
+ * [completed Sat, running Sun], and Twelve Data — asked with `outputsize=1` —
+ * hands back FRIDAY's bar because the market was shut. Authored to reproduce
+ * exactly the weekend behaviour §8.1 forbids R2 from changing.
+ */
+function saturdayLiveMockFetch(urls: string[] = []): typeof fetch {
+  return ((url: string | URL | Request) => {
+    const href = typeof url === "string" ? url : url.toString();
+    urls.push(href);
+    if (href.includes("api.binance.com")) {
+      const symbol = Object.keys(CRYPTO_CLOSES).find((s) => href.includes(`symbol=${s}`))!;
+      const close = CRYPTO_CLOSES[symbol]!;
+      const body = [klineRow(Date.UTC(2026, 7, 15), close), klineRow(Date.UTC(2026, 7, 16), close + 1)];
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    }
+    if (href.includes("api.twelvedata.com")) {
+      const symbols = decodeURIComponent(/[?&]symbol=([^&]+)/.exec(href)![1]!).split(",");
+      const keyed: Record<string, unknown> = {};
+      for (const symbol of symbols) {
+        // Friday's close, returned on a Saturday — the stale bar the gate catches.
+        keyed[symbol] = {
+          status: "ok",
+          values: [{ datetime: RECOVERY_AS_OF, close: String(EQUITY_CLOSES[symbol]) }],
+        };
+      }
+      const body = symbols.length === 1 ? keyed[symbols[0]!] : keyed;
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    }
+    if (href.includes("banxico.org.mx")) {
+      return Promise.resolve(fixResponse(String(FIX_RATE), banxicoFecha(SATURDAY_AS_OF)));
+    }
+    return Promise.resolve(new Response("[]", { status: 200 }));
+  }) as typeof fetch;
+}
+
+describe("runPriceFetch — with no asOf the live path is unchanged (R2 pin)", () => {
+  it("reports the DERIVED asOf, an empty notOwed, and all 13 instruments attempted", async () => {
+    const result = await runPriceFetch({
+      config: { dataDir, markTime: "00:00" },
+      fetchImpl: mockFetch(),
+      now: () => RUN_INSTANT,
+      credentials: CREDENTIALS,
+    });
+
+    expect(result.asOf).toBe(AS_OF);
+    expect(result.notOwed).toEqual([]);
+    expect(result.totalCount).toBe(13);
+    expect(result.storedCount).toBe(13);
+    expect(result.markEmitted).toBe(true);
+  });
+
+  it("on a SATURDAY still fetches all 9 Twelve Data symbols and records 9 stale skips", async () => {
+    // §8.1: the owed-set filter is scoped to the recovery path. The nightly job
+    // keeps storing Friday's close under Saturday's asOf and reporting 9 skips —
+    // an unconditional filter would silently change what the daily job stores.
+    const urls: string[] = [];
+    const result = await runPriceFetch({
+      config: { dataDir, markTime: "00:00" },
+      fetchImpl: saturdayLiveMockFetch(urls),
+      now: () => new Date("2026-08-15T18:00:00.000Z"), // 12:00 CDMX, Sat 2026-08-15
+      credentials: CREDENTIALS,
+    });
+
+    expect(result.asOf).toBe(SATURDAY_AS_OF);
+    expect(result.notOwed).toEqual([]);
+    expect(result.totalCount).toBe(13);
+    expect(result.storedCount).toBe(13);
+    // The 9 Twelve Data symbols were REQUESTED — paced into chunks of 8 + 1.
+    const equityRequests = urls.filter((href) => href.includes("api.twelvedata.com"));
+    expect(equityRequests).toHaveLength(2);
+    expect(equityRequests.every((href) => href.includes("outputsize=1"))).toBe(true);
+    // …stored under Saturday's asOf, and skipped as stale marks — all 9 of them.
+    expect(result.staleMarkSkips).toHaveLength(9);
+    expect(result.staleMarkSkips.every((skip) => skip.asOf === SATURDAY_AS_OF)).toBe(true);
+    expect(result.emittedCount).toBe(4); // only the crypto marked
+    expect(JSON.parse((await readStore("aapl")).trim())).toMatchObject({ asOf: SATURDAY_AS_OF });
+  });
+});
+
+describe("runPriceFetch — the asOf override is validated, never coerced (R2.2)", () => {
+  const refuse = (asOf: string) =>
+    runPriceFetch({
+      config: { dataDir },
+      asOf,
+      fetchImpl: recoveryMockFetch(),
+      now: () => RECOVERY_NOW,
+      credentials: CREDENTIALS,
+    });
+
+  it("refuses a date that is not a real calendar day, never coercing 2026-02-30 to March 2", async () => {
+    await expect(refuse("2026-02-30")).rejects.toThrow(/2026-02-30/);
+    await expect(refuse("2026-02-30")).rejects.toThrow(/calendar/i);
+    // Nothing was fetched and nothing was written: the refusal precedes the run.
+    await expect(readInbox()).rejects.toThrow();
+  });
+
+  it("refuses a malformed shape outright", async () => {
+    await expect(refuse("2026-8-14")).rejects.toThrow(/YYYY-MM-DD/);
+  });
+
+  it("refuses TODAY's trading day, naming the daily job as the alternative", async () => {
+    await expect(refuse(RECOVERY_TODAY)).rejects.toThrow(/daily job/i);
+    await expect(refuse(RECOVERY_TODAY)).rejects.toThrow(new RegExp(RECOVERY_TODAY));
+  });
+
+  it("refuses a future date", async () => {
+    await expect(refuse("2026-09-01")).rejects.toThrow(/2026-09-01/);
+  });
+});
+
+describe("runPriceFetch — recovering a past trading day (R2.1/R2.3)", () => {
+  it("dates the marks to the target day while stamping fetchedAt with the REAL instant", async () => {
+    // The decoupling IS the decision, so both halves are asserted together: a test
+    // that checked only `asOf` would stay green on a fabricated clock.
+    const result = await runPriceFetch({
+      config: { dataDir },
+      asOf: RECOVERY_AS_OF,
+      fetchImpl: recoveryMockFetch(),
+      now: () => RECOVERY_NOW,
+      credentials: CREDENTIALS,
+    });
+
+    expect(result.asOf).toBe(RECOVERY_AS_OF);
+    expect(result.totalCount).toBe(13);
+    expect(result.storedCount).toBe(13);
+    expect(result.failures).toEqual([]);
+    expect(result.staleMarkSkips).toEqual([]);
+
+    // Every mark is dated to the recovered day…
+    expect(result.marks.map((mark) => mark.asOf)).toEqual(Array(13).fill(RECOVERY_AS_OF));
+    expect((await readInbox()).map((event) => event.id)).toContain(`pm-btc-${RECOVERY_AS_OF}`);
+
+    // …and every quote records the instant the recovery ACTUALLY happened.
+    expect(result.quotes.map((quote) => quote.asOf)).toEqual(Array(13).fill(RECOVERY_AS_OF));
+    expect(result.quotes.map((quote) => quote.fetchedAt)).toEqual(
+      Array(13).fill(RECOVERY_NOW.toISOString()),
+    );
+    const stored = JSON.parse((await readStore("btc")).trim());
+    expect(stored).toMatchObject({ asOf: RECOVERY_AS_OF, fetchedAt: RECOVERY_NOW.toISOString() });
+  });
+
+  it("emits marks BEFORE the wall-clock mark time — settlement answers the gate, not the clock", async () => {
+    // The default 18:00 CDMX mark time against a 09:00 CDMX clock: on the live path
+    // this run would emit nothing. A settled past day makes that question vacuous.
+    const result = await runPriceFetch({
+      config: { dataDir },
+      asOf: RECOVERY_AS_OF,
+      fetchImpl: recoveryMockFetch(),
+      now: () => RECOVERY_NOW,
+      credentials: CREDENTIALS,
+    });
+
+    expect(result.markEmitted).toBe(true);
+    expect(result.emittedCount).toBe(13);
+
+    // Same clock, no override: the gate is shut and nothing marks. This is the
+    // control that proves the override — not the hour — opened it.
+    const live = await runPriceFetch({
+      config: { dataDir },
+      fetchImpl: mockFetch(),
+      now: () => RECOVERY_NOW,
+      credentials: CREDENTIALS,
+    });
+    expect(live.markEmitted).toBe(false);
+    expect(live.emittedCount).toBe(0);
+  });
+
+  it("derives the *-mxn marks off the FIX published for the recovered day", async () => {
+    const urls: string[] = [];
+    await runPriceFetch({
+      config: { dataDir },
+      asOf: RECOVERY_AS_OF,
+      fetchImpl: recoveryMockFetch(urls),
+      now: () => RECOVERY_NOW,
+      credentials: CREDENTIALS,
+    });
+
+    expect(urls.some((href) => href.includes(`/datos/${RECOVERY_AS_OF}/${RECOVERY_AS_OF}`))).toBe(true);
+    const eww = (await readInbox()).find((event) => event.id === `pm-eww-mxn-${RECOVERY_AS_OF}`);
+    expect(eww).toMatchObject({ instrumentId: "eww-mxn", price: 1156.25, usdMxn: FIX_RATE });
+  });
+});
+
+describe("runPriceFetch — the owed set is computed BEFORE any request (R2.4/R2.5)", () => {
+  it("under a Saturday asOf builds no Twelve Data or Banxico request at all", async () => {
+    const urls: string[] = [];
+    const result = await runPriceFetch({
+      config: { dataDir },
+      asOf: SATURDAY_AS_OF,
+      fetchImpl: recoveryMockFetch(urls),
+      now: () => RECOVERY_NOW,
+      credentials: CREDENTIALS,
+    });
+
+    // The requests ACTUALLY CONSTRUCTED — the ambiguous Saturday 400 is dissolved,
+    // not handled, because the doomed request is never built.
+    expect(urls.filter((href) => href.includes("api.twelvedata.com"))).toEqual([]);
+    expect(urls.filter((href) => href.includes("banxico.org.mx"))).toEqual([]);
+    expect(urls.filter((href) => href.includes("api.binance.com"))).toHaveLength(4);
+
+    expect(result.asOf).toBe(SATURDAY_AS_OF);
+    expect(result.totalCount).toBe(4);
+    expect(result.storedCount).toBe(4);
+    expect(result.emittedCount).toBe(4);
+    expect(result.failures).toEqual([]);
+    expect(result.staleMarkSkips).toEqual([]);
+
+    expect(result.notOwed.map((row) => row.instrumentId)).toEqual([
+      "aapl",
+      "googl",
+      "tsla",
+      "eww-mxn",
+      "intc-mxn",
+      "nke-mxn",
+      "nu-mxn",
+      "rivn-mxn",
+      "sbux-mxn",
+    ]);
+    expect(result.notOwed.every((row) => row.source === "twelvedata")).toBe(true);
+    expect(result.notOwed.find((row) => row.instrumentId === "eww-mxn")?.symbol).toBe("EWW");
+    // Nothing was stored for an instrument that owed nothing.
+    await expect(readStore("aapl")).rejects.toThrow();
+  });
+});
+
+describe("runPriceFetch — recovery is additive and idempotent", () => {
+  it("inserts the recovered day in date order and adds no new marks on a re-run", async () => {
+    // A live run first lands Monday's row, then the recovery lands Friday's.
+    await runPriceFetch({
+      config: { dataDir, markTime: "00:00" },
+      fetchImpl: ((url: string | URL | Request) => {
+        const href = typeof url === "string" ? url : url.toString();
+        if (href.includes("api.binance.com")) {
+          const symbol = Object.keys(CRYPTO_CLOSES).find((s) => href.includes(`symbol=${s}`))!;
+          const close = CRYPTO_CLOSES[symbol]!;
+          return Promise.resolve(
+            new Response(
+              JSON.stringify([
+                klineRow(Date.UTC(2026, 7, 17), close),
+                klineRow(Date.UTC(2026, 7, 18), close + 1),
+              ]),
+              { status: 200 },
+            ),
+          );
+        }
+        return recoveryMockFetch()(url as string);
+      }) as typeof fetch,
+      now: () => RECOVERY_NOW,
+      credentials: CREDENTIALS,
+    });
+    const beforeRecovery = (await readStore("btc")).trim().split("\n");
+    expect(beforeRecovery).toHaveLength(1);
+
+    const recovery = {
+      config: { dataDir },
+      asOf: RECOVERY_AS_OF,
+      fetchImpl: recoveryMockFetch(),
+      now: () => RECOVERY_NOW,
+      credentials: CREDENTIALS,
+    };
+    await runPriceFetch(recovery);
+
+    const rows = (await readStore("btc"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { asOf: string });
+    expect(rows.map((row) => row.asOf)).toEqual([RECOVERY_AS_OF, RECOVERY_TODAY]);
+
+    const afterFirst = await readInbox();
+    const second = await runPriceFetch(recovery);
+    expect(second.emittedCount).toBe(0);
+    expect(second.skippedCount).toBe(13);
+    expect(await readInbox()).toHaveLength(afterFirst.length);
+  });
+});
