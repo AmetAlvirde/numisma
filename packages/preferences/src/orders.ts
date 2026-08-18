@@ -1,12 +1,14 @@
 /**
  * IO shell over the `orders.jsonl` sidecar — resolve-path, load, append.
  *
- * ADR-013 puts an `Order` BESIDE the append-only event log: a third durable artifact in
- * ADR-004's sidecar class, joined to the fold at read time and never merged into it.
+ * ADR-013 puts an `Order` BESIDE the append-only event log: a member of ADR-004's
+ * sidecar class — and, counting DURABLE ARTIFACTS (the axis ADR-013 uses, which starts
+ * at `events.jsonl`), the third of those — joined to the fold at read time and never
+ * merged into it.
  * ADR-001 bars file IO from `@numisma/engine`, so the pure half — the record contract
  * and the as-of selector — lives there and only the disk access lives here.
  *
- * This is a THIRD TENANT of a package whose name now names one member of the sidecar
+ * This is ANOTHER TENANT of a package whose name now names one member of the sidecar
  * class rather than the class. The name debt is recorded in ADR-004 and deliberately
  * not paid here; the practical gain is that a tenant inside this package inherits the
  * existing `@numisma/preferences` import guard for free.

@@ -205,9 +205,9 @@ holds only the write/ingest half (`ingestInbox`, `migrateLegacyLog`, inbox
 archival, magnitude-threshold env plumbing, `parseAsOfArg`); its read-path unit
 tests moved with the code into `packages/event-store/src/event-store.test.ts`.
 
-- **`packages/engine/src/events/*.ts`** (92.56% lines, measured) — the covered
-  core is the fold itself (`events/fold.ts`, 96.91% lines) and the ingest
-  cross-reference (`events/crossref.ts`, 96.23% lines), exercised by
+- **`packages/engine/src/events/*.ts`** (93.85% lines, re-measured at `8393bf6`) —
+  the covered core is the fold itself (`events/fold.ts`, 98.02% lines) and the ingest
+  cross-reference (`events/crossref.ts`, 97.61% lines), exercised by
   `event-ingest.test.ts` and `fold.test.ts` — and, since the date-ordering
   gates landed, by `position-born-by.test.ts` (29 tests) and
   `position-seal.test.ts` (PR #261). Uncovered in both: **per-field
@@ -224,8 +224,9 @@ tests moved with the code into `packages/event-store/src/event-store.test.ts`.
   `positionId`/`funding.reserveId`/`funding.amount` fields).
   `events/crossref.ts` (re-measured 2026-08-08, after PR #261) adds `:330-333`
   (the `_never` exhaustiveness latch on the event-type switch — unreachable at
-  runtime by construction, same category as `events/fold.ts`'s `:492-498` and
-  the other `_never` rows in §7), `:558-562` (`ReserveOpened` colliding with an
+  runtime by construction, same category as `events/fold.ts`'s
+  `:737-740,742-743` and the other `_never` rows in §7), `:558-562`
+  (`ReserveOpened` colliding with an
   existing position id), `:1090-1097` (`PositionTrimmed`'s settlement-proceeds
   deviation-threshold rejection), `:1141-1142` (`PositionAddedTo`'s
   funding-leg debit-check error-message wrapping), and `:1204-1205,1267-1268`
@@ -236,19 +237,38 @@ tests moved with the code into `packages/event-store/src/event-store.test.ts`.
   already-closed rejection branches this bullet used to cite as open — they
   measure covered in the fresh run.)
 
-  `events/fold.ts` has four branches open, not the two this bullet
-  used to claim: `:649-650` (the lot-selection helper's zero-`tierTotal` early
-  return) and `:688-689` (the zero-`totalQuantity` guard in
-  `weightedAverageCost`) are real fold branches still open, but so are `:47-48`
-  — the degenerate zero-cost-lot arm in the tier-delta allocator, which
-  attributes the whole delta to `lots[0]?.tier ?? "c1"` rather than splitting
-  it by tier, a real tier-attribution fallback — and `:492-498`, the
-  `foldEvents` exhaustiveness latch (`const _never: never = event; throw new
-  Error(...)`), categorized like the other `_never` latch rows (§7's
-  `skip-message.ts`/`orders/ingest.ts`/`orders/select.ts`): unreachable at
-  runtime by construction, kept live so a new verb fails the build rather than
-  falling through silently. The `PriceMarked`-carries-`usdMxn` FX-update branch
-  this bullet used to name is now covered.
+  `events/fold.ts` (re-measured at `8393bf6`, after #329) has **three** ranges
+  open, and every line number this paragraph used to carry has moved:
+
+  - `:691-692` — the `Withdraw` arm's `recordSkip(event, order,
+    "reserve-absent")`, taken when `applyToReserve` finds no such reserve. A
+    Discard-Channel skip record rather than a numeric guard, and a branch this
+    paragraph never named before.
+  - `:737-740,742-743` — the `foldEvents` exhaustiveness latch (`const _never:
+    never = event; throw new Error(...)`), categorized like the other `_never`
+    latch rows (§7's `skip-message.ts`/`orders/ingest.ts`/`orders/select.ts`):
+    unreachable at runtime by construction, kept live so a new verb fails the
+    build rather than falling through silently. Cited as `:492-498` before;
+    only the lines moved.
+  - `:1045-1046` — the zero-`totalQuantity` early `return 0` in
+    `weightedAverageCost`. Cited as `:688-689` before; only the lines moved.
+
+  Two claims this paragraph used to make are now false and are withdrawn rather
+  than renumbered. **The `:47-48` c1-fallback branch no longer exists:** #329
+  deleted the `lots[0]?.tier ?? "c1"` arm of the tier-delta allocator, and
+  `fold.ts:47-48` is now `SKIP_DETAIL` prose for the `"position-absent"` skip
+  reason. In its place `tierWeightedDeltas` sends a zero-cost-lot delta to
+  `present[0]` — the canonically first Tier holding a lot, in `c1`/`c2`/`c3`
+  order, which is order-independent and invents no Tier — and returns `[]` for
+  no-lots-at-all, a Discard-Channel discard, the file's own comment recording
+  that the old fallback "minted a full-magnitude c1 delta for a cash movement
+  carrying no provenance whatsoever… Not a bad attribution: an invented one."
+  Both arms measure covered. And **`:649-650`, the lot-selection helper's
+  zero-`tierTotal` early return, is no longer uncovered** — the helper still
+  exists (`splitTierRemoval`, `fold.ts:987`, its `if (tierTotal === 0)` early
+  return at `:996-998`), it simply measures covered. The
+  `PriceMarked`-carries-`usdMxn` FX-update branch this bullet used to name is
+  covered too.
 - **`packages/event-store/src/event-store.ts`** (the read path, 96.03% lines) —
   the covered core is `loadEventLog`'s quarantine handling and
   `loadFoldedReview`'s fail-loud fold, exercised by
@@ -552,8 +572,8 @@ individually itemized with its own paragraph. Grouped by package.
 | File | Lines | Uncovered | What's there |
 | --- | --- | --- | --- |
 | `heartbeat.ts` | 97.82% | `:199-200` | One branch past the documented "taken as written for v2, never synthesized" guard. |
-| `preferences.ts` | 100% lines, 96.55% branch | `:214,225` | Re-derived after spec #320 made the loader total: **the non-`ENOENT` rethrow this row used to name no longer exists** — that path is now the `load-failed` arm of the returned envelope and is covered, as is the split-denominator guard the row's other citation pointed at. What remains is two branch-only arms, neither of them a behavior: `:214` is `String(error)`, the non-`Error` arm of the `load-failed` message (reachable only if something other than an `Error` is thrown out of `readFile`); `:225` is the `?? ""` arm of `lines[index]`, unreachable by construction — `index` is always in range — and present only because `noUncheckedIndexedAccess` types the access as possibly-`undefined`. |
-| `orders.ts` (preferences package) | 89.74% | `:73-75,181-182,222-223,225-227,229-230` | `:73-75` is `defaultWarn`'s `console.warn` fallback when no `warn` is injected; `:181-182` is the non-`ENOENT` rethrow on the sidecar read (same shape as `price-store.ts`'s); `:222-223,225-227,229-230` are the lock-contention retry path in the sidecar's advisory file lock (`open(lockPath, "wx")` racing another writer) — a real concurrency branch, exercised only under contention. |
+| `preferences.ts` | 98.72% lines, 95.45% branch | `:244-245` | Re-measured at `8393bf6`. Spec #320 made the loader total, so **the non-`ENOENT` rethrow this row originally named no longer exists** — that path is the `load-failed` arm of the returned envelope and is covered, as is the split-denominator guard the original row's other citation pointed at. The row's later `:214`/`:225` pair has gone stale the same way: `String(error)` is no longer how the `load-failed` message is built, and the `?? ""` arm of `lines[index]` — the blank-line guard in `loadPreferences`'s line walk — measures covered. What remains is one arm and it is not a behavior: `:244-245` is `readFailureCode`'s `return "unknown-read-error"` — the non-`Error` fallback, reachable only if something other than an `Error` is thrown out of `readFile`. |
+| `orders.ts` (preferences package) | 94.64% lines, 90.9% branch | `:73-75` | Re-measured at `8393bf6`. Two of this row's three original citations pointed **past the end of the file** — `orders.ts` is 147 lines — because the code they named moved out: the non-`ENOENT` rethrow on the sidecar read (cited `:181-182`) and the lock-contention retry path in the advisory file lock (cited `:222-223,225-227,229-230`, `open(lockPath, "wx")` racing another writer) now live in the shared `sidecar-io.ts` and are not in this file at all. What is left is the row's first citation, at its new lines: `:73-75` is `defaultWarn`'s `console.warn` fallback when no `warn` is injected. |
 
 None of the above is claimed unreachable. Each is a real branch this table now
 names instead of omits — closing the gap finding 3 identified, without

@@ -2,11 +2,12 @@
  * IO shell over the `plans.jsonl` sidecar — resolve-path, load, append.
  *
  * A `Plan` is the operator's DECLARATION OF INTENT for one position, and this file is
- * the THIRD member of ADR-004's sidecar class: durable, append-only, git-versioned,
+ * a member of ADR-004's sidecar class — the third BY CLASS MEMBERSHIP, the axis
+ * ADR-004's own counting note uses: durable, append-only, git-versioned,
  * beside the event log and never folded. ADR-001 bars file IO from `@numisma/engine`,
  * so the pure half — the record contract, the closed vocabularies, the strict
  * calendar-date predicate — lives at `packages/engine/src/plans.ts` and only the disk
- * access lives here. This is a FOURTH TENANT of a package whose name names one member
+ * access lives here. This is ANOTHER TENANT of a package whose name names one member
  * of the class rather than the class; the debt is recorded in ADR-004 and deliberately
  * not paid here, and the practical gain is the existing `@numisma/preferences` import
  * guard, inherited for free.
@@ -65,7 +66,7 @@ const PLANS_FILE_NAME = "plans.jsonl";
 
 /**
  * Resolve the plans sidecar path under ADR-006's invariant — absolute and
- * homedir-derived, never CWD-relative. The four cases (unset → the accumulus default,
+ * homedir-derived, never CWD-relative. The cases (unset → the accumulus default,
  * blank/whitespace → a loud throw, absolute → verbatim, relative → a loud throw) live
  * once in {@link resolveSidecarPath}; see its docstring for why an explicit `""` must
  * NOT resolve against the process's working directory. The throw is what enforces that
