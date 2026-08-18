@@ -247,7 +247,7 @@ describe("prepareStartup — ingests, surfaces the report, and wires the fold lo
           throw new Error("cross-reference: unknown instrumentId");
         },
       }),
-    ).rejects.toThrow(/cross-reference/);
+    ).rejects.toThrow("cross-reference: unknown instrumentId");
     // No count is surfaced for a rejected startup — the host surfaces the error instead.
     expect(emitted).toEqual([]);
   });

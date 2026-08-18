@@ -70,19 +70,21 @@ describe("parseMagnitudeThresholdArg — opt-in operator override, fail-loud on 
 
   it("fails loud on a non-numeric value", () => {
     expect(() => parseMagnitudeThresholdArg(["node", "spine", "--magnitude-threshold=huge"], {})).toThrow(
-      /Invalid magnitude-threshold/,
+      "Invalid magnitude-threshold override from --magnitude-threshold: 'huge'. " +
+        "Expected a positive number (a relative deviation, e.g. 1.5 for ±150%).",
     );
   });
 
   it("fails loud on a non-positive value", () => {
     expect(() => parseMagnitudeThresholdArg(["node", "spine"], { [SPINE_MAGNITUDE_THRESHOLD_ENV]: "0" })).toThrow(
-      /Invalid magnitude-threshold/,
+      "Invalid magnitude-threshold override from SPINE_MAGNITUDE_THRESHOLD: '0'. " +
+        "Expected a positive number (a relative deviation, e.g. 1.5 for ±150%).",
     );
   });
 
   it("fails loud on a missing flag value", () => {
     expect(() => parseMagnitudeThresholdArg(["node", "spine", "--magnitude-threshold"], {})).toThrow(
-      /Missing value for --magnitude-threshold/,
+      "Missing value for --magnitude-threshold (expected a positive number).",
     );
   });
 });
