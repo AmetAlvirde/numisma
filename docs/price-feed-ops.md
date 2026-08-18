@@ -641,32 +641,58 @@ Three further details are load-bearing and each is one character wide:
   at `0`. Ending a profile on a `[ … ] && …` that took the false branch leaves
   `$?` non-zero, which some prompts render as a failure the operator did not
   cause.
-- If you set `NUMISMA_DATA_DIR`, **export it before this block runs**. The
-  expansion reads the environment at the moment the profile executes; a value set
-  after it, or set without `export`, silently leaves the snippet reading the
-  default directory.
+- If you set `NUMISMA_DATA_DIR`, **set it before this block runs**. The expansion
+  reads the environment at the moment the profile executes, so a value set after it
+  silently leaves the snippet reading the default directory. Note what this does
+  *not* buy you: it gets the **reader** onto the right path and nothing else.
+  Exporting the variable from your profile does not put it in front of the
+  scheduled run, which is the **writer** — see the environment-scope divergence
+  below, which is the one that actually fires.
 
 ### ⚠️ This snippet is the THIRD reader of the data-dir default
 
-The same default is now written down in three places, in three languages:
+The same default is now written down in four places, in four languages:
 
 | Reader | Where | Form |
 | --- | --- | --- |
 | The engine (authority) | `packages/engine/src/data-dir.ts` — ADR-006's rule, reached from `resolveDataDirDefault` | `NUMISMA_DATA_DIR` else `homedir()/Dev/accumulus/data`, absolute and homedir-derived |
 | The wrapper | `DATA_DIR=` in `ops/price-feed/run-daily-fetch.sh` | `${NUMISMA_DATA_DIR:-$HOME/Dev/accumulus/data}` |
 | **This snippet** | your shell profile | the same expansion again |
+| The LaunchAgent | `EnvironmentVariables` in `ops/price-feed/com.numisma.pricefeed.daily.plist` | a literal absolute path, or absent — launchd cannot expand `~` and inherits nothing from your profile |
+
+(Four places, then — the plist is the environment the wrapper's expansion actually
+runs in, so it decides which branch of `${NUMISMA_DATA_DIR:-…}` the writer takes.)
 
 The writer (the wrapper, through the engine) and the reader (your profile) resolve
-that path **independently**. If the three ever disagree, the notice is written to
+that path **independently**. If they ever disagree, the notice is written to
 one directory and `cat`-ed from another — and for a delivery channel that failure
 does not look like a failure. It looks like a clean machine. **Silence that looks
 like health is the exact condition this whole increment exists to remove**, so
-treat a change to any one of the three as a change to all three.
+treat a change to any one of them as a change to all of them.
 
-**Two ways the bash expansion and the engine's rule actually differ today**, and
-in both the failure is the same one: the writer lands in one directory, the reader
-looks in another, and **the channel goes quiet while looking healthy**.
+**Three ways they actually diverge today**, and in all three the failure is the
+same one: the writer lands in one directory, the reader looks in another, and
+**the channel goes quiet while looking healthy**. The first is a divergence of
+*scope* — which process sees the variable at all — and it is the one that fires in
+practice, because it is produced by following this page's own instructions. The
+other two are divergences of *value format*.
 
+- **A value your shell exports and launchd never sees.** The snippet expands
+  `${NUMISMA_DATA_DIR:-…}` in an **interactive login shell**. The wrapper runs
+  under **launchd**, which starts the job with a bare, non-login environment —
+  this page's install section and `run-daily-fetch.sh:44-54` exist entirely
+  because of that fact, for `PATH`. `NUMISMA_DATA_DIR` is no different: a value
+  exported from `~/.zshrc` — the very file this section tells you to edit, and the
+  natural place to put it — is **invisible to the scheduled run**. So the wrapper
+  writes `operator-notice.txt` into `$HOME/Dev/<fund>/data` while your profile
+  `cat`s `/Volumes/ledger/data/operator-notice.txt`, which never exists. `[ -s … ]`
+  is false on every new terminal, forever, and the machine reads as clean. Note
+  that the wrapper's `DATA_DIR` is resolved at `run-daily-fetch.sh:59`, **before**
+  the private token file is sourced under `set -a`, so putting `NUMISMA_DATA_DIR`
+  in `~/.config/numisma/price-feed.env` does not fix this either — it splits the
+  run instead (bash writes the notice in the pre-source dir, step 5b's
+  `pnpm operator-notice` writes it in the post-source one). The token file is for
+  provider tokens; the data dir belongs in the plist.
 - **A `~/`-prefixed value.** The engine expands a leading `~/` itself
   (`data-dir.ts:50-52`). Bash does **not** expand a tilde that arrives inside a
   variable's value, so the snippet reads a directory literally named `~`. The
@@ -678,9 +704,13 @@ looks in another, and **the channel goes quiet while looking healthy**.
   no such guard: it resolves the value against whatever directory the shell
   happened to start in, which differs between terminals.
 
-**The mitigation is one rule:** set `NUMISMA_DATA_DIR` to an absolute,
-already-expanded path (`$HOME/...`, never a literal `~/...`), or leave it unset
-and take the default all three readers agree on.
+**The mitigation is one rule, and it has both halves:** either leave
+`NUMISMA_DATA_DIR` unset **everywhere** and take the default all four readers agree
+on, or set it to an absolute, already-expanded path (`$HOME/...` in your profile, a
+literal `/Users/you/...` in the plist — never a `~/...`) **in the LaunchAgent plist's
+`EnvironmentVariables` as well as in your profile**, and not in
+`~/.config/numisma/price-feed.env`. Setting it in only one of those two is the
+scope divergence above, and it is silent.
 
 ### Empty means healthy
 
