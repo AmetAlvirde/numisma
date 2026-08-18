@@ -49,6 +49,9 @@ const SKIP_DETAIL: Record<FoldSkipReason, string> = {
   "reserve-absent":
     "The fold has no record of the reserve this event's cash leg names, so that leg was " +
     "read and then dropped. No balance moved.",
+  "provenance-absent":
+    "This event's cash leg has no cost-basis provenance to inherit — the fold has no " +
+    "lots to attribute it across — so the leg was read and then dropped. No balance moved.",
 };
 
 /**
@@ -91,7 +94,10 @@ export function dedupeFoldSkips(skipped: readonly SkippedFoldEvent[]): SkippedFo
  *
  * ZERO-COST LOTS get one delta, not a split: with every cost weight zero there is
  * no cost-basis weight to split by, so the whole delta lands on the canonically
- * first Tier that holds a lot (#329). */
+ * first Tier that holds a lot (#329).
+ *
+ * NO LOTS AT ALL RETURNS AN EMPTY LIST — the leg has no provenance to inherit, so
+ * there is nothing to attribute and the caller must discard it (#329). */
 function tierWeightedDeltas(lots: PositionLot[], total: number, sign: 1 | -1): TierDelta[] {
   const costByTier = new Map<CapitalTier, number>();
   let totalCost = 0;
@@ -102,8 +108,14 @@ function tierWeightedDeltas(lots: PositionLot[], total: number, sign: 1 | -1): T
   }
   const present = TIERS.filter((tier) => costByTier.has(tier));
   if (present.length === 0) {
-    // No lots at all. Left exactly as it was; ruled on separately (#329).
-    return [{ tier: lots[0]?.tier ?? "c1", amount: sign * total }];
+    // NO LOTS ⇒ NO PROVENANCE ⇒ NO DELTA. Any lot at all puts a key in `costByTier`,
+    // so this arm is reachable only when `lots` is empty. It used to return
+    // `[{ tier: lots[0]?.tier ?? "c1", … }]`, which — the `lots[0]` being undefined by
+    // construction — ALWAYS took the `?? "c1"` fallback and minted a full-magnitude c1
+    // delta for a cash movement carrying no provenance whatsoever; `applyToReserve`
+    // then booked it as real c1 capital. Not a bad attribution: an invented one. The
+    // empty list is the discard, and the caller records it (#329).
+    return [];
   }
   if (totalCost === 0) {
     // Zero-cost lots: no cost-basis weight to split by, so the whole delta goes to
@@ -128,7 +140,10 @@ function tierWeightedDeltas(lots: PositionLot[], total: number, sign: 1 | -1): T
 }
 
 /** Open → debit the funding Reserve by the cash leaving, split across the
- * position lots' own Tiers (each Tier pays for what it bought). */
+ * position lots' own Tiers (each Tier pays for what it bought).
+ *
+ * RETURNS `[]` FOR A LOT-LESS OPEN — no lots, no provenance, nothing to attribute.
+ * Callers must treat the empty list as a discard, never as a no-op worth booking. */
 export function reserveDeltasForOpen(lots: PositionLot[], amount: number): TierDelta[] {
   return tierWeightedDeltas(lots, amount, -1);
 }
@@ -141,7 +156,10 @@ export function reserveDeltasForOpen(lots: PositionLot[], amount: number): TierD
  * native and USD weights are proportionally identical, so the split is exact. When
  * `buildClosedPosition` reuses this helper to apportion proceeds against USD cost
  * basis, that native-vs-USD basis mismatch is the source of the documented
- * mixed-`entryFx` per-tier caveat; see that helper's note. Totals stay exact. */
+ * mixed-`entryFx` per-tier caveat; see that helper's note. Totals stay exact.
+ *
+ * RETURNS `[]` FOR A LOT-LESS CLOSE — no lots, no provenance, nothing to attribute.
+ * Callers must treat the empty list as a discard, never as a no-op worth booking. */
 export function reserveDeltasForClose(lots: PositionLot[], proceeds: number): TierDelta[] {
   return tierWeightedDeltas(lots, proceeds, 1);
 }
@@ -264,6 +282,32 @@ export function foldEvents(
       reason,
       detail: SKIP_DETAIL[reason],
     });
+  };
+  /**
+   * Apply one LOT-DERIVED cash leg, or record why it could not be applied.
+   *
+   * PRECEDENCE IS A DECISION: `provenance-absent` wins and the reserve is never
+   * consulted. With no deltas there is nothing to apply, so whether the reserve exists
+   * is moot — recording `reserve-absent` as well would report a reserve miss that never
+   * happened. One event, one finding, on this path.
+   *
+   * Only lot-derived legs route through here. The explicit-tier legs (Deposit,
+   * Withdraw, both Transfer legs) call `applyToReserve` directly: their deltas are
+   * never empty, and routing them here would imply a discard that cannot occur.
+   */
+  const applyTieredLeg = (
+    reserveId: string,
+    deltas: TierDelta[],
+    event: PortfolioEvent,
+    order: number,
+  ): void => {
+    if (deltas.length === 0) {
+      recordSkip(event, order, "provenance-absent");
+      return;
+    }
+    if (!applyToReserve(reserves, reserveId, deltas)) {
+      recordSkip(event, order, "reserve-absent");
+    }
   };
   let usdMxn = genesis.review.usdMxn;
   let latestAsOf = genesis.review.asOf;
@@ -391,9 +435,12 @@ export function foldEvents(
           costAnchors.set(position.instrumentId, anchor);
         }
         // Cash leg: debit the funding reserve. Sufficiency was proven at ingest.
-        if (!applyToReserve(reserves, event.funding.reserveId, reserveDeltasForOpen(position.lots, event.funding.amount))) {
-          recordSkip(event, order, "reserve-absent");
-        }
+        applyTieredLeg(
+          event.funding.reserveId,
+          reserveDeltasForOpen(position.lots, event.funding.amount),
+          event,
+          order,
+        );
         break;
       }
       case "PositionClosed": {
@@ -402,15 +449,12 @@ export function foldEvents(
         // closed position's mix, BEFORE retiring the asset leg. Honest-by-
         // construction: the asset cannot be removed without recording the cash.
         if (closing) {
-          if (
-            !applyToReserve(
-              reserves,
-              event.settlement.reserveId,
-              reserveDeltasForClose(closing.lots, event.settlement.proceeds),
-            )
-          ) {
-            recordSkip(event, order, "reserve-absent");
-          }
+          applyTieredLeg(
+            event.settlement.reserveId,
+            reserveDeltasForClose(closing.lots, event.settlement.proceeds),
+            event,
+            order,
+          );
           // Realized P&L: compute proceeds − cost
           // basis, tag it, and push a finished row onto the closed book INSTEAD of
           // silently dropping the position. Descriptive only — the profit already
@@ -461,15 +505,12 @@ export function foldEvents(
           // The mark the removed units are valued at for the NAV-honesty disclosure:
           // the latest PriceMarked seen so far, else the position's standing mark.
           const markPrice = latestMark.get(trimming.instrumentId) ?? trimming.markPrice;
-          if (
-            !applyToReserve(
-              reserves,
-              event.settlement.reserveId,
-              reserveDeltasForClose(removed, event.settlement.proceeds),
-            )
-          ) {
-            recordSkip(event, order, "reserve-absent");
-          }
+          applyTieredLeg(
+            event.settlement.reserveId,
+            reserveDeltasForClose(removed, event.settlement.proceeds),
+            event,
+            order,
+          );
           closedPositions.push(
             buildClosedPosition(
               trimming,
@@ -529,15 +570,12 @@ export function foldEvents(
               anchor.price = blended;
             }
           }
-          if (
-            !applyToReserve(
-              reserves,
-              event.funding.reserveId,
-              reserveDeltasForOpen([event.lot], event.funding.amount),
-            )
-          ) {
-            recordSkip(event, order, "reserve-absent");
-          }
+          applyTieredLeg(
+            event.funding.reserveId,
+            reserveDeltasForOpen([event.lot], event.funding.amount),
+            event,
+            order,
+          );
         } else {
           recordSkip(event, order, "position-absent");
         }
