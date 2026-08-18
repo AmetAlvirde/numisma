@@ -139,7 +139,7 @@ export type FundingCoverage =
  * kinds — `orderPlaced`, `orderCancelled`, `orderFilled` and `orderFillObserved`
  * (`OrderRecord` in `./records.ts`, cited BY NAME for the reason the paragraph above
  * gives; that line number had already drifted once) — and `appendOrders`
- * (`packages/preferences/src/orders.ts:244`) writes fresh `orderPlaced` and
+ * (in `@numisma/preferences`, cited BY NAME for the same reason) writes fresh `orderPlaced` and
  * `orderFillObserved` rows. NEITHER ADDITION GIVES THE SKIP A HOME, which is the first
  * thing a reader who counts four kinds will want ruled out: an observation restates a rung
  * ALREADY placed and finds it BY ID, so it is reachable only for a row that parsed. There

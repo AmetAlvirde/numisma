@@ -14,8 +14,11 @@ quarantine, `loadFoldedReview`) lives in [`@numisma/event-store`](../../packages
 It also hosts the `Order` CLIs — the access surface for
 [ADR-013](../../context/adr/ADR-013-order-a-claim-on-capital-recorded-beside-the-log.md)'s
 `Order`, "a claim on capital that has not yet become a transaction," recorded in
-a third durable artifact, `data/orders.jsonl`, **beside** the event log, never
-in it, and joined to the fold at read time. The sidecar's own read/write IO
+`data/orders.jsonl` — a durable artifact **beside** the event log, never
+in it, and joined to the fold at read time. (ADR-013 calls it *the third*
+durable artifact; that count starts at `events.jsonl`. On ADR-004's
+sidecar-class axis, which excludes the log, it is the second. Say which count
+you mean.) The sidecar's own read/write IO
 (`resolveOrdersPath`, `loadOrders`, `appendOrders`) lives in
 [`@numisma/preferences`](../../packages/preferences), alongside the general
 preferences sidecar — this package only wires that IO to its three interactive
