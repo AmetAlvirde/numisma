@@ -205,9 +205,9 @@ holds only the write/ingest half (`ingestInbox`, `migrateLegacyLog`, inbox
 archival, magnitude-threshold env plumbing, `parseAsOfArg`); its read-path unit
 tests moved with the code into `packages/event-store/src/event-store.test.ts`.
 
-- **`packages/engine/src/events/*.ts`** (92.56% lines, measured) — the covered
-  core is the fold itself (`events/fold.ts`, 98.02% lines) and the ingest
-  cross-reference (`events/crossref.ts`, 96.23% lines), exercised by
+- **`packages/engine/src/events/*.ts`** (93.85% lines, re-measured at `8393bf6`) —
+  the covered core is the fold itself (`events/fold.ts`, 98.02% lines) and the ingest
+  cross-reference (`events/crossref.ts`, 97.61% lines), exercised by
   `event-ingest.test.ts` and `fold.test.ts` — and, since the date-ordering
   gates landed, by `position-born-by.test.ts` (29 tests) and
   `position-seal.test.ts` (PR #261). Uncovered in both: **per-field
