@@ -67,14 +67,27 @@ const SKIP_DETAIL: Record<FoldSkipReason, string> = {
  * IT EXISTS BECAUSE THE FOLD IS RE-RUN, NOT BECAUSE LISTS ARE LONG. Any caller that
  * folds the same log more than once per run sees the same standing drop once per fold:
  * `walkPendingInbox` re-folds on every accept (ADR-015), so a 13-event batch is 14 folds
- * and one dropped prior arrives 14 times; the legacy migration folds once per line. That
- * is one FINDING reported N times, and N is an artifact of the caller's loop rather than
- * anything about the log. Deduping is therefore structural — without it, an operator
- * counts folds and believes they are counting damage.
+ * and one dropped prior arrives 14 times; the backfill re-folds once per anchor, so a
+ * twelve-anchor replay rediscovers one damaged prior twelve times; the legacy migration
+ * folds once per line. Each of those callers concatenates the folds' `skipped` and hands
+ * the union on. That is one FINDING reported N times, and N is an artifact of the
+ * caller's loop rather than anything about the log. Deduping is therefore structural —
+ * without it, an operator counts folds and believes they are counting damage.
  *
- * THE KEY IS THE PAIR, never the id alone: one event can be dropped for two different
- * reasons and that is two findings. A `Transfer` whose BOTH legs name absent reserves is
- * one event dropped twice for ONE reason and collapses to one finding, correctly.
+ * RE-FOLDING IS NOW THE ONLY WAY A REPEAT ARISES. #371 closed the vocabulary on "the
+ * fold applied NOTHING", and every arm records once and stops, so no single fold can put
+ * two records on one event. It used to: a `Transfer` reported per LEG, which is where
+ * this key's original justification came from and why that example is gone from here.
+ *
+ * THE KEY IS STILL THE PAIR, never the id alone. What repeats across folds is the WHOLE
+ * finding — the same event, dropped for the same reason, by a fold reading the same
+ * prefix — so an id-only key would dedupe today's logs identically and start silently
+ * swallowing findings the moment one event carried two reasons. That it never does is a
+ * DECISION each arm makes in the open (`applyTieredLeg`'s precedence ruling, the
+ * `Transfer` arm's both-legs-or-neither pre-flight), not a property this key may assume
+ * on their behalf: the closed vocabulary fixes what a reason MEANS, never how many an
+ * event may collect. Keyed on the pair, breaking that decision is loud — two findings,
+ * two lines — rather than invisible.
  *
  * FIRST APPEARANCE WINS, so the fold's own deterministic ordering (application order,
  * with the post-loop invalidation records appended) survives the dedup. Pure; the input
@@ -1067,9 +1080,26 @@ export function splitTierRemoval(
  * for everything that arrived through the gate — but it is no longer a SILENT one.
  * The boolean is how the helper signals its miss back to the calling arm, which owns
  * the event and therefore owns the locator; the helper itself sees only a reserve id
- * and could not name the event that named it. Every one of the eight call sites —
- * open funding, close settlement, trim settlement, add funding, `Deposit`, `Withdraw`,
- * and BOTH `Transfer` legs — must record on a `false`, one record per miss. */
+ * and could not name the event that named it.
+ *
+ * A `false` DISCARDS THE WHOLE EVENT, RECORDED ONCE (#371). Six of the eight call sites
+ * read the boolean and do exactly that: `Deposit` and `Withdraw` record and stop, and
+ * open funding, close settlement, trim settlement and add funding read it through
+ * `applyTieredLeg`, whose own `false` is the gate that keeps the rest of their arm from
+ * running. No caller records a miss and then carries on — that half-applying sense of
+ * `reserve-absent` is what #371 removed.
+ *
+ * BOTH `Transfer` LEGS DISCARD THE BOOLEAN, DELIBERATELY. A per-CALL answer is the wrong
+ * shape for that arm: by the time the second leg could report `false`, the first has
+ * already moved cash. It settles existence for both reserves before either call and
+ * records once for the pair, so the legs here are reached only where they cannot fail.
+ *
+ * A NINTH CALL SITE INHERITS "ONE RECORD PER EVENT", NOT "one record per call". Any arm
+ * that calls this more than once for a single event must settle existence up front the
+ * way `Transfer` does, because `dedupeFoldSkips` keys on (`eventId`, `reason`): two
+ * `reserve-absent` records for one event BOTH survive the dedup, inflating
+ * `discardedEventCount` and printing two operator lines for a single drop. The channel
+ * would over-report the very thing it exists to report exactly once. */
 function applyToReserve(
   reserves: Map<string, ReserveRecord>,
   reserveId: string,
