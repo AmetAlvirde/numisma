@@ -760,6 +760,236 @@ derives its mark-time window from the live wall clock, which answers nothing
 useful about a date that already passed. Run `pnpm prices:fetch --as-of=<date>`
 directly, on its own, every time.
 
+## Wire the operator notice into your shell profile
+
+Every surface this repo has is **pull-only**. The TUI banner derives the lost days
+live and correctly, and says so only to someone who opens the TUI; the dashboard
+only to someone who opens the dashboard; `gap-report.json` only to someone who
+opens the file. On 2026-08-14/15 all three were right the whole time and nobody
+looked for three days, at the machine. Step 5b of the wrapper
+(`pnpm operator-notice`) closes that by writing the same two signals — the job
+heartbeat and the gap findings — into one well-known plain-text file. This section
+is the other half: getting your shell to read it. It adds no detection; it is a
+transport.
+
+**The file.** `operator-notice.txt`, in the resolved data dir beside the durable
+log, next to `gap-report.json` and `job-heartbeat.json`
+(`OPERATOR_NOTICE_FILENAME` in `packages/event-store/src/operator-notice-io.ts`).
+Plain `.txt` and not `.json` on purpose: the intended consumer is `cat`, and a
+reader that needs `jq` is a dependency an operator's shell profile should not
+carry.
+
+### The snippet
+
+Append this to `~/.zshrc` (or `~/.bashrc`/`~/.profile` — it is POSIX and safe on
+the bash 3.2 macOS ships):
+
+```sh
+# Numisma: print the daily price run's operator notice on every new shell.
+# The path MUST match the wrapper's DATA_DIR — see the three-readers warning below.
+numisma_notice="${NUMISMA_DATA_DIR:-$HOME/Dev/accumulus/data}/operator-notice.txt"
+[ -s "$numisma_notice" ] && cat "$numisma_notice"
+unset numisma_notice
+```
+
+**This section writes the data-dir path literally, where the rest of this page
+uses `<fund>`** — deliberately, and it should stay that way: a placeholder left
+unsubstituted here would fail *silently* (a profile reading a non-existent path
+prints nothing, exactly like a healthy machine) rather than loudly in front of the
+operator, and a hole cannot be the third reader of a shared default. The literal
+discloses nothing the committed `ops/price-feed/run-daily-fetch.sh:59` does not
+already write. If your store lives elsewhere, change it in all three places named
+below, not just here.
+
+Three further details are load-bearing and each is one character wide:
+
+- `-s`, not `-f`: a healthy run leaves the file **present and empty**, and `-s`
+  is what makes that print nothing.
+- The trailing `unset` is not tidiness — it is what keeps the block's exit status
+  at `0`. Ending a profile on a `[ … ] && …` that took the false branch leaves
+  `$?` non-zero, which some prompts render as a failure the operator did not
+  cause.
+- If you set `NUMISMA_DATA_DIR`, **set it before this block runs**. The expansion
+  reads the environment at the moment the profile executes, so a value set after it
+  silently leaves the snippet reading the default directory. Note what this does
+  *not* buy you: it gets the **reader** onto the right path and nothing else.
+  Exporting the variable from your profile does not put it in front of the
+  scheduled run, which is the **writer** — see the environment-scope divergence
+  below, which is the one that actually fires.
+
+### ⚠️ This snippet is the THIRD reader of the data-dir default
+
+The same default is now written down in four places, in four languages:
+
+| Reader | Where | Form |
+| --- | --- | --- |
+| The engine (authority) | `packages/engine/src/data-dir.ts` — ADR-006's rule, reached from `resolveDataDirDefault` | `NUMISMA_DATA_DIR` else `homedir()/Dev/accumulus/data`, absolute and homedir-derived |
+| The wrapper | `DATA_DIR=` in `ops/price-feed/run-daily-fetch.sh` | `${NUMISMA_DATA_DIR:-$HOME/Dev/accumulus/data}` |
+| **This snippet** | your shell profile | the same expansion again |
+| The LaunchAgent | `EnvironmentVariables` in `ops/price-feed/com.numisma.pricefeed.daily.plist` | a literal absolute path, or absent — launchd cannot expand `~` and inherits nothing from your profile |
+
+(Four places, then — the plist is the environment the wrapper's expansion actually
+runs in, so it decides which branch of `${NUMISMA_DATA_DIR:-…}` the writer takes.)
+
+The writer (the wrapper, through the engine) and the reader (your profile) resolve
+that path **independently**. If they ever disagree, the notice is written to
+one directory and `cat`-ed from another — and for a delivery channel that failure
+does not look like a failure. It looks like a clean machine. **Silence that looks
+like health is the exact condition this whole increment exists to remove**, so
+treat a change to any one of them as a change to all of them.
+
+**Three ways they actually diverge today**, and in all three the failure is the
+same one: the writer lands in one directory, the reader looks in another, and
+**the channel goes quiet while looking healthy**. The first is a divergence of
+*scope* — which process sees the variable at all — and it is the one that fires in
+practice, because it is produced by following this page's own instructions. The
+other two are divergences of *value format*.
+
+- **A value your shell exports and launchd never sees.** The snippet expands
+  `${NUMISMA_DATA_DIR:-…}` in an **interactive login shell**. The wrapper runs
+  under **launchd**, which starts the job with a bare, non-login environment —
+  this page's install section and `run-daily-fetch.sh:44-54` exist entirely
+  because of that fact, for `PATH`. `NUMISMA_DATA_DIR` is no different: a value
+  exported from `~/.zshrc` — the very file this section tells you to edit, and the
+  natural place to put it — is **invisible to the scheduled run**. So the wrapper
+  writes `operator-notice.txt` into `$HOME/Dev/<fund>/data` while your profile
+  `cat`s `/Volumes/ledger/data/operator-notice.txt`, which never exists. `[ -s … ]`
+  is false on every new terminal, forever, and the machine reads as clean. Note
+  that the wrapper's `DATA_DIR` is resolved at `run-daily-fetch.sh:59`, **before**
+  the private token file is sourced under `set -a`, so putting `NUMISMA_DATA_DIR`
+  in `~/.config/numisma/price-feed.env` does not fix this either — it splits the
+  run instead (bash writes the notice in the pre-source dir, step 5b's
+  `pnpm operator-notice` writes it in the post-source one). The token file is for
+  provider tokens; the data dir belongs in the plist.
+- **A `~/`-prefixed value.** The engine expands a leading `~/` itself
+  (`data-dir.ts:50-52`). Bash does **not** expand a tilde that arrives inside a
+  variable's value, so the snippet reads a directory literally named `~`. The
+  wrapper writes the real notice; your shell reads an empty path and prints
+  nothing, forever.
+- **A relative value.** The engine *refuses* it outright with a named error — "a
+  relative value resolves differently depending on the working directory, so it is
+  rejected to prevent a split-brain ledger" (`data-dir.ts:53-58`). The snippet has
+  no such guard: it resolves the value against whatever directory the shell
+  happened to start in, which differs between terminals.
+
+**The mitigation is one rule, and it has both halves:** either leave
+`NUMISMA_DATA_DIR` unset **everywhere** and take the default all four readers agree
+on, or set it to an absolute, already-expanded path (`$HOME/...` in your profile, a
+literal `/Users/you/...` in the plist — never a `~/...`) **in the LaunchAgent plist's
+`EnvironmentVariables` as well as in your profile**, and not in
+`~/.config/numisma/price-feed.env`. Setting it in only one of those two is the
+scope divergence above, and it is silent.
+
+### Empty means healthy
+
+A clean machine prints nothing on a new shell. That is the whole contract, and it
+is why there is nothing to configure and nothing to maintain:
+
+- The file is **rewritten in full on every run**, including the healthy case,
+  where it is truncated to empty. The channel self-clears.
+- **No rotation and no history.** It is a notice, not a log. One fixed name, one
+  current state.
+- **No dismissal state anywhere in the design** — so there is none to get wrong,
+  and nothing to clear by hand. You silence a line by fixing what it reports.
+
+### What it means when it does print
+
+Lines arrive in one order, always: **the job first, the data second** — a failed
+run is *why* days went missing, and reading the consequence before the reason is
+the wrong way round on a channel scanned in two seconds.
+
+**Job lines** (from `job-heartbeat.json`) name a run that failed and the step it
+died at, a breadcrumb dated ahead of today (a wrong machine clock), or a job that
+has not completed since some date. These are the wrapper-level failures; triage
+them with the sections above.
+
+**Lost days are ENUMERATED, one per day, each followed by its own recovery
+command**:
+
+```text
+Numisma: 2026-03-02 — NO MARKS. The day is anchored but no price mark landed on it; the day is lost.
+Numisma: 2026-03-02 — recover with: pnpm prices:fetch --as-of=2026-03-02
+```
+
+A lost day is **remediable and self-extinguishing**: run the command it names,
+and on the next run the row is gone. That standing debt on every new shell is the
+pressure the channel exists to apply. The date is repeated inside the command line
+on purpose, so a line that reaches you alone — grepped, quoted into a standup,
+wrapped by a narrow terminal — still says which day it recovers.
+
+**Venue-dark days are COUNTED on one line and never enumerated**:
+
+```text
+Numisma: 3 venue-day(s) dark — not lost days: the feed ran and the days are anchored. Enumerate them with pnpm gap-report.
+```
+
+The asymmetry is deliberate and it is the decision this channel lives or dies on.
+A venue-dark day is **permanent and it accumulates** — roughly ten a year are US
+market holidays, and no command will ever clear one. Enumerated on a surface that
+prints on *every new terminal*, they would grow without bound until the operator
+learned to scroll past the whole block: cry-wolf channel death, arriving on a
+schedule, inside the fix. So the notice carries the number and names
+`pnpm gap-report`, which enumerates them on demand. (The TUI banner *does*
+enumerate them, correctly — a pulled surface has a different noise budget. The
+two renderings differ on purpose and must not be unified.)
+
+**A `lost days were NOT checked (…)` line** means the **derivation itself broke** —
+the checker, not the data:
+
+```text
+Numisma: lost days were NOT checked (ENOENT: no such file or directory, open '…/events.jsonl').
+```
+
+Nothing is being claimed about your days here, in either direction. Read the
+parenthesised detail, then run `pnpm gap-report` by hand to see the same failure
+with its full output. A checker that said nothing while broken would be
+indistinguishable from one saying "all clear", which is why this arrives as a line
+rather than as silence.
+
+### Verify the wiring once
+
+```sh
+# 1. Write the notice now, without waiting for the schedule.
+pnpm operator-notice          # logs: [operator-notice] wrote <path>
+
+# 2. The path it printed is the one your profile resolves.
+echo "${NUMISMA_DATA_DIR:-$HOME/Dev/accumulus/data}/operator-notice.txt"
+
+# 3. Open a new terminal. On a healthy machine it prints nothing — that is a pass,
+#    provided steps 1 and 2 printed the same path.
+```
+
+To prove the channel actually speaks rather than merely staying quiet, put one
+authored line in the file by hand and open a new terminal:
+
+```sh
+printf 'Numisma: wiring check — delete this line.\n' \
+  > "${NUMISMA_DATA_DIR:-$HOME/Dev/accumulus/data}/operator-notice.txt"
+```
+
+The next run overwrites it, so there is nothing to undo.
+
+**To remove the wiring:** delete the block from your profile. Nothing else is
+installed — no launch agent, no state file, no dotfile of its own. The wrapper
+keeps writing `operator-notice.txt`; the other surfaces (the TUI banner,
+`pnpm gap-report`) are unaffected.
+
+### Known limit: a run that never fires at all is not covered
+
+The check **rides the existing wrapper**, so it speaks only when a run runs. If
+launchd stays silent — the machine on, the job never invoked — no run reaches step
+5b, nothing rewrites the file, and a new shell prints whatever the last run left,
+which on a healthy last run is nothing. The heartbeat's "has not completed since"
+line covers a job that ran and then stopped running; it cannot cover a channel
+whose writer is the thing that stopped.
+
+Catching that case needs an independent clock — a second LaunchAgent whose only
+job is to notice the first one's absence. That was weighed and rejected on cost:
+a second scheduled job is a second thing to install, resolve a PATH for, keep in
+sync, and debug when *it* stops firing. This is a bounded, recorded limit of the
+channel, not a defect in it. The gap report remains the backstop that names a loss
+whenever anything does eventually run.
+
 ## The committed wrapper test harness (and why a green CI check says nothing about it)
 
 `apps/price-feed/src/wrapper-harness/` drives `ops/price-feed/run-daily-fetch.sh`
