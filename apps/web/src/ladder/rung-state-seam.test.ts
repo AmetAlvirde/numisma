@@ -61,10 +61,11 @@
  * EVERY VALUE BELOW IS AUTHORED, or is one of the hand-authored fixtures; nothing here is
  * seeded from real output (`docs/local-data.md`).
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { sourceFiles } from "../../../../ops/testkit/repo-sources.testkit.js";
 import { composeFillPathPage, type FillPathView } from "./fill-path-view.ts";
 import { rungStateCopy } from "./rung-state-copy.ts";
 import { STARTED_LADDER_FIXTURES } from "./started-ladder.fixtures.ts";
@@ -230,22 +231,9 @@ function code(source: string): string {
 
 /** Every `.ts`/`.tsx` file under `apps/web/src`, code text, excluding tests. */
 function productionSources(): { path: string; source: string }[] {
-  const out: { path: string; source: string }[] = [];
-  const walk = (dir: string) => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const path = join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walk(path);
-        continue;
-      }
-      if (!/\.tsx?$/.test(entry.name) || /\.test\.tsx?$/.test(entry.name)) {
-        continue;
-      }
-      out.push({ path, source: code(readFileSync(path, "utf8")) });
-    }
-  };
-  walk(WEB_SRC);
-  return out;
+  return sourceFiles({ dir: WEB_SRC, as: "absolute" })
+    .filter((path) => !/\.test\.tsx?$/.test(path))
+    .map((path) => ({ path, source: code(readFileSync(path, "utf8")) }));
 }
 
 describe("the state words are authored on the web, from the axes", () => {

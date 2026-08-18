@@ -26,10 +26,11 @@
  * divergent copies of `Shell`. The reader must open the phone to judge the layout;
  * nothing below pretends otherwise.
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { sourceFiles } from "../../../../ops/testkit/repo-sources.testkit.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const read = (file: string) => readFileSync(join(HERE, file), "utf-8");
@@ -259,12 +260,5 @@ function reachableFrom(entry: string): string[] {
 
 /** Every `.ts`/`.tsx` under `apps/web/src`, for the one-call-site sweep above. */
 function allWebSources(): string[] {
-  const root = join(HERE, "..");
-  const walk = (dir: string): string[] =>
-    readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-      const full = join(dir, entry.name);
-      if (entry.isDirectory()) return walk(full);
-      return /\.tsx?$/.test(entry.name) ? [full] : [];
-    });
-  return walk(root);
+  return sourceFiles({ dir: join(HERE, ".."), as: "absolute" });
 }
