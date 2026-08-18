@@ -592,6 +592,173 @@ private `<fund>` repo, `~/Dev/<fund>/data` by default. The `inbox/` and
 `prices/` subtrees are the disposable cache: `<fund>`'s allowlist `.gitignore`
 keeps them (and `ingested/`, `*.tmp`, `*.quarantine`) out of the versioned history.
 
+## Lost-day recovery: `--as-of`
+
+If a scheduled run never happened — the laptop was closed, the wrapper never
+fired — the missed day does not repair itself. `pnpm prices:fetch --as-of=<date>`
+recovers exactly one past trading day: it fetches that day's bars from the
+providers (not today's), stores the quotes, and queues marks dated that day. It
+is a flag on the existing command, not a new pipeline.
+
+**Vocabulary note (retiring "backfill" for this meaning).** `pnpm backfill` is
+already a real, different thing — the wrapper's step 6, which refreshes the
+hosted Neon projection from the durable log. Older issues and hand-off notes
+that call recovering a missed price day "backfill" are using the term loosely;
+that usage is retired as of this section. The recovery flag is named `--as-of`
+rather than something like `--backfill` on purpose: it names the *parameter*
+(which day), not an operation, and it does not collide with the wrapper step
+that already owns the word.
+
+### The procedure — four steps, all of them already familiar
+
+1. **Recover the day:** `pnpm prices:fetch --as-of=2026-08-14`
+2. **Inspect the output** — the run reports owed / marked / absent counts and
+   exits non-zero if anything owed came back absent (see below). Do not proceed
+   to step 3 on a non-zero exit without reading why.
+3. **Fold it in:** `pnpm spine` — the same validate-and-append step the daily
+   schedule runs, unchanged. Its ±50% magnitude guard applies exactly as it
+   does to a same-day mark (see Triage above for what to do if it rejects one).
+4. **Commit the new marks to the `<fund>` data repo** — the same auto-commit
+   the wrapper performs on the schedule (step 3 in the Components table above),
+   done by hand here since recovery is never run through the wrapper (below).
+
+Recovering several missed days is the same procedure repeated, not a new one:
+
+```sh
+for d in 2026-08-14 2026-08-15; do
+  pnpm prices:fetch --as-of=$d
+done
+pnpm spine
+# commit the new marks to <fund>
+```
+
+**There is no range flag, and it is not an oversight.** The unit of correctness
+for a price mark is the *day*, everywhere in this system: the freshness rule
+compares one `asOf` string, the inbox id is `pm-<instrumentId>-<asOf>`, and the
+venue calendar (`owesMarkOn`) answers per day. A shell loop over single-day
+calls is that same unit repeated, and it is provably safe to repeat — the inbox
+merges by id, so re-running an already-recovered date queues nothing new. A
+range parameter would additionally have to reproduce that day-by-day logic
+*and* it walks into a real trap on the Banxico leg: the FIX range endpoint
+returns its dates in ascending order and the parser reads the newest one, so a
+multi-day window would silently attribute the wrong day's FIX to every date but
+the last in the range. One call, one day, keeps that trap permanently out of
+reach.
+
+### A weekday recovery and a weekend recovery, side by side
+
+The registry holds 13 instruments: 4 crypto (`btc` `eth` `render` `gram`,
+Binance, daily cadence — Binance trades every day) and 9 Twelve Data symbols
+(`aapl` `googl` `tsla` plus the six `*-mxn` derived rows, weekdays only). A
+Friday owes all 13. A Saturday owes only the 4 crypto — the 9 equity-sourced
+rows are **not owed** that day, not missing. Read the two reports below side by
+side: **the 4/4 Saturday report is a complete, successful recovery**, not a
+partial one, and it must never be mistaken for 9 silent failures.
+
+The output below is authored to match the CLI's real format strings — it is
+**illustrative, not a captured run** (no real recovery has been executed to
+produce it):
+
+Friday, 2026-08-14 — 13 of 13 owed:
+
+```
+prices:fetch — recovering 2026-08-14: marks are dated 2026-08-14, while
+  fetchedAt records this run, because that is what a late measurement is.
+
+  fetched btc     BTCUSDT     2026-08-14  <price>
+  fetched eth     ETHUSDT     2026-08-14  <price>
+  fetched render  RENDERUSDT  2026-08-14  <price>
+  fetched gram    GRAMUSDT    2026-08-14  <price>
+  fetched aapl    AAPL        2026-08-14  <price>
+  fetched googl   GOOGL       2026-08-14  <price>
+  fetched tsla    TSLA        2026-08-14  <price>
+  fetched eww-mxn EWW         2026-08-14  <price>
+  ...             (remaining 5 of 13 instruments omitted for brevity)
+
+prices:fetch — 13/13 quotes stored in <dataDir>/prices
+  13 new PriceMarked candidate(s) written to <dataDir>/inbox/transactions.json
+  0 already pending (same id) — skipped
+
+  recovery of 2026-08-14 — 13 owed, 13 marked, 0 absent; 0 not owed by their venue
+
+Next: run `pnpm spine` to validate + append the marks to the event log.
+```
+
+Exit code **0**.
+
+Saturday, 2026-08-15 — 4 of 4 owed (not 9 of 13 — the other 9 were never owed):
+
+```
+prices:fetch — recovering 2026-08-15: marks are dated 2026-08-15, while
+  fetchedAt records this run, because that is what a late measurement is.
+
+  fetched btc     BTCUSDT     2026-08-15  <price>
+  fetched eth     ETHUSDT     2026-08-15  <price>
+  fetched render  RENDERUSDT  2026-08-15  <price>
+  fetched gram    GRAMUSDT    2026-08-15  <price>
+
+prices:fetch — 4/4 quotes stored in <dataDir>/prices
+  4 new PriceMarked candidate(s) written to <dataDir>/inbox/transactions.json
+  0 already pending (same id) — skipped
+
+  recovery of 2026-08-15 — 4 owed, 4 marked, 0 absent; 9 not owed by their venue
+  not owed (never attempted): aapl, googl, tsla, eww-mxn, intc-mxn, nke-mxn, nu-mxn, rivn-mxn, sbux-mxn
+
+Next: run `pnpm spine` to validate + append the marks to the event log.
+```
+
+Exit code **0**. The 9 Twelve Data symbols in `not owed` were never requested —
+the run computes the owed set from the venue calendar before building any
+provider request, so there is no ambiguous "no data" response to explain away.
+
+### The exit contract
+
+Under `--as-of`, every registered instrument for the recovered day lands in
+exactly one of three states: **not owed** (the venue owed nothing that day —
+never attempted), **owed and marked** (a mark was built and queued), or **owed
+and absent** (owed, but no mark came out — a provider failure, or a bar dated
+something other than the target day). A recovery in which every owed instrument
+marked exits **0**. The run exits **1** if the absent set is non-empty — and,
+exactly as on the daily path, also if any fetch failed outright or the spine
+pre-check would reject a queued mark.
+
+A refused argument never reaches the providers, and exits **1** with a single
+readable sentence and **no stack trace**: `--as-of=<today>` (recovering today is
+just running the daily job), a future date, a date that is not a real calendar
+day (`2026-02-30` is refused, never quietly read as March 2), a missing value,
+or an unknown argument — including the `--asof=` near-miss, which is rejected
+rather than ignored precisely so a typo cannot silently run the daily job and
+look like a finished recovery.
+
+**In one sentence: the exit code cannot tell a market holiday apart from a
+provider failure — it only says the day did not come back, so read the
+`ABSENT`/`suspected` lines it prints before deciding what to do.** A holiday
+needs no action; a provider fault needs a re-run.
+
+### What recovery does *not* do (and why it is never run through the wrapper)
+
+A recovery run writes exactly two things: stored quotes in `<dataDir>/prices`
+and queued marks in `<dataDir>/inbox/transactions.json`. It never:
+
+- **Writes the heartbeat.** `job-heartbeat.json` records whether the daily job
+  ran that evening; its only writer is the wrapper's `EXIT` trap. Stamping it
+  for a recovered past date would assert an evening run that never happened —
+  manufacturing exactly the clean-looking surface a lost day hides behind.
+- **Runs the spine.** `--as-of` is a flag on the fetch step, not a new
+  pipeline; folding the recovered marks into the event log is still step 3 of
+  the procedure above, run by hand.
+- **Commits to the `<fund>` data repo, or refreshes the hosted projection.**
+  Both stay the operator's, as steps 3–4 above and steps 5–6 of the daily
+  wrapper (`pnpm gap-report -- --write`, `pnpm backfill`) respectively.
+
+This is also why recovery is **never** routed through
+`ops/price-feed/run-daily-fetch.sh`: the wrapper's `EXIT` trap is the sole
+writer of `job-heartbeat.json`, so pushing a recovery run through it would
+stamp that false evening-ran signal regardless of intent. The wrapper also
+derives its mark-time window from the live wall clock, which answers nothing
+useful about a date that already passed. Run `pnpm prices:fetch --as-of=<date>`
+directly, on its own, every time.
+
 ## The committed wrapper test harness (and why a green CI check says nothing about it)
 
 `apps/price-feed/src/wrapper-harness/` drives `ops/price-feed/run-daily-fetch.sh`
