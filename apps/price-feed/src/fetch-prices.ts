@@ -39,17 +39,43 @@
  * attached — the derived MXN value lives ONLY on the mark, never in the store, and
  * a missing/stale FIX fails those derivations loudly rather than reusing an old
  * rate or emitting an underived mark.
+ *
+ * RECOVERING A LOST DAY (#359). `RunOptions.asOf` replaces the derived trading day
+ * and NOTHING ELSE — `now` stays the real clock, so `fetchedAt` records the instant
+ * the recovery actually happened. A mark dated for the day it measures and stamped
+ * with the day it was fetched IS what "measurement recovered late" means; fabricating
+ * `now` instead would forge that provenance, and would steer no provider anyway (a
+ * provider reads `now` only for the `fetchedAt` stamp and as a fallback for a
+ * malformed bar timestamp). The override is validated HERE rather than in the CLI —
+ * a programmatic caller must not be able to bypass it — and it must be a REAL
+ * calendar day strictly earlier than the current trading day. That last rule is
+ * load-bearing twice over: it is what makes forcing the mark gate open safe (a past
+ * bar settled days ago, so the 18:00 settlement proxy has nothing left to infer),
+ * and it is what guarantees Binance's target UTC day is complete now that the
+ * date-pinned path has no `>= 2 klines` proxy of its own.
+ *
+ * OWED-SET FILTERING IS RECOVERY-ONLY (spec §8.1). Under an override the registry is
+ * filtered through `owesMarkOn` BEFORE any request is constructed, so a Saturday
+ * never asks Twelve Data for a bar that does not exist — which matters because a
+ * non-ok status is a REQUEST-level failure there, and one dateless symbol would
+ * collapse all nine into `failAll`. The live daily path is deliberately UNCHANGED:
+ * it still fetches all 9 equity symbols on a Saturday, stores Friday's close under
+ * Saturday's `asOf`, and records 9 stale-mark skips. Making the filter unconditional
+ * would quietly change what the nightly job stores; that is a separate decision.
  */
 import {
   deriveMxnMark,
   instrumentsForSource,
   isAtOrAfterMarkTime,
+  isIsoCalendarDate,
   markFromQuote,
+  owesMarkOn,
   requireFreshFix,
   tradingDayAsOf,
   type FixObservation,
   type InstrumentRegistryEntry,
   type PriceMarkedEvent,
+  type PriceSource,
   type Quote,
 } from "@numisma/engine";
 import { mkdir } from "node:fs/promises";
@@ -66,6 +92,7 @@ import { fetchBanxicoFix } from "./banxico-provider.js";
 import { emitMarksToInbox } from "./inbox.js";
 import { resolvePriceFeedPaths } from "./paths.js";
 import { upsertQuote } from "./price-store.js";
+import { PriceFetchRefusal } from "./refusal.js";
 
 /** One instrument that could not be fetched, with the symbol-attributable reason. */
 export interface FetchFailure {
@@ -92,9 +119,35 @@ export interface MarkSkip {
   asOf: string;
 }
 
+/**
+ * One instrument the run did NOT attempt because its venue owed no mark on the
+ * target day — a Twelve Data equity under a Saturday `asOf`. Recovery path only:
+ * empty on every live daily run (see the owed-set note in the module doc).
+ */
+export interface NotOwed {
+  instrumentId: string;
+  symbol: string;
+  source: PriceSource;
+}
+
 export interface FetchRunResult {
   /** Quotes successfully fetched and upserted this run (crypto + equities + USD legs). */
   quotes: Quote[];
+  /**
+   * The trading day this run marked against — the derived one on a live run, the
+   * validated override on a recovery run. The only place a caller can read the
+   * run's date without picking a quote out of the store.
+   */
+  asOf: string;
+  /**
+   * Instruments the owed-set filter removed before any request was built. Empty on
+   * the live path, which never filters (spec §8.1).
+   */
+  notOwed: readonly NotOwed[];
+  /**
+   * Instruments this run ATTEMPTED: the owed set under an override, all 13 without
+   * one. So a Saturday recovery reads `4/4` rather than `4/13`.
+   */
   totalCount: number;
   storedCount: number;
   /** New mark candidates written to the inbox (0 before the mark time). */
@@ -128,6 +181,14 @@ export interface RunOptions {
   fetchImpl?: typeof fetch;
   /** Injectable clock; defaults to `new Date()`. Anchors `asOf` and the mark gate. */
   now?: () => Date;
+  /**
+   * Recover a PAST trading day instead of today's: `YYYY-MM-DD`, replacing the
+   * derived `asOf` and nothing else. `now` stays the real clock, so `fetchedAt`
+   * still records when the recovery ran. Validated here, not by the caller —
+   * a value that is not a real calendar day, or that is not strictly earlier than
+   * the current trading day, throws rather than being coerced.
+   */
+  asOf?: string;
   /** Provider credentials; default to the environment. Injectable for tests. */
   credentials?: Partial<ProviderCredentials>;
   /**
@@ -163,11 +224,33 @@ export async function runPriceFetch(options: RunOptions = {}): Promise<FetchRunR
   const sleepImpl =
     options.sleepImpl ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const instant = now();
-  const asOf = tradingDayAsOf(instant, config.timeZone);
+  const today = tradingDayAsOf(instant, config.timeZone);
+  // The override REPLACES the derived trading day and nothing else — validated
+  // before a single request is built, so a bad date can never reach the store.
+  const override = validateAsOfOverride(options.asOf, today);
+  const asOf = override ?? today;
+  // The provider's word for the same day. Translated here, at the call sites, and
+  // omitted entirely on the live path so those requests stay byte-identical.
+  const targetDate = override;
   const paths = resolvePriceFeedPaths(config.dataDir);
 
-  const binanceEntries = instrumentsForSource("binance");
-  const equityEntries = instrumentsForSource("twelvedata");
+  // The owed set, computed BEFORE any request — recovery path only (spec §8.1).
+  const notOwed: NotOwed[] = [];
+  const owed = (entries: InstrumentRegistryEntry[]): InstrumentRegistryEntry[] => {
+    if (override === undefined) return entries;
+    return entries.filter((entry) => {
+      if (owesMarkOn(entry.source, asOf)) return true;
+      notOwed.push({
+        instrumentId: entry.instrumentId,
+        symbol: entry.symbol,
+        source: entry.source,
+      });
+      return false;
+    });
+  };
+  const binanceEntries = owed(instrumentsForSource("binance"));
+  const equityEntries = owed(instrumentsForSource("twelvedata"));
+  // What the run ATTEMPTED, so `storedCount/totalCount` stays an honest ratio.
   const totalCount = binanceEntries.length + equityEntries.length;
 
   await mkdir(paths.pricesDir, { recursive: true });
@@ -179,7 +262,7 @@ export async function runPriceFetch(options: RunOptions = {}): Promise<FetchRunR
   // Crypto (Binance): keyless, so fetch one symbol at a time — no rate budget worth
   // batching, and each stays individually attributable.
   await fetchInto(binanceEntries, successes, failures, paths.pricesDir, asOf, (entry) =>
-    fetchBinanceDailyClose(entry, { timeoutMs: config.requestTimeoutMs, fetchImpl, now }),
+    fetchBinanceDailyClose(entry, { timeoutMs: config.requestTimeoutMs, fetchImpl, now, targetDate }),
   );
   // Equities (Twelve Data): batched, but PACED across minute windows. The free tier
   // caps at 8 CREDITS/min and a batch costs 1 credit PER SYMBOL, so all 9 symbols in
@@ -203,19 +286,40 @@ export async function runPriceFetch(options: RunOptions = {}): Promise<FetchRunR
       apiKey: credentials.twelveDataApiKey,
       fetchImpl,
       now,
+      ...(targetDate === undefined ? {} : { targetDate }),
     });
     await recordResults(equityResults, successes, failures, paths.pricesDir, asOf);
   }
 
   // Two-plane rule: the store always upserts above; marks only at/after mark time.
-  const markEmitted = isAtOrAfterMarkTime(instant, config);
+  //
+  // …except on the recovery path, where the gate is forced open and
+  // `isAtOrAfterMarkTime` is not consulted at all. That gate answers "has TODAY's
+  // bar settled yet?", and for a day already in the past the question is vacuous —
+  // settlement is in hand rather than inferred from the hour. Validation guarantees
+  // `asOf < today`, which is the whole reason this is safe: without it,
+  // `--as-of=<today>` before 18:00 would mark an unsettled bar. Keeping the gate
+  // instead would fail as "correct fetch, zero marks, exit 0" — #356's exact shape,
+  // re-created inside the tool built to fix #356.
+  const markEmitted = override !== undefined || isAtOrAfterMarkTime(instant, config);
   const marks = markEmitted
-    ? await buildMarks(successes, failures, staleMarkSkips, asOf, config, credentials, fetchImpl)
+    ? await buildMarks(
+        successes,
+        failures,
+        staleMarkSkips,
+        asOf,
+        targetDate,
+        config,
+        credentials,
+        fetchImpl,
+      )
     : [];
   const emittedCount = await emitMarksToInbox(paths.inbox, marks);
 
   return {
     quotes: successes.map((s) => s.quote),
+    asOf,
+    notOwed,
     totalCount,
     storedCount: successes.length,
     emittedCount,
@@ -225,6 +329,47 @@ export async function runPriceFetch(options: RunOptions = {}): Promise<FetchRunR
     failures,
     staleMarkSkips,
   };
+}
+
+/**
+ * Validate an `asOf` override, or pass `undefined` straight through (the live path).
+ *
+ * WHY HERE AND NOT IN THE CLI. The module's two-plane invariant reads "one clock, so
+ * the stored quote and the queued mark cannot diverge on `asOf`". Today divergence is
+ * impossible BY CONSTRUCTION; an override downgrades that to merely incorrect, so the
+ * obligation to check belongs to the function that holds the invariant — a
+ * programmatic caller must not be able to route around it.
+ *
+ * Two rules, and both refusals throw a `PriceFetchRefusal` carrying a sentence an
+ * operator can act on (the CLI renders it as that sentence and nothing else; it does
+ * not compose it). The TYPE is what earns the bare rendering: an unexpected fault
+ * further down this function — a failed `mkdir`, an atomic-write error, a defect in
+ * `buildMarks` — is not a refusal and keeps its stack.
+ *
+ *  1. A REAL calendar day, via `isIsoCalendarDate` — shape AND round-trip. A
+ *     shape-only regex accepts `"2026-02-30"`, which then silently becomes March 2 in
+ *     every date computation downstream. Refused, never coerced.
+ *  2. STRICTLY earlier than the current trading day (`YYYY-MM-DD` sorts
+ *     chronologically, so a string compare is the date compare). This disposes of a
+ *     future date as well, and it is the precondition the forced-open mark gate and
+ *     Binance's pinned path both rest on.
+ */
+function validateAsOfOverride(asOf: string | undefined, today: string): string | undefined {
+  if (asOf === undefined) return undefined;
+  if (!isIsoCalendarDate(asOf)) {
+    throw new PriceFetchRefusal(
+      `asOf "${asOf}" is not a real calendar date. Give a day that exists, in YYYY-MM-DD ` +
+        `form — a near-miss like 2026-02-30 is refused, never quietly read as March 2.`,
+    );
+  }
+  if (asOf >= today) {
+    throw new PriceFetchRefusal(
+      `asOf "${asOf}" is not in the past: the current trading day is ${today}, and a ` +
+        `recovery run marks against a day strictly earlier than it. To mark ${today}, ` +
+        `run the daily job with no asOf — "recover today" is just "run the daily job".`,
+    );
+  }
+  return asOf;
 }
 
 /** Split `items` into consecutive chunks of at most `size` (size ≥ 1). */
@@ -331,6 +476,8 @@ async function buildMarks(
   failures: FetchFailure[],
   staleMarkSkips: MarkSkip[],
   asOf: string,
+  /** The provider's word for `asOf` on a recovery run; `undefined` on the live path. */
+  targetDate: string | undefined,
   config: PriceFeedConfig,
   credentials: ProviderCredentials,
   fetchImpl: typeof fetch,
@@ -346,6 +493,9 @@ async function buildMarks(
         timeoutMs: config.requestTimeoutMs,
         token: credentials.banxicoToken,
         fetchImpl,
+        // On a recovery run the newest FIX is days too new; ask for the one
+        // published on the recovered day, or `requireFreshFix` rejects it below.
+        ...(targetDate === undefined ? {} : { targetDate }),
       });
     } catch (error) {
       // Surface the FIX outage once, attributably; each `*-mxn` derivation below
