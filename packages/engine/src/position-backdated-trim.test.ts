@@ -319,8 +319,8 @@ describe("ADR-017 — the trim boundary", () => {
 // THE PREFIX BOUNDARY IS `<=`, NOT `<` — the four cases a strict prefix got wrong.
 //
 // `worldAsOf(d)` folds the events the fold will have applied BEFORE the backdated verb.
-// The fold orders by (`asOf`, THEN LOG INDEX) (`fold.ts:250`), and every event in the
-// reference has a LOWER log index than the event under check — `ingest-walk.ts:191`
+// The fold orders by (`asOf`, THEN LOG INDEX) (`fold.ts:200`), and every event in the
+// reference has a LOWER log index than the event under check — `ingest-walk.ts:231`
 // rebuilds the reference from `[...priorEvents, ...accepted]` and the candidate joins
 // `accepted` only once it is admitted. So a same-dated prior is applied BEFORE the trim
 // and belongs in its world; a strict `<` prefix judges against a world the fold will

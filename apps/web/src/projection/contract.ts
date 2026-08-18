@@ -210,7 +210,8 @@ export interface DcaBlock {
    * zero rows enumerable there is no row to carry a discriminant. A missing file is
    * `loaded`-with-empty — the normal starting state — while a real read error is
    * `load-failed`, mapped here to `"unreadable"`. Without this field the wire renders
-   * a failed read as "no plans", the exact lie the engine names at `plans.ts:254-258`.
+   * a failed read as "no plans", the exact lie the engine names on `LoadedPlans`
+   * (`packages/engine/src/plans.ts:289-292`).
    */
   source: "loaded" | "unreadable";
   /**

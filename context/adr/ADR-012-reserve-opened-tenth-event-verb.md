@@ -80,7 +80,7 @@ movement verb — it was the destination container.**
   it.
 - **`ReserveOpened` with a mandatory opening balance, symmetric with
   `PositionOpened` — REJECTED.** `PositionOpened` requires at least one lot
-  (`packages/engine/src/events/parse.ts:515-516`), and mirroring that shape
+  (`parseLots`, `packages/engine/src/events/parse.ts:528`), and mirroring that shape
   would make a Reserve birthable only by draining another Reserve's balance
   into it at creation. That is false for the new-venue case — a Reserve at a
   brand-new exchange or a new Tempo's cash pocket at an existing venue has no
@@ -107,20 +107,23 @@ capital structure sits on the log side of it.
 **`lots: []`, not absent — and it is load-bearing.** The grill's `T2` specified
 the container is born with *"no lots."* Taken literally that is a
 **provenance-laundering bug**, found by building the prototype:
-`packages/engine/src/events/fold.ts:85` — `applyReserveDelta` **early-returns
-on a falsy `lots`** (documented there as `"untiered: amount is the whole
-truth"`). A Reserve born genuinely lots-less would **silently swallow the
+`applyReserveDelta` in `packages/engine/src/events/fold.ts` — cited BY NAME,
+because the line number this ADR pinned has since drifted — **early-returns on a
+falsy `lots`**, and `foldEvents`' `ReserveOpened` arm documents why: `"untiered:
+amount is the whole truth"`. A Reserve born genuinely lots-less would **silently swallow the
 `tier` of every incoming `Transfer`**, so the reclassified sum would have
 landed in the new Reserve untiered and dropped straight out of the tier
 rollup — **while NAV still looked perfect**, because `amount` stays
 authoritative and the money did arrive. That is exactly the failure
 `Transfer`'s own doc claims to prevent — tier "rides across so moving cash
-cannot launder its provenance." The fix, now built into `foldEvents`
-(`fold.ts:367`) and its cross-reference shadow
-(`packages/engine/src/events/crossref.ts:290-298`): the Reserve is born with an
+cannot launder its provenance." The fix, now built into `foldEvents`'s
+`ReserveOpened` arm (`fold.ts`, cited by name) and its cross-reference shadow
+(`buildEventReference`, `packages/engine/src/events/crossref.ts:551`): the
+Reserve is born with an
 **empty array**, not an absent field. An empty array is truthy, so the first
-credit pushes a real tier lot; `packages/engine/src/compose/canonical.ts:386`
-reads a length-0 lot array as untiered, so a Reserve born and never funded
+credit pushes a real tier lot; `buildReserveTierContributions`
+(`packages/engine/src/compose/canonical.ts:392-393`) reads a length-0 lot array
+as untiered, so a Reserve born and never funded
 still composes correctly into the tier rollup. NAV-neutrality is unharmed —
 empty lots sum to zero. **Generalized, this is the nugget worth keeping:**
 "structurally impossible" is a claim about a specific encoding, not about an

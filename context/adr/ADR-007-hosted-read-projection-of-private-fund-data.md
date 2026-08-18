@@ -316,7 +316,8 @@ nothing else notices). It carries three things:
 - **`source`** — `"loaded" | "unreadable"`, the whole-file outcome of the sidecar read, mapped
   1:1 out of `loadPlans`'s two-arm `load` result (its `"load-failed"` arm becomes `"unreadable"`;
   the loader's own spelling stays off the wire). Without this field a read failure renders as
-  "no plans" — the exact lie the engine names at `packages/engine/src/plans.ts:254-258` —
+  "no plans" — the exact lie the engine names on `LoadedPlans`
+  (`packages/engine/src/plans.ts:289-292`) —
   because with zero rows enumerable there is no per-row discriminant left to carry it.
 - **`positions`** — a `DcaPositionRow[]`, one row per position the sidecar names, each carrying
   `{ positionId, state }` with `kind` and `rungs` present only where they mean something. `state`
