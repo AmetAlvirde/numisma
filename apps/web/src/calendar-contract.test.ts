@@ -24,48 +24,21 @@
  * of Greenwich on the previous day) is what would let a liveness detector call a
  * Monday a Sunday.
  */
-import { readFileSync, readdirSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import * as engine from "@numisma/engine";
 import * as calendar from "@numisma/engine/calendar";
 import { describe, expect, it } from "vitest";
+import { REPO_ROOT, sourceFiles } from "../../../ops/testkit/repo-sources.testkit.js";
 
 const SHARED_DATE_HELPERS = ["addDays", "daysBetween"] as const;
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-// HERE = apps/web/src → the repo root is three levels up.
-const REPO_ROOT = resolve(HERE, "../../..");
 const SINGLE_HOME = "packages/engine/src/calendar.ts";
-
-const SKIPPED_DIRS = new Set([
-  "node_modules",
-  ".git",
-  ".vercel",
-  ".output",
-  ".nitro",
-  "dist",
-  "coverage",
-]);
-
-/** Every non-vendored TypeScript source in the repo, repo-root-relative. */
-function typescriptSources(dir: string, found: string[] = []): string[] {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.isDirectory()) {
-      if (!SKIPPED_DIRS.has(entry.name)) {
-        typescriptSources(join(dir, entry.name), found);
-      }
-    } else if (/\.tsx?$/.test(entry.name)) {
-      found.push(relative(REPO_ROOT, join(dir, entry.name)));
-    }
-  }
-  return found;
-}
 
 // The repo walk and every read happen ONCE, hoisted for the same reason the three
 // sources below are: `declarersOf` is called per helper name, and re-walking 200-odd
 // files per name buys nothing.
-const SOURCES = typescriptSources(REPO_ROOT).map((file) => ({
+const SOURCES = sourceFiles().map((file) => ({
   file,
   text: readFileSync(join(REPO_ROOT, file), "utf8"),
 }));

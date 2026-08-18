@@ -16,11 +16,21 @@
  * shape this follows deliberately (walk the SOURCE TREE, not a build output, so it
  * needs no build and MUST NOT self-skip — it runs on every `pnpm test`, on every
  * machine).
+ *
+ * SCANS SIX EXTENSIONS, NOT TWO. `GUARD_SOURCE_EXTENSIONS` is the list this file
+ * declared for itself before it moved onto the shared walker, passed back in
+ * explicitly because the walker's `.ts`/`.tsx` default would narrow it. No
+ * `.js`/`.jsx`/`.mts`/`.cts` file exists under `apps/web` today, so the scanned set
+ * is unchanged — the point is that the first one to arrive is still caught here.
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { describe, expect, it } from "vitest";
+import {
+  GUARD_SOURCE_EXTENSIONS,
+  sourceFiles,
+} from "../../../ops/testkit/repo-sources.testkit.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** The web app's source root — this file lives at its top level. */
@@ -29,22 +39,6 @@ const SRC_DIR = resolve(HERE);
 const ALLOWED_DIR = join(SRC_DIR, "push");
 
 const PACKAGE = "@numisma/preferences";
-const SOURCE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts"];
-
-/** Every file under `dir`, recursively (skipping build/dependency output). */
-function walk(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    if (entry.name === "node_modules" || entry.name.startsWith(".")) return [];
-    const full = join(dir, entry.name);
-    return entry.isDirectory() ? walk(full) : [full];
-  });
-}
-
-function sourceFiles(dir: string): string[] {
-  return walk(dir).filter((file) =>
-    SOURCE_EXTENSIONS.some((ext) => file.endsWith(ext)),
-  );
-}
 
 /**
  * Does this file name the package in an IMPORT POSITION? Matched by syntax
@@ -67,7 +61,11 @@ function importsPreferences(file: string): boolean {
 
 describe("blast radius: @numisma/preferences is confined to the push path", () => {
   it("no apps/web source file outside src/push/ imports the sidecar reader", () => {
-    const offenders = sourceFiles(SRC_DIR)
+    const offenders = sourceFiles({
+      dir: SRC_DIR,
+      as: "absolute",
+      extensions: GUARD_SOURCE_EXTENSIONS,
+    })
       .filter((file) => !file.startsWith(`${ALLOWED_DIR}${sep}`))
       .filter(importsPreferences)
       .map((file) => relative(SRC_DIR, file));
@@ -88,7 +86,11 @@ describe("blast radius: @numisma/preferences is confined to the push path", () =
     // Guard against a false pass: if the push path stopped importing the reader
     // (or the scan stopped matching import syntax), the check above would pass
     // vacuously while proving nothing.
-    const importers = sourceFiles(ALLOWED_DIR).filter(importsPreferences);
+    const importers = sourceFiles({
+      dir: ALLOWED_DIR,
+      as: "absolute",
+      extensions: GUARD_SOURCE_EXTENSIONS,
+    }).filter(importsPreferences);
     expect(importers.length).toBeGreaterThan(0);
   });
 });

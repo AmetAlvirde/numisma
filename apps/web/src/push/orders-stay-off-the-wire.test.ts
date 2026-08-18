@@ -113,9 +113,10 @@
  * this file is about. All restored.
  * ────────────────────────────────────────────────────────────────────────────────
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { REPO_ROOT, sourceFiles } from "../../../../ops/testkit/repo-sources.testkit.js";
 import { COMPOSITION_SNAPSHOT_SCHEMA_VERSION, toProjectionReport } from "../projection/contract.ts";
 import { loadFixture, TEST_DCA, TEST_GLANCE } from "./push-core.fixtures.ts";
 
@@ -202,14 +203,24 @@ function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/.*$/gm, "$1");
 }
 
-/** Every source file on the projection/push path, excluding the tests that police it. */
+/** This test file's own package, repo-root-relative — the base the reported paths are relative to. */
+const WEB_PACKAGE = "apps/web";
+
+/**
+ * Every source file on the projection/push path, excluding the tests that police it.
+ *
+ * The listing comes from the shared gitignore-aware walker, which already restricts
+ * itself to `.ts` and `.tsx`; the `.test.`/`.fixtures.` exclusions below are THIS
+ * guard's own policy and stay. Reported paths remain `src/push/foo.ts` — relative to
+ * `apps/web`, not the repo root — because they are read by a human out of an assertion
+ * failure, and a package-relative path is what that reader is holding.
+ */
 function projectionSources(): { path: string; source: string }[] {
   const roots = ["src/push", "src/projection"];
   const files: { path: string; source: string }[] = [];
   for (const root of roots) {
-    const dir = new URL(`../../${root}/`, import.meta.url).pathname;
-    for (const entry of readdirSync(dir)) {
-      if (!entry.endsWith(".ts") && !entry.endsWith(".tsx")) continue;
+    const dir = join(REPO_ROOT, WEB_PACKAGE, root);
+    for (const entry of sourceFiles({ dir, recursive: false, as: "dir" })) {
       if (entry.includes(".test.") || entry.includes(".fixtures.")) continue;
       files.push({
         path: join(root, entry),

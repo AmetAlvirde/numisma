@@ -15,36 +15,31 @@
  * a computed specifier that this walker cannot resolve shows up as an unresolved
  * import and fails the last assertion rather than passing silently.
  */
-import { readFileSync, readdirSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { REPO_ROOT, sourceFiles, workspacePackageDirs } from "../../../ops/testkit/repo-sources.testkit.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-// HERE = apps/tui/src → the repo root is three levels up.
-const REPO_ROOT = resolve(HERE, "../../..");
 
-/** Every workspace package: name → its directory and `exports` map. */
+/**
+ * Every workspace package: name → its directory and `exports` map.
+ *
+ * `workspacePackageDirs()` hands back REPO-ROOT-RELATIVE directories; the `dir`
+ * stored here is ABSOLUTE, because `resolveSpecifier` joins export targets onto it.
+ */
 function workspacePackages(): Map<string, { dir: string; exports: unknown }> {
   const found = new Map<string, { dir: string; exports: unknown }>();
-  for (const group of ["packages", "apps"]) {
-    for (const entry of readdirSync(join(REPO_ROOT, group), { withFileTypes: true })) {
-      if (!entry.isDirectory()) {
-        continue;
-      }
-      const dir = join(REPO_ROOT, group, entry.name);
-      const manifestPath = join(dir, "package.json");
-      if (!existsSync(manifestPath)) {
-        continue;
-      }
-      const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
-        name?: string;
-        exports?: unknown;
-      };
-      if (manifest.name !== undefined) {
-        found.set(manifest.name, { dir, exports: manifest.exports });
-      }
+  for (const packageDir of workspacePackageDirs()) {
+    const dir = join(REPO_ROOT, packageDir);
+    const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as {
+      name?: string;
+      exports?: unknown;
+    };
+    if (manifest.name !== undefined) {
+      found.set(manifest.name, { dir, exports: manifest.exports });
     }
   }
   return found;
@@ -291,9 +286,9 @@ function walkGraph(entries: readonly string[]): Graph {
 
 /** Every non-test source file the TUI ships. */
 function tuiSources(): string[] {
-  return readdirSync(HERE)
-    .filter((name) => /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name))
-    .map((name) => join(HERE, name));
+  return sourceFiles({ dir: HERE, recursive: false, as: "absolute" }).filter(
+    (file) => !/\.test\.tsx?$/.test(file),
+  );
 }
 
 const GRAPH = walkGraph(tuiSources());

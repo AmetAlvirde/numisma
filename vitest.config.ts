@@ -1,7 +1,49 @@
-import { defineConfig } from "vitest/config";
+import { defaultExclude, defineConfig } from "vitest/config";
+
+import { gitignoredPathGlobs } from "./ops/testkit/gitignored-path-globs.ts";
+
+// Test DISCOVERY is derived from what GIT IGNORES — deliberately, and it must
+// stay derived. Do not "simplify" this into a literal list of directory names.
+//
+// Why: vitest's default excludes cover node_modules/dist/.git/.cache, but not
+// `.claude/`, which this repo's execution model fills with ONE GIT WORKTREE PER
+// LANE (`.claude/worktrees/<lane>`). Each worktree is a *different branch*.
+// Without this, a repo-root `vitest run` collected every worktree's copy of the
+// suite — measured at 312 files where the branch itself has 156 — so the merge
+// gate (the full suite, run in the main checkout) was executing other lanes'
+// unmerged work-in-progress and reporting the verdict as this branch's. One
+// lane's broken WIP turns the gate red on an unrelated PR.
+//
+// A hardcoded `"**/.claude/**"` would close today's instance and none of the
+// class: the next agent tool to land gets a line in `.gitignore`, not here. Git
+// already knows the whole answer — nested `.gitignore` files, negations,
+// anchored paths, `.git/info/exclude`, the global excludes file — so discovery
+// ASKS IT rather than keeping a second copy in sync, or (as this config used to)
+// re-implementing a slice of gitignore syntax by parsing the root file's text.
+// This mirrors the gitignore-aware source walker that replaced the SKIPPED_DIRS
+// denylist; both now ask the same question of the same tool.
+//
+// WHY THE EXCLUDE FORM AND NOT AN INCLUDE FORM. Deriving vitest's `include` from
+// `git ls-files` instead would mean re-implementing vitest's default include
+// pattern (`**/*.{test,spec}.?(c|m)[jt]s?(x)`) as a hand-maintained filter — a
+// new list of exactly the kind this lane retires, failing toward green when a
+// `.spec.ts` silently stops being collected. The exclude form leaves vitest's own
+// `include` authoritative and computes nothing but "what does git ignore".
+//
+// The machinery lives in `ops/testkit/gitignored-path-globs.ts`, with the
+// entry→glob translation exposed as a pure function so it can be tested at all: a
+// private function in a config file has no importer, and this is the one piece of
+// discovery machinery that fails toward green — a widened glob deletes tests and
+// the shortened suite still passes. `gitignored-path-globs.test.ts` pins the
+// escaping with authored fixtures and asserts, with picomatch, that no test file
+// git knows about is eaten.
 
 export default defineConfig({
   test: {
+    // `exclude` REPLACES vitest's defaults rather than merging with them, so
+    // `defaultExclude` must be spread first — dropping it would start
+    // collecting tests out of node_modules.
+    exclude: [...defaultExclude, ...gitignoredPathGlobs()],
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
