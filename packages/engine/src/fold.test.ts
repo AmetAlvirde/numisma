@@ -47,7 +47,24 @@ function emptyGenesis(): FundReviewData {
       { id: "btc-usd", name: "Bitcoin", symbol: "BTC", currency: "USD" },
       { id: "cemex-mxn", name: "Cemex", symbol: "CEMEXCPO", currency: "MXN" },
     ],
-    reserves: [],
+    // FUNDED, NOT EMPTY (#371). The helpers below used to default their cash legs to a
+    // reserve the genesis did not hold, so the leg no-opped and a position-focused test
+    // could ignore it. A reserve miss is now a TOTAL discard, so that default would drop
+    // the very events these tests are about. The balance is deliberately far larger than
+    // any fixture spends, so no debit here can go negative and distract from the asset
+    // leg these tests actually assert on.
+    reserves: [
+      {
+        id: "desk-usd",
+        portfolioId: "core",
+        tempo: "Reserve",
+        executionMode: "live",
+        accountId: "binance-usd",
+        currency: "USD",
+        amount: 1_000_000,
+        lots: [{ quantity: 1_000_000, tier: "c1" }],
+      },
+    ],
     positions: [],
   };
 }
@@ -93,9 +110,11 @@ function opened(
     type: "PositionOpened",
     position,
     decision: DECISION,
-    // Default funds from a reserve the bare genesis does not hold, so the cash leg
-    // no-ops and these position-focused tests keep asserting only the asset leg.
-    funding: funding ?? { reserveId: "no-such-reserve", amount: cost },
+    // Defaults to the genesis desk reserve, which is funded far beyond any fixture's
+    // spend, so the cash leg APPLIES and stays uninteresting — these position-focused
+    // tests keep asserting only the asset leg. It must name a reserve that exists: a
+    // miss now discards the whole event (#371), which would drop the open outright.
+    funding: funding ?? { reserveId: "desk-usd", amount: cost },
   };
 }
 
@@ -110,7 +129,7 @@ function closed(
     asOf,
     type: "PositionClosed",
     positionId,
-    settlement: settlement ?? { reserveId: "no-such-reserve", proceeds: 1 },
+    settlement: settlement ?? { reserveId: "desk-usd", proceeds: 1 },
   };
 }
 
@@ -198,7 +217,7 @@ describe("foldEvents — PositionAddedTo refreshes the entry-VWAC fallback mark"
         type: "PositionAddedTo",
         positionId: "scale-core",
         lot: { quantity: 10, cost: 200, tier: "c1" },
-        funding: { reserveId: "no-such-reserve", amount: 2000 },
+        funding: { reserveId: "desk-usd", amount: 2000 },
       },
     ]).data;
 
@@ -233,7 +252,7 @@ describe("foldEvents — PositionAddedTo refreshes the entry-VWAC fallback mark"
         type: "PositionAddedTo",
         positionId: "marked-core",
         lot: { quantity: 10, cost: 200, tier: "c1" },
-        funding: { reserveId: "no-such-reserve", amount: 2000 },
+        funding: { reserveId: "desk-usd", amount: 2000 },
       },
     ]).data;
 
@@ -260,7 +279,7 @@ describe("foldEvents — PositionAddedTo refreshes the entry-VWAC fallback mark"
         type: "PositionAddedTo",
         positionId: "scale-core",
         lot: { quantity: 10, cost: 200, tier: "c1" },
-        funding: { reserveId: "no-such-reserve", amount: 2000 },
+        funding: { reserveId: "desk-usd", amount: 2000 },
       },
     ]).data;
 
@@ -297,7 +316,7 @@ describe("foldEvents — PositionAddedTo refreshes the entry-VWAC fallback mark"
         type: "PositionAddedTo",
         positionId: "sameday-core",
         lot: { quantity: 10, cost: 200, tier: "c1" },
-        funding: { reserveId: "no-such-reserve", amount: 2000 },
+        funding: { reserveId: "desk-usd", amount: 2000 },
       },
     ]).data;
 
@@ -329,7 +348,7 @@ describe("foldEvents — PositionAddedTo refreshes the entry-VWAC fallback mark"
         type: "PositionAddedTo",
         positionId: "marked-core",
         lot: { quantity: 10, cost: 200, tier: "c1" },
-        funding: { reserveId: "no-such-reserve", amount: 2000 },
+        funding: { reserveId: "desk-usd", amount: 2000 },
       },
     ]).data;
 
@@ -362,7 +381,7 @@ describe("foldEvents — PositionAddedTo refreshes the entry-VWAC fallback mark"
         type: "PositionAddedTo",
         positionId: "sameday-mark-core",
         lot: { quantity: 10, cost: 200, tier: "c1" },
-        funding: { reserveId: "no-such-reserve", amount: 2000 },
+        funding: { reserveId: "desk-usd", amount: 2000 },
       },
       marked("mk-3", "2026-06-03", "btc-usd", 130),
     ]).data;
@@ -396,7 +415,7 @@ describe("foldEvents — PositionAddedTo refreshes the entry-VWAC fallback mark"
         type: "PositionAddedTo",
         positionId: "one-day-core",
         lot: { quantity: 10, cost: 200, tier: "c1" },
-        funding: { reserveId: "no-such-reserve", amount: 2000 },
+        funding: { reserveId: "desk-usd", amount: 2000 },
       },
       marked("mk-4", "2026-06-02", "btc-usd", 130),
     ]).data;
@@ -453,7 +472,7 @@ describe("foldEvents — PositionAddedTo refreshes the entry-VWAC fallback mark"
         type: "PositionAddedTo",
         positionId: "journey-core",
         lot: { quantity: 10, cost: 200, tier: "c1" },
-        funding: { reserveId: "no-such-reserve", amount: 2000 },
+        funding: { reserveId: "desk-usd", amount: 2000 },
       },
       marked("mk-7", "2026-06-04", "btc-usd", 105),
     ]).data;
@@ -494,7 +513,7 @@ describe("foldEvents — PositionAddedTo refreshes the entry-VWAC fallback mark"
         type: "PositionAddedTo",
         positionId: "genesis-close-core",
         lot: { quantity: 10, cost: 200, tier: "c1" },
-        funding: { reserveId: "no-such-reserve", amount: 2000 },
+        funding: { reserveId: "desk-usd", amount: 2000 },
       },
     ]).data;
 
@@ -584,7 +603,31 @@ describe("foldEvents — tier + entry-FX preservation (ADR-002)", () => {
     // a c1 lot acquired at entryFx 25 (vs review FX 20) and an untiered-FX c2 lot,
     // marked to 100 MXN. Cost basis converts at each lot's entry FX; market value
     // at review FX.
-    const folded = foldEvents(emptyGenesis(), [
+    //
+    // THIS TEST OWNS ITS RESERVE, because it asserts FUND-WIDE tier percentages and any
+    // standing balance would land in the rollup beside the position. It is funded with
+    // exactly this open's cost, tier-matched to its lots (c1 500 + c2 800 = 1300), so
+    // the funding debit drains it to zero on both tiers and the fund is the position
+    // alone. Before #371 the open named an absent reserve and its cash leg no-opped;
+    // a reserve miss now discards the whole event, so the leg has to be real — and it
+    // has to land somewhere that leaves these percentages meaning what they meant.
+    const genesis = emptyGenesis();
+    genesis.reserves = [
+      {
+        id: "desk-usd",
+        portfolioId: "core",
+        tempo: "Reserve",
+        executionMode: "live",
+        accountId: "binance-usd",
+        currency: "USD",
+        amount: 1300,
+        lots: [
+          { quantity: 500, tier: "c1" },
+          { quantity: 800, tier: "c2" },
+        ],
+      },
+    ];
+    const folded = foldEvents(genesis, [
       opened("o", "2026-06-05", {
         id: "cemex-house-money",
         portfolioId: "core",
@@ -1172,5 +1215,221 @@ describe("a cash leg with no lot provenance discards the WHOLE event (#329)", ()
 
     expect(result.kind).toBe("event-error");
     expect(result).toMatchObject({ path: "position.lots" });
+  });
+});
+
+describe("a cash leg naming an ABSENT RESERVE discards the WHOLE event (#371)", () => {
+  // THE RULING THIS PINS. `reserve-absent` used to mean two different things depending
+  // on which arm raised it. On the four explicit-tier cash arms it meant "nothing
+  // applied" — there is nothing else in those arms to apply. On the four LOT-DERIVED
+  // arms it meant "everything except the cash": a close booked its row and retired the
+  // position, a trim booked a partial row and mutated the lots, an open registered a
+  // position, an add grew one — each against a reserve that never moved. And `Transfer`
+  // debited its source when only the destination was missing.
+  //
+  // Nothing in `FoldSkipReason`, in `SKIP_DETAIL`, or in the prose told a reader which
+  // sense was in force; the difference lived only in the shape of the call sites. Every
+  // member of the vocabulary now means the fold applied NOTHING AT ALL, which is what
+  // makes each reason's fixed notice ("No state moved.") true wherever it can be raised.
+  //
+  // REACHABILITY IS UNCHANGED and is migration-shaped, the same caveat #366 and #367
+  // carry: the cross-ref existence gate rejects an unknown reserve before the fold runs,
+  // so on the gated path none of this can happen. It is reachable through callers that
+  // fold the durable log directly — `loadFoldedReview` in `event-store.ts`.
+
+  const RESERVE_START = 5000;
+
+  /** One funded USD reserve and one all-c1 BTC position (2 @ 100, marked 150). */
+  function reserveGenesis(): FundReviewData {
+    const genesis = emptyGenesis();
+    genesis.reserves = [
+      {
+        id: "desk-usd",
+        portfolioId: "core",
+        tempo: "Reserve",
+        executionMode: "live",
+        accountId: "binance-usd",
+        currency: "USD",
+        amount: RESERVE_START,
+        lots: [{ quantity: RESERVE_START, tier: "c1" }],
+      },
+    ];
+    genesis.positions = [
+      {
+        id: "btc-core",
+        portfolioId: "core",
+        tempo: "Capital",
+        executionMode: "live",
+        accountId: "binance-usd",
+        instrumentId: "btc-usd",
+        direction: "long",
+        markPrice: 150,
+        currency: "USD",
+        lots: [{ quantity: 2, cost: 100, tier: "c1" }],
+      },
+    ];
+    return genesis;
+  }
+
+  /** Total realized P&L on the closed book — the figure a partial discard inflates. */
+  function realized(folded: ReturnType<typeof foldEvents>): number {
+    return (folded.data.closedPositions ?? []).reduce((sum, row) => sum + row.realizedPnlUsd, 0);
+  }
+
+  function onlySkip(folded: ReturnType<typeof foldEvents>) {
+    expect(folded.skipped).toHaveLength(1);
+    return folded.skipped[0]!;
+  }
+
+  it("discards a CLOSE naming an absent settlement reserve — the position stays open", () => {
+    // The defect in its original form (#371): the row carried the full proceeds into
+    // realized P&L and `positions.delete` retired the asset, while no reserve was ever
+    // credited. The money did not move to the wrong place, it left the fund entirely.
+    const folded = foldEvents(reserveGenesis(), [
+      closed("evt-close-ghost-reserve", "2026-06-04", "btc-core", {
+        reserveId: "no-such-reserve",
+        proceeds: 300,
+      }),
+    ]);
+
+    expect(onlySkip(folded)).toMatchObject({
+      eventId: "evt-close-ghost-reserve",
+      index: 0,
+      verb: "PositionClosed",
+      reason: "reserve-absent",
+    });
+    expect(folded.data.closedPositions ?? []).toEqual([]);
+    expect(realized(folded)).toBe(0);
+    expect(folded.data.positions.map((position) => position.id)).toEqual(["btc-core"]);
+    expect(folded.data.positions[0]!.lots).toEqual([{ quantity: 2, cost: 100, tier: "c1" }]);
+    expect(folded.data.reserves[0]!.amount).toBe(RESERVE_START);
+  });
+
+  it("discards a TRIM naming an absent settlement reserve — the lots are untouched", () => {
+    const folded = foldEvents(reserveGenesis(), [
+      {
+        id: "evt-trim-ghost-reserve",
+        asOf: "2026-06-04",
+        type: "PositionTrimmed",
+        positionId: "btc-core",
+        removals: [{ tier: "c1", quantity: 1 }],
+        settlement: { reserveId: "no-such-reserve", proceeds: 150 },
+      },
+    ]);
+
+    expect(onlySkip(folded)).toMatchObject({
+      verb: "PositionTrimmed",
+      reason: "reserve-absent",
+    });
+    expect(folded.data.closedPositions ?? []).toEqual([]);
+    expect(realized(folded)).toBe(0);
+    // The asset leg never moved: still 2 units, not 1.
+    expect(folded.data.positions[0]!.lots).toEqual([{ quantity: 2, cost: 100, tier: "c1" }]);
+    expect(folded.data.reserves[0]!.amount).toBe(RESERVE_START);
+  });
+
+  it("discards an OPEN naming an absent funding reserve — no position, no anchor", () => {
+    // A position registered while its debit dropped is a holding no reserve paid for:
+    // NAV invention rather than misattribution.
+    const folded = foldEvents(reserveGenesis(), [
+      opened(
+        "evt-open-ghost-reserve",
+        "2026-06-04",
+        {
+          id: "aapl-new",
+          portfolioId: "core",
+          tempo: "Capital",
+          executionMode: "live",
+          accountId: "binance-usd",
+          instrumentId: "aapl-usd",
+          direction: "long",
+          currency: "USD",
+          lots: [{ quantity: 4, cost: 50, tier: "c1" }],
+        },
+        { reserveId: "no-such-reserve", amount: 200 },
+      ),
+    ]);
+
+    expect(onlySkip(folded)).toMatchObject({
+      verb: "PositionOpened",
+      reason: "reserve-absent",
+    });
+    expect(folded.data.positions.map((position) => position.id)).toEqual(["btc-core"]);
+    expect(folded.data.reserves[0]!.amount).toBe(RESERVE_START);
+    // No entry-price anchor was seeded for the instrument the discarded open named.
+    expect((folded.data.closes ?? []).some((close) => close.instrumentId === "aapl-usd")).toBe(
+      false,
+    );
+  });
+
+  it("discards an ADD naming an absent funding reserve — the lot is not appended", () => {
+    // THE SITE THAT NEEDED THE ARM RESTRUCTURED. The cash leg used to run LAST here with
+    // its return ignored, so the lot was already on the position by the time the debit
+    // dropped — the fund grew by a lot nothing paid for. The leg now runs first and
+    // gates, exactly as the open arm does.
+    const folded = foldEvents(reserveGenesis(), [
+      {
+        id: "evt-add-ghost-reserve",
+        asOf: "2026-06-04",
+        type: "PositionAddedTo",
+        positionId: "btc-core",
+        lot: { quantity: 3, cost: 120, tier: "c1" },
+        funding: { reserveId: "no-such-reserve", amount: 360 },
+      },
+    ]);
+
+    expect(onlySkip(folded)).toMatchObject({
+      verb: "PositionAddedTo",
+      reason: "reserve-absent",
+    });
+    expect(folded.data.positions[0]!.lots).toEqual([{ quantity: 2, cost: 100, tier: "c1" }]);
+    expect(folded.data.reserves[0]!.amount).toBe(RESERVE_START);
+  });
+
+  it("still applies each arm in full when the reserve IS present — the gate is not a block", () => {
+    // The other half of every gate: it must stop only the case it names. One fold
+    // exercising all four lot-derived arms against the real reserve, with no skips.
+    const folded = foldEvents(reserveGenesis(), [
+      {
+        id: "evt-add-real",
+        asOf: "2026-06-03",
+        type: "PositionAddedTo",
+        positionId: "btc-core",
+        lot: { quantity: 2, cost: 100, tier: "c1" },
+        funding: { reserveId: "desk-usd", amount: 200 },
+      },
+      closed("evt-close-real", "2026-06-05", "btc-core", {
+        reserveId: "desk-usd",
+        proceeds: 600,
+      }),
+    ]);
+
+    expect(folded.skipped).toEqual([]);
+    // 4 units at cost 100 == 400 basis; 600 proceeds == 200 realized.
+    expect(realized(folded)).toBe(200);
+    expect(folded.data.positions).toEqual([]);
+    // 5000 − 200 funding + 600 proceeds.
+    expect(folded.data.reserves[0]!.amount).toBe(RESERVE_START - 200 + 600);
+  });
+
+  it("keeps the reason's prose free of figures and of event content", () => {
+    // The notice prints unasked on channels a human reads daily, so it stays fixed and
+    // quotable. Widened here to the reserve-absent path now that it names the EVENT.
+    const skip = onlySkip(
+      foldEvents(reserveGenesis(), [
+        closed("evt-close-ghost-reserve", "2026-06-04", "btc-core", {
+          reserveId: "no-such-reserve",
+          proceeds: 300,
+        }),
+      ]),
+    );
+
+    expect(skip.reason).toBe("reserve-absent");
+    expect(skip.detail).not.toMatch(/\d/);
+    expect(skip.detail).not.toContain(skip.verb);
+    expect(skip.detail).not.toContain(skip.eventId);
+    expect(skip.detail).not.toContain("no-such-reserve");
+    expect(skip.detail).not.toContain("btc-core");
+    expect(skip.detail.length).toBeGreaterThan(0);
   });
 });

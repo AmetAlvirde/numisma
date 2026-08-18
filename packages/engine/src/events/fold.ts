@@ -286,10 +286,10 @@ export function foldEvents(
   /**
    * Apply one LOT-DERIVED cash leg. RETURNS WHETHER THE REST OF THE EVENT MAY RUN.
    *
-   * THE DISCARD IS TOTAL, WHICH IS WHY THIS IS A GATE AND NOT A VOID CALL. A
-   * lot-derived leg with no deltas has no cost-basis provenance, and an event whose
-   * cash leg cannot be attributed is dropped WHOLE: no closed-book row, no retirement,
-   * no lot mutation, no registration. `false` means the arm must do nothing at all.
+   * THE DISCARD IS TOTAL, WHICH IS WHY THIS IS A GATE AND NOT A VOID CALL. A cash leg
+   * the fold cannot apply — for EITHER reason it can report — drops the whole event:
+   * no closed-book row, no retirement, no lot mutation, no registration. `false` means
+   * the arm must do nothing at all.
    * Recording the drop and then letting the arm carry on would raise realized P&L by
    * the full proceeds while crediting NO reserve — the cash would simply vanish, which
    * is strictly worse than the invented-`c1` attribution this replaced (that at least
@@ -308,10 +308,19 @@ export function foldEvents(
    * `formatFoldDiscards` lines for a single drop. The channel would over-report the
    * very thing it exists to report exactly once.
    *
-   * A RESERVE MISS IS NOT A DISCARD and returns `true`. That asymmetry is INHERITED,
-   * not introduced here: a missing reserve has always let the arm carry on, and the
-   * cross-ref existence gate rejects an unknown reserve before the fold ever runs, so
-   * on the gated path it cannot happen at all. Only the provenance case gates.
+   * A RESERVE MISS IS ALSO A TOTAL DISCARD and returns `false` (#371). It did not use
+   * to: a missing reserve let the arm carry on, so a close booked its row and retired
+   * the position, a trim booked its partial row and mutated the lots, an open
+   * registered a position, and an add grew one — every one of them against a reserve
+   * that never moved. The vocabulary said `reserve-absent` at four other sites where
+   * it meant "nothing applied", and nothing in the type or the prose told a reader
+   * which sense was in force. Both gates now mean the same thing, so the reason codes
+   * describe WHAT WAS MISSING and the fold's answer to any of them is uniform.
+   *
+   * Reachability is unchanged and remains migration-shaped: the cross-ref existence
+   * gate rejects an unknown reserve before the fold ever runs, so on the gated path a
+   * reserve miss cannot happen. It is reachable through callers that fold the durable
+   * log directly, bypassing both gates — `loadFoldedReview` in `event-store.ts`.
    *
    * Only lot-derived legs route through here. The explicit-tier legs (`Deposit`,
    * `Withdraw`, both `Transfer` legs) call `applyToReserve` directly: their tiers come
@@ -330,6 +339,7 @@ export function foldEvents(
     }
     if (!applyToReserve(reserves, reserveId, deltas)) {
       recordSkip(event, order, "reserve-absent");
+      return false;
     }
     return true;
   };
@@ -588,6 +598,34 @@ export function foldEvents(
         // was proven at ingest.
         const adding = positions.get(event.positionId);
         if (adding) {
+          // CASH LEG FIRST, BECAUSE IT GATES THE ARM — the same hoist the open arm
+          // makes, for the same reason (#371). `provenance-absent` still cannot fire
+          // here: `[event.lot]` is a one-element array literal, so
+          // `reserveDeltasForOpen` always yields exactly one delta. `reserve-absent`
+          // CAN, and it is why the leg moved above the append and why the return is
+          // now honored rather than ignored. Appending the lot and then dropping the
+          // debit grew the position by a lot no reserve paid for — the fund gained an
+          // asset for free, which is NAV invention rather than mere misattribution.
+          //
+          // The deltas do not read `adding.lots`, only `event.lot`, so the hoist
+          // changes nothing an observer can see on the applying path.
+          //
+          // It stays routed through the gate rather than calling `applyToReserve`
+          // directly because this IS a lot-derived leg: its tier comes from
+          // `event.lot.tier`, so it belongs on the lot-derived path by kind, not by
+          // whether today's argument happens to be non-empty. The explicit-tier path
+          // would quietly lose the provenance check the day this site learns to add
+          // more than one lot.
+          if (
+            !applyTieredLeg(
+              event.funding.reserveId,
+              reserveDeltasForOpen([event.lot], event.funding.amount),
+              event,
+              order,
+            )
+          ) {
+            break;
+          }
           adding.lots = [...adding.lots, { ...event.lot }];
           // If this position is still on its entry-VWAC fallback (opened this fold, no
           // real mark yet), refresh that fallback to the new blended VWAC so the scale-in
@@ -623,22 +661,6 @@ export function foldEvents(
               anchor.price = blended;
             }
           }
-          // ROUTED THROUGH THE GATE THOUGH THE DISCARD IS UNREACHABLE HERE, AND THE
-          // RETURN IS DELIBERATELY IGNORED. The array literal `[event.lot]` always
-          // holds exactly one lot, so `reserveDeltasForOpen` always yields exactly one
-          // delta and `provenance-absent` cannot fire on this site — there is nothing
-          // left of the arm to gate anyway, the append happened above. It stays routed
-          // because this IS a lot-derived leg: its tier comes from `event.lot.tier`, so
-          // it belongs on the lot-derived path by kind, not by whether today's argument
-          // happens to be non-empty. Calling `applyToReserve` directly instead would
-          // put a lot-derived leg on the explicit-tier path and quietly lose the
-          // provenance check the day this site learns to add more than one lot.
-          applyTieredLeg(
-            event.funding.reserveId,
-            reserveDeltasForOpen([event.lot], event.funding.amount),
-            event,
-            order,
-          );
         } else {
           recordSkip(event, order, "position-absent");
         }
