@@ -49,8 +49,47 @@
  * one will look for the other; the missing suffix is the honest part.
  */
 import { execFileSync } from "node:child_process";
+import { realpathSync } from "node:fs";
 
 import { REPO_ROOT } from "./repo-sources.testkit.js";
+
+/**
+ * Throw unless `root` is the TOPLEVEL of a git repository.
+ *
+ * Compared through `realpathSync` on both sides because git answers with the
+ * resolved path: on macOS a `mkdtemp` root is `/var/folders/…` and git calls the
+ * same directory `/private/var/folders/…`. Comparing the raw strings there would
+ * reject every legitimate temp-directory fixture, which is the only caller that
+ * passes `root` at all.
+ */
+function assertRepositoryToplevel(
+  root: string,
+  env: NodeJS.ProcessEnv | undefined,
+): void {
+  let toplevel: string;
+  try {
+    toplevel = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      ...(env === undefined ? {} : { env }),
+    }).trim();
+  } catch (cause) {
+    throw new Error(
+      `gitignored-path-globs: ${root} is not inside a git repository, so ` +
+        `\`git ls-files\` cannot say what is ignored there.`,
+      { cause },
+    );
+  }
+  if (realpathSync(toplevel) !== realpathSync(root)) {
+    throw new Error(
+      `gitignored-path-globs: ${root} is not a repository toplevel (that is ` +
+        `${toplevel}). \`git ls-files\` reports paths relative to its cwd, so a ` +
+        `subdirectory root yields globs anchored to the wrong base — they look ` +
+        `right and exclude nothing. Pass the toplevel.`,
+    );
+  }
+}
 
 /**
  * Glob metacharacters picomatch honours, each escapable with a backslash.
@@ -90,11 +129,53 @@ export function globsForIgnoredEntries(
  * `--directory --no-empty-directory` collapses a wholly-ignored directory to one
  * entry instead of listing every file inside it (15 entries here, not tens of
  * thousands of `node_modules` files), and `-z` keeps paths with spaces intact.
- * `cwd: REPO_ROOT` is imported rather than re-derived — the walker and discovery
- * agreeing on one root is the point, and inside a linked worktree that root is the
- * worktree's own.
+ * The default root is `REPO_ROOT`, imported rather than re-derived — the walker
+ * and discovery agreeing on one root is the point, and inside a linked worktree
+ * that root is the worktree's own.
+ *
+ * WHY `root` IS A PARAMETER. It is the seam that makes this derivation testable
+ * without depending on WHICH CHECKOUT the suite happens to be running in. Git
+ * lists only ignored paths that EXIST ON DISK — correct, and the reason the
+ * exclude form is safe — but it also means the answer is a fact about one working
+ * tree rather than about the repo. A fresh linked worktree has no `.claude/`, no
+ * `coverage/`, no `apps/web/.tanstack/`, so a guard asserting against the live
+ * result was green in the main checkout and red in every worktree; worse, the
+ * assertion that most needed exercising — that the derivation reaches NESTED
+ * `.gitignore` files and anchors them to their own directory — could never run
+ * where this board actually does its work. Point `root` at an AUTHORED fixture
+ * repo instead and the behaviour under test (nested ignores, anchoring, escaping
+ * through a real git round-trip, `--no-empty-directory`, and the deliberate
+ * silence about ignored paths that do not exist on disk) is pinned identically on
+ * every machine. The default is unchanged, so `vitest.config.ts` calls this
+ * exactly as it did before.
+ *
+ * `root` MUST BE A REPOSITORY TOPLEVEL, AND THAT IS CHECKED, NOT ASSUMED.
+ * `git ls-files` reports paths relative to its cwd and descends only from there,
+ * so pointing `root` at a SUBDIRECTORY of a repo does not fail — it returns
+ * plausible-looking globs anchored to the wrong base. Handed `apps/web`, it
+ * reports `.tanstack/**` where discovery needs `apps/web/.tanstack/**`, and that
+ * glob silently excludes nothing (or, worse, excludes an unrelated root-level
+ * directory of the same name). Fail-toward-green again, in the one module whose
+ * entire purpose is to close that mode — so a non-toplevel `root` throws. The
+ * check is skipped when `root` is the default, which is itself the output of
+ * `git rev-parse --show-toplevel`: nothing to re-derive, and no subprocess added
+ * to the config-load path that runs before every single test invocation.
+ *
+ * `options.env` REPLACES THE ENVIRONMENT OF THE GIT SUBPROCESS, and exists for the
+ * same reason `root` does. Git reads `GIT_DIR`, `GIT_WORK_TREE` and
+ * `GIT_INDEX_FILE` from the environment and they OUTRANK `cwd`, while
+ * `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` outrank even
+ * repo-local config — so a fixture that pins `root` but inherits `process.env` is
+ * only hermetic on a machine that happens not to export any of them (a `git
+ * bisect run`, a hook, or a CI wrapper is not such a machine). Omitting the option
+ * inherits `process.env` exactly as before, so the `vitest.config.ts` call site is
+ * byte-identical in behaviour.
  */
-export function gitignoredPathGlobs(): string[] {
+export function gitignoredPathGlobs(
+  root: string = REPO_ROOT,
+  options: { readonly env?: NodeJS.ProcessEnv } = {},
+): string[] {
+  if (root !== REPO_ROOT) assertRepositoryToplevel(root, options.env);
   const listing = execFileSync(
     "git",
     [
@@ -106,7 +187,12 @@ export function gitignoredPathGlobs(): string[] {
       "--no-empty-directory",
       "-z",
     ],
-    { cwd: REPO_ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+    {
+      cwd: root,
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+      ...(options.env === undefined ? {} : { env: options.env }),
+    },
   );
   return globsForIgnoredEntries(
     listing.split("\0").filter((entry) => entry !== ""),

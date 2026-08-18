@@ -268,48 +268,48 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
     });
 
     /**
-     * KNOWN DEFECT — CHARACTERIZED HERE, NOT BLESSED.
+     * A CONTENTLESS LOG IS THE SAME ANSWER AS A MISSING ONE — the sentence and the
+     * untouched bytes both. Fixed under #345; the two cases below are one seam, and this
+     * is the note that keeps them fixed.
      *
-     * FILED AS #345, which covers this case and the sibling case below. The fix is a
-     * behavior change, so it belongs in its own increment rather than in this tests-only
-     * one.
+     * WHAT WENT WRONG BEFORE. `readOptional` returns `undefined` only on ENOENT, so an
+     * existing but empty (or blank-lines-only) `events.jsonl` read back as `""` and the
+     * early return in `migrateLegacyLog` was NOT taken. `loadGenesis` ran, the line loop
+     * produced no events, and `writeLogImage` was still called — with `"\n"`. The log was
+     * replaced by a single newline byte, while `migratedCount + unchangedCount === 0` sent
+     * the shell down the `touched === 0` branch, so it printed the reassuring "no log"
+     * sentence and exited 0: a lie about a write that happened, on the one tool in the
+     * repo that rewrites the durable log.
      *
-     * This test asserts what the tool OBSERVABLY DOES today, and what it does is wrong:
-     * it reports "No durable log to migrate" about a log it has just OVERWRITTEN.
+     * WHY THE FIX IS NOT IN `readOptional`, AND MUST NOT MOVE THERE. Its ENOENT-only
+     * contract is what every other caller reads it for — "absent" and "present but empty"
+     * are different facts, and the price feed's inbox and the preferences copy both lean
+     * on the distinction. Widening it to fold `""` into `undefined` would silence this
+     * case by destroying the signal that separates an empty log from an unreadable one.
+     * The guard belongs in `migrateLegacyLog`, where "nothing to migrate" is a policy
+     * this tool owns.
      *
-     * The mechanism: `readOptional` returns `undefined` only on ENOENT, so an existing
-     * but empty (or blank-lines-only) `events.jsonl` reads back as `""` and the early
-     * return at `event-store.ts:209-211` is NOT taken. `loadGenesis` runs, the line loop
-     * produces no events, and `writeLogImage` is still called — with `"\n"`. The log is
-     * replaced by a single newline byte, while `migratedCount + unchangedCount === 0`
-     * sends the shell down the `touched === 0` branch and it prints the reassuring
-     * "no log" sentence and exits 0.
-     *
-     * Nothing of value is lost from a log that was already empty, so this is not a live
-     * data-loss incident — but the report is a lie about a write that happened, on the
-     * one tool in the repo that rewrites the durable log, and the same `undefined`-only
-     * ENOENT check is what stands between "empty" and "unreadable". Fixing it is a
-     * behavior change and this increment is tests only; the fix belongs in its own
-     * increment (#345, cited above), with this test INVERTED to assert the log is left
-     * untouched.
+     * BOTH CASES, ONE GUARD. The predicate is "no content once blank lines are
+     * discarded", which is the loop's own rule hoisted above the write — so the
+     * blank-lines-only log below cannot drift back to being handled separately, or at
+     * all.
      */
-    it("KNOWN DEFECT: rewrites an EMPTY log to a single newline while reporting 'No durable log'", async () => {
+    it("leaves an EMPTY log untouched and says 'No durable log to migrate' (exit 0, #345)", async () => {
       const { dir, logPath } = await syntheticDataDir("");
 
       const result = runMigrate({ dataDir: dir, cwd: await workingDir() });
 
       expectExited(result);
       expect(result.status).toBe(0);
-      // What the operator is told:
       expect(result.stdout).toBe(`No durable log to migrate at ${logPath}.\n`);
-      // What actually happened to the file it just told them it did not migrate:
-      expect(await readFile(logPath, "utf8")).toBe("\n");
+      expect(result.stderr).toBe("");
+      // The report and the disk agree: the file it says it did not migrate is byte-for-byte
+      // what it was.
+      expect(await readFile(logPath, "utf8")).toBe("");
       expect(await litter(dir)).toEqual([]);
     });
 
-    // KNOWN DEFECT, same seam and the same follow-up (#345) as the case above: INVERT this
-    // case too when the fix lands, to assert the log is left untouched.
-    it("KNOWN DEFECT (same seam): a blank-lines-only log is collapsed to a single newline", async () => {
+    it("leaves a blank-lines-only log untouched at its original bytes (exit 0, #345)", async () => {
       const { dir, logPath } = await syntheticDataDir("\n\n\n");
 
       const result = runMigrate({ dataDir: dir, cwd: await workingDir() });
@@ -317,9 +317,57 @@ describe("migrate-legacy-log — the shell around the one-shot durable-log rewri
       expectExited(result);
       expect(result.status).toBe(0);
       expect(result.stdout).toBe(`No durable log to migrate at ${logPath}.\n`);
-      // Blank lines are records to neither half, so the loop yields nothing and the
-      // three-byte image is replaced by a one-byte one — again reported as "no log".
-      expect(await readFile(logPath, "utf8")).toBe("\n");
+      expect(result.stderr).toBe("");
+      // Blank lines are records to neither half, so this log carries no content — and the
+      // guard reads it the same way the loop does. All three bytes survive.
+      expect(await readFile(logPath, "utf8")).toBe("\n\n\n");
+      expect(await litter(dir)).toEqual([]);
+    });
+
+    /**
+     * THE ORDERING HALF OF THE #345 GUARD, WHICH THE TWO CASES ABOVE DO NOT PIN. Both of
+     * them plant a valid `genesis.json`, so both stay green whether the guard sits above
+     * `loadGenesis` (`event-store.ts`) or below it. This case is the one that cares WHERE
+     * it sits: with no genesis on disk at all, an empty log exits 0 with the "no log"
+     * sentence only if the guard returns FIRST. Move it below the read and this run exits
+     * 1 naming `genesis.json` instead — which is exactly the mutation this case exists to
+     * catch, and the reason it is worth its spawn.
+     *
+     * IT IS ALSO A BEHAVIOUR CHANGE THIS PR MADE AND NOTHING ELSE RECORDED. Before #345 an
+     * empty log plus a missing genesis DID exit 1 naming `genesis.json`. The change is
+     * deliberate and consistent — the case two blocks up, `says 'No durable log to
+     * migrate' … when the log is absent`, already returns above the genesis read for an
+     * ABSENT log, and #345's whole claim is that a contentless log is the same answer as a
+     * missing one. Two shapes cannot be "one seam" and then take different doors out. This
+     * case is where that consistency is written down as behaviour rather than as a comment.
+     *
+     * The contrast case lives at the bottom of this file (`exits 1 when the data dir has no
+     * genesis to migrate against`): same missing genesis, but a log WITH CONTENT, which
+     * still refuses. Nothing here softens that — a run that has records to migrate still
+     * needs the genesis to cross-reference them against.
+     */
+    it("needs no genesis at all to report an empty log as nothing to migrate (exit 0)", async () => {
+      // NOT `syntheticDataDir` — that helper always plants a genesis, which is the whole
+      // thing this case must NOT have. A bare temp dir holding one empty file.
+      const dir = await tempDir();
+      const logPath = join(dir, "events.jsonl");
+      await writeFile(logPath, "", "utf8");
+      expect(await exists(join(dir, "genesis.json"))).toBe(false);
+
+      const result = runMigrate({ dataDir: dir, cwd: await workingDir() });
+
+      expectExited(result);
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe(`No durable log to migrate at ${logPath}.\n`);
+      // AND NOTHING ON STDERR: no genesis complaint leaks out alongside the 0. An exit code
+      // that says "fine" over a stderr that names a broken file is the worst of both.
+      expect(result.stderr).toBe("");
+      expect(result.stderr).not.toMatch(/genesis/);
+      // Byte-for-byte: the run that says it migrated nothing wrote nothing, and did not
+      // conjure a genesis on the way past either.
+      expect(await readFile(logPath, "utf8")).toBe("");
+      expect(await exists(join(dir, "genesis.json"))).toBe(false);
+      expect(await litter(dir)).toEqual([]);
     });
   });
 
