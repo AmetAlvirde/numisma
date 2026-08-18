@@ -302,6 +302,12 @@ export function foldEvents(
    * is moot — recording `reserve-absent` as well would report a reserve miss that never
    * happened. One event, one finding, on this path.
    *
+   * AND THE COST IS MEASURABLE, NOT MERELY SEMANTIC: `dedupeFoldSkips` keys on
+   * (`eventId`, `reason`), so two reasons for one event are two DISTINCT records that
+   * both survive dedupe — inflating `discardedEventCount` and emitting two
+   * `formatFoldDiscards` lines for a single drop. The channel would over-report the
+   * very thing it exists to report exactly once.
+   *
    * A RESERVE MISS IS NOT A DISCARD and returns `true`. That asymmetry is INHERITED,
    * not introduced here: a missing reserve has always let the arm carry on, and the
    * cross-ref existence gate rejects an unknown reserve before the fold ever runs, so
