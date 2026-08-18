@@ -72,8 +72,12 @@ const dirs: string[] = [];
 const savedDataDir = process.env.NUMISMA_DATA_DIR;
 
 afterEach(async () => {
-  // A GENUINE ABSENCE, never `?? ""`: `resolveDataDir` gates on a non-blank string, so
-  // an empty env var falls through to the operator's REAL private ledger.
+  // A GENUINE ABSENCE, never `?? ""`. This delete-vs-assign restore is MORE correct
+  // since #348, not less: `resolveDataDir` no longer treats a set-but-empty env var as
+  // unset — it REFUSES it. So `?? ""` here would not quietly aim a later test at the
+  // operator's REAL private ledger any more; it would blow up every subsequent resolve
+  // in the process instead. Deleting the variable is the only restore that returns the
+  // environment to the state the suite found it in.
   if (savedDataDir === undefined) {
     delete process.env.NUMISMA_DATA_DIR;
   } else {

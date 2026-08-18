@@ -90,13 +90,51 @@ describe("resolvePlansPath — ADR-006's invariant, at every door", () => {
     expect(path).toBe(join(resolveDataDir(), "plans.jsonl"));
   });
 
-  it('an explicit "" does NOT resolve CWD-relative — it falls through to the default', () => {
+  it('an explicit "" is REFUSED — never CWD-relative, and no longer a silent default (#348)', () => {
     // `resolve("")` is the process's working directory, and `""` is exactly what an
     // unset shell variable expands to. A durable, git-tracked artifact written into
-    // whatever directory a script started in is a split-brain ledger.
-    expect(resolvePlansPath("")).toBe(resolvePlansPath());
-    expect(resolvePlansPath("   ")).toBe(resolvePlansPath());
-    expect(resolvePlansPath("").startsWith(process.cwd() + "/plans.jsonl")).toBe(false);
+    // whatever directory a script started in is a split-brain ledger — so `""` must
+    // never become a path at all. It used to fall through to the default instead;
+    // that hid a MISCONFIGURED knob as an ABSENT one and aimed it at the real ledger.
+    expect(() => resolvePlansPath("")).toThrow(
+      /sidecar data directory must not be empty/,
+    );
+    expect(() => resolvePlansPath("   ")).toThrow(
+      /sidecar data directory must not be empty/,
+    );
+
+    // The CWD point still holds, and the throw is now what enforces it: `""` yields no
+    // path at all, so nothing it returns can be CWD-flavoured. Pinned as a value check
+    // and not just as `toThrow`, because the failure mode this guards is a RETURN of
+    // `resolve("")/plans.jsonl` — which a throw-shaped assertion alone would not name.
+    let produced: string | undefined;
+    try {
+      produced = resolvePlansPath("");
+    } catch {
+      produced = undefined;
+    }
+    expect(produced).toBeUndefined();
+    expect(produced).not.toBe(join(process.cwd(), "plans.jsonl"));
+  });
+
+  it("a GENUINELY absent override still defaults — the refusal must not swallow `undefined`", () => {
+    expect(resolvePlansPath(undefined)).toBe(join(resolveDataDir(), "plans.jsonl"));
+    expect(() => resolvePlansPath()).not.toThrow();
+  });
+
+  it("the blank refusal names the consequence AND the two ways out", () => {
+    // The caller must be able to tell the blank case apart from the absent one: the
+    // defect was that a misconfigured argument was indistinguishable from no argument.
+    let message = "";
+    try {
+      resolvePlansPath("");
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toMatch(/not .?unset.?/i);
+    expect(message).toMatch(/REAL default ledger/);
+    expect(message).toMatch(/Pass no data directory/);
+    expect(message).toMatch(/absolute path/);
   });
 
   it("honors an ABSOLUTE override verbatim", () => {
