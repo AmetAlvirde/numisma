@@ -66,7 +66,7 @@ const PLANS_FILE_NAME = "plans.jsonl";
 
 /**
  * Resolve the plans sidecar path under ADR-006's invariant — absolute and
- * homedir-derived, never CWD-relative. The four cases (unset → the accumulus default,
+ * homedir-derived, never CWD-relative. The cases (unset → the accumulus default,
  * blank/whitespace → a loud throw, absolute → verbatim, relative → a loud throw) live
  * once in {@link resolveSidecarPath}; see its docstring for why an explicit `""` must
  * NOT resolve against the process's working directory. The throw is what enforces that
