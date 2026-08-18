@@ -29,7 +29,7 @@
  * key is read from the environment (`TWELVEDATA_API_KEY`), never committed, and
  * passed in via {@link EquitiesFetchOptions.apiKey}.
  */
-import type { InstrumentRegistryEntry } from "@numisma/engine";
+import { addDays, type InstrumentRegistryEntry } from "@numisma/engine";
 import {
   fetchJson,
   isRecord,
@@ -42,6 +42,16 @@ const TWELVEDATA_TIME_SERIES = "https://api.twelvedata.com/time_series";
 export interface EquitiesFetchOptions extends FetchOptions {
   /** The Twelve Data API key, read from `TWELVEDATA_API_KEY`. */
   apiKey: string;
+  /**
+   * Optional `YYYY-MM-DD` day to select the bar BY DATE WINDOW instead of by
+   * `outputsize=1`. Omit it and the request is byte-identical to the live path.
+   *
+   * This is deliberately NOT called `asOf`. `ProviderObservation.observationDate`
+   * is the provider's own bar date, not the engine's timezone-anchored trading
+   * day; that the two coincide on the recovery path is the orchestrator's
+   * conclusion, not this layer's premise.
+   */
+  targetDate?: string;
 }
 
 /**
@@ -90,9 +100,19 @@ export async function fetchTwelveDataDailyCloses(
   let url: string;
   try {
     const symbols = entries.map((entry) => encodeURIComponent(entry.symbol)).join(",");
+    // ⚠️ Twelve Data's `end_date` is EXCLUSIVE. `start_date === end_date` returns
+    // the no-data 400 EVEN WHEN THE BAR EXISTS, and that 400 is indistinguishable
+    // from "that day did not trade" — a silent wrongness. The window is therefore
+    // target..target+1, and the +1 comes from the engine's UTC `addDays` rather
+    // than local-time `Date` arithmetic or string surgery.
+    const selector =
+      options.targetDate === undefined
+        ? `&outputsize=1`
+        : `&start_date=${encodeURIComponent(options.targetDate)}` +
+          `&end_date=${encodeURIComponent(addDays(options.targetDate, 1))}`;
     url =
       `${TWELVEDATA_TIME_SERIES}?symbol=${symbols}` +
-      `&interval=1day&outputsize=1&apikey=${encodeURIComponent(options.apiKey)}`;
+      `&interval=1day${selector}&apikey=${encodeURIComponent(options.apiKey)}`;
   } catch (error) {
     return failAll(error instanceof Error ? error.message : String(error));
   }

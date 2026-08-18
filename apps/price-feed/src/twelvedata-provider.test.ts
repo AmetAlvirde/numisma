@@ -10,7 +10,10 @@
 // request is what Twelve Data answers with the un-keyed body shape.
 import { describe, expect, it } from "vitest";
 import type { InstrumentRegistryEntry } from "@numisma/engine";
-import { fetchTwelveDataDailyCloses } from "./twelvedata-provider.js";
+import {
+  fetchTwelveDataDailyCloses,
+  type EquitiesFetchOptions,
+} from "./twelvedata-provider.js";
 
 const AAPL: InstrumentRegistryEntry = {
   instrumentId: "aapl",
@@ -46,7 +49,7 @@ function fetchWith(res: () => Response | Promise<Response>): typeof fetch {
 const OPTS = { timeoutMs: 5_000, apiKey: "test-key", now: () => NOW };
 
 /** The one-element batch: the un-keyed single-symbol body shape. */
-async function fetchOne(entry: InstrumentRegistryEntry, options: typeof OPTS & { fetchImpl: typeof fetch }) {
+async function fetchOne(entry: InstrumentRegistryEntry, options: EquitiesFetchOptions) {
   const [result] = await fetchTwelveDataDailyCloses([entry], options);
   return result;
 }
@@ -261,5 +264,166 @@ describe("fetchTwelveDataDailyCloses — batched multi-symbol fetch (rate-limit 
     }) as typeof fetch;
     expect(await fetchTwelveDataDailyCloses([], { ...OPTS, fetchImpl: spy })).toEqual([]);
     expect(called).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The optional target-date window (recovery path). Every fixture below is
+// AUTHORED — hand-written shapes, never a recorded response.
+//
+// The trap this block exists to guard: Twelve Data's `end_date` is EXCLUSIVE, so
+// `start_date === end_date` returns the no-data 400 even when the bar exists —
+// and that 400 is indistinguishable from "that day did not trade". The window
+// must therefore span target..target+1, and the pin below fails if they are equal.
+describe("fetchTwelveDataDailyCloses — targetDate window", () => {
+  const TARGET = "2026-06-30";
+
+  /** An AUTHORED windowed response: one bar, dated on the target day. */
+  function windowedResponse(datetime: string, close: string): Response {
+    return new Response(
+      JSON.stringify({
+        meta: { symbol: "AAPL", interval: "1day" },
+        values: [{ datetime, open: "1", high: "2", low: "0.5", close, volume: "10" }],
+        status: "ok",
+      }),
+      { status: 200 },
+    );
+  }
+
+  function spyOn(res: () => Response): { seen: () => string; fetchImpl: typeof fetch } {
+    let seen = "";
+    const fetchImpl: typeof fetch = ((url: string | URL | Request) => {
+      seen = typeof url === "string" ? url : url.toString();
+      return Promise.resolve(res());
+    }) as typeof fetch;
+    return { seen: () => seen, fetchImpl };
+  }
+
+  function paramsOf(url: string): URLSearchParams {
+    return new URL(url).searchParams;
+  }
+
+  it("returns an observation dated on the target day", async () => {
+    // The stub answers as the real API does: only a windowed request yields the
+    // target day's bar — an un-windowed one yields the NEWEST bar. So this test
+    // is red unless the window actually reached the wire.
+    let seen = "";
+    const fetchImpl: typeof fetch = ((url: string | URL | Request) => {
+      seen = typeof url === "string" ? url : url.toString();
+      const windowed = seen.includes(`start_date=${TARGET}`);
+      return Promise.resolve(
+        windowed ? windowedResponse(TARGET, "198.10") : windowedResponse("2026-07-03", "212.44"),
+      );
+    }) as typeof fetch;
+    const result = await fetchOne(AAPL, { ...OPTS, fetchImpl, targetDate: TARGET });
+    expect(result?.error).toBeUndefined();
+    expect(result?.observation).toEqual({
+      instrumentId: "aapl",
+      symbol: "AAPL",
+      close: 198.1,
+      fetchedAt: NOW.toISOString(),
+      observationDate: TARGET,
+    });
+  });
+
+  it("requests an end_date strictly ONE DAY AFTER start_date (the end is exclusive)", async () => {
+    const spy = spyOn(() => windowedResponse(TARGET, "198.10"));
+    await fetchOne(AAPL, { ...OPTS, fetchImpl: spy.fetchImpl, targetDate: TARGET });
+    const params = paramsOf(spy.seen());
+    expect(params.get("start_date")).toBe(TARGET);
+    // The guard that catches the trap: an inclusive-looking window is red here.
+    expect(params.get("end_date")).not.toBe(params.get("start_date"));
+    expect(params.get("end_date")).toBe("2026-07-01");
+  });
+
+  it("spans a month boundary correctly rather than by string surgery", async () => {
+    const spy = spyOn(() => windowedResponse("2026-02-28", "1.5"));
+    await fetchOne(AAPL, { ...OPTS, fetchImpl: spy.fetchImpl, targetDate: "2026-02-28" });
+    const params = paramsOf(spy.seen());
+    expect(params.get("start_date")).toBe("2026-02-28");
+    expect(params.get("end_date")).toBe("2026-03-01");
+  });
+
+  it("drops outputsize on the windowed path and keeps the batch shape", async () => {
+    const spy = spyOn(() =>
+      new Response(
+        JSON.stringify({
+          AAPL: {
+            values: [{ datetime: TARGET, close: "198.10" }],
+            status: "ok",
+          },
+          GOOGL: {
+            values: [{ datetime: TARGET, close: "173.25" }],
+            status: "ok",
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    const results = await fetchTwelveDataDailyCloses([AAPL, GOOGL], {
+      ...OPTS,
+      fetchImpl: spy.fetchImpl,
+      targetDate: TARGET,
+    });
+    const params = paramsOf(spy.seen());
+    expect(params.get("outputsize")).toBeNull();
+    expect(params.get("symbol")).toBe("AAPL,GOOGL");
+    expect(results.map((r) => r.observation?.close)).toEqual([198.1, 173.25]);
+    expect(results.map((r) => r.observation?.observationDate)).toEqual([TARGET, TARGET]);
+  });
+
+  it("still fans a batch-level status:error out to every symbol", async () => {
+    const spy = spyOn(
+      () =>
+        new Response(JSON.stringify({ status: "error", code: 400, message: "no data is available" }), {
+          status: 200,
+        }),
+    );
+    const results = await fetchTwelveDataDailyCloses([AAPL, GOOGL], {
+      ...OPTS,
+      fetchImpl: spy.fetchImpl,
+      targetDate: TARGET,
+    });
+    expect(results.map((r) => r.error)).toEqual([
+      "Twelve Data AAPL -> no data is available",
+      "Twelve Data GOOGL -> no data is available",
+    ]);
+  });
+});
+
+// The LIVE 18:00 path, pinned. This block is a large part of the safety argument
+// for the recovery change: with no `targetDate` the request must stay byte-identical
+// to what production sends today — `outputsize=1`, and no date parameters at all.
+describe("fetchTwelveDataDailyCloses — live path pinned (no targetDate)", () => {
+  it("sends outputsize=1 and NO date params", async () => {
+    let seen = "";
+    const spy: typeof fetch = ((url: string | URL | Request) => {
+      seen = typeof url === "string" ? url : url.toString();
+      return Promise.resolve(timeSeriesResponse("212.44"));
+    }) as typeof fetch;
+    await fetchOne(AAPL, { ...OPTS, fetchImpl: spy });
+    expect(seen).toBe(
+      "https://api.twelvedata.com/time_series?symbol=AAPL&interval=1day&outputsize=1&apikey=test-key",
+    );
+  });
+
+  it("sends outputsize=1 and NO date params for a batch", async () => {
+    let seen = "";
+    const spy: typeof fetch = ((url: string | URL | Request) => {
+      seen = typeof url === "string" ? url : url.toString();
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            AAPL: { values: [{ datetime: "2026-07-03", close: "1" }], status: "ok" },
+            GOOGL: { values: [{ datetime: "2026-07-03", close: "2" }], status: "ok" },
+          }),
+          { status: 200 },
+        ),
+      );
+    }) as typeof fetch;
+    await fetchTwelveDataDailyCloses([AAPL, GOOGL], { ...OPTS, fetchImpl: spy });
+    expect(seen).toBe(
+      "https://api.twelvedata.com/time_series?symbol=AAPL,GOOGL&interval=1day&outputsize=1&apikey=test-key",
+    );
   });
 });
