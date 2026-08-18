@@ -22,9 +22,11 @@ export {
 // async shell (`gap-report-io.js`).
 export {
   LAUNCHD_ERA_START,
+  MAX_WINDOW_DAYS,
   REPORT_TIME_ZONE,
   boundedEraFloor,
   computeGapReport,
+  defaultGapReportSince,
   dueThrough,
   formatGapReport,
   formatGapSummary,
