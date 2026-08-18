@@ -5,9 +5,9 @@
  * content or in shape — the repo's transaction data is private and lives in a gitignored
  * sibling repo, and the line is authorship, not resemblance.
  *
- * ONE FAKE `pnpm` THAT DISPATCHES ON ITS FIRST ARGUMENT, not four unrelated scripts. The
- * wrapper calls `pnpm` four times with distinct first arguments — `prices:fetch`,
- * `spine`, `gap-report -- --write`, `backfill` — and case 6 needs a run that succeeds
+ * ONE FAKE `pnpm` THAT DISPATCHES ON ITS FIRST ARGUMENT, not five unrelated scripts. The
+ * wrapper calls `pnpm` five times with distinct first arguments — `prices:fetch`,
+ * `spine`, `gap-report -- --write`, `operator-notice`, `backfill` — and case 6 needs a run that succeeds
  * through `spine` and then hangs at `backfill` specifically, which is what makes it a
  * CRY-WOLF case: the day's marks are in the log and the run wedged afterwards. A
  * single-behavior fake cannot express that; a per-command behavior table can, and case 6
@@ -86,8 +86,24 @@ export const TERM_DEAF_CHILD_NAME = "numisma-harness-term-deaf-child";
 /** The sentinel the TERM-deaf child writes on start, so case 3 cannot silently become case 2. */
 export const TERM_DEAF_CHILD_SENTINEL = "term-deaf-grandchild-started";
 
-/** The four first-arguments the wrapper invokes `pnpm` with, in the order it invokes them. */
-export const WRAPPER_PNPM_COMMANDS = ["prices:fetch", "spine", "gap-report", "backfill"] as const;
+/**
+ * The five first-arguments the wrapper invokes `pnpm` with, IN THE ORDER IT INVOKES THEM.
+ *
+ * `operator-notice` sits where the wrapper's step 5b puts it — after `gap-report` and
+ * before `backfill` — and that POSITION is the assertion, not decoration. Both halves of
+ * case 6 compare `invocationOrder()` against this list exactly, so a notice step that
+ * drifted to the far side of the networked `backfill` goes red here rather than shipping:
+ * the whole reason 5b sits where it does is that `gap-report` and the notice are the LOCAL
+ * derived surfaces, and a thirty-second database outage must not be able to take the
+ * delivery channel down with it.
+ */
+export const WRAPPER_PNPM_COMMANDS = [
+  "prices:fetch",
+  "spine",
+  "gap-report",
+  "operator-notice",
+  "backfill",
+] as const;
 
 /**
  * The sentinel filename a given `pnpm` sub-command writes. Mirrors the `tr` in the fake

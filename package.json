@@ -22,6 +22,7 @@
     "smoke:startup": "bun apps/tui/src/smoke-startup-openTui.ts",
     "push": "tsx apps/web/src/push/push.ts",
     "gap-report": "tsx apps/web/src/push/gap-report.ts",
+    "operator-notice": "tsx apps/price-feed/src/operator-notice-cli.ts",
     "backfill": "tsx apps/web/src/push/backfill.ts",
     "db:init": "tsx apps/web/src/push/push.ts --init-only",
     "db:provision": "tsx apps/web/src/projection/provision-projection.ts",
