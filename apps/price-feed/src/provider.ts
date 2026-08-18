@@ -66,7 +66,61 @@ interface FetchJsonOptions {
  * as an unlabelled `SyntaxError`, which in Twelve Data's case aborted the whole run
  * against that function's own "never throws for a data problem" contract. Here it is
  * an ordinary `{ ok: false, reason }`, attributed by whoever asked for it.
+ *
+ * A non-ok status appends the provider's own sentence when one can be recovered
+ * (`HTTP 400 Bad Request — No data is available on the specified dates`), because a
+ * bare `HTTP 400 Bad Request` reads as a malformed request when on the recovery path
+ * it almost always means that day had no trading. The `HTTP <status> <statusText>`
+ * prefix stays first and byte-identical — callers match it by prefix.
  */
+/**
+ * How much of a provider's own error text may ride along in a `reason`. Generous
+ * enough for any real API sentence, small enough that an HTML interstitial served
+ * in place of JSON cannot flood a scheduled run's log.
+ */
+const MAX_PROVIDER_TEXT = 200;
+
+/** Trim, then clip to `MAX_PROVIDER_TEXT` with an ellipsis marking the cut. */
+function clip(text: string): string {
+  const trimmed = text.trim();
+  return trimmed.length <= MAX_PROVIDER_TEXT
+    ? trimmed
+    : `${trimmed.slice(0, MAX_PROVIDER_TEXT)}…`;
+}
+
+/**
+ * Recover the provider's own sentence from a non-ok response body, or `""` when
+ * there is nothing usable.
+ *
+ * The three providers disagree on the key, so we prefer `message`, then `msg`, then
+ * `error`, and fall back to a snippet of the raw text. EVERY step is guarded: a body
+ * read that rejects, a body that is not JSON, a JSON body that is not an object, and
+ * a preferred key holding a non-string all resolve to a usable string or `""`. A
+ * non-ok status must never become a throw — the Result-not-throw contract is what
+ * keeps one bad symbol from aborting a whole batched run.
+ */
+async function readErrorText(res: Response): Promise<string> {
+  let raw: string;
+  try {
+    raw = await res.text();
+  } catch {
+    return "";
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    return clip(raw);
+  }
+  if (isRecord(parsed)) {
+    for (const key of ["message", "msg", "error"] as const) {
+      const value = parsed[key];
+      if (typeof value === "string" && value.trim() !== "") return clip(value);
+    }
+  }
+  return clip(raw);
+}
+
 export async function fetchJson(
   url: string,
   options: FetchJsonOptions,
@@ -77,7 +131,9 @@ export async function fetchJson(
   try {
     const res = await fetchImpl(url, { ...options.init, signal: controller.signal });
     if (!res.ok) {
-      return { ok: false, reason: `HTTP ${res.status} ${res.statusText}` };
+      const bare = `HTTP ${res.status} ${res.statusText}`;
+      const explanation = await readErrorText(res);
+      return { ok: false, reason: explanation === "" ? bare : `${bare} — ${explanation}` };
     }
     return { ok: true, body: (await res.json()) as unknown };
   } catch (error) {

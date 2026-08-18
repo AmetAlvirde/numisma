@@ -14,13 +14,37 @@
 import type { FixObservation } from "@numisma/engine";
 import { fetchJson, isRecord } from "./provider.js";
 
-const BANXICO_SF43718 =
-  "https://www.banxico.org.mx/SieAPIRest/service/v1/series/SF43718/datos/oportuno";
+const BANXICO_SF43718_DATOS =
+  "https://www.banxico.org.mx/SieAPIRest/service/v1/series/SF43718/datos";
+
+/**
+ * The series URL for one request. With no target date this is the live 18:00 path —
+ * `/datos/oportuno`, the newest published FIX. With one it pins BOTH ends of the SIE
+ * range to the same day: `/datos/<target>/<target>`, inclusive.
+ *
+ * There is deliberately no multi-day form. {@link extractLatestDatum} takes the LAST
+ * entry and the range endpoint returns ascending, so any window wider than a single
+ * day would return the newest day's FIX for every day requested — a plausible-looking
+ * wrong number rather than an error. One date in, that same date on both ends.
+ */
+function seriesUrl(targetDate?: string): string {
+  return targetDate === undefined
+    ? `${BANXICO_SF43718_DATOS}/oportuno`
+    : `${BANXICO_SF43718_DATOS}/${targetDate}/${targetDate}`;
+}
 
 export interface FixFetchOptions {
   timeoutMs: number;
   /** The Banxico SIE token, read from `BANXICO_TOKEN`. */
   token: string;
+  /**
+   * Fetch the FIX published for this `YYYY-MM-DD` day instead of the newest one.
+   * Omitted on the live daily path, which stays byte-identical to `/datos/oportuno`.
+   *
+   * Deliberately NOT named `asOf`: this is the provider's own bar date, not the
+   * timezone-anchored trading day the engine reasons about.
+   */
+  targetDate?: string;
   /** Injectable for tests; defaults to the global `fetch`. */
   fetchImpl?: typeof fetch;
 }
@@ -37,7 +61,7 @@ export async function fetchBanxicoFix(options: FixFetchOptions): Promise<FixObse
         "before fetching the USD/MXN FIX.",
     );
   }
-  const r = await fetchJson(BANXICO_SF43718, {
+  const r = await fetchJson(seriesUrl(options.targetDate), {
     timeoutMs: options.timeoutMs,
     fetchImpl: options.fetchImpl,
     init: { headers: { "Bmx-Token": options.token, Accept: "application/json" } },
