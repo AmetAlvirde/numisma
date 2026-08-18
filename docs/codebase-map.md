@@ -31,7 +31,7 @@ placeholder convention itself, are documented in
 | `packages/event-store` | `@numisma/event-store` | Node | The durable log's **read** path — path resolution, genesis load, log load with quarantine, `loadFoldedReview` — plus the gap-report and heartbeat sidecars. | `README.md`, then `src/` |
 | `packages/preferences` | `@numisma/preferences` | Node | Sidecar file IO for `preferences.jsonl` and `orders.jsonl`. Append-only, validated on load, cross-process locked for orders. | `README.md` |
 | `apps/tui` | `@numisma/tui` | Bun (dashboard) + Node (CLIs) | The local access surface: the log's **write/ingest** half, startup orchestration, the openTUI dashboard, the three Orders CLIs, and the smokes. | `README.md` §Entry points, `src/event-store.ts` |
-| `apps/price-feed` | `@numisma/price-feed` | Node, headless | The market-data runtime shell: three provider adapters, the disposable price store, the atomic inbox emit, and the fetch-time spine-guard pre-check. | `README.md`, `src/cli.ts` |
+| `apps/price-feed` | `@numisma/price-feed` | Node, headless | The market-data runtime shell: three provider adapters, the disposable price store, the atomic inbox emit, and the fetch-time spine-guard pre-check. | `README.md`, `src/cli.ts` (wiring only — the report and exit contract are in `src/cli-main.ts`, the argv parser in `src/cli-args.ts`) |
 | `apps/web` | `@numisma/web` | TanStack Start (Vite + Nitro), React 19 | The hosted read-projection dashboard, its Better Auth server, and the push/provisioning scripts. | `README.md`, `src/push/push.ts` |
 
 **The dependency rule:** apps depend on packages, never the reverse; packages

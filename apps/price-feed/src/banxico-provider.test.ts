@@ -154,3 +154,61 @@ describe("fetchBanxicoFix — loud failures", () => {
     ).rejects.toThrow(/^Banxico SF43718 -> request timed out after 20ms$/);
   });
 });
+
+describe("fetchBanxicoFix — target date", () => {
+  function urlSpy(res: () => Response | Promise<Response>): {
+    fetchImpl: typeof fetch;
+    url: () => string;
+  } {
+    let seen = "";
+    const fetchImpl: typeof fetch = ((url: string | URL | Request) => {
+      seen = typeof url === "string" ? url : url.toString();
+      return Promise.resolve(res());
+    }) as typeof fetch;
+    return { fetchImpl, url: () => seen };
+  }
+
+  it("pins the live path to /datos/oportuno when no targetDate is given", async () => {
+    const spy = urlSpy(() => fixResponse("18.5"));
+    await fetchBanxicoFix({ ...OPTS, fetchImpl: spy.fetchImpl });
+    expect(spy.url()).toBe(
+      "https://www.banxico.org.mx/SieAPIRest/service/v1/series/SF43718/datos/oportuno",
+    );
+  });
+
+  it("requests /datos/<target>/<target> — the same date on both ends", async () => {
+    const spy = urlSpy(() => fixResponse("18.9012", "14/08/2026"));
+    await fetchBanxicoFix({ ...OPTS, targetDate: "2026-08-14", fetchImpl: spy.fetchImpl });
+    expect(spy.url()).toBe(
+      "https://www.banxico.org.mx/SieAPIRest/service/v1/series/SF43718/datos/2026-08-14/2026-08-14",
+    );
+    expect(spy.url()).not.toContain("oportuno");
+  });
+
+  it("returns the observation for the requested date from an authored single-datum payload", async () => {
+    // Authored fixture — an invented FIX rate, not a recorded Banxico response.
+    const fix = await fetchBanxicoFix({
+      ...OPTS,
+      targetDate: "2026-08-14",
+      fetchImpl: fetchWith(() => fixResponse("18.9012", "14/08/2026")),
+    });
+    expect(fix).toEqual({ rate: 18.9012, date: "2026-08-14" });
+  });
+
+  it("still throws the no-observation refusal when the target date has no published FIX", async () => {
+    // Banxico omits `datos` entirely on an unpublished date (a weekday holiday under
+    // the owed-set filter). The refusal must stay loud, never a silent neighbour day.
+    await expect(
+      fetchBanxicoFix({
+        ...OPTS,
+        targetDate: "2026-09-16",
+        fetchImpl: fetchWith(
+          () =>
+            new Response(JSON.stringify({ bmx: { series: [{ idSerie: "SF43718" }] } }), {
+              status: 200,
+            }),
+        ),
+      }),
+    ).rejects.toThrow(/no FIX observation/);
+  });
+});
