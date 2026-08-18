@@ -284,30 +284,48 @@ export function foldEvents(
     });
   };
   /**
-   * Apply one LOT-DERIVED cash leg, or record why it could not be applied.
+   * Apply one LOT-DERIVED cash leg. RETURNS WHETHER THE REST OF THE EVENT MAY RUN.
+   *
+   * THE DISCARD IS TOTAL, WHICH IS WHY THIS IS A GATE AND NOT A VOID CALL. A
+   * lot-derived leg with no deltas has no cost-basis provenance, and an event whose
+   * cash leg cannot be attributed is dropped WHOLE: no closed-book row, no retirement,
+   * no lot mutation, no registration. `false` means the arm must do nothing at all.
+   * Recording the drop and then letting the arm carry on would raise realized P&L by
+   * the full proceeds while crediting NO reserve — the cash would simply vanish, which
+   * is strictly worse than the invented-`c1` attribution this replaced (that at least
+   * conserved the money). The `position-absent` `else` branches in these same arms
+   * already discard the whole event; this is deliberately the SAME semantics, not a
+   * second kind of discard.
    *
    * PRECEDENCE IS A DECISION: `provenance-absent` wins and the reserve is never
    * consulted. With no deltas there is nothing to apply, so whether the reserve exists
    * is moot — recording `reserve-absent` as well would report a reserve miss that never
    * happened. One event, one finding, on this path.
    *
-   * Only lot-derived legs route through here. The explicit-tier legs (Deposit,
-   * Withdraw, both Transfer legs) call `applyToReserve` directly: their deltas are
-   * never empty, and routing them here would imply a discard that cannot occur.
+   * A RESERVE MISS IS NOT A DISCARD and returns `true`. That asymmetry is INHERITED,
+   * not introduced here: a missing reserve has always let the arm carry on, and the
+   * cross-ref existence gate rejects an unknown reserve before the fold ever runs, so
+   * on the gated path it cannot happen at all. Only the provenance case gates.
+   *
+   * Only lot-derived legs route through here. The explicit-tier legs (`Deposit`,
+   * `Withdraw`, both `Transfer` legs) call `applyToReserve` directly: their tiers come
+   * from the event itself rather than from lots, so they have no provenance that could
+   * be missing, and routing them here would imply a discard that cannot occur.
    */
   const applyTieredLeg = (
     reserveId: string,
     deltas: TierDelta[],
     event: PortfolioEvent,
     order: number,
-  ): void => {
+  ): boolean => {
     if (deltas.length === 0) {
       recordSkip(event, order, "provenance-absent");
-      return;
+      return false;
     }
     if (!applyToReserve(reserves, reserveId, deltas)) {
       recordSkip(event, order, "reserve-absent");
     }
+    return true;
   };
   let usdMxn = genesis.review.usdMxn;
   let latestAsOf = genesis.review.asOf;
@@ -403,6 +421,22 @@ export function foldEvents(
     switch (event.type) {
       case "PositionOpened": {
         const { position } = event;
+        // Cash leg FIRST, because it gates the arm. Sufficiency was proven at ingest.
+        // A lot-less open has no provenance for the debit to inherit, and the discard
+        // is total: no registration, no cost anchor, no entry-VWAC fallback mark. The
+        // reserve and the position/close maps are disjoint, so hoisting the leg above
+        // the registration changes nothing an observer can see on the applying path —
+        // it only makes the drop able to stop the arm before it starts.
+        if (
+          !applyTieredLeg(
+            event.funding.reserveId,
+            reserveDeltasForOpen(position.lots, event.funding.amount),
+            event,
+            order,
+          )
+        ) {
+          break;
+        }
         const entryPrice = weightedAverageCost(position.lots);
         positions.set(position.id, {
           id: position.id,
@@ -434,47 +468,49 @@ export function foldEvents(
           pushClose(anchor);
           costAnchors.set(position.instrumentId, anchor);
         }
-        // Cash leg: debit the funding reserve. Sufficiency was proven at ingest.
-        applyTieredLeg(
-          event.funding.reserveId,
-          reserveDeltasForOpen(position.lots, event.funding.amount),
-          event,
-          order,
-        );
         break;
       }
       case "PositionClosed": {
         const closing = positions.get(event.positionId);
+        if (!closing) {
+          recordSkip(event, order, "position-absent");
+          break;
+        }
         // Cash leg: credit the settlement reserve with proceeds, tiered by the
         // closed position's mix, BEFORE retiring the asset leg. Honest-by-
         // construction: the asset cannot be removed without recording the cash.
-        if (closing) {
-          applyTieredLeg(
+        //
+        // AND IT GATES THE REST OF THE ARM. A lot-less position has no provenance for
+        // the proceeds to inherit, so the close is discarded WHOLE — the position stays
+        // open, no row is booked, nothing is retired. Booking the row while the cash
+        // leg dropped would raise realized P&L by the full proceeds against a reserve
+        // that never moved: the R8 failure below, in its other direction.
+        if (
+          !applyTieredLeg(
             event.settlement.reserveId,
             reserveDeltasForClose(closing.lots, event.settlement.proceeds),
             event,
             order,
-          );
-          // Realized P&L: compute proceeds − cost
-          // basis, tag it, and push a finished row onto the closed book INSTEAD of
-          // silently dropping the position. Descriptive only — the profit already
-          // landed in the Reserve above; the blotter records how the fund got here.
-          const settlementCurrency =
-            reserves.get(event.settlement.reserveId)?.currency ?? closing.currency;
-          closedPositions.push(
-            buildClosedPosition(closing, closing.lots, event.asOf, event.settlement.proceeds, settlementCurrency, usdMxn),
-          );
-          // R8 (ledger item 19): THE DELETE LIVES HERE NOW, not after the block. Moving
-          // it in is provably behavior-preserving — `Map.delete` on a key whose `get`
-          // just returned `undefined` is a no-op by definition — and it makes the arm a
-          // clean pair: either the close applies IN FULL (cash leg, closed-book row,
-          // retirement) or it is recorded as discarded and NOTHING happens. Leaving the
-          // delete outside while adding the `else` would be strictly worse than either
-          // shape: the code would announce the drop and then act on its behalf.
-          positions.delete(event.positionId);
-        } else {
-          recordSkip(event, order, "position-absent");
+          )
+        ) {
+          break;
         }
+        // Realized P&L: compute proceeds − cost
+        // basis, tag it, and push a finished row onto the closed book INSTEAD of
+        // silently dropping the position. Descriptive only — the profit already
+        // landed in the Reserve above; the blotter records how the fund got here.
+        const settlementCurrency =
+          reserves.get(event.settlement.reserveId)?.currency ?? closing.currency;
+        closedPositions.push(
+          buildClosedPosition(closing, closing.lots, event.asOf, event.settlement.proceeds, settlementCurrency, usdMxn),
+        );
+        // R8 (ledger item 19): THE DELETE LIVES INSIDE THE APPLYING PATH, not after the
+        // block — reached only once BOTH gates above have passed. The arm is a clean
+        // pair: either the close applies IN FULL (cash leg, closed-book row,
+        // retirement) or it is recorded as discarded and NOTHING happens. Announcing
+        // the drop and then acting on its behalf — pushing the row, retiring the asset
+        // — is the shape this guards against, whichever gate did the announcing.
+        positions.delete(event.positionId);
         break;
       }
       case "PositionTrimmed": {
@@ -505,12 +541,23 @@ export function foldEvents(
           // The mark the removed units are valued at for the NAV-honesty disclosure:
           // the latest PriceMarked seen so far, else the position's standing mark.
           const markPrice = latestMark.get(trimming.instrumentId) ?? trimming.markPrice;
-          applyTieredLeg(
-            event.settlement.reserveId,
-            reserveDeltasForClose(removed, event.settlement.proceeds),
-            event,
-            order,
-          );
+          // Cash leg, AND the gate on the rest of the arm. `splitTierRemoval` yields no
+          // removed lots when the removal names a tier the position holds nothing in, so
+          // the proceeds have no provenance to inherit and the trim is discarded WHOLE:
+          // no partial row, and `trimming.lots` is left exactly as it was. Pushing the
+          // row while the credit dropped would book realized P&L against a reserve that
+          // never moved; mutating the lots on top of that would retire the asset for
+          // cash the fund never received.
+          if (
+            !applyTieredLeg(
+              event.settlement.reserveId,
+              reserveDeltasForClose(removed, event.settlement.proceeds),
+              event,
+              order,
+            )
+          ) {
+            break;
+          }
           closedPositions.push(
             buildClosedPosition(
               trimming,
@@ -570,6 +617,16 @@ export function foldEvents(
               anchor.price = blended;
             }
           }
+          // ROUTED THROUGH THE GATE THOUGH THE DISCARD IS UNREACHABLE HERE, AND THE
+          // RETURN IS DELIBERATELY IGNORED. The array literal `[event.lot]` always
+          // holds exactly one lot, so `reserveDeltasForOpen` always yields exactly one
+          // delta and `provenance-absent` cannot fire on this site — there is nothing
+          // left of the arm to gate anyway, the append happened above. It stays routed
+          // because this IS a lot-derived leg: its tier comes from `event.lot.tier`, so
+          // it belongs on the lot-derived path by kind, not by whether today's argument
+          // happens to be non-empty. Calling `applyToReserve` directly instead would
+          // put a lot-derived leg on the explicit-tier path and quietly lose the
+          // provenance check the day this site learns to add more than one lot.
           applyTieredLeg(
             event.funding.reserveId,
             reserveDeltasForOpen([event.lot], event.funding.amount),

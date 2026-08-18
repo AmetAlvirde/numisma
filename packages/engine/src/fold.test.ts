@@ -9,7 +9,9 @@ import {
   buildCompositionReport,
   buildEventReference,
   crossReferenceEvent,
+  EVENT_SCHEMA_VERSION,
   foldEvents,
+  parseEvent,
   parseFundReview,
   reserveDeltasForClose,
   reserveDeltasForOpen,
@@ -19,6 +21,7 @@ import {
   type PositionLot,
   type PositionOpenedEvent,
   type PositionClosedEvent,
+  type PositionTrimmedEvent,
   type PriceMarkedEvent,
 } from "./index.js";
 import { describe, expect, it } from "vitest";
@@ -907,16 +910,34 @@ describe("tier-weighted deltas — the zero-cost arm attributes in canonical Tie
   });
 });
 
-describe("tier-weighted deltas — a lot-less cash leg is DISCARDED, not attributed (#329)", () => {
-  // Any lot at all puts a key in `costByTier`, so "no Tier is present" is reachable
-  // ONLY when the lots array is empty. The old code returned a full-magnitude delta on
+describe("a cash leg with no lot provenance discards the WHOLE event (#329)", () => {
+  // Any lot at all puts a key in `costByTier`, so `tierWeightedDeltas` returns an empty
+  // list ONLY when it is handed no lots. The old code returned a full-magnitude delta on
   // the `?? "c1"` fallback — it MINTED c1 capital for a cash movement carrying no
   // provenance whatsoever, and `applyReserveDelta` booked it as real. That is not a bad
-  // attribution, it is an invented one. An empty delta list is the discard; the fold
-  // records it on ADR-020's Discard Channel as `provenance-absent`.
+  // attribution, it is an invented one.
+  //
+  // THE EMPTY LIST IS A DISCARD OF THE EVENT, NOT OF THE LEG. Dropping only the cash
+  // leg and letting the arm carry on is worse than the invented `c1`: the closed-book
+  // row would raise realized P&L by the full proceeds while NO reserve was credited, so
+  // the money would not be misattributed, it would be gone. `provenance-absent` on
+  // ADR-020's Discard Channel therefore means what `position-absent` already means in
+  // these same arms — nothing applied.
+  //
+  // WHICH ROUTE IS REACHABLE. `parseLots` rejects `lots: []`, and the durable log is
+  // parsed line-by-line on load (`loadEventLog`), so a lot-less OPEN cannot reach the
+  // fold through ingest OR through `loadFoldedReview`; it is pinned below as a pure
+  // arm, with the parser guard that makes it unreachable pinned beside it. The credit
+  // legs are a different story: a removal naming a tier the position holds no lots in
+  // is parse-legal (`parse.ts` requires only a positive quantity) and only the
+  // cross-ref sufficiency gate stops it — a gate `loadFoldedReview` does not run, since
+  // it calls `foldEvents` on the durable log directly. That is the migration-shaped
+  // route the conservation tests below use.
 
-  /** Genesis holding one funded reserve and no positions. */
-  function reserveGenesis(): FundReviewData {
+  const DISCARD_GENESIS_RESERVE = 1000;
+
+  /** Genesis with one funded USD reserve and one all-c1 BTC position (3 @ 100). */
+  function trimmableGenesis(): FundReviewData {
     const genesis = emptyGenesis();
     genesis.reserves = [
       {
@@ -926,30 +947,47 @@ describe("tier-weighted deltas — a lot-less cash leg is DISCARDED, not attribu
         executionMode: "live",
         accountId: "binance-usd",
         currency: "USD",
-        amount: 1000,
+        amount: DISCARD_GENESIS_RESERVE,
       },
     ];
-    return genesis;
-  }
-
-  /** A PositionOpened carrying no lots at all — the only shape that reaches the arm. */
-  function lotlessOpen(reserveId: string): PositionOpenedEvent {
-    return opened(
-      "evt-lotless-open",
-      "2026-06-02",
+    genesis.positions = [
       {
-        id: "ghost-core",
+        id: "btc-core",
         portfolioId: "core",
         tempo: "Capital",
         executionMode: "live",
         accountId: "binance-usd",
         instrumentId: "btc-usd",
         direction: "long",
+        markPrice: 120,
         currency: "USD",
-        lots: [],
+        lots: [{ quantity: 3, cost: 100, tier: "c1" }],
       },
-      { reserveId, amount: 400 },
-    );
+    ];
+    return genesis;
+  }
+
+  /** A trim whose removals name `tier`; `c2` on the genesis above removes nothing. */
+  function trimmed(
+    id: string,
+    asOf: string,
+    tier: "c1" | "c2" | "c3",
+    quantity: number,
+    settlement: { reserveId: string; proceeds: number },
+  ): PositionTrimmedEvent {
+    return {
+      id,
+      asOf,
+      type: "PositionTrimmed",
+      positionId: "btc-core",
+      removals: [{ tier, quantity }],
+      settlement,
+    };
+  }
+
+  /** Total realized P&L on the closed book — the figure a partial discard inflates. */
+  function realizedPnl(folded: ReturnType<typeof foldEvents>): number {
+    return (folded.data.closedPositions ?? []).reduce((sum, row) => sum + row.realizedPnlUsd, 0);
   }
 
   it("returns an empty delta list for empty lots on both legs", () => {
@@ -957,10 +995,137 @@ describe("tier-weighted deltas — a lot-less cash leg is DISCARDED, not attribu
     expect(reserveDeltasForClose([], 250)).toEqual([]);
   });
 
-  it("records one provenance-absent skip AND leaves the reserve balance untouched", () => {
-    // Both halves matter. The skip record alone would stay green while the phantom c1
-    // debit still ran; the balance alone would not prove the drop was reported.
-    const folded = foldEvents(reserveGenesis(), [lotlessOpen("desk-usd")]);
+  it("discards a trim naming a tier the position holds no lots in — nothing applies", () => {
+    // THE REACHABLE PRODUCER. `splitTierRemoval` returns `removed: []` when the named
+    // tier's total quantity is zero, so the proceeds have no provenance to inherit.
+    // Every clause here is a distinct way the old partial discard leaked: the row
+    // booked P&L, the mutation retired the asset, the reserve stayed flat while both
+    // happened.
+    const folded = foldEvents(trimmableGenesis(), [
+      trimmed("evt-trim-empty-tier", "2026-06-03", "c2", 1, {
+        reserveId: "desk-usd",
+        proceeds: 130,
+      }),
+    ]);
+
+    expect(folded.skipped).toEqual([
+      {
+        eventId: "evt-trim-empty-tier",
+        index: 0,
+        verb: "PositionTrimmed",
+        reason: "provenance-absent",
+        detail: expect.any(String),
+      },
+    ]);
+    // No partial row, so no realized P&L moved.
+    expect(folded.data.closedPositions ?? []).toEqual([]);
+    expect(realizedPnl(folded)).toBe(0);
+    // The asset leg is untouched: same position, same lots, not retired.
+    expect(folded.data.positions).toHaveLength(1);
+    expect(folded.data.positions[0]!.id).toBe("btc-core");
+    expect(folded.data.positions[0]!.lots).toEqual([{ quantity: 3, cost: 100, tier: "c1" }]);
+    // And the reserve never moved.
+    expect(folded.data.reserves[0]!.amount).toBe(DISCARD_GENESIS_RESERVE);
+  });
+
+  it("discards a close of a position a trim already emptied — the position stays open", () => {
+    // The same door, one verb along: a full-quantity trim is rejected at ingest but is
+    // parse-legal, so a durable log can hold one. It leaves the position open with no
+    // lots, and the close that follows has no provenance for its proceeds. The trim
+    // itself applies in full — it is the BASELINE the close must not move.
+    const applyingTrim = trimmed("evt-trim-all", "2026-06-03", "c1", 3, {
+      reserveId: "desk-usd",
+      proceeds: 360,
+    });
+    const baseline = foldEvents(trimmableGenesis(), [applyingTrim]);
+    expect(baseline.skipped).toEqual([]);
+    expect(baseline.data.reserves[0]!.amount).toBe(DISCARD_GENESIS_RESERVE + 360);
+    expect(realizedPnl(baseline)).toBe(60); // 360 proceeds − 300 cost basis
+    expect(baseline.data.positions[0]!.lots).toEqual([]);
+
+    const folded = foldEvents(trimmableGenesis(), [
+      applyingTrim,
+      closed("evt-close-lotless", "2026-06-04", "btc-core", {
+        reserveId: "desk-usd",
+        proceeds: 500,
+      }),
+    ]);
+
+    expect(folded.skipped).toEqual([
+      {
+        eventId: "evt-close-lotless",
+        index: 1,
+        verb: "PositionClosed",
+        reason: "provenance-absent",
+        detail: expect.any(String),
+      },
+    ]);
+    // Exactly the trim's own row — the close booked nothing. Under the partial discard
+    // this was two rows and 560 of realized P&L against a reserve that never saw the
+    // second 500.
+    expect(folded.data.closedPositions ?? []).toHaveLength(1);
+    expect(realizedPnl(folded)).toBe(60);
+    expect(folded.data.reserves[0]!.amount).toBe(DISCARD_GENESIS_RESERVE + 360);
+    // Not retired: `positions.delete` never ran.
+    expect(folded.data.positions.map((position) => position.id)).toEqual(["btc-core"]);
+  });
+
+  it("reports provenance-absent and NOT reserve-absent when the reserve is also missing", () => {
+    // Precedence is a decision: there is nothing to apply, so whether the reserve
+    // exists is moot, and a reserve miss that never happened must not be reported.
+    // One event, one finding, on this path.
+    const folded = foldEvents(trimmableGenesis(), [
+      trimmed("evt-trim-empty-tier", "2026-06-03", "c2", 1, {
+        reserveId: "no-such-reserve",
+        proceeds: 130,
+      }),
+    ]);
+
+    expect(folded.skipped).toHaveLength(1);
+    expect(folded.skipped[0]!.reason).toBe("provenance-absent");
+  });
+
+  it("keeps the new reason's prose free of figures and of event content", () => {
+    const folded = foldEvents(trimmableGenesis(), [
+      trimmed("evt-trim-empty-tier", "2026-06-03", "c2", 1, {
+        reserveId: "desk-usd",
+        proceeds: 130,
+      }),
+    ]);
+
+    const skip = folded.skipped[0]!;
+    expect(skip.reason).toBe("provenance-absent");
+    expect(skip.detail).not.toMatch(/\d/); // no figure of any kind
+    expect(skip.detail).not.toContain(skip.verb); // the verb has its own field
+    expect(skip.detail).not.toContain(skip.eventId);
+    expect(skip.detail).not.toContain("desk-usd");
+    expect(skip.detail).not.toContain("btc-core");
+    expect(skip.detail.length).toBeGreaterThan(0);
+  });
+
+  it("discards a lot-less open whole — no position, no anchor, no debit", () => {
+    // `foldEvents` is exported and pure, so the open arm must be internally consistent
+    // even though nothing in production can hand it this event (see the parser pin
+    // below). Registering the ghost while dropping its funding debit would put a
+    // position on the read model that no reserve paid for.
+    const folded = foldEvents(trimmableGenesis(), [
+      opened(
+        "evt-lotless-open",
+        "2026-06-02",
+        {
+          id: "ghost-core",
+          portfolioId: "core",
+          tempo: "Capital",
+          executionMode: "live",
+          accountId: "binance-usd",
+          instrumentId: "aapl-usd",
+          direction: "long",
+          currency: "USD",
+          lots: [],
+        },
+        { reserveId: "desk-usd", amount: 400 },
+      ),
+    ]);
 
     expect(folded.skipped).toEqual([
       {
@@ -971,30 +1136,41 @@ describe("tier-weighted deltas — a lot-less cash leg is DISCARDED, not attribu
         detail: expect.any(String),
       },
     ]);
-    expect(folded.data.reserves).toHaveLength(1);
-    expect(folded.data.reserves[0]!.amount).toBe(1000);
+    expect(folded.data.positions.map((position) => position.id)).toEqual(["btc-core"]);
+    expect(folded.data.reserves[0]!.amount).toBe(DISCARD_GENESIS_RESERVE);
+    // No entry-price anchor was seeded for the instrument the ghost named.
+    expect((folded.data.closes ?? []).some((close) => close.instrumentId === "aapl-usd")).toBe(
+      false,
+    );
   });
 
-  it("keeps the new reason's prose free of figures and of event content", () => {
-    const folded = foldEvents(reserveGenesis(), [lotlessOpen("desk-usd")]);
+  it("cannot arrive through ingest: the parser rejects an open with no lots", () => {
+    // WHAT THIS BUYS. It is the reason the test above pins an arm no production route
+    // reaches, and it is the tripwire on that claim: the durable log is parsed on load,
+    // so relaxing `parseLots` would make the lot-less open a LIVE route into the fold
+    // and this test reddens to say so. Everything else in the fixture is valid, so the
+    // empty `lots` is the only thing under test.
+    const result = parseEvent({
+      schemaVersion: EVENT_SCHEMA_VERSION,
+      id: "evt-lotless-open",
+      asOf: "2026-06-02",
+      type: "PositionOpened",
+      position: {
+        id: "ghost-core",
+        portfolioId: "core",
+        tempo: "Capital",
+        executionMode: "live",
+        accountId: "binance-usd",
+        instrumentId: "aapl-usd",
+        direction: "long",
+        currency: "USD",
+        lots: [],
+      },
+      decision: DECISION,
+      funding: { reserveId: "desk-usd", amount: 400 },
+    });
 
-    const skip = folded.skipped[0]!;
-    expect(skip.reason).toBe("provenance-absent");
-    expect(skip.detail).not.toMatch(/\d/); // no figure of any kind
-    expect(skip.detail).not.toContain(skip.verb); // the verb has its own field
-    expect(skip.detail).not.toContain(skip.eventId);
-    expect(skip.detail).not.toContain("desk-usd");
-    expect(skip.detail).not.toContain("ghost-core");
-    expect(skip.detail.length).toBeGreaterThan(0);
-  });
-
-  it("reports provenance-absent and NOT reserve-absent when the reserve is also missing", () => {
-    // Precedence is a decision: there is nothing to apply, so whether the reserve
-    // exists is moot, and a reserve miss that never happened must not be reported.
-    // One event, one finding, on this path.
-    const folded = foldEvents(reserveGenesis(), [lotlessOpen("no-such-reserve")]);
-
-    expect(folded.skipped).toHaveLength(1);
-    expect(folded.skipped[0]!.reason).toBe("provenance-absent");
+    expect(result.kind).toBe("event-error");
+    expect(result).toMatchObject({ path: "position.lots" });
   });
 });
