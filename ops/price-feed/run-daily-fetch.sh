@@ -445,8 +445,10 @@ if [[ -n "$PREVIOUS_EXIT_CODE" && -n "$PREVIOUS_LAST_STEP" ]]; then
     # true, and on the outage above step 5b is precisely what is not running. A stale
     # enumeration standing under a fresh FAILED line is a channel telling the operator two
     # things of different vintages in one voice, which is the credibility spend this whole
-    # design refuses. So: one bounded, currently-true message, and `NOTICE_SCOPE_LINE` above
-    # says out loud that lost days are not in it. The cost is real and it is accepted.
+    # design refuses. So: one bounded, currently-true message, and the scope line in
+    # `write_operator_failure_notice` (`notice_scope_line`, defined with the writer near the
+    # top of this file) says out loud that lost days are not in it. The cost is real and it
+    # is accepted.
     #
     # THE TAIL IS "the run now starting" BECAUSE THAT IS WHERE THIS CALLER STANDS — the run
     # this file is about is over, and the one that will replace this text has not reached
@@ -1070,10 +1072,15 @@ pnpm gap-report -- --write
 #     run died at `prices-fetch`, this run is landing the missed days right now —
 #     the file is right and the sentence is wrong, and the run writing it is the run
 #     that just fixed it. So the channels split by LANGUAGE: this notice is the DATA
-#     half, and the job half is bash that knows its own run — step 0 today, correctly
-#     scoped to the PREVIOUS run and reaching the two paths this step never sees at
-#     all. The TUI banner keeps all three heartbeat triggers; it is a live PULL
-#     surface, read at the moment the operator looks. Writing an in-progress
+#     half, and the job half is bash — two writers of this same file, reaching the two
+#     paths this step never sees at all. The PRIMARY one is the EXIT trap, which calls
+#     `write_operator_failure_notice` from inside the failing run and is therefore
+#     scoped to THIS run at the moment it dies. Step 0 is the BACKSTOP: it reads the
+#     previous run's breadcrumb, so it is deliberately scoped to the PREVIOUS run, and
+#     what it covers alone is a death with no trap at all — SIGKILL, OOM, power loss —
+#     plus a run that dies before the trap is installed. Step 0's own block above says
+#     this in the same words. The TUI banner keeps all three heartbeat triggers; it
+#     is a live PULL surface, read at the moment the operator looks. Writing an in-progress
 #     heartbeat before this line instead was refused on `write_heartbeat`'s own cost:
 #     its first act after capturing $? is a SIGKILL of the watchdog and a reap of its
 #     sleep, so an early write would leave this step AND `backfill`, the longest one,
