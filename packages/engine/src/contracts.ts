@@ -85,12 +85,21 @@ export interface FundReviewData {
 }
 
 /**
- * Why the fold could not apply an event. CLOSED AT TWO MEMBERS — a third reason is a
- * spec change, not a build decision. `position-absent`: the verb named a position the
- * fold has no record of (never opened in this window, or already retired).
+ * Why the fold could not apply an event. A CLOSED VOCABULARY — widening it is a spec
+ * change, not a build decision; it was widened once, deliberately, to three (#329).
+ *
+ * `position-absent`: the verb named a position the fold has no record of (never opened
+ * in this window, or already retired).
+ *
  * `reserve-absent`: a cash leg named a reserve the fold has no record of.
+ *
+ * `provenance-absent`: a cash leg derived from position lots had NO LOTS to derive
+ * from, so there is no cost-basis provenance for the leg to inherit. THIS IS NOT
+ * `reserve-absent` AND THE TWO MUST NEVER BE CONFLATED: here the reserve exists and was
+ * found — what is missing is the attribution the leg would have carried into it.
+ * Reporting a reserve miss that never happened would make the notice lie.
  */
-export type FoldSkipReason = "position-absent" | "reserve-absent";
+export type FoldSkipReason = "position-absent" | "reserve-absent" | "provenance-absent";
 
 /**
  * One event the fold read and then dropped — the Discard Channel's record (PRD #323,

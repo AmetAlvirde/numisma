@@ -23,7 +23,9 @@
  * door, the same shape `record-fill-cli.test.ts` uses. `input` is always supplied so the
  * readline prompt gets EOF or an authored answer instead of hanging, and every runner call
  * carries a `timeout` so a shell that failed to close its prompt surfaces as a KILLED
- * process rather than as a stuck suite.
+ * process rather than as a stuck suite. A spawn's stdin is a PIPE, never a terminal, which
+ * is not merely an incidental property of this harness — since #346 it is the condition the
+ * last block below tests, and the reason `no-reserve-declared` is assertable at all.
  *
  * EVERY FIXTURE IS AUTHORED — invented ids, an invented instrument, round decade prices,
  * round balances. Nothing is seeded from, or shaped by, a real export, a real ladder or a
@@ -169,7 +171,13 @@ interface ShellRun {
   stderr: string;
 }
 
-describe("import-orders-cli — the shell's own contract (argv, exit codes, env, readline)", () => {
+// NOT "readline", WHICH THIS TITLE USED TO CLAIM. Every case here is a `spawnSync` with a
+// piped stdin, so `process.stdin.isTTY` is falsy in all of them and the `isTTY` guard in
+// `ask` returns before `createInterface` is ever called. No case in this file constructs a
+// readline interface, and therefore none can observe one being closed. What IS pinned is
+// the no-terminal branch in front of it — the notice, its placement at the first
+// unanswerable question, and the empty answer the domain then refuses on.
+describe("import-orders-cli — the shell's own contract (argv, exit codes, env, no-terminal stdin)", () => {
   const createdDirs: string[] = [];
 
   afterEach(async () => {
@@ -224,10 +232,18 @@ describe("import-orders-cli — the shell's own contract (argv, exit codes, env,
   }
 
   /**
-   * The readline lifecycle assertion, made on EVERY path: the process ended on its own.
-   * `rl.close()` lives in a `finally`, so a path that lost it would leave stdin open and
-   * the process alive until the runner's timeout killed it — which is a signal, not a
-   * status.
+   * THE TERMINATION ASSERTION, MADE ON EVERY PATH: the process ended on its own rather than
+   * being killed by the runner's timeout, which arrives as a signal instead of a status.
+   *
+   * IT IS NOT A READLINE-LIFECYCLE ASSERTION, WHICH IS WHAT THIS DOC USED TO IMPLY. The
+   * `finally { rl?.close() }` in the shell is never exercised from here: no case in this
+   * file has a TTY on stdin, so `rl` is `undefined` on every one of them and deleting the
+   * whole `finally` block leaves all of them green. The close is correct — verified by hand
+   * against a real pty — and it is what keeps a REAL interview from leaving stdin open, but
+   * both halves of its lifecycle, the `createInterface` and the `close`, are observable only
+   * from a terminal, and a spawned test cannot stand in one. What this function actually
+   * holds down is that no path here HANGS — which, on a piped stdin, is a claim about the
+   * no-terminal branch returning promptly rather than about an interface being closed.
    */
   function expectExited(run: ShellRun): void {
     expect(run.signal).toBeNull();
@@ -292,8 +308,19 @@ describe("import-orders-cli — the shell's own contract (argv, exit codes, env,
     // And the unreadable row was reported on the error channel, where per-row problems go.
     expect(run.stderr).toContain(`${csv}:2 skipped`);
     // The operator was never taken into the interview: every readable rung was already on
-    // file, so there was nothing to attribute. The funding prompt's own text is the proof.
-    expect(run.stdout).not.toMatch(/Funding reserve for this batch/);
+    // file, so there was nothing to attribute.
+    //
+    // THE PROOF IS THE MISSING NO-TERMINAL NOTICE, not the missing prompt text. Asserting
+    // that `Funding reserve for this batch` never reaches stdout was the obvious probe and
+    // it went vacuous under #346: that string exists only as the argument handed to `ask`
+    // (`import-orders-funding-declaration.ts:68`), and a spawned run takes the no-terminal
+    // branch, which returns "" WITHOUT writing the question anywhere. The absence proved
+    // nothing — it holds on a run that asked and on a run that did not. The notice does
+    // discriminate: `ask` writes it the first time it is called on a stdin that is no
+    // terminal, so stderr staying clean of it is the observable fact that NO QUESTION WAS
+    // PUT AT ALL. Its twin is the no-terminal block below, where a run that DOES reach the
+    // funding question writes exactly that notice — same probe, opposite sign.
+    expect(run.stderr).not.toMatch(/No terminal on stdin/);
   });
 
   it("exits 0 on imported and leaves no temp sibling beside the sidecar it wrote", async () => {
@@ -352,9 +379,11 @@ describe("import-orders-cli — the shell's own contract (argv, exit codes, env,
     const dir = await dataDir();
     const csv = await exportFile(dir, [FRESH_ROW]);
 
-    // `resolveOrdersPath()` throws inside the try, AFTER the readline was constructed —
-    // so this path exercises both the catch (message to stderr, exit 1) and the `finally`
-    // that must still close the prompt.
+    // `resolveOrdersPath()` throws INSIDE the try, so this path exercises the outer catch:
+    // the message reaches stderr and the run exits 1. It does NOT exercise the `finally`'s
+    // `rl?.close()` in any meaningful sense — stdin here is a pipe, no question was ever
+    // put, and `rl` is `undefined`, so the optional call is a no-op. What the `finally`
+    // costs on this path is exactly the nothing the `?.` was written to cost.
     const run = runImport([csv], { dataDir: "data" });
 
     expectExited(run);
@@ -368,9 +397,10 @@ describe("import-orders-cli — the shell's own contract (argv, exit codes, env,
     // so running the same refusal under two different values shows the resolution
     // FOLLOWING the env var rather than merely happening to sit somewhere plausible.
     //
-    // THE OTHER TWO RESOLVERS SIT BEHIND THE PROMPT and cannot be reached from a spawned
-    // run — see the interview-wall case below, and #346, for why — so what is pinned here
-    // is the reachable one plus the negative that matters: no run of this shell falls back
+    // THE OTHER TWO RESOLVERS SIT BEHIND THE PROMPT and STILL cannot be reached from a
+    // spawned run: #346 made a piped run refuse the interview rather than answer it, which
+    // moved the wall without removing it — see the no-terminal block below — so what is
+    // pinned here is the reachable one plus the negative that matters: no run falls back
     // to the real accumulus root. `resolvePlansPath` and `resolveEventStorePaths` share
     // `resolveDataDir` with `resolveOrdersPath`, and that agreement is pinned at the
     // resolver (`packages/preferences/src/plans-reliable.test.ts`, the data-dir drift
@@ -390,43 +420,104 @@ describe("import-orders-cli — the shell's own contract (argv, exit codes, env,
     expect(two.stderr).not.toMatch(/accumulus/);
   });
 
-  it("reaches the funding prompt on good inputs and still exits, closing the readline", async () => {
-    // THE CONTROL CASE, and a finding in its own right. A fresh rung has nothing on file
-    // to compare against, so the flow runs the export read, the header parse, the sidecar
-    // load and the changed-claim partition and then ASKS — and the shell's own readline,
-    // constructed over a PIPE that carries no terminal, has already seen end-of-input by
-    // the time the question is put. The prompt rejects, the outer catch reports it, and
-    // the run exits 1 through the same `finally` every other path uses.
+  describe("a stdin that is no terminal — the interview has nowhere to happen (#346)", () => {
+    // THE CASE THIS BLOCK REPLACED asserted `readline was closed`, a readline internal that
+    // reached the operator verbatim: `createInterface` was constructed at module scope and
+    // eagerly consumed a piped stdin, so the stream had already ended by the time the first
+    // question was put. The shell now builds the interface AT the first question, and when
+    // stdin is no terminal it never builds one at all — it says so in its own voice and
+    // returns an empty answer, which is the one honest answer an unattended run can give.
     //
-    // What that buys the assertions above: this run proves the shell STARTS and gets all
-    // the way through the reads on good inputs, so a refusal elsewhere in this file is the
-    // shell's own decision rather than a process that could not run at all. What it also
-    // records is the wall: the interactive half of this flow — the funding declaration,
-    // the rung picks, the plans read and the fold behind them — is not exercisable from a
-    // non-interactive spawn, and the `no-reserve-declared` refusal is unreachable here.
-    //
-    // FILED AS #346: `createInterface` is constructed at `import-orders-cli.ts:28` and
-    // eagerly consumes stdin, so by the time the first `ask` runs a piped stdin has already
-    // ended and `rl.question` rejects — which is why piping answers to `pnpm orders:import`
-    // cannot work, and why `no-reserve-declared` at `import-orders.ts:588` is unreachable
-    // without a TTY.
-    const dir = await dataDir();
-    const csv = await exportFile(dir, [FRESH_ROW]);
+    // WHAT THAT UNLOCKS is the first test in this repo of `no-reserve-declared`
+    // (`import-orders.ts:588`). That refusal fires only when `declareFunding` returns
+    // undefined, which happens only on an empty batch answer — so before this change it was
+    // reachable exclusively from a TTY, i.e. from nowhere a test can stand. The shell
+    // returning "" rather than throwing is what puts it under a spawn.
 
-    const run = runImport([csv], { dataDir: dir });
+    it("names the missing terminal, lets the FLOW refuse, exits 1, writes nothing", async () => {
+      const dir = await dataDir();
+      // A fresh rung: nothing on file to compare it against, so it is ADMITTED and the
+      // flow reaches the funding interview. The only export shape that gets this far.
+      const csv = await exportFile(dir, [FRESH_ROW]);
 
-    expectExited(run);
-    expect(run.status).toBe(1);
-    // It did NOT fail on any of the reads before the prompt — no refusal was raised.
-    expect(run.stderr).not.toMatch(/REFUSED/);
-    // DELIBERATELY A NODE-INTERNAL STRING, not a contract of ours. `ERR_USE_AFTER_CLOSE`
-    // is the most precise available probe for "the prompt was actually put": no message of
-    // ours is emitted between the last read and the question. The tradeoff is owned here —
-    // a Node release that rewords it breaks this case, and the fix is to re-derive the new
-    // wording rather than to weaken the probe, because a looser match would stop
-    // distinguishing "reached the prompt" from "died earlier for some other reason".
-    expect(run.stderr).toMatch(/readline was closed/);
-    // Nothing was written on the way to the prompt: the sidecar is still absent.
-    expect(await readdir(dir)).not.toContain("orders.jsonl");
+      const run = runImport([csv], { dataDir: dir });
+
+      expectExited(run);
+      expect(run.status).toBe(1);
+      // THE SHELL'S SENTENCE — a consequence, not a rule, and not a readline internal.
+      expect(run.stderr).toContain(
+        "No terminal on stdin: this import is an interview — it asks which reserve funds " +
+          "the batch — and there is nowhere to conduct it, so every question goes " +
+          "unanswered. Run it from a terminal.",
+      );
+      // WHAT IT HONESTLY DOES NOT PIN, in the voice this file uses for that: the notice is
+      // written ONCE PER RUN rather than once per question, and no spawn can see it. This
+      // used to carry a `toHaveLength(1)` count over the notice, which could not fail — a
+      // no-terminal run puts EXACTLY ONE question. `import-orders.ts:586` asks the funding
+      // batch question, gets "", and `:588` refuses the whole import; every later question
+      // (the override pass, the rung walk) sits past that refusal, and no export shape,
+      // argv, or data-dir state reaches one. Delete the `toldThereIsNoTerminal` flag
+      // entirely, write the notice unconditionally, and all nine cases here stay green.
+      // The flag is kept anyway — it is a boolean, and the rung walk on the far side of the
+      // funding wall can put thirty questions, which is the shape that makes the difference
+      // between one notice and thirty legible. Counting a one-element set proved none of it.
+      // AND THE FLOW'S OWN SENTENCE, on the flow's own channel, in the flow's own voice —
+      // `no-reserve-declared`, asserted end-to-end for the first time. Two refusals, two
+      // layers, one story: the shell says why there was no answer, the domain says what it
+      // did about it.
+      expect(run.stderr).toContain(
+        "REFUSED — no funding reserve was declared for this batch",
+      );
+      expect(run.stderr).toContain(`Nothing was written to ${join(dir, "orders.jsonl")}.`);
+      // THE INTERNAL IS GONE FROM THIS PATH — the piped, non-TTY one, which is the path
+      // every unattended caller and every test in this file takes, and where a readline
+      // constructed anywhere would bring `readline was closed` straight back.
+      //
+      // SAID PRECISELY, BECAUSE THE BROADER CLAIM IS FALSE. This is not "no readline
+      // internal ever reaches the operator again". At a REAL terminal, Ctrl-D on the
+      // funding question still surfaces Node's own `Aborted with Ctrl+D` on stderr with
+      // exit 1 — no shell sentence, no `no-reserve-declared`. Reproduced by hand on this
+      // commit (`printf '\004' | script -q /dev/null tsx …`). A BLANK LINE at the same
+      // terminal refuses correctly, in both voices, so this is a gap in the TTY branch
+      // rather than a regression of the fix: what #346 killed is a piped run reporting a
+      // readline internal instead of naming the missing terminal, and that is dead. The
+      // Ctrl-D case is tracked separately; nothing here should be widened to cover it.
+      expect(run.stderr).not.toMatch(/readline was closed/);
+      // Refused means refused: no sidecar, and no staging sibling of one either.
+      expect(await readdir(dir)).not.toContain("orders.jsonl");
+      expect(await litter(dir)).toEqual([]);
+    });
+
+    it("stays SILENT about the terminal on a run that never asks a question", async () => {
+      // THE PAYOFF OF BUILDING LAZILY, stated as behaviour the operator can see. Every
+      // readable rung here is already on file, so nothing is admitted and no question is
+      // ever put — and a shell that announced the missing terminal at STARTUP, rather than
+      // at the first unanswerable question, would scold a run that had nothing to ask.
+      //
+      // The mutation this is pinned against is moving the NOTICE out of `ask` and up to
+      // the shell's opening lines: this case goes red, the case above stays green — which
+      // is exactly the difference between "lazy" and "loud".
+      //
+      // WHAT IT HONESTLY DOES NOT PIN, said out loud so nobody reads more into it: moving
+      // `createInterface` itself back to module scope leaves all nine cases green, because
+      // the `isTTY` guard returns before `rl` is ever touched and a spawned stdin is never
+      // a terminal. The interface's laziness is a STRUCTURAL claim — it is what lets the
+      // `finally` close only what was built — and no test standing outside a TTY can
+      // observe it. The guard, the notice's placement, and the empty-answer composition
+      // are the three things these two cases actually hold down.
+      const dir = await dataDir({
+        "orders.jsonl": `${serializeOrderRecord(placementOnFile())}\n`,
+      });
+      const csv = await exportFile(dir, [RESTATED_ROW]);
+
+      const run = runImport([csv], { dataDir: dir });
+
+      expectExited(run);
+      expect(run.status).toBe(0);
+      expect(run.stderr).not.toMatch(/No terminal on stdin/);
+      expect(run.stderr).not.toMatch(/readline was closed/);
+      // It really did the work — this is a successful import, not a silent early exit.
+      expect(run.stdout).toMatch(/Imported .*: 0 order\(s\) appended/);
+    });
   });
 });
