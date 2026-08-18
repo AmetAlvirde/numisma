@@ -748,8 +748,9 @@ and queued marks in `<dataDir>/inbox/transactions.json`. It never:
   pipeline; folding the recovered marks into the event log is still step 3 of
   the procedure above, run by hand.
 - **Commits to the `<fund>` data repo, or refreshes the hosted projection.**
-  Both stay the operator's, as steps 3–4 above and steps 5–6 of the daily
-  wrapper (`pnpm gap-report -- --write`, `pnpm backfill`) respectively.
+  Both stay the operator's: the commit is step 4 of the procedure above (the
+  wrapper's step 3), and refreshing the projection is `pnpm backfill` (the
+  wrapper's step 6).
 
 This is also why recovery is **never** routed through
 `ops/price-feed/run-daily-fetch.sh`: the wrapper's `EXIT` trap is the sole

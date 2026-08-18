@@ -112,7 +112,10 @@ describe("prices:fetch — with no arguments the live daily path is unchanged", 
       Promise.resolve(runResult({ asOf: LIVE_AS_OF, quotes: [], marks: [], totalCount: 13 })),
     );
 
-    expect(captured.options).toEqual({});
+    // `toStrictEqual`, not `toEqual`: `toEqual` ignores undefined-valued keys, so it
+    // would also pass if the CLI started sending `{ asOf: undefined }` — which is a
+    // different call than "no asOf at all", and this test's whole claim is the latter.
+    expect(captured.options).toStrictEqual({});
     expect(captured.exitCode).toBe(0);
     // No recovery vocabulary leaks onto the daily path.
     expect(captured.out).not.toMatch(/recover/i);
@@ -331,16 +334,17 @@ describe("prices:fetch — refusals render as one sentence, never a stack trace"
     expect(captured.err).toMatch(/needs a date/i);
   });
 
+  /**
+   * Both `runPriceFetch` refusals are driven through the REAL `runPriceFetch`, not a
+   * hand-thrown stand-in: what earns the bare rendering is now the error's TYPE, so a
+   * fixture `new Error(...)` would assert the fixture rather than the contract. The
+   * refusal fires before any IO, so no `dataDir` is touched.
+   */
+  const realRun = (options: RunOptions) =>
+    runPriceFetch({ ...options, now: () => new Date("2026-08-17T15:00:00.000Z") });
+
   it("renders runPriceFetch's TODAY refusal as one readable message", async () => {
-    const captured = await invoke(["--as-of=2026-08-17"], () =>
-      Promise.reject(
-        new Error(
-          'asOf "2026-08-17" is not in the past: the current trading day is 2026-08-17. ' +
-            'To mark 2026-08-17, run the daily job with no asOf — "recover today" is just ' +
-            '"run the daily job".',
-        ),
-      ),
-    );
+    const captured = await invoke(["--as-of=2026-08-17"], realRun);
 
     expect(captured.exitCode).toBe(1);
     expect(captured.err).toMatch(/is not in the past/);
@@ -350,13 +354,40 @@ describe("prices:fetch — refusals render as one sentence, never a stack trace"
   });
 
   it("renders runPriceFetch's impossible-date refusal as one readable message", async () => {
-    const captured = await invoke(["--as-of=2026-02-30"], () =>
-      Promise.reject(new Error('asOf "2026-02-30" is not a real calendar date.')),
-    );
+    const captured = await invoke(["--as-of=2026-02-30"], realRun);
 
     expect(captured.exitCode).toBe(1);
     expect(captured.err).toMatch(/2026-02-30/);
+    expect(captured.err).toMatch(/not a real calendar date/);
     expect(captured.err).not.toMatch(/\n\s+at /);
+  });
+
+  /**
+   * The other half of the pair, and the one the type gate exists for: a fault that is
+   * NOT an operator refusal keeps its stack, on the recovery path exactly as on the
+   * live path. Gating the bare rendering on "an --as-of was given" instead would
+   * swallow the stack of a failed `mkdir`, an atomic-write error or a defect in
+   * `buildMarks` — on the newer, less-exercised half of the command.
+   */
+  const bug = () => Promise.reject(new Error("EACCES: permission denied, mkdir '/prices'"));
+
+  it("rethrows an UNEXPECTED fault on the recovery path, stack intact", async () => {
+    await expect(invoke(["--as-of=2026-08-14"], bug)).rejects.toThrow(/EACCES/);
+  });
+
+  it("rethrows an UNEXPECTED fault on the live path too — unchanged", async () => {
+    await expect(invoke([], bug)).rejects.toThrow(/EACCES/);
+  });
+
+  it("accepts the pnpm `--` forwarding form and still reaches the run", async () => {
+    // pnpm 11 puts the literal separator in argv[0]; `pnpm gap-report -- --write` is
+    // this repo's own documented idiom, so an operator will type it here too.
+    const captured = await invoke(["--", "--as-of=2026-08-14"], () =>
+      Promise.resolve(runResult()),
+    );
+
+    expect(captured.options).toStrictEqual({ asOf: RECOVERY_AS_OF });
+    expect(captured.exitCode).toBe(0);
   });
 });
 
@@ -382,7 +413,7 @@ describe("prices:fetch --as-of — the run writes stored quotes and inbox marks 
   }
 
   it("touches the price store and the inbox and nothing else — no heartbeat, no log", async () => {
-    // Driven through the REAL `runPriceFetch` (no `run` injected) with an authored
+    // Driven through the REAL `runPriceFetch` (wrapped by the injected `run`) with an authored
     // one-row Binance payload, so the assertion is over what the pipeline actually
     // wrote rather than over what a stub claimed.
     const out: string[] = [];
@@ -391,6 +422,7 @@ describe("prices:fetch --as-of — the run writes stored quotes and inbox marks 
       config: { dataDir, twelveDataMaxSymbolsPerMinute: 9, twelveDataPauseMs: 0 },
       // The REAL run, with only its network and clock edges stubbed — so the CLI's
       // own option plumbing (`asOf` reaching `runPriceFetch`) is exercised too.
+      // (`run` IS injected here; what it wraps is the real `runPriceFetch`.)
       run: (options) =>
         runPriceFetch({
           ...options,
@@ -432,7 +464,7 @@ function authoredRecoveryFetch(): typeof fetch {
               series: [
                 {
                   idSerie: "SF43718",
-                  datos: [{ fecha: `${window[3]}/${window[2]}/${window[1]}`, dato: "17.0218" }],
+                  datos: [{ fecha: `${window[3]}/${window[2]}/${window[1]}`, dato: "18.4407" }],
                 },
               ],
             },

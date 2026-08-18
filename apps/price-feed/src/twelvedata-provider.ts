@@ -138,7 +138,10 @@ export async function fetchTwelveDataDailyCloses(
   return entries.map((entry) => {
     const symbolBody = entries.length === 1 ? body : body[entry.symbol];
     try {
-      return { entry, observation: observationFromBody(entry, symbolBody, now) };
+      return {
+        entry,
+        observation: observationFromBody(entry, symbolBody, now, options.targetDate),
+      };
     } catch (error) {
       return { entry, error: error instanceof Error ? error.message : String(error) };
     }
@@ -151,11 +154,28 @@ export async function fetchTwelveDataDailyCloses(
  * catches per entry, so the throw never escapes the batch. `symbolBody` is the
  * un-keyed `{ values, status }` object for that symbol (the whole body for a
  * single-symbol request, or one keyed entry from a batch).
+ *
+ * ROW SELECTION DIFFERS BY PATH, deliberately:
+ *
+ *  - LIVE (`targetDate === undefined`) — `values[0]`, unchanged, because
+ *    `outputsize=1` asks for exactly the newest bar and there is no other row to
+ *    prefer. This half must stay byte-for-byte the pre-recovery behaviour.
+ *  - DATE-PINNED — the row whose `datetime` IS the target date, rather than
+ *    whichever row came first. The exclusive one-day window should return exactly
+ *    one row, but "should" is doing load-bearing work there: if exclusivity ever
+ *    slipped, `values[0]` under Twelve Data's newest-first default ordering would be
+ *    the NEIGHBOURING day's bar. The stale-bar gate downstream would correctly
+ *    withhold the MARK — but the quote store is written before that gate, so
+ *    `<dataDir>/prices/<id>.jsonl` would take the wrong day's price under the target
+ *    `asOf`. Selecting by date makes neither exclusivity nor ordering load-bearing,
+ *    and no row for the target date becomes the same symbol-attributable,
+ *    date-naming failure a zero-row payload already produces.
  */
 function observationFromBody(
   entry: InstrumentRegistryEntry,
   symbolBody: unknown,
   now: () => Date,
+  targetDate: string | undefined,
 ): ProviderObservation {
   if (!isRecord(symbolBody)) {
     throw new Error(`Twelve Data ${entry.symbol} -> unexpected payload shape`);
@@ -166,8 +186,19 @@ function observationFromBody(
     throw new Error(`Twelve Data ${entry.symbol} -> ${message}`);
   }
   const values = symbolBody.values;
-  const row = Array.isArray(values) ? values[0] : undefined;
+  if (!Array.isArray(values)) {
+    throw new Error(`Twelve Data ${entry.symbol} -> unexpected payload shape`);
+  }
+  const row =
+    targetDate === undefined
+      ? values[0]
+      : values.find((candidate) => isRecord(candidate) && rowDate(candidate) === targetDate);
   if (!isRecord(row)) {
+    if (targetDate !== undefined) {
+      throw new Error(
+        `Twelve Data ${entry.symbol} -> no bar dated ${targetDate} in the response`,
+      );
+    }
     throw new Error(`Twelve Data ${entry.symbol} -> unexpected payload shape`);
   }
   const close = Number(row.close);
@@ -190,10 +221,15 @@ function observationFromBody(
  * day); a row with no usable date is a malformed payload, thrown attributably.
  */
 function barDateFromRow(entry: InstrumentRegistryEntry, row: Record<string, unknown>): string {
-  const datetime = typeof row.datetime === "string" ? row.datetime : "";
-  const match = /^(\d{4}-\d{2}-\d{2})/.exec(datetime);
-  if (!match) {
+  const date = rowDate(row);
+  if (date === undefined) {
     throw new Error(`Twelve Data ${entry.symbol} -> unexpected payload shape (no bar datetime)`);
   }
-  return match[1]!;
+  return date;
+}
+
+/** A row's `YYYY-MM-DD`, or `undefined` when it has no usable `datetime`. */
+function rowDate(row: Record<string, unknown>): string | undefined {
+  const datetime = typeof row.datetime === "string" ? row.datetime : "";
+  return /^(\d{4}-\d{2}-\d{2})/.exec(datetime)?.[1];
 }

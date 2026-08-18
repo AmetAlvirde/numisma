@@ -52,8 +52,14 @@ shared inbox, and `pnpm spine` (in `apps/tui`) owns the guarded, validated appen
   later when `pnpm spine` runs. `pnpm spine` stays the one authoritative
   guard; a failed pre-check (unreadable log, missing genesis) is swallowed
   into a non-fatal note, never a crash.
-- **The CLI** (`src/cli.ts`, `pnpm prices:fetch`) — thin console/exit-code
-  wiring over `runPriceFetch` + `scanFetchedMarks`. No domain logic.
+- **The CLI** (`pnpm prices:fetch`) — split in two so the report and the exit
+  code are testable without spawning a process. `src/cli.ts` is wiring only: it
+  reads `process.argv`, calls `runPriceFetchCli` and assigns the exit code it
+  returns. `src/cli-main.ts` holds the console report, the owed / marked /
+  absent classification behind `--as-of` and the exit contract, over
+  `runPriceFetch` + `scanFetchedMarks`; `src/cli-args.ts` is the argv parser,
+  shape-only, which refuses an unknown argument rather than ignoring it. Still
+  no domain logic — every decision lives behind `runPriceFetch`.
 
 ## Runtime constraints
 

@@ -26,6 +26,8 @@
  * must agree forever, with nothing forcing them to.
  */
 
+import { PriceFetchRefusal } from "./refusal.js";
+
 /** The flag surface of `prices:fetch`. One flag, one value, no range, no dry run. */
 export interface PriceFetchArgs {
   /**
@@ -64,13 +66,13 @@ export function parsePriceFetchArgs(argv: readonly string[]): PriceFetchArgs {
 
   const take = (value: string | undefined, spelling: string): string => {
     if (value === undefined || value === "" || value.startsWith("-")) {
-      throw new Error(
+      throw new PriceFetchRefusal(
         `${AS_OF_FLAG} needs a date: write ${AS_OF_FLAG}=YYYY-MM-DD or ` +
           `${AS_OF_FLAG} YYYY-MM-DD (got "${spelling}").\n${USAGE}`,
       );
     }
     if (!ISO_SHAPE.test(value)) {
-      throw new Error(
+      throw new PriceFetchRefusal(
         `${AS_OF_FLAG} value "${value}" is not a date in YYYY-MM-DD form ` +
           `(zero-padded, e.g. 2026-08-14).\n${USAGE}`,
       );
@@ -82,7 +84,7 @@ export function parsePriceFetchArgs(argv: readonly string[]): PriceFetchArgs {
     if (asOf !== undefined) {
       // One date per run. A range is a shell loop wearing a flag, and a multi-day
       // window walks into the Banxico ordering trap the pinned one-day path avoids.
-      throw new Error(
+      throw new PriceFetchRefusal(
         `${AS_OF_FLAG} may be given once — this command recovers one day per run ` +
           `(got "${asOf}" and "${value}"). For several days, loop the command; the ` +
           `inbox merges by id, so repeating a day is safe.\n${USAGE}`,
@@ -91,10 +93,21 @@ export function parsePriceFetchArgs(argv: readonly string[]): PriceFetchArgs {
     asOf = value;
   };
 
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i]!;
+  // ⚠️ ONE leading bare `--`, and only a leading one, is skipped. pnpm 11 forwards
+  // the separator itself into argv, so `pnpm prices:fetch -- --as-of=2026-08-14`
+  // arrives here as `["--", "--as-of=2026-08-14"]`. That spelling is this repo's own
+  // documented flag-forwarding idiom (`pnpm gap-report -- --write` in the runbook),
+  // so an operator will type it, and refusing it reads as "the command is broken"
+  // rather than as a spelling correction. A `--` anywhere ELSE is still an unknown
+  // argument: nothing after the flag's value is a positional this command accepts,
+  // and weakening the unknown-argument guard is the one thing this parser exists to
+  // never do (a silently-dropped flag runs the DAILY job and reports success).
+  const args = argv[0] === "--" ? argv.slice(1) : argv;
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
     if (arg === AS_OF_FLAG) {
-      claim(take(argv[i + 1], arg));
+      claim(take(args[i + 1], arg));
       i++;
       continue;
     }
@@ -102,7 +115,7 @@ export function parsePriceFetchArgs(argv: readonly string[]): PriceFetchArgs {
       claim(take(arg.slice(AS_OF_FLAG.length + 1), arg));
       continue;
     }
-    throw new Error(
+    throw new PriceFetchRefusal(
       `unknown argument "${arg}". \`prices:fetch\` takes ${AS_OF_FLAG} and nothing ` +
         `else, and refuses what it does not understand rather than ignoring it: a ` +
         `silently-dropped flag would run the ordinary daily job and report success, ` +

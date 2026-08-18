@@ -56,24 +56,6 @@ interface FetchJsonOptions {
 }
 
 /**
- * Fetch `url` and decode its JSON body, bounded by an `AbortController` timeout
- * (R4) so a stalled provider can never hang a scheduled run. Returns a bare-reason
- * Result for a timeout, a transport error, a non-ok HTTP status, or a body that is
- * not JSON — the caller labels it.
- *
- * The JSON decode is INSIDE the guarded region on purpose: a 200 with a non-JSON
- * body (a maintenance page, a Cloudflare interstitial) used to escape each provider
- * as an unlabelled `SyntaxError`, which in Twelve Data's case aborted the whole run
- * against that function's own "never throws for a data problem" contract. Here it is
- * an ordinary `{ ok: false, reason }`, attributed by whoever asked for it.
- *
- * A non-ok status appends the provider's own sentence when one can be recovered
- * (`HTTP 400 Bad Request — No data is available on the specified dates`), because a
- * bare `HTTP 400 Bad Request` reads as a malformed request when on the recovery path
- * it almost always means that day had no trading. The `HTTP <status> <statusText>`
- * prefix stays first and byte-identical — callers match it by prefix.
- */
-/**
  * How much of a provider's own error text may ride along in a `reason`. Generous
  * enough for any real API sentence, small enough that an HTML interstitial served
  * in place of JSON cannot flood a scheduled run's log.
@@ -121,6 +103,24 @@ async function readErrorText(res: Response): Promise<string> {
   return clip(raw);
 }
 
+/**
+ * Fetch `url` and decode its JSON body, bounded by an `AbortController` timeout
+ * (R4) so a stalled provider can never hang a scheduled run. Returns a bare-reason
+ * Result for a timeout, a transport error, a non-ok HTTP status, or a body that is
+ * not JSON — the caller labels it.
+ *
+ * The JSON decode is INSIDE the guarded region on purpose: a 200 with a non-JSON
+ * body (a maintenance page, a Cloudflare interstitial) used to escape each provider
+ * as an unlabelled `SyntaxError`, which in Twelve Data's case aborted the whole run
+ * against that function's own "never throws for a data problem" contract. Here it is
+ * an ordinary `{ ok: false, reason }`, attributed by whoever asked for it.
+ *
+ * A non-ok status appends the provider's own sentence when one can be recovered
+ * (`HTTP 400 Bad Request — No data is available on the specified dates`), because a
+ * bare `HTTP 400 Bad Request` reads as a malformed request when on the recovery path
+ * it almost always means that day had no trading. The `HTTP <status> <statusText>`
+ * prefix stays first and byte-identical — callers match it by prefix.
+ */
 export async function fetchJson(
   url: string,
   options: FetchJsonOptions,
