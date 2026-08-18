@@ -72,8 +72,16 @@
  * nothing to say about them, and a trigger that armed on them would be claiming otherwise.
  */
 
-import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -2167,5 +2175,106 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
       },
       600_000,
     );
+  });
+});
+
+// ── THE BLANK `NUMISMA_DATA_DIR` REFUSAL (#348) ───────────────────────────────────────
+//
+// THIS BLOCK IS NOT ARMED, AND THAT IS DELIBERATE. Everything above is gated behind
+// `decision.run` because it launches the whole wrapper — watchdog, fake pnpm, minutes of
+// wall clock. This refusal fires in the wrapper's `DATA_DIR` configuration block,
+// before the log dir, before the heartbeat trap, before `cd` and before anything named
+// `pnpm` is looked for. Running it costs one bash startup, so it runs everywhere, always,
+// including on the CI box this suite otherwise cannot use.
+//
+// WHAT IT GUARDS. The wrapper read `${NUMISMA_DATA_DIR:-$HOME/Dev/accumulus/data}`, and
+// the COLON form substitutes on unset OR empty. So a blank env var — `NUMISMA_DATA_DIR=""`,
+// or `"${SCRATCH}"` with `SCRATCH` unset — silently pointed the entire run at the
+// operator's REAL accumulus ledger, which is arm 2 of the three `sidecar-io.ts` weighs.
+// And because `:-` does NOT substitute for whitespace, `"   "` survived as a literal
+// relative path that `HEARTBEAT_FILE` and `git -C "$DATA_DIR"` then resolved against the
+// process CWD — arm 1, the one ADR-006 forbids outright. One operator mistake, two
+// different silent ledgers, depending on how many spaces they typed.
+//
+// NO REAL DATA DIR IS TOUCHED. `HOME` is redirected to a fresh temp dir for every case,
+// so even the paths the wrapper merely NAMES cannot be the real ones, and the environment
+// is built from an explicit allowlist rather than spread from `process.env` — a developer
+// running this with a live `NUMISMA_DATA_DIR` exported must not change the result.
+describe("wrapper config — a blank NUMISMA_DATA_DIR is REFUSED (always runs)", () => {
+  /** sysexits.h EX_CONFIG. Distinct from the wrapper's 1 / 124 / 127 / 143. */
+  const EX_CONFIG = 78;
+
+  function runWrapperConfig(env: Record<string, string>): {
+    status: number | null;
+    stdout: string;
+    stderr: string;
+    home: string;
+  } {
+    const home = mkdtempSync(join(tmpdir(), "numisma-wrapper-blank-"));
+    onTestFinished(() => {
+      rmSync(home, { recursive: true, force: true });
+    });
+    const result = spawnSync("/bin/bash", [WRAPPER_PATH], {
+      encoding: "utf8",
+      // An ALLOWLIST, not a spread: the ambient shell may well export a real
+      // NUMISMA_DATA_DIR, and inheriting it would make these cases lie.
+      env: { PATH: LAUNCHD_BARE_PATH, HOME: home, ...env },
+      input: "",
+      timeout: 30_000,
+    });
+    return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "", home };
+  }
+
+  it('refuses an EMPTY NUMISMA_DATA_DIR with EX_CONFIG, naming the variable and the hazard', () => {
+    const run = runWrapperConfig({ NUMISMA_DATA_DIR: "" });
+
+    expect(run.status, "a blank data dir must be a configuration refusal, not a run").toBe(
+      EX_CONFIG,
+    );
+    expect(run.stderr).toMatch(/FATAL: NUMISMA_DATA_DIR is set to a blank value/);
+    // The consequence, not just the rule — this is the sentence that tells the operator
+    // why the job refused instead of quietly doing the wrong thing.
+    expect(run.stderr).toMatch(/REAL default ledger/);
+    expect(run.stderr).toMatch(/Unset NUMISMA_DATA_DIR/);
+  });
+
+  it('refuses a WHITESPACE-ONLY NUMISMA_DATA_DIR — the arm `${VAR:-}` could never catch', () => {
+    // `:-` treats "   " as set-and-non-empty, so the old read passed it through as a
+    // relative path. This is the case that proves the fix is a real predicate and not
+    // just a swapped colon.
+    const run = runWrapperConfig({ NUMISMA_DATA_DIR: "   " });
+
+    expect(run.status).toBe(EX_CONFIG);
+    expect(run.stderr).toMatch(/is set to a blank value \(got '   '\)/);
+  });
+
+  it("says plainly that NO heartbeat was written, and writes none", () => {
+    // The wrapper's whole heartbeat design is "every failure leaves a breadcrumb", so a
+    // failure that deliberately leaves none has to SAY so — otherwise the next reader
+    // treats the silence as the bug rather than as the finding.
+    const run = runWrapperConfig({ NUMISMA_DATA_DIR: "" });
+
+    expect(run.stderr).toMatch(/No heartbeat was written/);
+    // And it is not merely claimed. The refusal precedes both the wrapper's
+    // `HEARTBEAT_FILE=` assignment and its `exec … tee` log redirect (named, not pinned
+    // to line numbers, which drift), so nothing at all is on disk under the fake HOME:
+    // no `Dev/accumulus`, no `Library/Logs`.
+    expect(existsSync(join(run.home, "Dev"))).toBe(false);
+    expect(existsSync(join(run.home, "Library"))).toBe(false);
+  });
+
+  it("an UNSET NUMISMA_DATA_DIR still takes the default — the refusal must not swallow unset", () => {
+    // Driven only as far as the mark-timezone guard, which is a deliberate, named early
+    // exit well before `cd "$REPO_DIR"` and any `pnpm`. Reaching it at all is the proof:
+    // it lives hundreds of lines BELOW the data-dir block, so an unset var got past the
+    // refusal and took the default. Exit 1 (the TZ guard) is specifically NOT 78.
+    const run = runWrapperConfig({
+      NUMISMA_MARK_TZ: "Not/AZone",
+      NUMISMA_PRICEFEED_LOG_DIR: join(mkdtempSync(join(tmpdir(), "numisma-wrapper-logs-")), "logs"),
+    });
+
+    expect(run.status, "unset must not be refused as a misconfiguration").not.toBe(EX_CONFIG);
+    expect(run.status).toBe(1);
+    expect(run.stdout).toMatch(/mark timezone 'Not\/AZone' is not a resolvable IANA zone/);
   });
 });

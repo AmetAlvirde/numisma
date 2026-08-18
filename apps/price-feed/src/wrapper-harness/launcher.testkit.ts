@@ -156,7 +156,17 @@ export async function launchWrapper(options: LaunchOptions): Promise<RunRecord> 
   assertIsolated(options.env, options.caseDir);
 
   const logDir = options.env.NUMISMA_PRICEFEED_LOG_DIR ?? "";
-  const dataDir = options.env.NUMISMA_DATA_DIR ?? "";
+  // NARROWED, never defaulted (#348). `assertIsolated` above has already refused both
+  // `undefined` and `""` for every name in `WRAPPER_ENV_VARS`, so the only honest thing
+  // to write here is a narrowing of a value that is already proven real. `?? ""` would
+  // manufacture the exact empty string the resolvers now refuse — and it would do so
+  // silently, out of a value the assert guarantees cannot be missing.
+  const dataDir = options.env.NUMISMA_DATA_DIR;
+  if (dataDir === undefined || dataDir === "") {
+    throw new Error(
+      "unreachable: assertIsolated guarantees NUMISMA_DATA_DIR is set and non-empty",
+    );
+  }
 
   // THE NON-LEADER SHAPE MUST NOT `exec`. bash short-circuits `bash -c '"$0"'` into an
   // exec of the single command, which would hand the group leadership straight back to

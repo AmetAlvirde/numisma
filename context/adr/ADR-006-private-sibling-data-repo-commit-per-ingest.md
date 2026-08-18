@@ -66,8 +66,12 @@ the `captureIngestCommit` seam wired into `ingestInbox` — is the `@numisma/tui
   CWD-relative, never a hardcoded `/Users/...` literal — so launchd (which runs with a bare
   CWD and cannot expand `~`) and the interactive TUI resolve the *same* store. A
   `NUMISMA_DATA_DIR` env override **wins over the default in both planes** (the tui
-  `event-store.ts` and price-feed `config.ts`), with **identical `~`-expansion** and
-  **empty/whitespace fall-through to the default**. A **relative** `NUMISMA_DATA_DIR` is a
+  `event-store.ts` and price-feed `config.ts`), with **identical `~`-expansion** and an
+  **unset-only fall-through to the default**: `undefined` means nobody configured the knob,
+  so the default answers, but a **set-but-empty or whitespace-only** value is a
+  *misconfigured* knob rather than an absent one and is **rejected with a loud error**
+  (#348) — accepting it would silently aim every write at the real ledger. A **relative**
+  `NUMISMA_DATA_DIR` is a
   footgun — it re-resolves against `process.cwd()`, so two callers with different CWDs would
   split-brain onto two stores — and must be **rejected with a loud error** (require absolute
   or `~`). price-feed and tui must keep agreeing on the sub-paths (`inbox/transactions.json`,

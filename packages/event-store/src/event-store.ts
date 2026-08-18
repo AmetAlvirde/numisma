@@ -69,8 +69,31 @@ export function quarantineLogPath(logPath: string): string {
   return `${logPath}.quarantine`;
 }
 
-export function resolveEventStorePaths(dataDir = resolveDataDirDefault()): EventStorePaths {
-  const base = resolve(dataDir);
+/**
+ * Resolve every on-disk location of one event store from its root.
+ *
+ * No `dataDir` → the shared `resolveDataDirDefault()`. A blank or whitespace-only
+ * `dataDir` → REFUSED, loudly (#348). This is written as an explicit `undefined` check
+ * rather than as a default PARAMETER because a JS default fires on `undefined` and on
+ * nothing else: `""` used to sail past it into `resolve("")`, which is the process's
+ * CWD. That is the arm ADR-006 exists to forbid, and it is worst here of anywhere —
+ * this resolver owns `genesis.json` and the append-only `events.jsonl`, so a caller
+ * that got its env expansion wrong would not read a stale ledger, it would find NO
+ * ledger, seed a second one beside whatever directory the job started in, and append
+ * to that. `undefined` means nobody configured this and takes the default; `""` means
+ * somebody configured it and got it wrong, which is not a thing to guess at.
+ */
+export function resolveEventStorePaths(dataDir?: string): EventStorePaths {
+  if (dataDir !== undefined && dataDir.trim() === "") {
+    throw new Error(
+      `an event-store data directory must not be empty (got "${dataDir}"). ` +
+        `An empty value is not "unset": resolving it would land on the process's ` +
+        `working directory and seed a SECOND genesis and event log there, splitting ` +
+        `the ledger away from the real one. Pass no data directory at all to use the ` +
+        `default deliberately, or pass an absolute path.`,
+    );
+  }
+  const base = resolve(dataDir ?? resolveDataDirDefault());
   return {
     genesis: join(base, "genesis.json"),
     log: join(base, "events.jsonl"),

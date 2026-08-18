@@ -20,15 +20,34 @@ import { resolveDataDir } from "@numisma/engine";
  * Resolve `<dataDir>/<fileName>` under ADR-006's invariant: ABSOLUTE and
  * homedir-derived, NEVER CWD-relative.
  *
- * The three cases, and why each is what it is:
+ * The cases, and why each is what it is:
  *
- *   - **No override, or a blank/whitespace-only one** → the shared engine
- *     `resolveDataDir()` (the `NUMISMA_DATA_DIR` env knob, or the accumulus
- *     default). An explicit `""` MUST land here and not on `resolve("")`, which is
- *     the process's CWD: a durable, git-tracked artifact written relative to
- *     whatever directory a script happened to start in is a split-brain ledger
- *     waiting to happen, and `""` is exactly the value an unset shell variable
- *     expands to at the one call site most likely to produce it.
+ *   - **No override at all (`undefined`)** → the shared engine `resolveDataDir()`
+ *     (the `NUMISMA_DATA_DIR` env knob, or the accumulus default). Nobody configured
+ *     a directory, so the shared one is the answer.
+ *   - **A blank or whitespace-only override (`""`)** → THROWN, loudly (#348).
+ *
+ *     Three arms were weighed for `""`, and the record of all three lives here so
+ *     none of them is re-litigated by accident:
+ *
+ *       1. `""` → `resolve("")` → the process's CWD. **Rejected, and the rejection
+ *          still stands.** A durable, git-tracked artifact written relative to
+ *          whatever directory a script happened to start in is a split-brain ledger
+ *          waiting to happen. NEVER reintroduce `resolve("")` here — the throw below
+ *          is what keeps this arm shut now that `""` no longer has a landing spot.
+ *       2. `""` → the shared default, silently. **What this resolver did until #348.**
+ *          Its argument: `""` is exactly the value an unset shell variable expands to
+ *          (`${VAR:-}`) at the one call site most likely to produce it. That is true,
+ *          and it is incomplete — it treats a MISCONFIGURED knob as an ABSENT one. A
+ *          deployment that meant to point at a scratch dir and got the expansion wrong
+ *          then writes to the REAL accumulus ledger, silently. Arm 2 cannot see that
+ *          failure; that is why it lost, not because its CWD reasoning was wrong.
+ *       3. `""` → refuse. **Wins.** `undefined` means nobody configured this, so the
+ *          default is the answer. `""` means somebody configured it and got it wrong,
+ *          and the relative-path arm below already refuses a present-but-unusable
+ *          value for exactly that reason. An empty value is the same class of mistake
+ *          with a worse blast radius: relative lands on a wrong-but-scratch dir, empty
+ *          lands on the real ledger.
  *   - **An absolute override** → honored verbatim (normalized). Tests pass one.
  *   - **A relative override** → THROWN, loudly. It resolves differently depending
  *     on the working directory, so silently accepting it splits the store; the
@@ -36,10 +55,19 @@ import { resolveDataDir } from "@numisma/engine";
  *     resolver must not be the softer door around it.
  */
 export function resolveSidecarPath(fileName: string, dataDir?: string): string {
-  if (dataDir === undefined || dataDir.trim() === "") {
+  if (dataDir === undefined) {
     return join(resolveDataDir(), fileName);
   }
   const raw = dataDir.trim();
+  if (raw === "") {
+    throw new Error(
+      `a sidecar data directory must not be empty (got "${dataDir}"). ` +
+        `An empty value is not "unset": accepting it would silently send every write ` +
+        `to the REAL default ledger instead of the directory the caller meant to pass. ` +
+        `Pass no data directory at all to use the default deliberately, or pass an ` +
+        `absolute path.`,
+    );
+  }
   if (!isAbsolute(raw)) {
     throw new Error(
       `a sidecar data directory must be an absolute path (got "${raw}"). ` +
