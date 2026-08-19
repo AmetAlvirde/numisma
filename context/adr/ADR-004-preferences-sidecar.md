@@ -213,8 +213,10 @@ Each was verified against the code before being corrected here.
    `preferences.ts` for a reason of its own and rewrote the docstring; it now
    states the read path is **ALREADY WIRED** and the split-brain hazard live, not
    hypothetical, and its test-side twin says the same. The string this item
-   originally quoted no longer exists anywhere in the repo — quoted above only as
-   the historical claim being corrected.
+   originally quoted no longer exists **in the source** — `preferences.ts` carries
+   no "latent" anywhere. It survives only in the ADR record: quoted above as the
+   historical claim being corrected, and in `context/adr/INDEX.md`'s summary of
+   this same correction. That is the record doing its job, and it stays.
 
    **The chain is named by its functions, not by line numbers**, which is the
    practice this ADR adopts everywhere after correction 2's original citations went
