@@ -85,9 +85,15 @@ function keepAlways(): boolean {
  * throws rather than returning quietly: a disposer handed a path it will not remove has a
  * caller that is wrong, and a silent return is how that stays unnoticed.
  *
- * THE RETRIES ARE NOT DECORATION. The timeout cases deliberately leave the wrapper's stray
- * processes alive inside the case dir at the moment the case ends, and a bare `rm` can lose
- * that race.
+ * THE RETRIES ARE NOT DECORATION, AND NEITHER IS THE `catch` AROUND THEM. The timeout cases
+ * deliberately leave the wrapper's stray processes alive inside the case dir at the moment
+ * the case ends — a TERM-deaf `tee` still appending to a file under `logDir` is an
+ * `ENOTEMPTY` against a recursive walk — and `rmSync` THROWS once it exhausts its retries.
+ * Since this runs from `onTestFinished`, that throw would redden a case that passed, for a
+ * fact about the filesystem rather than about the code under test. So the two failure kinds
+ * are split: the guard above keeps throwing, because it means the CALLER is wrong, while a
+ * delete that loses the race warns and returns. A warning names the directory that survived,
+ * which is the difference between a bounded, visible leak and the silent one #390 was.
  */
 export function disposeCaseDir(caseDir: string, options: { readonly failed: boolean }): void {
   if (!isAbsolute(caseDir)) {
@@ -110,7 +116,15 @@ export function disposeCaseDir(caseDir: string, options: { readonly failed: bool
   if (options.failed || keepAlways()) {
     return;
   }
-  rmSync(path, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+  try {
+    rmSync(path, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+  } catch (error) {
+    console.warn(
+      `wrapper harness could not remove the case dir ${path}: ${
+        error instanceof Error ? error.message : String(error)
+      }. It is left on disk; cleanup does not get a vote on the verdict.`,
+    );
+  }
 }
 
 export interface CaseDirs {
@@ -153,14 +167,21 @@ export interface CaseOptions {
  *
  * `onTestFinished` rather than an `afterEach`, because a case may mint several dirs and
  * each must be judged by the result of the test that minted it. It also runs AFTER the
- * result state is settled, so `pass` is a fact by the time the callback reads it — and
- * anything that is not `pass` is treated as a failure, so the doubtful direction keeps the
- * evidence.
+ * result state is settled, so the verdict is a fact by the time the callback reads it.
+ *
+ * ONLY `fail` KEEPS THE DIRECTORY, PLUS A VERDICT THAT CANNOT BE READ AT ALL. `fail` is
+ * what a plain assertion failure, a timeout and an `afterEach` throw all produce, so it
+ * covers every case that has evidence worth reading. A `skip` has none: its body stopped
+ * before it asserted anything, so keeping its dir is #390 reinstated for that one case. An
+ * ABSENT state keeps the dir, and that asymmetry is deliberate — an unreadable verdict is
+ * exceptional rather than the common path (vitest settles the state before `onFinished`
+ * runs), and the doubtful direction is the one that preserves evidence.
  */
 export function makeCaseDir(options: CaseOptions): CaseDirs {
   const caseDir = mkdtempSync(join(tmpdir(), CASE_DIR_PREFIX));
   onTestFinished((context) => {
-    disposeCaseDir(caseDir, { failed: context.task.result?.state !== "pass" });
+    const state = context.task.result?.state;
+    disposeCaseDir(caseDir, { failed: state === undefined || state === "fail" });
   });
   const binDir = installFakeBin(caseDir);
   const repoDir = join(caseDir, "repo");
