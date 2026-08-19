@@ -29,10 +29,11 @@
  *     non-monotonic file replays deterministically).
  */
 import { appendFile, mkdir, readFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import {
   defaultProfitPolicyEntry,
   isIsoCalendarDate,
+  normalizeDataDirOverride,
   resolveDataDir,
   type LoadedPreferences,
   type PreferenceSkipReason,
@@ -49,30 +50,37 @@ import {
  * `loadPreferences(resolvePreferencesPath())` live, via `loadReserveFloorAsOf` →
  * `buildGlanceForAnchor` — so the split-brain hazard this resolver prevents is live, not
  * hypothetical: a CWD-relative read here would silently serve the phone a Reserve floor
- * from a different file than the one the fund appends to (ADR-004). An explicit `dataDir`
- * is still honored verbatim for callers (e.g. tests) that pass one.
+ * from a different file than the one the fund appends to (ADR-004).
  *
- * A blank or whitespace-only `dataDir` is REFUSED (#348), and the refusal is the reason
- * this is written as an explicit `undefined` check rather than as a default PARAMETER.
- * A JS default parameter fires on `undefined` and on nothing else, so `""` used to sail
- * straight past it into `resolve("")` — which is the process's CWD, the one arm ADR-006
- * exists to forbid. The phone's Reserve floor would then be read from
- * `<wherever-the-job-started>/preferences.jsonl`, a file nobody writes, and the answer
- * would be a plausible wrong number rather than an error. `undefined` still means nobody
+ * An explicit `dataDir` goes through the shared `normalizeDataDirOverride` (#369) rather
+ * than through a fourth hand-written copy of the rule. That matters most HERE, because
+ * this is the door that drifted furthest: until #369 it accepted a bare `"data"` and
+ * silently produced `<cwd>/data/preferences.jsonl`, so the phone's Reserve floor came
+ * from wherever the job started — a plausible wrong number rather than an error, which is
+ * the worst possible failure shape for this particular file.
+ *
+ * The blank arm is written as an explicit `undefined` check rather than as a default
+ * PARAMETER, and that is load-bearing (#348). A JS default parameter fires on `undefined`
+ * and on nothing else, so `""` used to sail straight past it into `resolve("")` — the
+ * process's CWD, the one arm ADR-006 exists to forbid. `undefined` still means nobody
  * configured this and still takes the default; `""` means somebody configured it and got
  * the expansion wrong, and that is not something this resolver may guess at.
  */
 export function resolvePreferencesPath(dataDir?: string): string {
-  if (dataDir !== undefined && dataDir.trim() === "") {
-    throw new Error(
-      `a preferences data directory must not be empty (got "${dataDir}"). ` +
-        `An empty value is not "unset": resolving it would land on the process's ` +
-        `working directory, serving a Reserve floor from a file nothing writes. ` +
-        `Pass no data directory at all to use the default deliberately, or pass an ` +
-        `absolute path.`,
-    );
+  if (dataDir === undefined) {
+    return join(resolveDataDir(), "preferences.jsonl");
   }
-  return join(resolve(dataDir ?? resolveDataDir()), "preferences.jsonl");
+  return join(
+    normalizeDataDirOverride(dataDir, {
+      subject: "a preferences data directory",
+      blankHeadline: "a preferences data directory must not be empty",
+      blankConsequence:
+        "resolving it would land on the process's working directory, serving a " +
+        "Reserve floor from a file nothing writes.",
+      blankRemedy: "Pass no data directory at all to use the default deliberately",
+    }),
+    "preferences.jsonl",
+  );
 }
 
 const SPLIT_BASES: readonly SplitBasis[] = ["highWaterMark", "perClose"];

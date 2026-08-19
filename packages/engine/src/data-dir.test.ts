@@ -11,6 +11,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { resolveDataDir } from "./data-dir.js";
+import { assertDataDirContract } from "./data-dir-contract.testkit.js";
 
 const ACCUMULUS_DEFAULT = join(homedir(), "Dev", "accumulus", "data");
 
@@ -101,4 +102,18 @@ describe("resolveDataDir — the single durable-ledger data-root resolver", () =
       }
     }
   });
+});
+
+// The `NUMISMA_DATA_DIR` env knob is a data-dir DOOR like the four caller-supplied ones,
+// so it runs the same table. The rows above are this door's own history — the #348 blank
+// refusal, the D6 relative refusal, the message wording an operator reads — and they stay;
+// the table is what proves this door and the other four still answer identically.
+assertDataDirContract({
+  name: "resolveDataDir (NUMISMA_DATA_DIR)",
+  subject: /NUMISMA_DATA_DIR/,
+  root: (dataDir) => resolveDataDir({ NUMISMA_DATA_DIR: dataDir }),
+  defaultArm: {
+    actual: () => resolveDataDir({}),
+    expected: () => ACCUMULUS_DEFAULT,
+  },
 });

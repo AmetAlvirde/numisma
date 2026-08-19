@@ -13,9 +13,10 @@
  * Every fixture is an authored string. Nothing here touches a filesystem — this is pure
  * path algebra — so no test in this file can reach a real data dir.
  */
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { PRICE_STORE_DIR_SEGMENT } from "@numisma/engine";
+import { assertDataDirContract } from "@numisma/engine/testkit";
 import { resolvePriceFeedPaths } from "./paths.js";
 
 describe("resolvePriceFeedPaths — a BLANK dataDir is REFUSED before it can be laundered", () => {
@@ -88,4 +89,19 @@ describe("resolvePriceFeedPaths — a BLANK dataDir is REFUSED before it can be 
     const spaced = resolve("/tmp/numisma authored root 348");
     expect(resolvePriceFeedPaths(spaced).log).toBe(join(spaced, "events.jsonl"));
   });
+});
+
+// The LAUNDERING door runs the same table as the other four (#369). It is the door the
+// table most needs, because its failure mode is invisible at the boundary it delegates
+// across: it used to `resolve()` its argument first, which turns every value the upstream
+// resolver refuses into one it accepts. `resolve("data")` is `<cwd>/data` — absolute,
+// valid-looking, and a different store on every CWD.
+//
+// It is also the one door with NO `undefined` arm: its `dataDir` is required, so there is
+// no default for a caller to fall into. The table asserts that absence rather than
+// skipping it, so a later edit that adds a default has to come back through here.
+assertDataDirContract({
+  name: "resolvePriceFeedPaths",
+  subject: /a price-feed data directory|NUMISMA_DATA_DIR/,
+  root: (dataDir) => dirname(resolvePriceFeedPaths(dataDir).log),
 });

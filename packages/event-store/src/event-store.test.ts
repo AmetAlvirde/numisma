@@ -6,9 +6,10 @@
 // skewed NAV), and a fixed log self-heals its stale quarantine lane. A small
 // explicit genesis fixture makes the cases legible.
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { deriveHeadDigest } from "@numisma/engine";
+import { deriveHeadDigest, resolveDataDir } from "@numisma/engine";
+import { assertDataDirContract } from "@numisma/engine/testkit";
 import {
   loadEventLog,
   loadFoldedReview,
@@ -387,4 +388,18 @@ describe("resolveEventStorePaths — a BLANK dataDir is REFUSED, not defaulted a
     const explicit = resolve("/tmp/numisma-explicit-store-348");
     expect(resolveEventStorePaths(explicit).log).toBe(resolve(explicit, "events.jsonl"));
   });
+});
+
+// The event-store door runs the SAME table as the other four (#369). This is the door
+// where a one-sided edit costs most — it owns `genesis.json` and the append-only
+// `events.jsonl` — and it is one of the two that used to resolve a bare `"data"` to
+// `<cwd>/data/events.jsonl` without a word.
+assertDataDirContract({
+  name: "resolveEventStorePaths",
+  subject: /an event-store data directory|NUMISMA_DATA_DIR/,
+  root: (dataDir) => dirname(resolveEventStorePaths(dataDir).log),
+  defaultArm: {
+    actual: () => dirname(resolveEventStorePaths().log),
+    expected: () => resolveDataDir(),
+  },
 });
