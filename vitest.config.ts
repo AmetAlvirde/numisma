@@ -113,6 +113,19 @@ export default defineConfig({
         // Thin price-feed CLI entry: top-level console/exit-code wiring over the
         // tested `runPriceFetch`, no unit to assert.
         "apps/price-feed/src/cli.ts",
+        // Same category as every CLI shell above, and named separately only because
+        // they were missed when their siblings were excluded: importing either one
+        // RUNS THE ACT. `plans-cli.ts` is a bare top-level `try/catch` that resolves
+        // the fold, the `plans.jsonl` sidecar and the `reconciliations.jsonl` trail
+        // and hands them to the already-measured `formatPlansReport`;
+        // `operator-notice-cli.ts` is a module-level
+        // `writeOperatorNotice(...).then(...)` over `@numisma/event-store`, which is
+        // measured. Until this entry existed they reported a dishonest 0% — the exact
+        // failure this section's opening paragraph warns about — rather than the
+        // honest "excluded, here is what guards it instead."
+        // See docs/coverage-rationale.md §1.
+        "apps/tui/src/plans-cli.ts",
+        "apps/price-feed/src/operator-notice-cli.ts",
         // Bun-only openTUI wiring: never executes under Node's vitest run, so
         // instrumenting it would only report dead 0%. Guarded by the openTUI
         // smokes (`pnpm smoke:tui`, `pnpm smoke:startup`).
