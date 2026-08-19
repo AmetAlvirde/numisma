@@ -723,9 +723,18 @@ function watchdogCardPresent(logDir: string): boolean {
  * So the wait no longer races a clock at all. It races {@link watchdogCardPresent}, which is
  * the thing case 4's premise is ACTUALLY about, and this number is what remains: a bound on
  * a run that is neither reaching its step nor being timed out by its own watchdog, which is
- * a broken wrapper rather than a busy machine. It sits above ceiling + grace so the card
- * always wins the race on a merely-slow run, and any run that reaches it has outlived the
- * watchdog that was supposed to bound it.
+ * a broken wrapper rather than a busy machine.
+ *
+ * WHY IT IS DERIVED FROM CEILING + GRACE AND NOT FROM THE CEILING ALONE, since the card is
+ * the event the wait is actually racing and the card lands AT the ceiling, before the TERM
+ * and therefore before the grace (`run-daily-fetch.sh`, the watchdog subshell). Sitting
+ * above the card would be enough if the card were guaranteed, and it is not: the wrapper
+ * writes it best-effort, `: > "$WATCHDOG_FIRED_FILE" 2>/dev/null || true`, precisely so a
+ * failed write costs a mislabel rather than the kill. On that path the wait sees no card,
+ * and the last thing the watchdog still guarantees is the SIGKILL at ceiling + grace. So
+ * the bound is "above everything the watchdog does", which is what makes reaching it mean
+ * a watchdog that never armed at all. Compare {@link timeoutSettleDeadlineMs} and case 7,
+ * where the same `(ceiling + grace)` arithmetic is derived from the escalation itself.
  */
 const REACH_STEP_BACKSTOP_MS =
   (TIMEOUT_CASE_OPTIONS.maxRunSeconds + TIMEOUT_CASE_OPTIONS.watchdogGraceSeconds) * 1_000 +
@@ -742,11 +751,19 @@ const REACH_STEP_BACKSTOP_MS =
  * those two are only the same statement on an unloaded machine. The watchdog announces
  * itself: it touches its calling card BEFORE it signals the group
  * (`run-daily-fetch.sh`, the watchdog subshell), so the losing condition is directly
- * observable and needs no proxy. Waiting on the card instead of a stopwatch means a slow
- * machine costs this case latency and never a red, while a watchdog that genuinely got there
- * first still fails — and fails saying so, instead of claiming the run never reached a step
- * it plainly reached. See {@link REACH_STEP_BACKSTOP_MS} for the measurements that retired
- * the stopwatch.
+ * observable and needs no proxy. A watchdog that genuinely got there first still fails —
+ * and fails saying so, instead of claiming the run never reached a step it plainly reached.
+ * See {@link REACH_STEP_BACKSTOP_MS} for the measurements that retired the stopwatch.
+ *
+ * WHAT THIS DOES NOT BUY, stated because an earlier version of this comment claimed it did:
+ * it does not make case 4 immune to a slow machine. It removes the 2000 ms strip, which was
+ * the tightest bound and the one #372 crossed, and hands the reach the whole ceiling. Past
+ * the ceiling the case still reds — here as "the watchdog beat the harness", and slightly
+ * earlier at the `durationMs < ceilingMs` assertion in the case body, which is now the
+ * binding wall-clock bound and says so in its own comment. The honest claim is that the
+ * headroom went from 2000 ms to roughly the ceiling minus the signal-to-exit tail, against
+ * a measured contended worst of 1541 ms, and that the red at the far end now names the
+ * watchdog rather than accusing the run of never arriving.
  *
  * THREE EXITS, EACH MEANING EXACTLY ONE THING:
  *   - the sentinel appears — the run is in the step, and the elapsed time is returned for
@@ -2369,6 +2386,13 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
           // watchdog's card lands there, and the backstop above it only catches a wrapper
           // that never ran. Reporting these against the retired 2000ms strip would print
           // headroom this case no longer spends.
+          //
+          // THE TWO HEADROOMS ARE NOT INDEPENDENT and must not be added: the duration
+          // CONTAINS the reach, and both are printed against the same ceiling from two
+          // different zeros — the duration from `spawn`, which is conservative because the
+          // watchdog's clock starts later, and the reach against a bare 3000 when its real
+          // deadline is `arm + 3000`, which is conservative in the other direction. Read
+          // each as "how close this run came to its own bound", never as spare budget.
           `[wrapper harness] case 4 · reached the step (ms, ceiling ${ceilingMs}): ` +
             `${against(reaches, ceilingMs)} · ran for (ms, ceiling ${ceilingMs}): ` +
             `${against(durations, ceilingMs)} · settled (ms, deadline ${SETTLE_DEADLINE_MS}): ` +
@@ -2435,10 +2459,25 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
         expect(record.logText, `${label}: the watchdog fired after all`).not.toContain(
           "WATCHDOG: run exceeded",
         );
+        // THE BINDING WALL-CLOCK BOUND OF THIS CASE, now that the reach's 2000ms strip is
+        // gone — and it is measured from a DIFFERENT ZERO than the ceiling it names.
+        // `durationMs` starts immediately before `spawn` (`launcher.testkit.ts`), while the
+        // watchdog's `SECONDS=0` is set inside a subshell forked well into the script, after
+        // the log dir, the `tee`, the stamp, the prior-heartbeat read and the operator
+        // notice. So this is strictly TIGHTER than the wrapper's own ceiling by the whole
+        // arming offset: it can red on a run the watchdog never timed out, which is why the
+        // message below reports what was measured instead of accusing the watchdog. Kept
+        // deliberately conservative — an ending that arrives this late is worth knowing
+        // about even when it is the machine — and the two assertions above are what actually
+        // establish the watchdog did not fire.
         expect(
           record.durationMs,
-          `${label}: the run outlived its own ${ceilingMs}ms ceiling, so the ending it recorded ` +
-            "may be the watchdog's rather than the harness's",
+          `${label}: the run took ${record.durationMs}ms from spawn to exit, past the ` +
+            `${ceilingMs}ms ceiling — measured from spawn, so it includes the arming offset ` +
+            "the watchdog's own clock does not. The assertions above already establish the " +
+            "watchdog did NOT fire, so this is either a machine slow enough to be worth " +
+            "recording or a ceiling that stopped being enforced; the report line's reach and " +
+            "duration series say which",
         ).toBeLessThan(ceilingMs);
 
         assertTriple(record, dirs.caseDir, {
