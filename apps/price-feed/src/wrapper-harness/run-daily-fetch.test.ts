@@ -2649,32 +2649,53 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
         // WHY THIS REPEATS, and it is the same argument as the tee-deafness control's: what
         // the mutation produces is RACY, so one reading of it decides nothing.
         //
-        // The orphan the mutation leaves behind is a `sleep` of ONE WATCHDOG POLL HOP, and
-        // the hop was already running when the shell exited. How much of it is left is
-        // therefore decided by WHERE IN THE POLL CYCLE the run finished — a phase, not a
-        // budget. Quiet, a fake run finishes early in a hop and the stray has most of five
-        // seconds left, which is why a single reading looked solid for months. Under load the
-        // run's own duration wanders across the cycle, and a run that finished near a hop
-        // boundary leaves a stray with milliseconds to live, gone before the settle window
-        // closes. Measured at 3 contended runs in 5 when #394 was filed, and 3 in 6 again on
-        // the machine this repetition was added on.
+        // The orphan the mutation leaves behind is a `sleep` of ONE WATCHDOG POLL HOP —
+        // `WATCHDOG_POLL_SECONDS`, read off the wrapper by `wrapperPollSeconds()`, unclamped
+        // here because `CASE_OPTIONS.maxRunSeconds` sits above it — and the hop was already
+        // running when the shell exited. How much of it is left is therefore decided by
+        // WHERE IN THE POLL CYCLE the run finished: a phase, not a budget. Quiet, a fake run
+        // finishes early in a hop and the stray has most of a hop left, which is why a
+        // single reading looked solid for months. Under load the run's own duration wanders
+        // across the cycle, and a run that finished near a hop boundary leaves a stray with
+        // milliseconds to live, gone before the settle window closes. Measured at 3
+        // contended runs in 5 when #394 was filed, and 3 in 6 again on the machine this
+        // repetition was added on.
         //
         // There is nothing to widen here: the phase is uniform, so a longer window makes the
         // control blinder and a shorter one makes assertion 3's own reading unrepresentative.
-        // What DOES collapse it is asking more than once. At the measured miss rate a single
-        // reading is a coin flip; twelve independent ones miss together about four times in a
-        // thousand, and every attempt is on the record either way.
+        // What DOES collapse it is asking more than once. At the 56% miss rate measured on
+        // this machine a single reading is a coin flip, and twelve misses together is
+        // `0.56^12`, about ONE IN A THOUSAND. (An earlier version of this comment said four
+        // in a thousand; that figure needs a 63% miss rate and followed from neither number
+        // quoted here. At the 3-in-6 rate it is 2.4 in ten thousand.)
         //
-        // NOTHING HERE ACCEPTS AN ABSENCE AS A PASS. Each attempt still asserts, race-free,
-        // that the mutation orphaned a `sleep` at the instant of exit — a wrapper that has
-        // stopped orphaning fails on attempt 1 rather than after twelve — and the loop as a
-        // whole still demands that assertion 3's own field, read through assertion 3's own
-        // window, came back occupied at least once.
+        // THAT NUMBER IS A FLOOR, NOT A RATE, and the difference is worth writing down
+        // because `p^12` assumes twelve independent draws and these are not independent.
+        // The phase is a deterministic function of the run's duration, the duration is set
+        // by ambient load, and ambient load persists across the roughly one minute this loop
+        // takes. A load regime that parks durations near a hop boundary makes all twelve
+        // attempts miss TOGETHER. So what the repetition buys is not `p^12` in general: it
+        // collapses the failure rate under the regimes actually measured, and the residual
+        // is bounded by how correlated the phase stays inside a regime nobody has sampled.
+        // The measurement behind this commit (worst case 4 attempts of 12) is consistent
+        // with independence and does not establish it.
+        //
+        // NOTHING HERE ACCEPTS AN ABSENCE AS A PASS, and the loop distinguishes the two ways
+        // an attempt can come back empty rather than treating either as the other. See the
+        // outcome block below: a pgid holding something that is NOT a `sleep` is the
+        // mutation having stopped biting, which repeating cannot fix, so it fails on the
+        // spot; a pgid that is already empty is the phase race and is recorded as an attempt
+        // instead. The loop as a whole still demands that assertion 3's own field, read
+        // through assertion 3's own window, came back occupied at least once.
         const attempts: string[] = [];
         let seen = 0;
+        let goneAtSample = 0;
         // The attempt-by-attempt series is the whole diagnosis if this control ever fails:
         // "expired on all 12" and "the mutation orphaned nothing on attempt 1" are different
-        // problems, and only the series tells them apart. It must survive a throw in the loop.
+        // problems, and only the series tells them apart. It must survive a throw in the
+        // loop — and the attempt that throws is the ONE the reader most wants, so its
+        // outcome is pushed BEFORE any assertion can end the run. Anything else prints an
+        // empty series exactly when the series is needed.
         onTestFinished(() => {
           console.log(`[wrapper harness] child-reap mutation outcomes: ${attempts.join(", ")}`);
         });
@@ -2694,6 +2715,32 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
             maxWaitMs: 60_000,
           });
 
+          // FOUR OUTCOMES, AND THE FIRST READING SPLITS THREE OF THEM. `residueAtExit` is
+          // not sampled at the instant of exit: `launchWrapper` reads it after the child's
+          // `exit` event, after `duringRun` has been awaited, and after a `ps -A -ww` has
+          // forked and returned — tens of milliseconds on an idle machine, more under the
+          // load this control exists to survive. So an EMPTY reading is the same phase draw
+          // as the settle window's, just over a shorter interval, and cannot be treated as
+          // proof about the wrapper. A NON-EMPTY reading with no `sleep` in it can: nothing
+          // in the mutated run puts a non-`sleep` process there except the `tee` the orphan
+          // was holding open, so seeing the group occupied by something that is not the
+          // timer is the mutation having stopped orphaning.
+          //
+          //   SEEN            the orphan outlived the settle window — what assertion 3 reads
+          //   expired         orphaned, then the phase ate it before the window closed
+          //   gone-at-sample  the pgid was already empty by the first `ps`; ambiguous
+          //   NO-ORPHAN       occupied by something that is not the timer; unambiguous
+          const orphanedAtExit = record.residueAtExit.some((entry) => /sleep/.test(entry));
+          const outcome =
+            record.pgidResidue.length > 0
+              ? "SEEN"
+              : orphanedAtExit
+                ? "expired"
+                : record.residueAtExit.length === 0
+                  ? "gone-at-sample"
+                  : "NO-ORPHAN";
+          attempts.push(`${outcome}(run=${record.durationMs}ms, settle=${record.settleMs}ms)`);
+
           // The run itself still reports success — that is precisely the danger. Without the
           // reaped child the wrapper's own EXIT trap SIGKILLs the watchdog subshell and
           // orphans its `sleep` into the run's process group, where it holds launchd's
@@ -2705,17 +2752,22 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
             `attempt ${attempt}: the mutated run did not reach the end`,
           ).toBe("complete");
 
-          // THE HALF THAT OWES NOTHING TO THE PHASE, asserted on EVERY attempt. The stray is
-          // sleeping out its hop when the shell exits whatever the phase is, so this reading
-          // is the one the race cannot reach — and a red here says the mutation has stopped
-          // biting, which no amount of repeating would fix and which the loop below would
-          // otherwise report as an expiry.
-          expect(
-            record.residueAtExit.join(" | "),
-            `attempt ${attempt}: the child-reap mutation orphaned NOTHING into the pgid at the ` +
-              `instant of exit (${record.residueAtExit.length} process(es) there) — the reap it ` +
-              "removes is no longer what keeps the group clean",
-          ).toMatch(/sleep/);
+          // THE UNAMBIGUOUS LOSS, AND THE ONLY ONE THAT FAILS FAST. Repeating cannot help a
+          // wrapper that has stopped orphaning, so this must not wait for twelve attempts to
+          // report itself as an expiry. The ambiguous shape is deliberately NOT here: it
+          // costs an attempt and is judged by the loop, because failing on it would be the
+          // #372 misdiagnosis — a busy machine told to go read the wrapper.
+          if (outcome === "NO-ORPHAN") {
+            expect(
+              record.residueAtExit.join(" | "),
+              `attempt ${attempt}: the child-reap mutation left the run's pgid occupied by ` +
+                `something that is not the watchdog's timer (${record.residueAtExit.length} ` +
+                "process(es) there) — the reap it removes is no longer what keeps the group clean",
+            ).toMatch(/sleep/);
+          }
+          if (outcome === "gone-at-sample") {
+            goneAtSample += 1;
+          }
 
           // AND THE HALF ASSERTION 3 ACTUALLY TAKES: the same field, after the same window.
           if (record.pgidResidue.length > 0) {
@@ -2726,17 +2778,21 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
             ).toMatch(/sleep/);
             seen += 1;
           }
-          attempts.push(
-            `${record.pgidResidue.length > 0 ? "SEEN" : "expired"}` +
-              `(run=${record.durationMs}ms, settle=${record.settleMs}ms)`,
-          );
         }
 
+        // THE LOOP-LEVEL VERDICT, AND IT NAMES WHICH SHAPE RAN OUT THE ATTEMPTS. All-expired
+        // is the phase race winning every draw, which the repetition was supposed to make a
+        // one-in-a-thousand event; all-gone-at-sample is the same race but over a window so
+        // short that it is also what a wrapper which stopped orphaning would look like, and
+        // twelve of those in a row is the strongest evidence this control can produce that
+        // the mutation itself is dead. Either way, assertion 3 has not been seen red.
         expect(
           seen,
-          `the child-reap mutation orphaned a \`sleep\` on every one of ${attempts.length} runs and ` +
-            `it had expired before the ${SETTLE_DEADLINE_MS}ms settle window closed every time, so ` +
-            "assertion 3 has not been seen red and this control is guarding nothing: " +
+          `the child-reap mutation never left a \`sleep\` alive through the ${SETTLE_DEADLINE_MS}ms ` +
+            `settle window in ${attempts.length} attempts (${goneAtSample} of them found the pgid ` +
+            "already empty at the first sample, which is either the same phase race over a shorter " +
+            "window or a mutation that has stopped orphaning at all), so assertion 3 has not been " +
+            "seen red and this control is guarding nothing: " +
             attempts.join(", "),
         ).toBeGreaterThan(0);
 
