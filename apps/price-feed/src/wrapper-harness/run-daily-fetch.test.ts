@@ -2286,10 +2286,26 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
       // tightest wall-clock margins, so a red here is exactly the failure where knowing
       // whether run 9 was slow — or whether every run had been drifting — is the whole
       // diagnosis. Printed after the loop, none of it survives the throw.
+      //
+      // EACH SERIES IS PRINTED AGAINST THE BOUND IT IS JUDGED BY, with the worst run's
+      // headroom named. A bare list of milliseconds needs the reader to remember which
+      // constant each one is racing, and #372 records the cost of getting that wrong: the
+      // file's 475s wall clock looked like the signal and was noise, while the number that
+      // actually moved was one step running at ~60% of its own 2000ms budget. Headroom is
+      // the quantity that goes to zero before a budget flips red, so it is the one printed.
       onTestFinished(() => {
+        const against = (series: readonly number[], bound: number): string => {
+          if (series.length === 0) {
+            return "none recorded";
+          }
+          const worst = Math.max(...series);
+          return `${series.join(", ")} — worst ${worst} of ${bound}, ${bound - worst} to spare`;
+        };
         console.log(
-          `[wrapper harness] case 4 reached the step in (ms): ${reaches.join(", ")} · ran for (ms, ` +
-            `ceiling ${ceilingMs}): ${durations.join(", ")} · settle ms: ${settles.join(", ")}`,
+          `[wrapper harness] case 4 · reached the step (ms, bound ${REACH_STEP_BOUND_MS}): ` +
+            `${against(reaches, REACH_STEP_BOUND_MS)} · ran for (ms, ceiling ${ceilingMs}): ` +
+            `${against(durations, ceilingMs)} · settled (ms, deadline ${SETTLE_DEADLINE_MS}): ` +
+            `${against(settles, SETTLE_DEADLINE_MS)}`,
         );
       });
 
