@@ -61,6 +61,16 @@ export default defineConfig({
     // red is chased. Stating it here makes the budget one fact, applies it to every
     // suite, and holds as the suite grows and on slower hardware.
     //
+    // IT IS NOT A TOLERANCE FOR SLOW CODE — it is headroom over scheduler
+    // contention this repo does not control, and the distinction is the whole
+    // reason the number may be read but not raised. Nothing in the suite awaits an
+    // unbounded operation, so A CASE THAT ACTUALLY REACHES 30 s IS A REAL HANG and
+    // must be read as a defect to fix, never as a budget to raise again. #178 is
+    // the precedent: a filesystem-bound case that cost ~540 ms alone reached
+    // 1.2-1.9 s under load and crossed the 5 s default twice on a busier machine,
+    // timing out the whole suite while passing in isolation. That is the failure
+    // this budget exists for. A case that outruns 30 s is a different animal.
+    //
     // WHAT IT COSTS: a genuinely hung test now takes 30 s to fail instead of 5 s.
     // That is the trade CI has been making all along and it is the right one — a
     // hang is a bug that will be found regardless, a false red is one that burns a

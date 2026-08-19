@@ -12,12 +12,9 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { resolveDataDir } from "@numisma/engine";
 import { TRACKED_FILES } from "./ingest-commit.js";
-
-// The spine:reset guard cases spawn `tsx` subprocesses; give them headroom under load.
-vi.setConfig({ testTimeout: 30_000 });
 
 /** Walk up from this test to the workspace root (the `pnpm-workspace.yaml` dir). */
 function repoRoot(): string {

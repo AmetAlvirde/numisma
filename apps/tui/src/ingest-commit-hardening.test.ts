@@ -13,9 +13,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { captureIngestCommit, type GitResult, type GitRunner } from "./ingest-commit.js";
 import { foldedFixture, GENESIS, git, initGitRepo, logLine, MARK } from "./ingest-commit.fixtures.js";
 
-// The real-repo cases spawn several git children each; give them headroom under load.
-vi.setConfig({ testTimeout: 30_000 });
-
 const createdDirs: string[] = [];
 
 afterEach(async () => {
