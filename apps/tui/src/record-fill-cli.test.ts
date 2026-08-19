@@ -176,3 +176,85 @@ describe("record-fill-cli — the shell refuses a partial durable log (finding 2
     expect(result.stdout).toMatch(/Resting rungs:/);
   });
 });
+
+/**
+ * THE READLINE INTERNAL STOPS REACHING THE OPERATOR (#370, symptom 2).
+ *
+ * This shell built its readline interface at MODULE SCOPE, which is the shape #346 removed
+ * from `import-orders-cli.ts` and never shared. `createInterface` eagerly consumes stdin,
+ * so on a pipe the stream had ended before the first question was put and `ask` rejected
+ * with `ERR_USE_AFTER_CLOSE` — the outer catch then printed `readline was closed` to the
+ * operator verbatim.
+ *
+ * NO PTY IS NEEDED FOR THIS ONE, which is where #370's framing was too strong: a spawn's
+ * stdin is a pipe, and the pipe is exactly what provokes the defect. The suites above
+ * already ran through this door with `input: ""` and were printing the internal the whole
+ * time. Symptom 1 — Ctrl-D at a REAL terminal — is a different trigger, still open, and
+ * nothing here claims to cover it.
+ */
+describe("record-fill-cli — a run with no terminal refuses in its own voice (#370)", () => {
+  const createdDirs: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(createdDirs.map((dir) => rm(dir, { recursive: true, force: true })));
+    createdDirs.length = 0;
+  });
+
+  async function cleanDataDir(): Promise<string> {
+    const dir = await mkdtemp(resolve(tmpdir(), "numisma-fill-cli-noterm-"));
+    createdDirs.push(dir);
+    await writeFile(join(dir, "genesis.json"), JSON.stringify(GENESIS_SEED), "utf8");
+    await writeFile(
+      join(dir, "orders.jsonl"),
+      ladderRecords()
+        .map((record) => `${serializeOrderRecord(record)}\n`)
+        .join(""),
+      "utf8",
+    );
+    await writeFile(join(dir, "events.jsonl"), "", "utf8");
+    return dir;
+  }
+
+  function runFill(dataDir: string): { status: number | null; stdout: string; stderr: string } {
+    const script = join(REPO_ROOT, "apps", "tui", "src", "record-fill-cli.ts");
+    const tsx = join(REPO_ROOT, "node_modules", ".bin", "tsx");
+    const env = { ...process.env, NUMISMA_DATA_DIR: dataDir };
+    const result = spawnSync(tsx, [script], { encoding: "utf8", env, input: "" });
+    return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+  }
+
+  it("never prints readline's own error", async () => {
+    const result = runFill(await cleanDataDir());
+
+    // The whole complaint, in one assertion. This was the observed output before the fix.
+    expect(result.stderr).not.toContain("readline was closed");
+    expect(result.stderr).not.toContain("ERR_USE_AFTER_CLOSE");
+  });
+
+  it("names the missing terminal in the shell's voice, and the refusal in the flow's", async () => {
+    const result = runFill(await cleanDataDir());
+
+    // TWO SENTENCES, TWO LAYERS: the shell says WHY there is no answer, the flow says
+    // WHAT IT DID about it. Neither one alone tells the operator what happened.
+    expect(result.stderr).toContain("No terminal on stdin");
+    expect(result.stderr).toContain("Run it from a terminal.");
+    expect(result.stderr).toContain("REFUSED");
+    expect(result.stderr).toContain("no resting rung matches");
+    // And it says nothing was written, which is the flow's own closing sentence.
+    expect(result.stderr).toContain("Nothing was written to");
+    expect(result.status).toBe(1);
+    // WHAT THIS SPAWN HONESTLY DOES NOT PIN, in the voice `import-orders-cli.test.ts`
+    // uses for the same situation on the sibling shell: the notice is written ONCE PER
+    // RUN rather than once per question, and no spawn here can see it. This case briefly
+    // carried a count over the notice, which could not fail — a no-terminal run reaches
+    // EXACTLY ONE question. `record-fill.ts` asks "Which rung filled?" first, gets `""`,
+    // and refuses as `unknown-rung`; every later question sits past that refusal, and no
+    // data-dir state reaches one. Delete the `toldThereIsNoTerminal` flag entirely, write
+    // the notice unconditionally on every `ask`, and this file stays green. That is the
+    // same verdict the import shell recorded, and it lands the same way here.
+    //
+    // The guard IS observed, as a unit, in `prompt-channel.test.ts`: nine questions put
+    // through a no-terminal channel, one notice counted. That is where the difference
+    // between one notice and nineteen is visible, and it needs no process at all.
+  });
+});

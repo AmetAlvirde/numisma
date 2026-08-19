@@ -28,10 +28,60 @@ import {
   unattendedFoldVerdict,
 } from "@numisma/event-store";
 import { restoreLogImage, writeLogImage } from "./event-store.js";
+import { createPromptChannel } from "./prompt-channel.js";
 import { recordFill } from "./record-fill.js";
 
 const paths = resolveEventStorePaths();
-const rl = createInterface({ input: process.stdin, output: process.stdout });
+/**
+ * THE PROMPT CHANNEL (#370, symptom 2). This shell built its interface HERE, at module
+ * scope, which is the pre-#346 shape: `createInterface` eagerly consumes stdin, so a piped
+ * run ended the stream before the first question was put and `ask` rejected with
+ * `ERR_USE_AFTER_CLOSE` — `readline was closed`, a readline internal printed verbatim to
+ * the operator by the outer catch below. The channel builds lazily and, on a stdin that is
+ * no terminal, names the missing terminal in this shell's own voice and returns "".
+ *
+ * `""` IS HONEST HERE ONLY BECAUSE OF THE ORDER `recordFill` ASKS IN, and that is a
+ * dependency rather than a property of the empty string. The reachable interview is
+ * NINETEEN `ask` sites, not the nine `record-fill.ts` holds literally: it hands `io.ask`
+ * onward to `authorLadderTarget` (`record-fill-ladder-target.ts`, eight more) and to
+ * `resolveFunding` (`record-fill-funding.ts`, two more), and a delegated question is no
+ * less reachable for being put from another file. They read `""` three ways:
+ *
+ *   - `record-fill.ts`'s "Which rung filled?" — the FIRST question the flow reaches —
+ *     matches no rung and refuses as `unknown-rung`. This is the refusal that makes the
+ *     empty answer safe, and nothing has been written when it fires. TEN more stop the
+ *     act on a blank: the fill timestamp, a touched rung's observed quantity and the
+ *     instrument id each reject one, as do `authorLadderTarget`'s five decision fields
+ *     (together, as `incomplete-decision`) and `resolveFunding`'s capital tier; a blank
+ *     position id abandons.
+ *   - SIX are silent ratifications, and they are the hazard. "Filled quantity [n]" takes
+ *     the remaining quantity; the per-rung book question takes its `[r]` default and
+ *     records that rung as resting untouched; "Also record N confirmed cancellation(s)?"
+ *     records NONE and lets the act continue; "Tempo [n]" takes the reserve's; "Cash
+ *     debited [n]" takes the proposed figure; and `authorLadderTarget`'s "Append this lot
+ *     to '<id>'? [Y/n]" — a gate phrased so that SILENCE MEANS YES — attaches the lot to
+ *     an existing Position. That last one is the only thing standing between an
+ *     unattended run and a lot landing in a Position nobody named.
+ *   - only TWO "[y/N]" confirmations read `""` as NO and abandon: "Confirm these derived
+ *     verdicts?" and "Write BOTH?".
+ *
+ * Only the first is ever reached without a terminal. Reorder the interview — ask the book
+ * observation before the rung pick, or make the rung question skippable — and this same
+ * `""` ratifies a quantity nobody stated and the run WRITES, unattended, with nobody
+ * having answered anything. If that ordering moves, this must become a refusal the domain
+ * cannot mistake for consent (a sentinel the questions reject, not a blank), and it must
+ * move in the same commit. `record-fill.test.ts` pins the ordering itself — one question
+ * asked, and it is the rung pick — so the move is loud rather than silent.
+ */
+const prompt = createPromptChannel({
+  isTTY: Boolean(process.stdin.isTTY),
+  createInterface: () => createInterface({ input: process.stdin, output: process.stdout }),
+  err: (message) => process.stderr.write(`${message}\n`),
+  noTerminalNotice:
+    "No terminal on stdin: recording a fill is an interview — it asks which rung filled, " +
+    "when, and for how much — and there is nowhere to conduct it, so every question goes " +
+    "unanswered. Run it from a terminal.",
+});
 try {
   // THE FOLD IS TAKEN, AND ITS DISCARD SUMMARY RENDERED, BEFORE THE ACT BEGINS.
   //
@@ -92,7 +142,7 @@ try {
     // here: `toldAt` is an audit instant and never an ordering key, so rendering it in a
     // named zone would buy nothing and would put a second calendar on this path.
     toldAt: () => new Date().toISOString(),
-    ask: (question) => rl.question(question),
+    ask: prompt.ask,
     out: (message) => process.stdout.write(message),
     err: (message) => process.stderr.write(`${message}\n`),
   });
@@ -103,5 +153,7 @@ try {
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
   process.exitCode = 1;
 } finally {
-  rl.close();
+  // ONLY IF ONE WAS EVER BUILT — see `createPromptChannel`. A run that never prompted
+  // must not construct an interface here just to close it.
+  prompt.close();
 }

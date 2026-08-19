@@ -23,77 +23,49 @@ import {
   unattendedFoldVerdict,
 } from "@numisma/event-store";
 import { importBitgetOpenOrders } from "./import-orders.js";
+import { createPromptChannel } from "./prompt-channel.js";
 
 const csvPath = process.argv[2];
 if (!csvPath) {
   process.stderr.write("usage: pnpm orders:import <path/to/open-orders-export.csv>\n");
   process.exitCode = 1;
 } else {
-  // THE PROMPT IS BUILT AT THE FIRST QUESTION, NEVER AT STARTUP (#346). `createInterface`
-  // eagerly consumes stdin, so constructing it here — which is where it used to live —
-  // ended a piped stream before any question was put, and the first `ask` rejected with
-  // `readline was closed`: a readline internal, printed verbatim to the operator by the
-  // outer catch below. Memoized, so the several questions of one interview share one
-  // interface, and a run that never asks never builds one.
-  let rl: ReturnType<typeof createInterface> | undefined;
-  let toldThereIsNoTerminal = false;
-
   /**
-   * The prompt channel — and, on a stdin that is no terminal, the place that says so.
+   * THE PROMPT CHANNEL — lazy interface, no-terminal notice, one-per-run (#346). The
+   * mechanism lives in `prompt-channel.ts` now rather than here, because
+   * `record-fill-cli.ts` needed the identical three decisions and had none of them
+   * (#370). What stays here is the part only this shell can know: what `""` MEANS to
+   * the questions this flow puts.
    *
-   * IT RETURNS RATHER THAN THROWS, DELIBERATELY. Throwing here would unwind through the
-   * outer catch and end the run in the shell, which would leave `no-reserve-declared`
-   * (`import-orders.ts:588`) unreachable forever — the flow's own refusal for a batch
-   * nobody funded, reached only when `declareFunding` gets an empty batch answer. Returning
-   * "" hands the domain the one answer a run with no terminal can honestly give, and the
-   * domain then refuses in its own voice. Two sentences, one story: the shell names WHY
-   * there is no answer, the flow names WHAT IT DID about it.
+   * `""` IS HONEST AT EXACTLY ONE CALL SITE, AND THAT IS AN ORDERING DEPENDENCY, not a
+   * property of the empty string. Read as an answer, `""` means different things to the
+   * questions this flow can put:
    *
-   * The notice is written once per run rather than once per question: the operator learns
-   * there is no terminal from the first unanswerable question, and repeating it would bury
-   * the flow's refusal under copies of the shell's. UNTESTED, AND UNTESTABLE FROM A SPAWN —
-   * said out loud so nobody reads the `toldThereIsNoTerminal` flag as pinned behaviour. A
-   * no-terminal run puts exactly ONE question (`import-orders.ts:586` asks the batch
-   * question, gets "", and `:588` refuses), so writing the notice unconditionally leaves
-   * every case in `import-orders-cli.test.ts` green. The flag is kept because it is correct
-   * and costs a boolean, and because the shape of the interview is not fixed: the rung walk
-   * on the far side of the funding wall can put thirty questions, and the day any of them
-   * becomes reachable without a terminal, the difference between one notice and thirty is
-   * the difference between a legible refusal and a wall of the shell shouting over the flow.
+   *   - `import-orders-funding-declaration.ts`'s batch question reads it as NO RESERVE
+   *     DECLARED, so `declareFunding` returns undefined and the flow refuses as
+   *     `no-reserve-declared`. This is the refusal that makes the empty answer safe.
+   *   - `import-orders-rung-picks.ts` reads it as ACCEPT EVERY PROPOSED RUNG, and, at its
+   *     other site, as TAKE THE DEFAULT.
+   *   - the funding declaration's second question reads it as NO PER-RUNG OVERRIDES.
+   *
+   * The last three are ratifications. A no-terminal run never reaches them ONLY because
+   * funding is asked FIRST and refuses the whole batch before any rung question is put.
+   * Reorder the interview — ask rung picks before funding, or make the funding question
+   * skippable — and this same `""` silently ratifies every default and the run WRITES,
+   * unattended, with nobody having answered anything. If that ordering ever moves, this
+   * must become a refusal that the domain cannot mistake for consent (a sentinel the
+   * questions reject, not a blank), and it must move in the same commit.
    */
-  const ask = (question: string): Promise<string> => {
-    if (!process.stdin.isTTY) {
-      if (!toldThereIsNoTerminal) {
-        toldThereIsNoTerminal = true;
-        process.stderr.write(
-          "No terminal on stdin: this import is an interview — it asks which reserve funds " +
-            "the batch — and there is nowhere to conduct it, so every question goes " +
-            "unanswered. Run it from a terminal.\n",
-        );
-      }
-      // `""` IS HONEST AT EXACTLY ONE CALL SITE, AND THAT IS AN ORDERING DEPENDENCY, not a
-      // property of the empty string. Read as an answer, `""` means different things to the
-      // three questions this flow can put:
-      //
-      //   - `import-orders-funding-declaration.ts:68` (the batch question) reads it as NO
-      //     RESERVE DECLARED, so `declareFunding` returns undefined and the flow refuses at
-      //     `import-orders.ts:588`. This is the refusal that makes the empty answer safe.
-      //   - `import-orders-rung-picks.ts:161` reads it as ACCEPT EVERY PROPOSED RUNG.
-      //   - `import-orders-rung-picks.ts:183` reads it as TAKE THE DEFAULT.
-      //   - `import-orders-funding-declaration.ts:74` reads it as NO PER-RUNG OVERRIDES.
-      //
-      // The last three are ratifications. A no-terminal run never reaches them ONLY because
-      // funding is asked FIRST and refuses the whole batch before any rung question is put.
-      // Reorder the interview — ask rung picks before funding, or make the funding question
-      // skippable — and this same `return ""` silently ratifies every default and the run
-      // WRITES, unattended, with nobody having answered anything. If that ordering ever
-      // moves, this return must become a refusal that the domain cannot mistake for consent
-      // (a sentinel the questions reject, not a blank), and it must move in the same commit.
-      return Promise.resolve("");
-    }
-    rl ??= createInterface({ input: process.stdin, output: process.stdout });
-    return rl.question(question);
-  };
+  const prompt = createPromptChannel({
+    isTTY: Boolean(process.stdin.isTTY),
+    createInterface: () => createInterface({ input: process.stdin, output: process.stdout }),
+    err: (message) => process.stderr.write(`${message}\n`),
+    noTerminalNotice:
+      "No terminal on stdin: this import is an interview — it asks which reserve funds " +
+      "the batch — and there is nowhere to conduct it, so every question goes " +
+      "unanswered. Run it from a terminal.",
+  });
+  const ask = prompt.ask;
 
   try {
     // THE FOLD IS TAKEN, AND ITS DISCARD SUMMARY RENDERED, BEFORE THE IMPORT BEGINS —
@@ -163,9 +135,9 @@ if (!csvPath) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;
   } finally {
-    // ONLY IF ONE WAS EVER BUILT. `?.` is the whole point of the lazy construction above:
-    // a run that never prompted must not construct an interface here just to close it,
-    // which would consume stdin on the way out for no reason at all.
-    rl?.close();
+    // ONLY IF ONE WAS EVER BUILT — see `createPromptChannel`. A run that never prompted
+    // must not construct an interface here just to close it, which would consume stdin on
+    // the way out for no reason at all.
+    prompt.close();
   }
 }

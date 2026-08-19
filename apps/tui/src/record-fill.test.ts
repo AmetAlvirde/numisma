@@ -1113,3 +1113,48 @@ describe("recording a fill over damaged history says so, and still records", () 
     expect(harness.out.join("")).not.toContain("DROPPED EVENT");
   });
 });
+
+/**
+ * THE ORDERING DEPENDENCY THAT MAKES AN EMPTY ANSWER SAFE (#370, symptom 2).
+ *
+ * `record-fill-cli.ts` hands the flow `""` for every question when stdin is no terminal,
+ * so the shell can name the missing terminal and let this flow refuse in its own voice
+ * instead of printing a readline internal. That is honest ONLY while the FIRST question
+ * this flow reaches is one that refuses on `""` — and it is a property of the ORDER the
+ * interview asks in, not of the empty string. The reachable interview is NINETEEN `ask`
+ * sites — this file holds nine literally and hands `io.ask` onward to `authorLadderTarget`
+ * and `resolveFunding` for the other ten — and SIX of them read `""` as a ratification:
+ * the filled-quantity question takes the remaining quantity, the per-rung book question
+ * accepts the proposed verdict, the cancellation confirmation records none and CONTINUES,
+ * "Tempo" and "Cash debited" take their bracketed defaults, and `authorLadderTarget`'s
+ * "Append this lot to '<id>'? [Y/n]" attaches the lot on silence, because `isNegative("")`
+ * is false. If any of those is ever reached first, the same `""` ratifies a quantity
+ * nobody stated and the act WRITES, unattended.
+ *
+ * So the dependency is pinned rather than commented. Both shells' construction sites say
+ * the same thing in prose; this is the assertion that goes red when the prose stops
+ * being true.
+ */
+describe("an interview nobody can answer refuses at the FIRST question and writes nothing", () => {
+  it("refuses as unknown-rung, having asked exactly one question", async () => {
+    // No scripted answers at all: the harness's `ask` falls through to `""` every time,
+    // which is precisely what the shell hands the flow on a stdin that is no terminal.
+    const harness = new Harness({ answers: [] });
+    const ordersBefore = harness.ordersImage;
+    const logBefore = harness.logImage;
+
+    const outcome = await recordFill(harness.io);
+
+    expect(outcome.status).toBe("rejected");
+    if (outcome.status !== "rejected") throw new Error("expected a rejection");
+    expect(outcome.reason).toBe("unknown-rung");
+    // THE PIN. One question — the rung pick — and the refusal came from it. Reaching a
+    // second means a ratifying question now runs ahead of the refusing one, and the
+    // shell's `""` has stopped being an honest answer.
+    expect(harness.asked).toHaveLength(1);
+    expect(harness.asked[0]).toContain("Which rung filled?");
+    // Nothing was written on either side before the refusal fired.
+    expect(harness.logImage).toBe(logBefore);
+    expect(harness.ordersImage).toBe(ordersBefore);
+  });
+});
