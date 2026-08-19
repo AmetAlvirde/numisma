@@ -396,7 +396,7 @@ describe("resolveEventStorePaths — a BLANK dataDir is REFUSED, not defaulted a
 // `<cwd>/data/events.jsonl` without a word.
 assertDataDirContract({
   name: "resolveEventStorePaths",
-  subject: /an event-store data directory|NUMISMA_DATA_DIR/,
+  subject: /an event-store data directory/,
   root: (dataDir) => dirname(resolveEventStorePaths(dataDir).log),
   defaultArm: {
     actual: () => dirname(resolveEventStorePaths().log),

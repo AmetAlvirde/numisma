@@ -148,6 +148,14 @@ export interface DataDirDoor {
    * The door's own voice, so the shared predicate is proven NOT to have flattened the
    * per-door error messages #348 deliberately wrote (a Reserve floor served from a file
    * nothing writes, vs a SECOND genesis seeded beside the job's CWD).
+   *
+   * It must match THIS door's subject and nothing else. An alternation that also admits
+   * another door's wording — `/a sidecar data directory|NUMISMA_DATA_DIR/` — disarms the
+   * assertion against the one regression `DataDirVoice` exists to prevent: a door that
+   * stopped calling `normalizeDataDirOverride` with its own voice and started delegating
+   * to `resolveDataDir({ NUMISMA_DATA_DIR: dataDir })` would emit the ENGINE's message,
+   * every root row would still land on the same path, and the whole table would stay
+   * green while the operator lost the sentence naming which artifact was at stake.
    */
   subject: RegExp;
   /**
@@ -197,25 +205,18 @@ export function assertDataDirContract(door: DataDirDoor): void {
       });
     }
 
-    it("never resolves against the process CWD — the whole point of the table", () => {
-      // The refusal rows above are each asserted individually; this is the class-level
-      // statement, and it names the two paths #369 measured coming out of the permissive
-      // doors so a regression reads as itself rather than as a generic mismatch.
-      for (const forbidden of [process.cwd(), join(process.cwd(), "data")]) {
-        for (const testCase of DATA_DIR_CONTRACT_CASES) {
-          let produced: string | undefined;
-          try {
-            produced = door.root(testCase.input);
-          } catch {
-            continue;
-          }
-          expect(
-            produced,
-            `${door.name}(${JSON.stringify(testCase.input)}) resolved to a CWD-derived root (${forbidden})`,
-          ).not.toBe(forbidden);
-        }
-      }
-    });
+    // There is deliberately NO extra "never resolves against the process CWD" case here.
+    // One used to sit at this spot, looping every row and asserting the produced root was
+    // neither `process.cwd()` nor `<cwd>/data`. It could not fail: every input that could
+    // have produced either of those two paths is a refusal row above, and each of those
+    // rows already asserts the door RETURNS NOTHING — a strictly stronger claim than "the
+    // thing it returned was not this particular path". A test that cannot go red while
+    // its neighbours are green is worse than no test, because its name advertises a
+    // class-level guarantee it is not actually holding. The guarantee is real and is held
+    // by the rows themselves: the `throws-relative` rows are exactly the CWD-dependent
+    // spellings #369 measured coming out of the permissive doors (`data` → `<cwd>/data`,
+    // `~/scratch` → `<cwd>/~/scratch`), and the `root` rows pin the absolute path each
+    // accepted input must land on, which no CWD-derived answer can equal.
 
     const defaultArm = door.defaultArm;
     if (defaultArm === undefined) {

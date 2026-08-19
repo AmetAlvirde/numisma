@@ -29,7 +29,7 @@ const SIDECAR_PROBE_FILE = "orders.jsonl";
 
 assertDataDirContract({
   name: "resolveSidecarPath",
-  subject: /a sidecar data directory|NUMISMA_DATA_DIR/,
+  subject: /a sidecar data directory/,
   root: (dataDir) => dirname(resolveSidecarPath(SIDECAR_PROBE_FILE, dataDir)),
   defaultArm: {
     actual: () => dirname(resolveSidecarPath(SIDECAR_PROBE_FILE)),
@@ -39,7 +39,7 @@ assertDataDirContract({
 
 assertDataDirContract({
   name: "resolvePreferencesPath",
-  subject: /a preferences data directory|NUMISMA_DATA_DIR/,
+  subject: /a preferences data directory/,
   root: (dataDir) => dirname(resolvePreferencesPath(dataDir)),
   defaultArm: {
     actual: () => dirname(resolvePreferencesPath()),

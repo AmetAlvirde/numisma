@@ -13,9 +13,10 @@
  * Every fixture is an authored string. Nothing here touches a filesystem — this is pure
  * path algebra — so no test in this file can reach a real data dir.
  */
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { PRICE_STORE_DIR_SEGMENT } from "@numisma/engine";
+import { INBOX_PATH_SEGMENTS, PRICE_STORE_DIR_SEGMENT } from "@numisma/engine";
 import { assertDataDirContract } from "@numisma/engine/testkit";
 import { resolvePriceFeedPaths } from "./paths.js";
 
@@ -100,8 +101,49 @@ describe("resolvePriceFeedPaths — a BLANK dataDir is REFUSED before it can be 
 // It is also the one door with NO `undefined` arm: its `dataDir` is required, so there is
 // no default for a caller to fall into. The table asserts that absence rather than
 // skipping it, so a later edit that adds a default has to come back through here.
+//
+// The root is read back off `pricesDir`, NOT off `log`. `log`, `genesis` and `inbox` are
+// all built by the delegated `resolveEventStorePaths`, so a table driven through any of
+// them measures the EVENT-STORE door's normalization a second time and says nothing about
+// this one. `pricesDir` is the only field this function assembles from its own `base`, so
+// it is the only field through which the table can see this door at all: a regression
+// that fed `join(dataDir, PRICE_STORE_DIR_SEGMENT)` the raw argument would keep every
+// delegated field correct and split the price marks off to `<cwd>/~/scratch/prices`,
+// invisibly, if the table kept reading `log`.
 assertDataDirContract({
   name: "resolvePriceFeedPaths",
-  subject: /a price-feed data directory|NUMISMA_DATA_DIR/,
-  root: (dataDir) => dirname(resolvePriceFeedPaths(dataDir).log),
+  subject: /a price-feed data directory/,
+  root: (dataDir) => dirname(resolvePriceFeedPaths(dataDir).pricesDir),
+});
+
+describe("resolvePriceFeedPaths — all four locations agree on ONE base", () => {
+  // The table drives this door through `pricesDir` alone (see above), which proves this
+  // function's own normalization but not that its own half and its delegated half landed
+  // on the SAME root. That agreement is the whole reason this function exists rather than
+  // each caller assembling four paths itself, and it is exactly what a split would break:
+  // marks written under one root while the log, genesis and inbox live under another is
+  // not a crash, it is a fund whose prices silently stop reaching its positions.
+  //
+  // The two inputs are the two the argument doors used to get wrong. `~/…` is #369's
+  // ruling (three doors produced `<cwd>/~/…`), and a padded absolute path is the trim's
+  // new reach at the argument doors — the one whose halves would disagree if only one of
+  // them normalized.
+  const assertOneBase = (dataDir: string, base: string): void => {
+    const paths = resolvePriceFeedPaths(dataDir);
+    expect(paths.pricesDir).toBe(join(base, PRICE_STORE_DIR_SEGMENT));
+    expect(paths.genesis).toBe(join(base, "genesis.json"));
+    expect(paths.log).toBe(join(base, "events.jsonl"));
+    expect(paths.inbox).toBe(join(base, ...INBOX_PATH_SEGMENTS));
+  };
+
+  it("a `~` path expands once, for the price store and the delegated log alike", () => {
+    // `homedir()` at runtime — never a `/Users/...` literal, which ADR-006 forbids and
+    // which would publish the operator's directory layout in a public repo.
+    assertOneBase("~/scratch/numisma-authored-price-root", join(homedir(), "scratch", "numisma-authored-price-root"));
+  });
+
+  it("a whitespace-padded path is trimmed once, not by one half only", () => {
+    const root = resolve("/tmp/numisma-authored-price-root-369");
+    assertOneBase(`  ${root}  `, root);
+  });
 });
