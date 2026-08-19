@@ -199,29 +199,40 @@ Each was verified against the code before being corrected here.
    in place. **The split the bullet asserts is intact**; only the runtime
    package's name is wrong, which is exactly why it survived this long.
 
-2. **`preferences.ts`'s own "latent today (no runtime caller)" is false.** The
-   docstring on `resolvePreferencesPath`
-   (`packages/preferences/src/preferences.ts:~39`) says the resolver is *"latent
-   today (no runtime caller), but becomes silent split-brain the moment the
-   sidecar is wired into the read path."* **That moment has already passed.** The
-   web push path reads it live: `apps/web/src/push/push-core.ts:130` —
-   `loadPreferences(resolvePreferencesPath())` inside `loadReserveFloorAsOf` —
-   reached from `buildGlanceForAnchor` (`:142`), which `apps/web/src/push/push.ts:73`
-   and `apps/web/src/push/backfill-core.ts:175` both call. The comment's own
-   hazard is therefore **live, not hypothetical**, and the resolver is load-bearing
-   today. The claim is corrected here; **the comment itself is left untouched by
-   this increment**, which changes no code at all — it is a one-line fix owed to
-   the next change that opens that file. *(**The debt is PAID, 2026-08-13 — spec
-   #320.** Slice 1 opened `preferences.ts` for a reason of its own and rewrote
-   that docstring: it now states the read path is already wired and the
-   split-brain hazard live, not latent. Nothing above is withdrawn — the chain it
-   names still holds and is still the reason the resolver is load-bearing — but
-   the line numbers this item cites have all moved since it was written, so read
-   the chain by its function names: `loadPreferences(resolvePreferencesPath())`
-   inside `loadReserveFloorAsOf`, reached from `buildGlanceForAnchor`, which the
-   push and the backfill both call. That chain is now also where the sidecar's
-   discards are carried out to the run's operator channel and emitted **after**
-   the upsert lands — ADR-020's fifth clause.)*
+2. **`preferences.ts`'s own "latent today (no runtime caller)" WAS false, and the
+   comment has since been rewritten.** When this correction was written, the
+   docstring on `resolvePreferencesPath` said the resolver was *"latent today (no
+   runtime caller), but becomes silent split-brain the moment the sidecar is wired
+   into the read path."* That moment had already passed: the web push path was
+   reading it live. The correction recorded the claim as false and deliberately
+   **left the comment standing** — a one-line fix owed to the next change that
+   opened the file.
+
+   **That debt is PAID (2026-08-13, spec #320)**, so this item is now a record of
+   a correction that has landed rather than one still owed. Slice 1 opened
+   `preferences.ts` for a reason of its own and rewrote the docstring; it now
+   states the read path is **ALREADY WIRED** and the split-brain hazard live, not
+   hypothetical, and its test-side twin says the same. The string this item
+   originally quoted no longer exists anywhere in the repo — quoted above only as
+   the historical claim being corrected.
+
+   **The chain is named by its functions, not by line numbers**, which is the
+   practice this ADR adopts everywhere after correction 2's original citations went
+   stale twice: `packages/preferences/src/preferences.ts` exports
+   `resolvePreferencesPath`; `apps/web/src/push/push-core.ts` calls
+   `loadPreferences(resolvePreferencesPath())` inside **`loadReserveFloorAsOf`**,
+   which **`buildGlanceForAnchor`** calls, which both the push
+   (`apps/web/src/push/push.ts`) and the backfill
+   (`apps/web/src/push/backfill-core.ts`) call. Note where the boundary sits:
+   `push.ts` and `backfill-core.ts` name **`buildGlanceForAnchor` only** — neither
+   mentions `loadPreferences` or `resolvePreferencesPath`, and `push-core.ts` is
+   the only non-test file under `apps/web/src` that does. So the resolver is load-bearing today
+   and the hazard it prevents is live, but the sidecar read is reached through one
+   door, not three.
+
+   That same chain is where the sidecar's discards are carried out to the run's
+   operator channel and emitted **after** the upsert lands — ADR-020's fifth
+   clause.
 
 3. **ADR-003's body only ever reaches NINE verbs**, so *"ADR-003 stays at ten
    verbs"* cites the wrong document. The count is genuinely **ten**. But ADR-003's
