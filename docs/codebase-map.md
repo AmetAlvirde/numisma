@@ -37,9 +37,10 @@ placeholder convention itself, are documented in
 **The dependency rule:** apps depend on packages, never the reverse; packages
 depend on `@numisma/engine` and never on each other beyond that. Every consumer
 imports through a package's **declared** entry points only — the root plus the
-three deliberate subpath exports (`@numisma/engine/format`,
-`@numisma/engine/calendar`, `@numisma/event-store/testkit`) — never an
-undeclared deep path into a package's `src/`. `pnpm typecheck` enforces both
+four deliberate subpath exports (`@numisma/engine/format`,
+`@numisma/engine/calendar`, `@numisma/engine/testkit`,
+`@numisma/event-store/testkit`) — never an undeclared deep path into a
+package's `src/`. `pnpm typecheck` enforces both
 the public surfaces and the no-deep-import boundary — it is a real gate, not a
 formality.
 
