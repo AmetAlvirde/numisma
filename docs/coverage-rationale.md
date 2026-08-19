@@ -34,6 +34,8 @@ dishonest.
 | `apps/tui/src/cancel-order-cli.ts` | The `pnpm orders:cancel <orderId> [observedAt]` entry: WIRING ONLY — argv plus the real orders sidecar, clock and streams bound to `cancelOrder`. No readline (the whole assertion is in argv), but importing it still *runs the act*, so there is no unit to assert as written. | The flow module `cancel-order.ts` IS measured by `cancel-order.test.ts`, which drives the retire path and every refusal through injected `loadOrders` / `appendOrders` / `now`. |
 | `apps/tui/src/migrate-legacy-log.ts` | The `pnpm migrate:log` one-shot runner (ADR-003 amendment, PRD #82 slice M1): reads the git-ignored operator mapping `data/migration-cash-legs.json` and hands it to `migrateLegacyLog`. Self-executing `main().catch(..., process.exitCode)` — same category as `apps/web/src/push/push.ts`; importing it rewrites the durable log in place. | `migrateLegacyLog` itself lives in `apps/tui/src/event-store.ts`, which IS measured (`event-store.test.ts`) — including its fail-loud abort paths, which are what make the rewrite safe. The only logic here is the ENOENT-tolerant mapping read, deliberately delegating the "which ids still need a leg" error to `migrateLegacyLog`. |
 | `apps/price-feed/src/cli.ts` | The `pnpm prices:fetch` entry (`tsx` script): WIRING ONLY, and now genuinely so — it reads `process.argv`, calls `runPriceFetchCli` and assigns the exit code. Importing it *runs the fetch*, so there is no unit to assert as written; same script category as `spine.ts`. The reporting and the exit contract it used to hold inline were extracted to `cli-main.ts` for exactly this reason. | `cli-main.ts` (the console report, the owed / marked / absent classification and the exit contract) and `cli-args.ts` (the argv parser) are NOT excluded — both are measured, by `cli-main.test.ts` and `cli-args.test.ts`. Underneath them, `runPriceFetch` is unit-tested by `fetch-prices.test.ts` and `scanFetchedMarks` by `rejection-check.test.ts`; the end-to-end path is also driven by the manual dry run in `docs/price-feed-ops.md`. |
+| `apps/tui/src/plans-cli.ts` | The `pnpm plans` entry: a bare top-level `try/catch` that resolves the fold (`loadFoldedReview`), the `plans.jsonl` sidecar and the `reconciliations.jsonl` trail and hands all three to `formatPlansReport`, then sets `process.exitCode`. Importing it *runs the act*, same shape as the orders CLI shells above. It also inherits the event log's write-on-read quarantine maintenance, which its own header names — so importing it is not even read-only. Excluded as of the increment that added it to `vitest.config.ts`; before that it reported a dishonest 0% and §7 carried a row saying so. | `formatPlansReport` IS measured (`plans-report.test.ts`), as is the engine-side `listPlansAsOf` it renders. The three reads it wires are each measured in their own modules (`loadFoldedReview` by `packages/event-store/src/event-store.test.ts`, the sidecar and trail loaders by their own suites). The shell's own argv/exit-code wiring has no spawn test today — nothing in the tree imports or spawns it (the only other mention of the filename is prose in `plans-report.ts:3`), so it is one of the five shells the paragraph below this table names as untested by any suite. |
+| `apps/price-feed/src/operator-notice-cli.ts` | The `pnpm operator-notice` entry: a module-level `writeOperatorNotice(resolveEventStorePaths(resolveDataDirDefault()), { now })` `.then(onSuccess, onFailure)`. Deliberately zero-argument (its header rules that an unattended step taking a date eventually writes the wrong one), so there is no argv to assert and importing it performs the write. Same category as `apps/web/src/push/push.ts`. Excluded in the same increment, for the same reason, as `plans-cli.ts`. | Everything it delegates to IS measured in `@numisma/event-store`: what the notice says (`operator-notice.ts`, pure) and where it goes and how it is written (`operator-notice-io.ts`). The data-dir resolution it performs is ADR-006's single rule (`resolveDataDirDefault`), measured in its own suite. The shell itself, though, has no driver, and the one place that looks like it does is not: the wrapper harness (`run-daily-fetch.test.ts`) drives step 5b through a *fake* bin — `wrapper-harness/fake-bin.testkit.ts`'s `"writes-operator-notice"` behavior, armed at `wrapper-harness/operator-notice.testkit.ts:195` — precisely so the wrapper is under test and not this CLI. So this shell is the fifth of the five the paragraph below this table names. |
 | `apps/web/src/push/push.ts` | Self-executing `tsx` script (`pnpm push` / `db:init`): top-level `main().then(..., process.exit)` — argv + credential + `process.exit` wiring only. Importing it runs `main()`, so there is no unit to assert as written. Slice #127 extracted the two pieces worth asserting into the measured `push/push-core.ts` (see below), leaving this a thin wrapper. PRD #134 slice 2 then moved `push.ts` off the committed fixture onto `loadCurrentFold()` (the real fold of the durable log). | `push-core.ts` is measured: `deriveSnapshot` / `loadCurrentFold` by `push-core.test.ts`, the real upsert (`upsertSnapshot`) by the gated `push-core.integration.test.ts`. The DDL `push.ts` applies via `--init` / `--init-only` is the tested `readSchemaDdl()` from `provision.ts`. |
 | `apps/web/src/push/backfill.ts` | Self-executing `tsx` script (`pnpm backfill`): argv (`parseBackfillArgs`) + credential + `process.exit` wiring over `backfill-core.ts`. Same category as `push.ts`. | `backfill-core.ts` is measured (`backfill-core.test.ts`) — it drives the whole replay loop, including `--fixture` / `--fixture-only`, with no database. |
 | `apps/web/src/push/gap-report.ts` | Self-executing `tsx` script (`pnpm gap-report`): argv + console + exit-code wiring over `gap-report-core.ts`. No database or environment required by design (D-series). | `gap-report-core.ts` is measured (`gap-report-core.test.ts`) — argument validation, the calendar window bound, and the exit contract are unit-tested with an injected clock and a throwaway store. |
@@ -51,16 +53,28 @@ dishonest.
 | `apps/web/src/routeTree.gen.ts` | Generated by TanStack Router — not authored source. | N/A — regenerated from the route files. |
 | `**/*.d.ts` | Type-only declaration files — no runtime statement to instrument. No `.d.ts` currently lives under a measured `src/`, so the glob matches nothing today; it exists to keep a future one from reporting dishonest 0%, the same defensive posture as the `**/*.fixtures.ts` / `**/*.testkit.ts` globs above. | N/A — `tsc`'s own type-check is what verifies a declaration file, not a coverage number. |
 
-**"Excluded from instrumentation" is not "untestable."** The four orders/migration
-CLI shells above (and the other self-executing scripts in this table) are excluded
-because v8 cannot report a spawned subprocess's coverage back to this process, and
-because importing one in-process runs the real act — not because nothing can drive
-them. `record-fill-cli.test.ts` proves the counterexample: it spawns the shell for
-real, against a throwaway data dir, and asserts its own wiring. The other three
-CLI shells (`import-orders-cli.ts`, `cancel-order-cli.ts`, `migrate-legacy-log.ts`)
-have no such spawn test today — they remain untested-by-any-suite, not merely
-uninstrumented — which is a real, open gap, not one this table should imply is
-closed by analogy.
+**"Excluded from instrumentation" is not "untestable."** The six CLI shells above
+— the four orders/migration entries plus `plans-cli.ts` and
+`operator-notice-cli.ts` — and the other self-executing scripts in this table are
+excluded because v8 cannot report a spawned subprocess's coverage back to this
+process, and because importing one in-process runs the real act — not because
+nothing can drive them. `record-fill-cli.test.ts` proves the counterexample: it
+spawns the shell for real, against a throwaway data dir, and asserts its own
+wiring. The other five CLI shells (`import-orders-cli.ts`, `cancel-order-cli.ts`,
+`migrate-legacy-log.ts`, `plans-cli.ts`, `operator-notice-cli.ts`) have no such
+spawn test today — they remain untested-by-any-suite, not merely uninstrumented —
+which is a real, open gap, not one this table should imply is closed by analogy.
+
+The last two joined that list by being excluded rather than by being tested, so
+this paragraph is now the only thing saying so, and it has to say it precisely.
+Until they were excluded, both reported a dishonest 0%, and that 0% was itself
+the flag; an exclude is supposed to trade a dishonest number for an honest
+accounting, and this is the accounting. Neither has a driver: nothing in the tree
+imports or spawns `plans-cli.ts`, and `operator-notice-cli.ts` has an apparent
+driver that is not one — the wrapper harness spawns a fake bin for the
+operator-notice step, never the real CLI. Two of the five are therefore invisible
+to a `grep` for their own filename outside this document, which is the reason
+they are spelled out here by name.
 
 The `.tsx` render components (`SummaryCard`, `SectionTable`, `FillPath`,
 `PriceDropPathChart`) and the route/router `.tsx` files are **not** matched by the
@@ -532,8 +546,14 @@ measured or excluded file below — plus two files an earlier section only
 mentioned in passing, with no figure and no gap accounted:
 `apps/price-feed/src/cli-main.ts` (§1) and `apps/web/src/ladder/fill-path-view.ts`
 (§6). A passing mention without a figure does not satisfy this section's own
-contract, so both get a row rather than a tightened mention. **55 rows, as of
-this fix.** Not all 55 are lines gaps — 18, about a third, are branch-only
+contract, so both get a row rather than a tightened mention. That took it to 55.
+Two then left: the increment that excluded `apps/tui/src/plans-cli.ts` and
+`apps/price-feed/src/operator-notice-cli.ts` in `vitest.config.ts` did the very
+thing both of their rows asked for, so they stopped being measured and moved to
+§1's table. They were relocated, not resolved — the shells are still untested by
+any suite, which is now §1's paragraph to say and no longer this section's, since
+this section only speaks for files the coverage run still measures. **53 rows, as
+of that relocation.** Not all 53 are lines gaps — 18, about a third, are branch-only
 (100% statements/lines, a branch below 100%), marked as such in the "Lines"
 column.
 
@@ -558,11 +578,17 @@ branch that runs only on a malformed input, a network/provider failure, or a
 lock/fs race; or a default-value/fallback arm no current fixture happens to
 exercise — real, reachable code either way, not dressed up as unreachable,
 just not yet each individually itemized with its own paragraph. Grouped by
-package. Three rows below say plainly that they do NOT fit even that:
-`plans-cli.ts`, `operator-notice-cli.ts` and `lib/binance-spot.ts` are an
-instrumentation-posture problem — a genuine 0% that `vitest.config.ts`
-should exclude and does not — not a branch shape, and are named as such in
-their own rows rather than folded into this sentence.
+package. One row below says plainly that it does NOT fit even that:
+`lib/binance-spot.ts` is an instrumentation-posture problem — a genuine 0%
+— not a branch shape, and is named as such in its own row rather than folded
+into this sentence. It is the LAST of what used to be three. `plans-cli.ts`
+and `operator-notice-cli.ts` were the other two, and both have since been
+excluded in `vitest.config.ts` alongside their sibling CLI shells; they now
+appear in §1 and are no longer measured, so §7 is not the place for them.
+`binance-spot.ts` stays here because an exclude is the WRONG fix for it: it is
+a browser hook caught by the `*.ts`-only include glob where §6's excused
+components are `.tsx`, so it needs the RTL toolchain §6 anticipates, or a
+logic extraction — not a line in the exclude list.
 
 **`apps/tui/src`**
 
@@ -576,7 +602,6 @@ their own rows rather than folded into this sentence.
 | `available-capital.ts` | 100% lines, 92.3% branch | `:61` | One branch-only gap. |
 | `gap-lines.ts` | 100% lines, 84.61% branch | `:86,156` | Two branch-only gaps: `:86` is `formatGapCheckFailure`'s non-`Error` fallback (`String(error)`); `:156` is one arm of `withheldLine`'s two-part concatenation (`lost > 0` / `venueDark > 0`) — both truthy together is not a combination any current fixture drives. |
 | `fold-lines.ts` | 100% lines, 80% branch | `:50` | Added at `d5fe02c` — no row existed before #377. One branch-only gap: `formatFoldCheckFailure`'s non-`Error` fallback (`String(error)`) — the same defensive shape as `gap-lines.ts`'s `formatGapCheckFailure` above. |
-| `plans-cli.ts` | 0% | `:40-95` | Added at `d5fe02c` — no row existed before #377, and this one does not fit the defensive/unreached-fixture/real-branch taxonomy cleanly, so it is named rather than forced into one. This is a self-executing top-level script (`pnpm plans`): a bare top-level `try { … } catch { … }`, WIRING ONLY — it resolves the fold, the `plans.jsonl` sidecar and the `reconciliations.jsonl` trail, hands them to the already-measured `formatPlansReport`, and sets `process.exitCode`. Importing it *runs the act*, same shape as `import-orders-cli.ts` / `record-fill-cli.ts` / `cancel-order-cli.ts` / `apps/price-feed/src/cli.ts` in §1 — but unlike those, it is **not excluded** in `vitest.config.ts`, so it reports a dishonest 0% of exactly the kind §1's opening paragraph warns against, rather than the honest "excluded, here's what guards it instead." The right fix is a `vitest.config.ts` exclude entry alongside its siblings — a source change out of this issue's scope; flagged here so it is not silently carried as a false 0%. |
 | `review-file.ts` | 100% lines, 98.11% branch | `:116` | One branch-only gap (the root-only `EACCES` skip noted in §2 is separate). |
 
 **`apps/price-feed/src`**
@@ -588,7 +613,6 @@ their own rows rather than folded into this sentence.
 | `binance-provider.ts` | 89.65% | `:63-64,97-98,102-103` | Three malformed-kline-payload throws for the Binance provider: `:63-64` the invalid-target-date throw when the requested day can't be parsed, `:97-98` the unexpected-payload-shape throw (the settled row is not an array), `:102-103` the non-positive-close throw. One more than the previous vintage — the invalid-target-date throw was covered before and is not now. |
 | `twelvedata-provider.ts` | 92.79% | `:128-129,181-182,190-191,226-227` | `:128-129` is the batched fetch's own unexpected-payload-shape throw (`failAll`, before any per-symbol dispatch); `:181-182` and `:190-191` are `observationFromBody`'s two unexpected-payload-shape throws (the symbol body itself, then its `values` array); `:226-227` is `barDateFromRow`'s no-usable-date throw. The rejected-symbol and non-positive-close throws this row used to cite are both covered now. |
 | `price-store.ts` | 92.85% | `:33-34` | The non-`ENOENT` rethrow in the per-instrument file read (an unexpected fs error the call path does not otherwise produce — defensive, same shape as `event-store.ts`'s `readOptional`). |
-| `operator-notice-cli.ts` | 0% | `:55-70` | Added at `d5fe02c` — no row existed before #377, and this one does not fit the taxonomy cleanly, same reason as `plans-cli.ts` above. A self-executing top-level script (`pnpm operator-notice`): module-level `writeOperatorNotice(...).then(onSuccess, onFailure)`, deliberately thin — its own header says every decision is already made in `@numisma/event-store`, which IS measured. Importing this file runs the write. Same category as the `apps/tui` CLI shells in §1, but **not excluded** in `vitest.config.ts`, so it reports a dishonest 0% rather than the honest "excluded, here's what guards it instead." Same fix, same out-of-scope note as `plans-cli.ts`. |
 | `provider.ts` | 100% lines, 91.17% branch | `:128,143-144` | `:128` is `fetchJson`'s `options.fetchImpl ?? fetch` default-value arm — every test injects its own `fetchImpl`, so the real default never runs; `:143-144` is the non-`Error` rejection-message fallback. The `AbortError`-timeout branch this row used to cite is covered now. |
 | `rejection-check.ts` | 93.2% | `:168,173-177,278` | The pre-check's own swallow-into-non-fatal-note paths (unreadable log, missing genesis) documented in the package README as advisory-only. |
 | `fetch-prices.ts` | 100% lines, 91.93% branch | `:223,405,431,506,535` | `:223` is `runPriceFetch`'s `options.now ?? (() => new Date())` default-value branch — every test injects its own `now`, so the real-default arm never runs; the `fetchImpl`/`sleepImpl` equivalents this row used to cite are covered now. `:405,431,506,535` are the four per-symbol/FIX `catch` blocks' non-triggered fallback arm in each failure-message construction — each catch itself runs (`fetch-prices.test.ts` drives real provider failures), just not with every individual thrown-error shape. |

@@ -20,10 +20,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { captureIngestCommit } from "./ingest-commit.js";
 import { GENESIS, git, initGitRepo, logLine, MARK } from "./ingest-commit.fixtures.js";
 
-// Each case spawns several real `git` children plus a workspace-version read; give the
-// git-heavy suite headroom over the 5s default under parallel load.
-vi.setConfig({ testTimeout: 30_000 });
-
 const APP_VERSION = "gobackv1";
 
 const createdDirs: string[] = [];

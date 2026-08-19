@@ -31,11 +31,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { serializeOrderRecord, type OrderRecord } from "@numisma/engine";
-
-// Spawning `tsx` costs a cold TypeScript start; give it headroom under load.
-vi.setConfig({ testTimeout: 30_000 });
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // HERE = apps/tui/src → the repo root is three levels up.

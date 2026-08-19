@@ -44,6 +44,55 @@ export default defineConfig({
     // `defaultExclude` must be spread first — dropping it would start
     // collecting tests out of node_modules.
     exclude: [...defaultExclude, ...gitignoredPathGlobs()],
+
+    // THE TEST BUDGET, STATED ONCE. Vitest's default is 5000 ms and this repo does
+    // not fit in it. The tui and price-feed suites spawn REAL subprocesses (`tsx`,
+    // the price-feed wrapper shell) and build REAL git repos in temp dirs, so a case
+    // whose body costs ~75 ms alone costs 1.4-2.0 s under full-suite parallel load —
+    // a 19-27x inflation that leaves roughly 2.4x of headroom against the default.
+    //
+    // THIS IS A DECLARED BUDGET, NOT A BUMP TO SILENCE A RED. 30_000 is the number
+    // this repo had ALREADY converged on, eleven times over: ten test files each
+    // carried their own `vi.setConfig({ testTimeout: 30_000 })` and CI passed
+    // `--testTimeout=30000` on the command line. One budget, eleven statements of
+    // it — and local runs got NONE of them for the price-feed suites, so a local
+    // run was STRICTER than CI. That divergence is the bug: a loaded machine could
+    // red locally on a case CI would never fail, which is a false red, and a false
+    // red is chased. Stating it here makes the budget one fact, applies it to every
+    // suite's TEST BODIES, and holds as the suite grows and on slower hardware.
+    //
+    // IT IS NOT A TOLERANCE FOR SLOW CODE — it is headroom over scheduler
+    // contention this repo does not control, and the distinction is the whole
+    // reason the number may be read but not raised. Nothing in the suite awaits an
+    // unbounded operation, so A CASE THAT ACTUALLY REACHES 30 s IS A REAL HANG and
+    // must be read as a defect to fix, never as a budget to raise again. #178 is
+    // the precedent: a filesystem-bound case that cost ~540 ms alone reached
+    // 1.2-1.9 s under load and crossed the 5 s default twice on a busier machine,
+    // timing out the whole suite while passing in isolation. That is the failure
+    // this budget exists for. A case that outruns 30 s is a different animal.
+    //
+    // WHAT IT COSTS: a genuinely hung test now takes 30 s to fail instead of 5 s.
+    // That is the trade CI has been making all along and it is the right one — a
+    // hang is a bug that will be found regardless, a false red is one that burns a
+    // session.
+    //
+    // WHAT IT DOES NOT DO: it cannot preempt a BLOCKING synchronous body.
+    // `testTimeout` is a timer on the same thread, so a `spawnSync` that never
+    // returns runs past any value set here. That is why the spawning tests pass
+    // their own `timeout` to the spawn — see `apps/tui/src/migrate-legacy-log.test.ts`.
+    //
+    // AND IT DOES NOT GOVERN HOOKS. `testTimeout` bounds test bodies only;
+    // `hookTimeout` and `teardownTimeout` are separate settings, both left at
+    // vitest's 10 s default. That is not a regression — neither the ten deleted
+    // `vi.setConfig({ testTimeout })` calls nor CI's old `--testTimeout` flag
+    // covered hooks either — but it is the ceiling that actually bites here: every
+    // file that lost a declaration cleans up in an `afterEach` that recursively
+    // `rm`s temp dirs, four of them real `.git` trees. Apply the same 19-27x
+    // parallel-load inflation to that cleanup and it runs into 10 s, not 30 s. The
+    // failure prints `Hook timed out in 10000ms`, names no test, and raising the
+    // number above would not have helped — so read it as a hook budget question,
+    // deliberately not answered here, rather than as this budget failing.
+    testTimeout: 30_000,
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
@@ -86,6 +135,19 @@ export default defineConfig({
         // Thin price-feed CLI entry: top-level console/exit-code wiring over the
         // tested `runPriceFetch`, no unit to assert.
         "apps/price-feed/src/cli.ts",
+        // Same category as every CLI shell above, and named separately only because
+        // they were missed when their siblings were excluded: importing either one
+        // RUNS THE ACT. `plans-cli.ts` is a bare top-level `try/catch` that resolves
+        // the fold, the `plans.jsonl` sidecar and the `reconciliations.jsonl` trail
+        // and hands them to the already-measured `formatPlansReport`;
+        // `operator-notice-cli.ts` is a module-level
+        // `writeOperatorNotice(...).then(...)` over `@numisma/event-store`, which is
+        // measured. Until this entry existed they reported a dishonest 0% — the exact
+        // failure this section's opening paragraph warns about — rather than the
+        // honest "excluded, here is what guards it instead."
+        // See docs/coverage-rationale.md §1.
+        "apps/tui/src/plans-cli.ts",
+        "apps/price-feed/src/operator-notice-cli.ts",
         // Bun-only openTUI wiring: never executes under Node's vitest run, so
         // instrumenting it would only report dead 0%. Guarded by the openTUI
         // smokes (`pnpm smoke:tui`, `pnpm smoke:startup`).

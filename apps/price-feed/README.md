@@ -158,6 +158,12 @@ pnpm test        # whole monorepo, vitest run
 pnpm typecheck    # this package: tsc --noEmit -p tsconfig.json
 ```
 
-`src/cli.ts` is excluded from the coverage number (thin console/exit-code
-wiring over the tested `runPriceFetch` — see `vitest.config.ts` and
-`docs/coverage-rationale.md`).
+Two files are excluded from the coverage number (see `vitest.config.ts` and
+`docs/coverage-rationale.md`). `src/cli.ts` is thin console/exit-code wiring over
+the tested `runPriceFetch`. `src/operator-notice-cli.ts` is the zero-argument
+`pnpm operator-notice` entry: a module-level `writeOperatorNotice(...)` whose every
+decision already lives in the measured `@numisma/event-store`, and importing it
+performs the write. Neither is spawn-tested — the wrapper harness that exercises
+the operator-notice step spawns a fake bin, deliberately, so the wrapper is what is
+under test and the shell itself is excluded from the number AND untested by any
+suite.

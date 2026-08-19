@@ -108,8 +108,8 @@ real Postgres, and a provisioning regression fails the build. The shape:
   **`auth:apply`** (twice — proves the vendored `better-auth.schema.sql` is
   present and applies idempotently; it fails if the file is missing) →
   **`pnpm --filter @numisma/web build`** (produces the client bundle) →
-  `pnpm test` (with a raised `--testTimeout` for the git-heavy tui tests on
-  slower runners).
+  `pnpm test` (no timeout flag — the 30 s budget is stated once in
+  `vitest.config.ts`, so CI and a local run share it).
 
 The build step exists so the **ADR-007 client-bundle invariant** test
 (`apps/web/src/client-bundle.integration.test.ts`) RUNS in CI rather than

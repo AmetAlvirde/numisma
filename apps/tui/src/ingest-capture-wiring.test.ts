@@ -14,10 +14,6 @@ import { resolveEventStorePaths } from "@numisma/event-store";
 import { ingestInbox } from "./event-store.js";
 import { GENESIS, GHOST_CLOSE, git, initGitRepo, logLine, MARK } from "./ingest-commit.fixtures.js";
 
-// Each case spawns several real `git` children (plus a workspace-version read); under
-// parallel load that outruns the 5s default, so give this git-heavy suite headroom.
-vi.setConfig({ testTimeout: 30_000 });
-
 const createdDirs: string[] = [];
 
 afterEach(async () => {

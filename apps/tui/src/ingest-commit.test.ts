@@ -20,10 +20,6 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { captureIngestCommit, readAppVersion } from "./ingest-commit.js";
 
-// The real-repo case spawns several git children (init, per-file add, commit, push);
-// give it headroom so it never flakes on the 5s default under full-suite parallel load.
-vi.setConfig({ testTimeout: 30_000 });
-
 const createdDirs: string[] = [];
 
 afterEach(async () => {
