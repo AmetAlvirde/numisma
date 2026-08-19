@@ -162,11 +162,16 @@ export interface EventReference {
    * "is this position closed" answerable AS OF A DATE, and the carrier ADR-017's guards
    * read: reject when `event.asOf >= closedAsOf`, admit when `event.asOf < closedAsOf`.
    *
-   * THE COMPARISON IS `>=`, matching {@link requirePositionUntouchedAfter}'s own
-   * strictness (which accepts EQUAL, because trim-then-close on one day is ordinary and
-   * the fold's (`asOf`, THEN LOG INDEX) order applies the earlier-logged verb first).
-   * The two rules meet on the close date and must not disagree there — otherwise a
-   * batch's verdict would depend on which of the pair arrived first.
+   * THE COMPARISON IS `>=`, AND IT DISAGREES WITH {@link requirePositionUntouchedAfter}
+   * ON EQUALITY, DELIBERATELY. That rule ACCEPTS a close dated equal to an accepted verb
+   * (success on `asOf >= latest.asOf`, reject only on strict `<`); this one REFUSES a
+   * verb dated equal to an accepted close. Opposite answers on one date, both right,
+   * because at equality the LOG INDEX decides and not the date: the fold orders by
+   * (`asOf`, THEN LOG INDEX), so a same-dated verb logged BEFORE the close folds ahead
+   * of it and one logged AFTER lands on a position the close already consumed. Each site
+   * takes the reading that matches what the fold will actually do, so a batch's verdict
+   * DOES turn on which of the pair the log received first — the fold's own tie-break
+   * showing through the gate. See ADR-017, "The boundary is `>=`".
    *
    * Read today by {@link crossReferenceAddedTo} only; {@link crossReferenceTrim} joins
    * it when ADR-017's second half lands, which additionally needs the world as of the
@@ -1191,8 +1196,9 @@ function crossReferenceTrim(
   // ADR-017, THE TRIM HALF: "a close is the position's last dated event" is a rule about
   // DATES, so this refusal must be too. A trim dated STRICTLY BEFORE the close that
   // retired the position is a correctly-dated trim reported late, and the fold places it
-  // where its date says. `>=` matches the seal rule's strictness in the other direction:
-  // the two rules meet on the close date itself and must not disagree there.
+  // where its date says. `>=` REFUSES equality where `requirePositionUntouchedAfter`
+  // accepts it — opposite answers on the close date, both right, because at equality the
+  // LOG INDEX decides: see {@link EventReference.closedPositionAsOf}.
   const retiredAsOf = reference.closedPositionAsOf.get(event.positionId);
   if (retiredAsOf !== undefined && event.asOf >= retiredAsOf) {
     return eventError(
@@ -1329,8 +1335,10 @@ function crossReferenceAddedTo(
   // `>=`, deliberately: EQUAL IS REFUSED here, where `requirePositionUntouchedAfter`
   // accepts it. The two rules are the same sentence read from its two ends — a close may
   // not be dated behind an accepted verb, and a verb may not be dated ON OR AFTER an
-  // accepted close — and on the close date itself only one of them can say yes, or the
-  // batch's verdict would turn on which of the pair the log happened to receive first.
+  // accepted close — and on the close date itself they answer DIFFERENTLY on purpose,
+  // because there the LOG INDEX decides and not the date: an add logged before a
+  // same-dated close folds ahead of it, one logged after does not. See
+  // {@link EventReference.closedPositionAsOf}.
   const retiredAsOf = reference.closedPositionAsOf.get(event.positionId);
   if (retiredAsOf !== undefined && event.asOf >= retiredAsOf) {
     return eventError(

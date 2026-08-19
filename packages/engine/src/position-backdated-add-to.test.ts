@@ -196,12 +196,18 @@ describe("ADR-017 — a PositionAddedTo dated STRICTLY BEFORE its target's close
   });
 });
 
-// THE BOUNDARY IS `>=`, MATCHING THE SEAL RULE'S OWN STRICTNESS AT `crossref.ts:819`.
-// The two rules meet on the close date itself and must not disagree there: the seal
-// rule accepts a verb dated EQUAL to a close (trim-then-close on one day is ordinary,
-// and the fold's (asOf, THEN LOG INDEX) order applies the earlier-logged verb first),
-// so this direction — where the close is already in the log — must REFUSE equality.
-// Anything else would let a batch's verdict depend on which of the two arrived first.
+// THE BOUNDARY IS `>=`, AND IT DELIBERATELY DISAGREES WITH THE SEAL RULE ON EQUALITY.
+// `requirePositionUntouchedAfter` ACCEPTS a close dated equal to an already-accepted
+// verb — it returns success on `asOf >= latest.asOf` and rejects only on strict `<`,
+// pinned by `case 1 — accepts a same-day trim-then-close` in `position-seal.test.ts`.
+// `crossReferenceAddedTo` REFUSES an add dated equal to an already-accepted close.
+// Opposite answers on one date, and both are right, because at equality the LOG INDEX
+// decides and not the date: `foldEvents` orders by (asOf, THEN LOG INDEX), so an
+// add logged BEFORE a same-dated close folds ahead of it, and one logged AFTER lands
+// on a position the close has already consumed. Each site takes the reading that
+// matches what the fold will actually do. The batch's verdict therefore DOES depend on
+// which of the pair the log received first — the fold's own tie-break showing through
+// the gate, not a flaw to design away. ADR-017, "The boundary is `>=`".
 describe("ADR-017 — the boundary", () => {
   it("refuses an add-to dated ON the close date", () => {
     const result = ingestBatch(closeThenAdd(CLOSED_AS_OF));
