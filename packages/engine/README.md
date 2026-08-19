@@ -109,7 +109,7 @@ imports the shared kernel rather than re-copying cross-concern helpers.
 | `orders/fill.ts`       | `TornFillAct`, `LadderPosition`, `FundingTier`, `OpenLadderTarget`, `AddLadderTarget`, `LadderTarget`, `FillActInput`, `FillAct`, `fillEventId`, `parseFillEventId`, `reconcileFillActs`, `resolveLadderPosition`, `deriveFundingTier`, `buildFillAct` | `S8`: the fill act's pure half — builds the paired `orderFilled` sidecar record and the `PositionOpened`/`PositionAddedTo` event together, so a caller can never write half of one. |
 | `durable-log.ts`       | `HeadDigest`, `IngestCommitInput`, `deriveHeadDigest`, `formatIngestCommitMessage` | Pure derivations for the git-backed durable event log's shell: a compact, schema-v2 Head Digest derived from the whole `FoldedReview` envelope (so a reader can trust a head — including its `discardedEventCount` — without replaying the log; ADR-020), and a deterministic ingest commit message. |
 | `calendar.ts`          | `addDays`, `daysBetween`   | Calendar-date arithmetic over the `asOf`-as-`YYYY-MM-DD` convention. Import-free (browser-safe by construction); also reachable via the `@numisma/engine/calendar` subpath. |
-| `data-dir.ts`          | `resolveDataDir`           | The one resolver for the durable ledger's data root: honors `NUMISMA_DATA_DIR`, else defaults to the sibling `<fund>` repo's `data/`. Pure string/env computation (`homedir()`, `node:path`) — no fs, no clock. |
+| `data-dir.ts`          | `resolveDataDir`, `normalizeDataDirOverride`, `DataDirVoice` | The one resolver for the durable ledger's data root: honors `NUMISMA_DATA_DIR`, else defaults to the sibling `<fund>` repo's `data/`. `normalizeDataDirOverride` is the ONE implementation of ADR-006's rule for a PRESENT value (blank refused, `~` expanded, absolute normalized, relative refused), which the four caller-supplied data-dir doors in the other packages route through so no door can be softer or harder than the env knob (#369); `DataDirVoice` carries the per-door refusal prose #348 deliberately wrote. Pure string/env computation (`homedir()`, `node:path`) — no fs, no clock. |
 
 Dependency direction: `contracts.ts` → (`internal.ts`, `price-journey.ts`) →
 `parse.ts` / `compose/*` / `events/*` / `price-feed/*` / `orders/*` / `format.ts`
@@ -128,10 +128,19 @@ folded state too, but only transitively — through `compose/canonical.js`, whic
 `parseFundReview` (to re-validate genesis) and the composition read model;
 `contracts.ts` depends on nothing else in the package, so there are no cycles.
 
-Two subpath exports exist beside the package root: `@numisma/engine/format`
-(the shared formatters, standalone) and `@numisma/engine/calendar` (the
+Three subpath exports exist beside the package root: `@numisma/engine/format`
+(the shared formatters, standalone), `@numisma/engine/calendar` (the
 import-free calendar arithmetic, for browser-side consumers that cannot pull in
-the rest of the package) — see `package.json`'s `exports` map.
+the rest of the package), and `@numisma/engine/testkit` — see `package.json`'s
+`exports` map.
+
+`./testkit` is TEST SCAFFOLDING, not domain code: it exports the one
+input→outcome table for ADR-006's `dataDir` rule (`data-dir-contract.testkit.ts`)
+so all five data-dir doors can be driven against a single copy of it from their
+own packages (#369). It is deliberately kept OUT of the `.` entry point, and out
+of `index.ts` entirely, so it is unreachable from production code — a subpath
+export is what lets four packages share one table without the table becoming
+part of the engine's domain surface.
 
 > Note: the behavioral suite is split to mirror the modules —
 > `fund-composition-{parse,tiers,warnings,dashboard}.test.ts` over a shared

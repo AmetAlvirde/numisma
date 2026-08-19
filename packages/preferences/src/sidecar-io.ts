@@ -13,18 +13,22 @@
  */
 import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
-import { dirname, isAbsolute, join, resolve } from "node:path";
-import { resolveDataDir } from "@numisma/engine";
+import { dirname, join } from "node:path";
+import { normalizeDataDirOverride, resolveDataDir } from "@numisma/engine";
 
 /**
  * Resolve `<dataDir>/<fileName>` under ADR-006's invariant: ABSOLUTE and
  * homedir-derived, NEVER CWD-relative.
  *
- * The cases, and why each is what it is:
+ * The `undefined` arm is this resolver's own — nobody configured a directory, so the
+ * shared engine `resolveDataDir()` (the `NUMISMA_DATA_DIR` env knob, or the accumulus
+ * default) is the answer. Every PRESENT value goes through the shared
+ * `normalizeDataDirOverride`, which is the SAME predicate the engine's env knob and the
+ * event-store / preferences / price-feed doors use, so this resolver cannot be either
+ * the softer or the harder door around the others (#369).
  *
- *   - **No override at all (`undefined`)** → the shared engine `resolveDataDir()`
- *     (the `NUMISMA_DATA_DIR` env knob, or the accumulus default). Nobody configured
- *     a directory, so the shared one is the answer.
+ * The two arms that predicate decides, and why each is what it is:
+ *
  *   - **A blank or whitespace-only override (`""`)** → THROWN, loudly (#348).
  *
  *     Three arms were weighed for `""`, and the record of all three lives here so
@@ -33,8 +37,9 @@ import { resolveDataDir } from "@numisma/engine";
  *       1. `""` → `resolve("")` → the process's CWD. **Rejected, and the rejection
  *          still stands.** A durable, git-tracked artifact written relative to
  *          whatever directory a script happened to start in is a split-brain ledger
- *          waiting to happen. NEVER reintroduce `resolve("")` here — the throw below
- *          is what keeps this arm shut now that `""` no longer has a landing spot.
+ *          waiting to happen. NEVER reintroduce `resolve("")` here — the shared
+ *          refusal is what keeps this arm shut now that `""` no longer has a landing
+ *          spot.
  *       2. `""` → the shared default, silently. **What this resolver did until #348.**
  *          Its argument: `""` is exactly the value an unset shell variable expands to
  *          (`${VAR:-}`) at the one call site most likely to produce it. That is true,
@@ -48,34 +53,30 @@ import { resolveDataDir } from "@numisma/engine";
  *          value for exactly that reason. An empty value is the same class of mistake
  *          with a worse blast radius: relative lands on a wrong-but-scratch dir, empty
  *          lands on the real ledger.
- *   - **An absolute override** → honored verbatim (normalized). Tests pass one.
  *   - **A relative override** → THROWN, loudly. It resolves differently depending
- *     on the working directory, so silently accepting it splits the store; the
- *     engine's `resolveDataDir` refuses the same value for the same reason and this
- *     resolver must not be the softer door around it.
+ *     on the working directory, so silently accepting it splits the store.
+ *
+ * And the arm this resolver CHANGED in #369: `~/x` used to be refused here as
+ * non-absolute while the engine's env knob expanded it. Both now expand it. `~/x` is
+ * absolute and homedir-derived — ADR-006's invariant verbatim — and it carries none of
+ * the CWD-dependence the rule exists to refuse; the full ruling is recorded on
+ * `normalizeDataDirOverride`.
  */
 export function resolveSidecarPath(fileName: string, dataDir?: string): string {
   if (dataDir === undefined) {
     return join(resolveDataDir(), fileName);
   }
-  const raw = dataDir.trim();
-  if (raw === "") {
-    throw new Error(
-      `a sidecar data directory must not be empty (got "${dataDir}"). ` +
-        `An empty value is not "unset": accepting it would silently send every write ` +
-        `to the REAL default ledger instead of the directory the caller meant to pass. ` +
-        `Pass no data directory at all to use the default deliberately, or pass an ` +
-        `absolute path.`,
-    );
-  }
-  if (!isAbsolute(raw)) {
-    throw new Error(
-      `a sidecar data directory must be an absolute path (got "${raw}"). ` +
-        `A relative value resolves differently depending on the working directory, ` +
-        `so it is rejected to prevent a split-brain ledger.`,
-    );
-  }
-  return join(resolve(raw), fileName);
+  return join(
+    normalizeDataDirOverride(dataDir, {
+      subject: "a sidecar data directory",
+      blankHeadline: "a sidecar data directory must not be empty",
+      blankConsequence:
+        "accepting it would silently send every write to the REAL default ledger " +
+        "instead of the directory the caller meant to pass.",
+      blankRemedy: "Pass no data directory at all to use the default deliberately",
+    }),
+    fileName,
+  );
 }
 
 /**

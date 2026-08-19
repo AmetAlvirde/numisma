@@ -90,7 +90,12 @@ The `NUMISMA_DATA_DIR` env var is the **single** knob that moves every plane (th
 event-store, the price-feed config, and the preferences sidecar). The resolution rule
 lives once, pure and IO-free, in `@numisma/engine` (`packages/engine/src/data-dir.ts`):
 
-- unset / empty / whitespace → the `<fund>` default (`~/Dev/<fund>/data`);
+- unset → the `<fund>` default (`~/Dev/<fund>/data`);
+- empty / whitespace-only → **rejected loudly** (#348): an empty value is a
+  MISCONFIGURED knob, not an absent one, and silently falling through to the
+  default would send every write to the real ledger instead of the store the
+  deployment meant to configure — unset the variable to choose the default
+  deliberately;
 - `~` or `~/…` → `~`-expanded against `homedir()`, then made absolute;
 - an absolute path → normalized;
 - a **relative** path → **rejected loudly** (a relative value would resolve

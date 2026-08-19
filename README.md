@@ -28,7 +28,7 @@ six members are versioned together at the monorepo version.
 
 | Package                                                    | Runtime                                    | Owns                                                                                                                                                                                                                                                                                       |
 | ---------------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [`@numisma/engine`](./packages/engine/README.md)           | Node-compatible, IO-free, no Bun/openTUI   | The pure fund domain: parsing untrusted input, validating events, folding genesis + log into the `CompositionReport` read model, the shared formatters, the pure half of the two-plane price model, and the whole Orders model. Exposes `.`, `./format`, and `./calendar` subpath exports. |
+| [`@numisma/engine`](./packages/engine/README.md)           | Node-compatible, IO-free, no Bun/openTUI   | The pure fund domain: parsing untrusted input, validating events, folding genesis + log into the `CompositionReport` read model, the shared formatters, the pure half of the two-plane price model, and the whole Orders model. Exposes `.`, `./format`, `./calendar`, and `./testkit` subpath exports. |
 | [`@numisma/event-store`](./packages/event-store/README.md) | Node-compatible                            | The durable log's **read** path — path resolution, genesis load, log load with quarantine, `loadFoldedReview` — plus the gap-report and job-heartbeat sidecars. Consumed by both the TUI and the web push. Exposes `.` and the `./testkit` subpath export.                                                                                 |
 | [`@numisma/preferences`](./packages/preferences/README.md) | Node-compatible                            | Sidecar file IO for `preferences.jsonl` (profit-split policy) and `orders.jsonl` (resting claims). Append-only, validated on load, cross-process locked for orders.                                                                                                                        |
 | [`@numisma/tui`](./apps/tui/README.md)                     | Bun + openTUI (dashboard); Node for CLIs   | The local access surface: the durable log's **write** half (ingest / dedup / atomic append / archive / legacy migration), startup orchestration, the interactive dashboard, the three Orders CLIs, and the smoke renders.                                                                  |
@@ -41,9 +41,10 @@ lives in `@numisma/event-store`, the **write/ingest** path (inbox detection,
 dedup persistence, atomic append, archive) and startup orchestration stay in
 `@numisma/tui`, and sidecar IO lives in `@numisma/preferences`. Every app
 consumes its libraries through a package's declared entry points — the root
-plus the three deliberate subpath exports (`@numisma/engine/format`,
-`@numisma/engine/calendar`, `@numisma/event-store/testkit`) — never an
-undeclared deep import; `pnpm typecheck` mechanically bars those.
+plus the four deliberate subpath exports (`@numisma/engine/format`,
+`@numisma/engine/calendar`, `@numisma/engine/testkit`,
+`@numisma/event-store/testkit`) — never an undeclared deep import; `pnpm
+typecheck` mechanically bars those.
 
 ## Documentation
 

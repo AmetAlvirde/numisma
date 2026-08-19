@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./format": "./src/format.ts",
+    "./testkit": "./src/data-dir-contract.testkit.ts",
     "./calendar": "./src/calendar.ts"
   },
   "types": "./src/index.ts",

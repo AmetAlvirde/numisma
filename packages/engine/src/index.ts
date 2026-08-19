@@ -449,7 +449,8 @@ export {
 // `NUMISMA_DATA_DIR` env override with an absolute, homedir-derived accumulus
 // default. Shared by the tui event-store, the price-feed config, and the
 // preferences sidecar so every plane resolves the same store.
-export { resolveDataDir } from "./data-dir.js";
+export { normalizeDataDirOverride, resolveDataDir } from "./data-dir.js";
+export type { DataDirVoice } from "./data-dir.js";
 
 // Shared formatters (the engine's one source of truth for the cents-precision /
 // padding conventions, consumed by the TUI) + the CLI composition renderer.
