@@ -2097,3 +2097,96 @@ describe("an import nobody can answer refuses at the FIRST question and writes n
     expect(await readOrDefault(setup.ordersPath, "<<absent>>")).toBe("<<absent>>");
   });
 });
+
+/**
+ * THE OTHER DOOR INTO THOSE RATIFYING QUESTIONS: CTRL-D, WHICH IS NOT A REORDER.
+ *
+ * The case above pins the ORDERING argument — funding is asked first and refuses, so a
+ * run with no terminal never reaches a ratification. That argument covers the no-terminal
+ * path only. `prompt-channel.ts` clause 4 resolves `""` for an ABANDONED question too,
+ * and for every question after it, because the abort closes the interface. So an operator
+ * who types a real reserve, sees the override question, realises the reserve is the wrong
+ * one and presses Ctrl-D used to get: the override blank read as "no overrides", the
+ * rung-pick blank read as ACCEPT EVERY PROPOSAL, and `appendOrders` called with
+ * `planId`/`rungId` joins nobody declared — durably, in an append-only file, attributed
+ * to the reserve they were in the act of taking back. Before #370's channel change the
+ * same keystroke ended the run with nothing on disk.
+ *
+ * THE ASSERTION IS AT THIS SEAM RATHER THAN THE CHANNEL'S, because this is the layer
+ * where the behaviour changed — the channel returning `""` was never the defect. No pty,
+ * no spawn: `ask` is injected, and `promptAbandoned` is the channel's latch as a
+ * predicate. The guarantee it pins is positional-independent — if the terminal was
+ * abandoned, nothing is written — so it holds for a Ctrl-D at the LAST question too,
+ * which is the case a latch that only re-answered later questions would still leak.
+ */
+describe("an interview abandoned at the terminal writes NOTHING (#370, clause 4)", () => {
+  /** Answers the funding question once, then `""` forever — what the channel really does. */
+  function abandonAfterFirstAnswer(setup: Harness): { appended: number } {
+    const calls = { appended: 0 };
+    let abandoned = false;
+    let answered = 0;
+    setup.io.ask = async (question) => {
+      setup.asked.push(question);
+      if (answered === 0) {
+        answered += 1;
+        return "reserve-a";
+      }
+      abandoned = true;
+      return "";
+    };
+    setup.io.promptAbandoned = () => abandoned;
+    setup.io.appendOrders = async () => {
+      calls.appended += 1;
+    };
+    return calls;
+  }
+
+  it("refuses as interview-abandoned and never reaches appendOrders", async () => {
+    const setup = await harness({ plans: [planLadder()] });
+    const calls = abandonAfterFirstAnswer(setup);
+
+    const outcome = await importBitgetOpenOrders({ csvPath: setup.csvPath, io: setup.io });
+
+    // THE PIN. Without the write-door check this is `imported / appended: 2`, carrying
+    // declared rung joins the operator never accepted.
+    expect(calls.appended).toBe(0);
+    expect(outcome).toMatchObject({ status: "rejected", reason: "interview-abandoned" });
+    // The operator gets the refusal contract's literal second sentence, not a stack.
+    expect(
+      setup.errors.some(
+        (message) => message.startsWith("REFUSED —") && message.includes("Nothing was written"),
+      ),
+    ).toBe(true);
+    // And the interview really did get past the refusing question — otherwise this case
+    // would be passing for the reason the case above already covers.
+    expect(setup.asked.length).toBeGreaterThan(1);
+    expect(setup.asked[0]).toContain("Funding reserve for this batch");
+  });
+
+  it("still lets a Ctrl-D at the FIRST question refuse as no-reserve-declared", async () => {
+    // #370's actual fix, unregressed: the channel's first rejecting question resolves
+    // `""`, the domain reads that as NO RESERVE DECLARED, and the operator gets the
+    // domain's own words rather than `Aborted with Ctrl+D`. The latch is true here too,
+    // but the funding refusal fires long before the write door, so it is that refusal —
+    // the specific one #370 names — the operator sees, not the new one.
+    const setup = await harness({ answers: [""], plans: [planLadder()] });
+    setup.io.promptAbandoned = () => true;
+
+    const outcome = await importBitgetOpenOrders({ csvPath: setup.csvPath, io: setup.io });
+
+    expect(outcome).toMatchObject({ status: "rejected", reason: "no-reserve-declared" });
+    expect(setup.asked).toHaveLength(1);
+    expect(await readOrDefault(setup.ordersPath, "<<absent>>")).toBe("<<absent>>");
+  });
+
+  it("writes normally when the terminal was never abandoned", async () => {
+    // The predicate defaults to absent for every existing caller and fixture; present and
+    // false must behave identically, or the guard would be a new failure mode of its own.
+    const setup = await harness({ answers: ["reserve-a", "n", ""], plans: [planLadder()] });
+    setup.io.promptAbandoned = () => false;
+
+    const outcome = await importBitgetOpenOrders({ csvPath: setup.csvPath, io: setup.io });
+
+    expect(outcome).toMatchObject({ status: "imported", appended: 2 });
+  });
+});

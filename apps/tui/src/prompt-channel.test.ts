@@ -20,8 +20,30 @@
  * CI is ubuntu while development is darwin.)
  *
  * So the channel takes `isTTY` as a VALUE and the interface as a FACTORY, and the thing
- * under test here is the channel rather than Node's terminal handling. Symptom 1 remains
- * open in #370 and gets its own decision; nothing below claims to cover it.
+ * under test here is the channel rather than Node's terminal handling.
+ *
+ * WHAT THE SYMPTOM 1 CASES BELOW DO AND DO NOT COVER. Symptom 1 is Ctrl-D at a REAL
+ * terminal, where `isTTY` is true, the guard does not fire, and `rl.question()` rejects.
+ * The channel's answer to that rejection is pinned here — and ONLY the channel's answer.
+ * There is no pty, no spawn and no child process anywhere in this file: nothing below
+ * presses Ctrl-D, and nothing below is end-to-end coverage of a terminal delivering one.
+ * What is pinned is: given a `question()` that rejects with the shape Node really
+ * produces, this channel resolves with `""`.
+ *
+ * THAT SHAPE WAS MEASURED, NOT ASSUMED — node v24.14.0, `node:readline/promises` over an
+ * in-process `PassThrough` pair with `terminal: true`, a pending `question()`, and a raw
+ * `\x04` byte written to the input:
+ *
+ *     name "AbortError", code "ABORT_ERR", message "Aborted with Ctrl+D"
+ *
+ * That message is the string #370 reports the operator seeing, printed by the shell's
+ * outer catch. The same measurement recorded the OTHER rejection a caller can provoke: a
+ * question put after the interface has closed rejects with code `ERR_USE_AFTER_CLOSE`,
+ * message "readline was closed" — the readline internal symptom 2 removed from the
+ * operator's screen. Both are reproduced by the authored fakes below. (It also recorded a
+ * non-rejection: plain stream EOF and `rl.close()` leave a pending `question()` unsettled
+ * forever rather than rejecting. Nothing here depends on that, but it is why a bare
+ * `.catch()` is the whole fix and no timeout is part of it.)
  *
  * Every fake is authored. Nothing here touches `process`, stdin, or a real readline.
  */
@@ -52,11 +74,57 @@ function fakeInterface(answers: string[]): PromptInterface & {
   };
 }
 
+/**
+ * Node's Ctrl-D rejection, reproduced from the measurement in this file's header rather
+ * than from the docs: an `AbortError` carrying `ABORT_ERR` and Node's own wording. This
+ * is the error that reached the operator through the shells' outer catch in #370.
+ */
+function abortedWithCtrlD(): Error {
+  const error: Error & { code?: string } = new Error("Aborted with Ctrl+D");
+  error.name = "AbortError";
+  error.code = "ABORT_ERR";
+  return error;
+}
+
+/** The other measured rejection: any question put after the interface has closed. */
+function usedAfterClose(): Error {
+  const error: Error & { code?: string } = new Error("readline was closed");
+  error.code = "ERR_USE_AFTER_CLOSE";
+  return error;
+}
+
+/**
+ * A readline stand-in that behaves the way the measured one does once Ctrl-D lands: the
+ * question in flight rejects with the abort, and every question after it rejects with
+ * `ERR_USE_AFTER_CLOSE`, because the interface is closed from that moment on. `close()`
+ * still counts, because the shell calls it in its `finally` either way.
+ */
+function ctrlDInterface(): PromptInterface & { asked: string[]; closed: number } {
+  const asked: string[] = [];
+  const state = { closed: 0 };
+  return {
+    asked,
+    get closed() {
+      return state.closed;
+    },
+    question: async (query: string) => {
+      asked.push(query);
+      throw asked.length === 1 ? abortedWithCtrlD() : usedAfterClose();
+    },
+    close: () => {
+      state.closed += 1;
+    },
+  };
+}
+
 /** The channel plus the two things a caller can observe about how it was built. */
-function channelOn(isTTY: boolean, answers: string[] = []) {
+function channelOn(
+  isTTY: boolean,
+  answers: string[] = [],
+  rl: PromptInterface & { asked: string[]; closed: number } = fakeInterface(answers),
+) {
   const errors: string[] = [];
   let built = 0;
-  const rl = fakeInterface(answers);
   const channel = createPromptChannel({
     isTTY,
     createInterface: () => {
@@ -177,5 +245,123 @@ describe("on a stdin that is no terminal the channel says so and returns an empt
     harness.channel.close();
 
     expect(harness.rl.closed).toBe(0);
+  });
+});
+
+describe("on a terminal where the question is aborted the channel ends the ANSWER, not the run", () => {
+  // #370, SYMPTOM 1. At a real terminal `isTTY` is true, so the no-terminal guard never
+  // fires; Ctrl-D makes `rl.question()` reject, and before this decision that rejection
+  // unwound through the shell's outer catch — `import-orders-cli.ts` and
+  // `record-fill-cli.ts` both print `error.message` there — putting Node's own wording,
+  // "Aborted with Ctrl+D", on the operator's screen and ending the run. The consequence
+  // the issue names: the domain's refusal, `REFUSED — no funding reserve was declared for
+  // this batch`, was never reached. Resolving with `""` is the same answer the
+  // no-terminal path gives, and it lets the domain refuse in its own voice.
+  it("RESOLVES with '' when the question rejects with Node's measured Ctrl-D abort", async () => {
+    const harness = channelOn(true, [], ctrlDInterface());
+
+    await expect(harness.channel.ask("funding reserve? ")).resolves.toBe("");
+
+    // It really did reach readline — this is the terminal path, not the guard.
+    expect(harness.built).toBe(1);
+    expect(harness.rl.asked).toEqual(["funding reserve? "]);
+  });
+
+  // Ctrl-D closes the interface, so the interview does not stop at the aborted question:
+  // whatever the flow asks next reaches a closed readline and rejects with
+  // `ERR_USE_AFTER_CLOSE` — the readline internal #370's symptom 2 took off the
+  // operator's screen. It must not come back through this door. Every later question
+  // answers `""` too, which is what carries a nineteen-question interview all the way to
+  // the domain's refusal instead of ending it at the first one.
+  it("keeps answering '' for the rest of the interview once the interface is closed", async () => {
+    const harness = channelOn(true, [], ctrlDInterface());
+
+    expect(await harness.channel.ask("first? ")).toBe("");
+    expect(await harness.channel.ask("second? ")).toBe("");
+    expect(await harness.channel.ask("third? ")).toBe("");
+
+    expect(harness.rl.asked).toEqual(["first? ", "second? ", "third? "]);
+    // Still one interface. An abort is not a reason to build another one.
+    expect(harness.built).toBe(1);
+  });
+
+  // Nothing is written to the error sink: the abort is not the shell's news to report.
+  // The domain's refusal is the message the operator gets, and it arrives on its own.
+  it("says nothing of its own about the abort", async () => {
+    const harness = channelOn(true, [], ctrlDInterface());
+
+    await harness.channel.ask("a? ");
+
+    expect(harness.errors).toEqual([]);
+  });
+
+  // The shells close in a `finally`, so `close()` runs on this path too. It was built,
+  // so it closes — once, and without throwing, even though readline is already closed.
+  it("still closes the interface it built", async () => {
+    const harness = channelOn(true, [], ctrlDInterface());
+
+    await harness.channel.ask("a? ");
+    harness.channel.close();
+
+    expect(harness.rl.closed).toBe(1);
+  });
+});
+
+/**
+ * THE ABANDONMENT LATCH — the fact `""` cannot carry.
+ *
+ * Clause 4 must resolve `""` (that is what lets the domain refuse in its own voice), and
+ * `""` is a RATIFICATION at several questions of both shells' interviews. The string
+ * therefore cannot tell a flow whether an answer was typed or abandoned, so the channel
+ * remembers it beside the string. What the flow does with it is the flow's business and
+ * is pinned where that behaviour lives — `import-orders.test.ts` drives
+ * `importBitgetOpenOrders` with an abandoning `ask` and asserts nothing is appended.
+ * What is pinned HERE is only the latch: when it is set, when it is not, and that it
+ * never clears.
+ */
+describe("the channel remembers that a question was abandoned", () => {
+  it("is false before anything is asked", () => {
+    expect(channelOn(true).channel.aborted()).toBe(false);
+  });
+
+  it("is false after a question that was actually answered", async () => {
+    const harness = channelOn(true, ["reserve-a"]);
+
+    expect(await harness.channel.ask("funding reserve? ")).toBe("reserve-a");
+
+    expect(harness.channel.aborted()).toBe(false);
+  });
+
+  it("latches on the rejecting question, WITHOUT changing what it resolves", async () => {
+    const harness = channelOn(true, [], ctrlDInterface());
+
+    // Both halves in one case on purpose: a latch that suppressed clause 4's `""` would
+    // put `Aborted with Ctrl+D` back on the operator's screen, which is the whole defect
+    // #370 removed.
+    expect(await harness.channel.ask("funding reserve? ")).toBe("");
+    expect(harness.channel.aborted()).toBe(true);
+  });
+
+  it("never clears for the rest of the interview", async () => {
+    const harness = channelOn(true, [], ctrlDInterface());
+
+    await harness.channel.ask("first? ");
+    await harness.channel.ask("second? ");
+    await harness.channel.ask("third? ");
+
+    expect(harness.channel.aborted()).toBe(true);
+  });
+
+  // The no-terminal path never asks readline anything, so no question was ABANDONED —
+  // it was unaskable. That path is governed by each shell's ordering argument, and its
+  // first question refuses on `""` before any write door is reached. Latching here would
+  // report an abandonment that did not happen and would attribute the wrong refusal to a
+  // piped run.
+  it("stays false on a stdin that is no terminal", async () => {
+    const harness = channelOn(false);
+
+    await harness.channel.ask("a? ");
+
+    expect(harness.channel.aborted()).toBe(false);
   });
 });
