@@ -28,10 +28,46 @@ import {
   unattendedFoldVerdict,
 } from "@numisma/event-store";
 import { restoreLogImage, writeLogImage } from "./event-store.js";
+import { createPromptChannel } from "./prompt-channel.js";
 import { recordFill } from "./record-fill.js";
 
 const paths = resolveEventStorePaths();
-const rl = createInterface({ input: process.stdin, output: process.stdout });
+/**
+ * THE PROMPT CHANNEL (#370, symptom 2). This shell built its interface HERE, at module
+ * scope, which is the pre-#346 shape: `createInterface` eagerly consumes stdin, so a piped
+ * run ended the stream before the first question was put and `ask` rejected with
+ * `ERR_USE_AFTER_CLOSE` — `readline was closed`, a readline internal printed verbatim to
+ * the operator by the outer catch below. The channel builds lazily and, on a stdin that is
+ * no terminal, names the missing terminal in this shell's own voice and returns "".
+ *
+ * `""` IS HONEST HERE ONLY BECAUSE OF THE ORDER `recordFill` ASKS IN, and that is a
+ * dependency rather than a property of the empty string. This flow has NINE `ask` sites and
+ * they read `""` three different ways:
+ *
+ *   - `record-fill.ts`'s "Which rung filled?" — the FIRST question the flow reaches —
+ *     matches no rung and refuses as `unknown-rung`. This is the refusal that makes the
+ *     empty answer safe, and nothing has been written when it fires.
+ *   - "Filled quantity [n]" reads `""` as TAKE THE REMAINING QUANTITY, and the per-rung
+ *     book questions read it as ACCEPT THE PROPOSED VERDICT. Silent ratifications, both.
+ *   - the two "[y/N]" confirmations read `""` as NO, and abandon.
+ *
+ * Only the first is ever reached without a terminal. Reorder the interview — ask the book
+ * observation before the rung pick, or make the rung question skippable — and this same
+ * `""` ratifies a quantity nobody stated and the run WRITES, unattended, with nobody
+ * having answered anything. If that ordering moves, this must become a refusal the domain
+ * cannot mistake for consent (a sentinel the questions reject, not a blank), and it must
+ * move in the same commit. `record-fill-cli.test.ts` pins the ordering itself so the move
+ * is loud rather than silent.
+ */
+const prompt = createPromptChannel({
+  isTTY: Boolean(process.stdin.isTTY),
+  createInterface: () => createInterface({ input: process.stdin, output: process.stdout }),
+  err: (message) => process.stderr.write(`${message}\n`),
+  noTerminalNotice:
+    "No terminal on stdin: recording a fill is an interview — it asks which rung filled, " +
+    "when, and for how much — and there is nowhere to conduct it, so every question goes " +
+    "unanswered. Run it from a terminal.",
+});
 try {
   // THE FOLD IS TAKEN, AND ITS DISCARD SUMMARY RENDERED, BEFORE THE ACT BEGINS.
   //
@@ -92,7 +128,7 @@ try {
     // here: `toldAt` is an audit instant and never an ordering key, so rendering it in a
     // named zone would buy nothing and would put a second calendar on this path.
     toldAt: () => new Date().toISOString(),
-    ask: (question) => rl.question(question),
+    ask: prompt.ask,
     out: (message) => process.stdout.write(message),
     err: (message) => process.stderr.write(`${message}\n`),
   });
@@ -103,5 +139,7 @@ try {
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
   process.exitCode = 1;
 } finally {
-  rl.close();
+  // ONLY IF ONE WAS EVER BUILT — see `createPromptChannel`. A run that never prompted
+  // must not construct an interface here just to close it.
+  prompt.close();
 }
