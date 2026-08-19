@@ -591,9 +591,18 @@ const RUNS_PER_CASE = decision.run ? resolveRunCount(process.env.NUMISMA_WRAPPER
 
 /**
  * The settle window for a case with no timeout in it. Short ON PURPOSE, and the shortness
- * is load-bearing: the child-reap mutation leaves a stray `sleep` with most of a
- * 5-second watchdog poll still to run, so a generous window here would let the mutated run
- * pass and the control would prove nothing.
+ * is load-bearing in the child-reap control: the mutation leaves a stray `sleep` with PART
+ * of a watchdog poll hop still to run, so a generous window here would outlast the stray on
+ * every run and the control would prove nothing.
+ *
+ * HOW MUCH of the hop is left is not a property of this number. It is decided by where in
+ * the watchdog's repeating poll cycle the run happened to finish, which is ambient — a
+ * phase, not a budget, and no value here makes it one. That is why the control repeats
+ * instead of trusting a single reading; #394 is the red that taught it to.
+ *
+ * As a bound on an ordinary case this is generous rather than tight. A healthy run reaps the
+ * watchdog and its child from inside the EXIT trap, so its pgid is already empty at the
+ * instant the shell exits and none of this window is ever spent.
  */
 const SETTLE_DEADLINE_MS = 2_000;
 
@@ -695,12 +704,41 @@ function watchdogCardPresent(logDir: string): boolean {
 }
 
 /**
- * How long case 4 will wait for the run to actually be INSIDE the fetch step before it
- * signals. Bounded well under the timeout cases' 3s ceiling on purpose: the whole claim of
- * case 4 is that its signal arrives before the watchdog's, so a wait that could run into the
- * ceiling would be a wait that could silently turn case 4 into a second copy of case 2.
+ * THE ANTI-HANG BACKSTOP ON CASE 4'S WAIT — deliberately NOT a budget, and the distinction
+ * is the whole point of this constant's existence.
+ *
+ * It used to be one: a flat 2000 ms, chosen as a safety strip under the timeout cases' 3 s
+ * ceiling, on the reasoning that a wait which ran into the ceiling could silently turn case
+ * 4 into a second copy of case 2. The reasoning was right; the mechanism was a PROXY for it,
+ * and the proxy is what went red. #372 recorded this exact wait failing under a full
+ * parallel suite with the message "the run never reached the step this signal is aimed at" —
+ * a statement that was simply FALSE. The run reached the step. The machine was busy.
+ *
+ * Measured on 2026-08-19, twelve runs per suite run: on a quiet machine the reach costs
+ * 388-678 ms across 60 samples, but with a second suite running concurrently — the board's
+ * ordinary condition, one worktree per lane — the worst run of each set was 1473, 1460 and
+ * 1282 ms. That is 74% of the old bound consumed by scheduler contention alone, and #372's
+ * original sighting is the same series crossing it.
+ *
+ * So the wait no longer races a clock at all. It races {@link watchdogCardPresent}, which is
+ * the thing case 4's premise is ACTUALLY about, and this number is what remains: a bound on
+ * a run that is neither reaching its step nor being timed out by its own watchdog, which is
+ * a broken wrapper rather than a busy machine.
+ *
+ * WHY IT IS DERIVED FROM CEILING + GRACE AND NOT FROM THE CEILING ALONE, since the card is
+ * the event the wait is actually racing and the card lands AT the ceiling, before the TERM
+ * and therefore before the grace (`run-daily-fetch.sh`, the watchdog subshell). Sitting
+ * above the card would be enough if the card were guaranteed, and it is not: the wrapper
+ * writes it best-effort, `: > "$WATCHDOG_FIRED_FILE" 2>/dev/null || true`, precisely so a
+ * failed write costs a mislabel rather than the kill. On that path the wait sees no card,
+ * and the last thing the watchdog still guarantees is the SIGKILL at ceiling + grace. So
+ * the bound is "above everything the watchdog does", which is what makes reaching it mean
+ * a watchdog that never armed at all. Compare {@link timeoutSettleDeadlineMs} and case 7,
+ * where the same `(ceiling + grace)` arithmetic is derived from the escalation itself.
  */
-const REACH_STEP_BOUND_MS = 2_000;
+const REACH_STEP_BACKSTOP_MS =
+  (TIMEOUT_CASE_OPTIONS.maxRunSeconds + TIMEOUT_CASE_OPTIONS.watchdogGraceSeconds) * 1_000 +
+  2_000;
 
 /**
  * Block until the fake has recorded `command`, so a signal aimed at a step lands while the
@@ -708,22 +746,56 @@ const REACH_STEP_BOUND_MS = 2_000;
  * heartbeat is half of what case 4 asserts, and `LAST_STEP` is set just before the call the
  * sentinel proves happened.
  *
- * FAIL-CLOSED AND BOUNDED. A sentinel that never arrives means the run never reached the
- * step this signal is aimed at, which is a failure of the case; waiting for it with
- * unbounded patience would be indistinguishable from a run that hung before it got there.
+ * FAIL-CLOSED, AND IT RACES THE WATCHDOG RATHER THAN A CLOCK. What case 4 needs is not "the
+ * step arrived inside N milliseconds" but "the step arrived before the watchdog fired", and
+ * those two are only the same statement on an unloaded machine. The watchdog announces
+ * itself: it touches its calling card BEFORE it signals the group
+ * (`run-daily-fetch.sh`, the watchdog subshell), so the losing condition is directly
+ * observable and needs no proxy. A watchdog that genuinely got there first still fails —
+ * and fails saying so, instead of claiming the run never reached a step it plainly reached.
+ * See {@link REACH_STEP_BACKSTOP_MS} for the measurements that retired the stopwatch.
+ *
+ * WHAT THIS DOES NOT BUY, stated because an earlier version of this comment claimed it did:
+ * it does not make case 4 immune to a slow machine. It removes the 2000 ms strip, which was
+ * the tightest bound and the one #372 crossed, and hands the reach the whole ceiling. Past
+ * the ceiling the case still reds — here as "the watchdog beat the harness", and slightly
+ * earlier at the `durationMs < ceilingMs` assertion in the case body, which is now the
+ * binding wall-clock bound and says so in its own comment. The honest claim is that the
+ * headroom went from 2000 ms to roughly the ceiling minus the signal-to-exit tail, against
+ * a measured contended worst of 1541 ms, and that the red at the far end now names the
+ * watchdog rather than accusing the run of never arriving.
+ *
+ * THREE EXITS, EACH MEANING EXACTLY ONE THING:
+ *   - the sentinel appears — the run is in the step, and the elapsed time is returned for
+ *     the report line;
+ *   - the calling card appears — the watchdog beat the harness, so this run is case 2
+ *     wearing case 4's name and there is nothing left to signal;
+ *   - the backstop expires — neither happened, which is a wrapper that is not running and
+ *     not being bounded by its own watchdog.
  */
 async function waitForFakeToReach(
   caseDir: string,
   command: string,
   label: string,
+  logDir: string,
 ): Promise<number> {
   const sentinel = join(caseDir, "sentinels", sentinelNameFor(command));
   const startedAt = Date.now();
   while (!existsSync(sentinel)) {
-    if (Date.now() - startedAt >= REACH_STEP_BOUND_MS) {
+    // CHECKED BEFORE THE BACKSTOP, because it is the informative half: a run the watchdog
+    // has already claimed should say THAT, not report a generic expiry.
+    if (watchdogCardPresent(logDir)) {
       throw new Error(
-        `${label}: the fake never recorded \`${command}\` within ${REACH_STEP_BOUND_MS}ms — ` +
-          "the run never reached the step this signal is aimed at",
+        `${label}: the watchdog left its calling card after ${Date.now() - startedAt}ms, ` +
+          `before the fake recorded \`${command}\` — the watchdog beat the harness to this ` +
+          "run, so it is a second copy of case 2 rather than an external stop",
+      );
+    }
+    if (Date.now() - startedAt >= REACH_STEP_BACKSTOP_MS) {
+      throw new Error(
+        `${label}: the fake never recorded \`${command}\` within ` +
+          `${REACH_STEP_BACKSTOP_MS}ms, and the watchdog never fired either — the run ` +
+          "reached neither its step nor its own ceiling",
       );
     }
     await sleep(25);
@@ -2291,8 +2363,16 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
       // headroom named. A bare list of milliseconds needs the reader to remember which
       // constant each one is racing, and #372 records the cost of getting that wrong: the
       // file's 475s wall clock looked like the signal and was noise, while the number that
-      // actually moved was one step running at ~60% of its own 2000ms budget. Headroom is
-      // the quantity that goes to zero before a budget flips red, so it is the one printed.
+      // actually moved was one step running at ~60% of the flat 2000ms budget the reach
+      // used to carry. Headroom is the quantity that goes to zero before a bound flips red,
+      // so it is the one printed.
+      //
+      // That budget is gone — the reach now races the watchdog's calling card rather than a
+      // stopwatch (see `waitForFakeToReach`), so its series is judged against the ceiling
+      // like the duration beside it. The series is still worth printing, and arguably worth
+      // more: it is now the only place the contention this case actually runs under is
+      // visible at all, and the measurements in `REACH_STEP_BACKSTOP_MS` came from reading
+      // exactly this line across quiet and contended runs.
       onTestFinished(() => {
         const against = (series: readonly number[], bound: number): string => {
           if (series.length === 0) {
@@ -2302,8 +2382,19 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
           return `${series.join(", ")} — worst ${worst} of ${bound}, ${bound - worst} to spare`;
         };
         console.log(
-          `[wrapper harness] case 4 · reached the step (ms, bound ${REACH_STEP_BOUND_MS}): ` +
-            `${against(reaches, REACH_STEP_BOUND_MS)} · ran for (ms, ceiling ${ceilingMs}): ` +
+          // JUDGED AGAINST THE CEILING, because that is the bound the wait now races: the
+          // watchdog's card lands there, and the backstop above it only catches a wrapper
+          // that never ran. Reporting these against the retired 2000ms strip would print
+          // headroom this case no longer spends.
+          //
+          // THE TWO HEADROOMS ARE NOT INDEPENDENT and must not be added: the duration
+          // CONTAINS the reach, and both are printed against the same ceiling from two
+          // different zeros — the duration from `spawn`, which is conservative because the
+          // watchdog's clock starts later, and the reach against a bare 3000 when its real
+          // deadline is `arm + 3000`, which is conservative in the other direction. Read
+          // each as "how close this run came to its own bound", never as spare budget.
+          `[wrapper harness] case 4 · reached the step (ms, ceiling ${ceilingMs}): ` +
+            `${against(reaches, ceilingMs)} · ran for (ms, ceiling ${ceilingMs}): ` +
             `${against(durations, ceilingMs)} · settled (ms, deadline ${SETTLE_DEADLINE_MS}): ` +
             `${against(settles, SETTLE_DEADLINE_MS)}`,
         );
@@ -2331,10 +2422,17 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
           // test, never as a wedged worker.
           maxWaitMs: 60_000,
           duringRun: async (pgid) => {
-            reaches.push(await waitForFakeToReach(dirs.caseDir, "prices:fetch", label));
+            reaches.push(await waitForFakeToReach(dirs.caseDir, "prices:fetch", label, dirs.logDir));
             // BEFORE THE CEILING, ASSERTED RATHER THAN ASSUMED. If the watchdog got there
             // first this is case 2 wearing case 4's name — a run that would still exit 124
             // and still pass an exit-code-only test of "something stopped it".
+            //
+            // THE WAIT ABOVE ALREADY RACES THIS CARD, so what is left here is the last
+            // instant it cannot cover: the wait only reads the card while the sentinel is
+            // ABSENT, so a run whose sentinel and card land in the same poll gap would come
+            // back "reached" and be signalled anyway. Re-reading it immediately before the
+            // kill closes that gap. Cheap, and the alternative is signalling a run the
+            // watchdog has already claimed.
             expect(
               watchdogCardPresent(dirs.logDir),
               `${label}: the watchdog fired BEFORE the harness could signal — this run is a ` +
@@ -2361,10 +2459,25 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
         expect(record.logText, `${label}: the watchdog fired after all`).not.toContain(
           "WATCHDOG: run exceeded",
         );
+        // THE BINDING WALL-CLOCK BOUND OF THIS CASE, now that the reach's 2000ms strip is
+        // gone — and it is measured from a DIFFERENT ZERO than the ceiling it names.
+        // `durationMs` starts immediately before `spawn` (`launcher.testkit.ts`), while the
+        // watchdog's `SECONDS=0` is set inside a subshell forked well into the script, after
+        // the log dir, the `tee`, the stamp, the prior-heartbeat read and the operator
+        // notice. So this is strictly TIGHTER than the wrapper's own ceiling by the whole
+        // arming offset: it can red on a run the watchdog never timed out, which is why the
+        // message below reports what was measured instead of accusing the watchdog. Kept
+        // deliberately conservative — an ending that arrives this late is worth knowing
+        // about even when it is the machine — and the two assertions above are what actually
+        // establish the watchdog did not fire.
         expect(
           record.durationMs,
-          `${label}: the run outlived its own ${ceilingMs}ms ceiling, so the ending it recorded ` +
-            "may be the watchdog's rather than the harness's",
+          `${label}: the run took ${record.durationMs}ms from spawn to exit, past the ` +
+            `${ceilingMs}ms ceiling — measured from spawn, so it includes the arming offset ` +
+            "the watchdog's own clock does not. The assertions above already establish the " +
+            "watchdog did NOT fire, so this is either a machine slow enough to be worth " +
+            "recording or a ceiling that stopped being enforced; the report line's reach and " +
+            "duration series say which",
         ).toBeLessThan(ceilingMs);
 
         assertTriple(record, dirs.caseDir, {
@@ -2533,33 +2646,155 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
     it(
       "makes the healthy case go RED on a stray process left in the run's pgid",
       async () => {
-        const dirs = makeCaseDir(CASE_OPTIONS);
-        // The committed wrapper is never touched: the mutation is applied to a copy that
-        // lives and dies inside the case dir.
-        const mutated = mutateWrapper(WRAPPER_PATH, dirs.caseDir, CHILD_REAP_MUTATION);
-        expect(mutated.startsWith(dirs.caseDir)).toBe(true);
-
-        const record = await launchWrapper({
-          caseDir: dirs.caseDir,
-          wrapperPath: mutated,
-          env: caseEnv(dirs, CASE_OPTIONS),
-          groupLeader: true,
-          settleDeadlineMs: SETTLE_DEADLINE_MS,
-          maxWaitMs: 60_000,
+        // WHY THIS REPEATS, and it is the same argument as the tee-deafness control's: what
+        // the mutation produces is RACY, so one reading of it decides nothing.
+        //
+        // The orphan the mutation leaves behind is a `sleep` of ONE WATCHDOG POLL HOP —
+        // `WATCHDOG_POLL_SECONDS`, read off the wrapper by `wrapperPollSeconds()`, unclamped
+        // here because `CASE_OPTIONS.maxRunSeconds` sits above it — and the hop was already
+        // running when the shell exited. How much of it is left is therefore decided by
+        // WHERE IN THE POLL CYCLE the run finished: a phase, not a budget. Quiet, a fake run
+        // finishes early in a hop and the stray has most of a hop left, which is why a
+        // single reading looked solid for months. Under load the run's own duration wanders
+        // across the cycle, and a run that finished near a hop boundary leaves a stray with
+        // milliseconds to live, gone before the settle window closes. Measured at 3
+        // contended runs in 5 when #394 was filed, and 3 in 6 again on the machine this
+        // repetition was added on.
+        //
+        // There is nothing to widen here: the phase is uniform, so a longer window makes the
+        // control blinder and a shorter one makes assertion 3's own reading unrepresentative.
+        // What DOES collapse it is asking more than once. At the 56% miss rate measured on
+        // this machine a single reading is a coin flip, and twelve misses together is
+        // `0.56^12`, about ONE IN A THOUSAND. (An earlier version of this comment said four
+        // in a thousand; that figure needs a 63% miss rate and followed from neither number
+        // quoted here. At the 3-in-6 rate it is 2.4 in ten thousand.)
+        //
+        // THAT NUMBER IS A FLOOR, NOT A RATE, and the difference is worth writing down
+        // because `p^12` assumes twelve independent draws and these are not independent.
+        // The phase is a deterministic function of the run's duration, the duration is set
+        // by ambient load, and ambient load persists across the roughly one minute this loop
+        // takes. A load regime that parks durations near a hop boundary makes all twelve
+        // attempts miss TOGETHER. So what the repetition buys is not `p^12` in general: it
+        // collapses the failure rate under the regimes actually measured, and the residual
+        // is bounded by how correlated the phase stays inside a regime nobody has sampled.
+        // The measurement behind this commit (worst case 4 attempts of 12) is consistent
+        // with independence and does not establish it.
+        //
+        // NOTHING HERE ACCEPTS AN ABSENCE AS A PASS, and the loop distinguishes the two ways
+        // an attempt can come back empty rather than treating either as the other. See the
+        // outcome block below: a pgid holding something that is NOT a `sleep` is the
+        // mutation having stopped biting, which repeating cannot fix, so it fails on the
+        // spot; a pgid that is already empty is the phase race and is recorded as an attempt
+        // instead. The loop as a whole still demands that assertion 3's own field, read
+        // through assertion 3's own window, came back occupied at least once.
+        const attempts: string[] = [];
+        let seen = 0;
+        let goneAtSample = 0;
+        // The attempt-by-attempt series is the whole diagnosis if this control ever fails:
+        // "expired on all 12" and "the mutation orphaned nothing on attempt 1" are different
+        // problems, and only the series tells them apart. It must survive a throw in the
+        // loop — and the attempt that throws is the ONE the reader most wants, so its
+        // outcome is pushed BEFORE any assertion can end the run. Anything else prints an
+        // empty series exactly when the series is needed.
+        onTestFinished(() => {
+          console.log(`[wrapper harness] child-reap mutation outcomes: ${attempts.join(", ")}`);
         });
+        for (let attempt = 1; attempt <= RUNS_PER_CASE && seen === 0; attempt += 1) {
+          const dirs = makeCaseDir(CASE_OPTIONS);
+          // The committed wrapper is never touched: the mutation is applied to a copy that
+          // lives and dies inside the case dir.
+          const mutated = mutateWrapper(WRAPPER_PATH, dirs.caseDir, CHILD_REAP_MUTATION);
+          expect(mutated.startsWith(dirs.caseDir)).toBe(true);
 
-        // The run itself still reports success — that is precisely the danger. Without the
-        // reaped child the wrapper's own EXIT trap SIGKILLs the watchdog subshell and
-        // orphans its `sleep` into the run's process group, where it holds launchd's
-        // per-label job slot and keeps the log `tee` alive. Assertion 3 is the only thing
-        // that sees it.
-        expect(record.exitCode).toBe(0);
-        expect(record.heartbeat?.lastStep).toBe("complete");
+          const record = await launchWrapper({
+            caseDir: dirs.caseDir,
+            wrapperPath: mutated,
+            env: caseEnv(dirs, CASE_OPTIONS),
+            groupLeader: true,
+            settleDeadlineMs: SETTLE_DEADLINE_MS,
+            maxWaitMs: 60_000,
+          });
+
+          // FOUR OUTCOMES, AND THE FIRST READING SPLITS THREE OF THEM. `residueAtExit` is
+          // not sampled at the instant of exit: `launchWrapper` reads it after the child's
+          // `exit` event, after `duringRun` has been awaited, and after a `ps -A -ww` has
+          // forked and returned — tens of milliseconds on an idle machine, more under the
+          // load this control exists to survive. So an EMPTY reading is the same phase draw
+          // as the settle window's, just over a shorter interval, and cannot be treated as
+          // proof about the wrapper. A NON-EMPTY reading with no `sleep` in it can: nothing
+          // in the mutated run puts a non-`sleep` process there except the `tee` the orphan
+          // was holding open, so seeing the group occupied by something that is not the
+          // timer is the mutation having stopped orphaning.
+          //
+          //   SEEN            the orphan outlived the settle window — what assertion 3 reads
+          //   expired         orphaned, then the phase ate it before the window closed
+          //   gone-at-sample  the pgid was already empty by the first `ps`; ambiguous
+          //   NO-ORPHAN       occupied by something that is not the timer; unambiguous
+          const orphanedAtExit = record.residueAtExit.some((entry) => /sleep/.test(entry));
+          const outcome =
+            record.pgidResidue.length > 0
+              ? "SEEN"
+              : orphanedAtExit
+                ? "expired"
+                : record.residueAtExit.length === 0
+                  ? "gone-at-sample"
+                  : "NO-ORPHAN";
+          attempts.push(`${outcome}(run=${record.durationMs}ms, settle=${record.settleMs}ms)`);
+
+          // The run itself still reports success — that is precisely the danger. Without the
+          // reaped child the wrapper's own EXIT trap SIGKILLs the watchdog subshell and
+          // orphans its `sleep` into the run's process group, where it holds launchd's
+          // per-label job slot and keeps the log `tee` alive. Assertion 3 is the only thing
+          // that sees it.
+          expect(record.exitCode, `attempt ${attempt}: the mutated run did not succeed`).toBe(0);
+          expect(
+            record.heartbeat?.lastStep,
+            `attempt ${attempt}: the mutated run did not reach the end`,
+          ).toBe("complete");
+
+          // THE UNAMBIGUOUS LOSS, AND THE ONLY ONE THAT FAILS FAST. Repeating cannot help a
+          // wrapper that has stopped orphaning, so this must not wait for twelve attempts to
+          // report itself as an expiry. The ambiguous shape is deliberately NOT here: it
+          // costs an attempt and is judged by the loop, because failing on it would be the
+          // #372 misdiagnosis — a busy machine told to go read the wrapper.
+          if (outcome === "NO-ORPHAN") {
+            expect(
+              record.residueAtExit.join(" | "),
+              `attempt ${attempt}: the child-reap mutation left the run's pgid occupied by ` +
+                `something that is not the watchdog's timer (${record.residueAtExit.length} ` +
+                "process(es) there) — the reap it removes is no longer what keeps the group clean",
+            ).toMatch(/sleep/);
+          }
+          if (outcome === "gone-at-sample") {
+            goneAtSample += 1;
+          }
+
+          // AND THE HALF ASSERTION 3 ACTUALLY TAKES: the same field, after the same window.
+          if (record.pgidResidue.length > 0) {
+            expect(
+              record.pgidResidue.join(" | "),
+              `attempt ${attempt}: something outlived the settle window, but it is not the ` +
+                "watchdog's orphaned timer",
+            ).toMatch(/sleep/);
+            seen += 1;
+          }
+        }
+
+        // THE LOOP-LEVEL VERDICT, AND IT NAMES WHICH SHAPE RAN OUT THE ATTEMPTS. All-expired
+        // is the phase race winning every draw, which the repetition was supposed to make a
+        // one-in-a-thousand event; all-gone-at-sample is the same race but over a window so
+        // short that it is also what a wrapper which stopped orphaning would look like, and
+        // twelve of those in a row is the strongest evidence this control can produce that
+        // the mutation itself is dead. Either way, assertion 3 has not been seen red.
         expect(
-          record.pgidResidue.length,
-          "the child-reap mutation left NOTHING in the pgid — assertion 3 is no longer guarding anything",
+          seen,
+          `the child-reap mutation never left a \`sleep\` alive through the ${SETTLE_DEADLINE_MS}ms ` +
+            `settle window in ${attempts.length} attempts (${goneAtSample} of them found the pgid ` +
+            "already empty at the first sample, which is either the same phase race over a shorter " +
+            "window or a mutation that has stopped orphaning at all), so assertion 3 has not been " +
+            "seen red and this control is guarding nothing: " +
+            attempts.join(", "),
         ).toBeGreaterThan(0);
-        expect(record.pgidResidue.join(" | ")).toMatch(/sleep/);
 
         // And the same assertion, applied to the same case, passes on the UNMUTATED
         // wrapper — so what went red is the mutation and not the settle window.
@@ -2574,7 +2809,7 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
         });
         expect(healthy.pgidResidue).toEqual([]);
       },
-      120_000,
+      600_000,
     );
   });
 
