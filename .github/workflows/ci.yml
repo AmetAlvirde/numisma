@@ -95,10 +95,13 @@ jobs:
         # harness runs on a macOS machine, automatically when its own subject code
         # changes, or on demand via `pnpm test:wrapper`. See docs/price-feed-ops.md.
         #
-        # --testTimeout raises the default 5s ceiling for the git-heavy tui tests,
-        # which flake on slower CI runners under full-suite parallel load. This is
-        # a CI-runner mitigation, not a change to any assertion.
-        run: pnpm test -- --testTimeout=30000
+        # NO --testTimeout FLAG HERE ANY MORE. The 30 s budget this step used to
+        # pass on the command line now lives in `vitest.config.ts`, where it
+        # applies to local runs too. Passing it here as well would restore the
+        # divergence it was moved to end: while the flag was CI-only, a local run
+        # was STRICTER than CI, so a loaded machine could red on a case CI would
+        # never fail. The config states the budget; this step just runs the suite.
+        run: pnpm test
 
       # ---------------------------------------------------------------------
       # The startup smoke (#196). Closes the hole that produced #140: the

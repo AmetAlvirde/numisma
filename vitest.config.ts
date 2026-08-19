@@ -44,6 +44,33 @@ export default defineConfig({
     // `defaultExclude` must be spread first — dropping it would start
     // collecting tests out of node_modules.
     exclude: [...defaultExclude, ...gitignoredPathGlobs()],
+
+    // THE TEST BUDGET, STATED ONCE. Vitest's default is 5000 ms and this repo does
+    // not fit in it. The tui and price-feed suites spawn REAL subprocesses (`tsx`,
+    // the price-feed wrapper shell) and build REAL git repos in temp dirs, so a case
+    // whose body costs ~75 ms alone costs 1.4-2.0 s under full-suite parallel load —
+    // a 19-27x inflation that leaves roughly 2.4x of headroom against the default.
+    //
+    // THIS IS A DECLARED BUDGET, NOT A BUMP TO SILENCE A RED. 30_000 is the number
+    // this repo had ALREADY converged on, eleven times over: ten test files each
+    // carried their own `vi.setConfig({ testTimeout: 30_000 })` and CI passed
+    // `--testTimeout=30000` on the command line. One budget, eleven statements of
+    // it — and local runs got NONE of them for the price-feed suites, so a local
+    // run was STRICTER than CI. That divergence is the bug: a loaded machine could
+    // red locally on a case CI would never fail, which is a false red, and a false
+    // red is chased. Stating it here makes the budget one fact, applies it to every
+    // suite, and holds as the suite grows and on slower hardware.
+    //
+    // WHAT IT COSTS: a genuinely hung test now takes 30 s to fail instead of 5 s.
+    // That is the trade CI has been making all along and it is the right one — a
+    // hang is a bug that will be found regardless, a false red is one that burns a
+    // session.
+    //
+    // WHAT IT DOES NOT DO: it cannot preempt a BLOCKING synchronous body.
+    // `testTimeout` is a timer on the same thread, so a `spawnSync` that never
+    // returns runs past any value set here. That is why the spawning tests pass
+    // their own `timeout` to the spawn — see `apps/tui/src/migrate-legacy-log.test.ts`.
+    testTimeout: 30_000,
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
