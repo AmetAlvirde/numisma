@@ -25,14 +25,107 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { onTestFinished } from "vitest";
 import { installFakeBin } from "./fake-bin.testkit.js";
 import { markEnv, type MarkConfig } from "./mark-window.testkit.js";
 
 /** The bare, non-login PATH launchd actually hands the job. */
 export const LAUNCHD_BARE_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
+
+/**
+ * The one name a case dir may have. It is both how `mkdtempSync` mints them and the only
+ * shape {@link disposeCaseDir} will remove, so the two cannot drift apart.
+ */
+export const CASE_DIR_PREFIX = "numisma-wrapper-case-";
+
+/** The debugging opt-out: set it and every case dir survives its run. */
+export const KEEP_CASE_DIRS_ENV = "NUMISMA_HARNESS_KEEP_CASE_DIRS";
+
+/**
+ * The values that mean "off". Everything else — including a typo — means KEEP.
+ *
+ * The forgiving direction is the deliberate one. Nothing in the suite sets this variable,
+ * so a value can only have arrived from a human who typed it to keep directories while
+ * debugging; a strict grammar would answer that human's `KEEP=y` by silently deleting the
+ * evidence they asked for. The cost of the other direction is bounded and visible: dirs
+ * pile up in the temp dir of exactly the machine whose owner exported the variable.
+ */
+const KEEP_OFF_VALUES = new Set(["", "0", "false", "no", "off"]);
+
+function keepAlways(): boolean {
+  const raw = process.env[KEEP_CASE_DIRS_ENV];
+  if (raw === undefined) {
+    return false;
+  }
+  return !KEEP_OFF_VALUES.has(raw.trim().toLowerCase());
+}
+
+/**
+ * THE ONLY THING IN THIS HARNESS THAT DELETES. Everything else here refuses; this removes
+ * a directory tree, so it is written to be wrong in the harmless direction.
+ *
+ * WHY IT EXISTS AT ALL (#390). `makeCaseDir` minted a fresh temp directory per run and
+ * nothing ever removed one. Measured on 2026-08-19: 6,725 `numisma-wrapper-case-*`
+ * directories in the temp dir, roughly 900 MB, accumulating since the harness landed. Not
+ * a correctness risk to any case — `mkdtempSync` is atomic and its cost does not move with
+ * sibling count — but unbounded growth on a dev machine is a real cost.
+ *
+ * A FAILING CASE KEEPS ITS DIRECTORY. These cases assert on files the WRAPPER wrote: the
+ * per-run log, `job-heartbeat.json`, the fake's sentinels. Deleting those on the way out
+ * of a red run deletes the only evidence of the red, and the post-mortem is then reading
+ * an empty temp dir. So `failed` is not a nicety; it is what makes this safe to run at all.
+ *
+ * THE PATH GUARD IS FAIL-CLOSED AND FIRST. It refuses anything that is not a DIRECT child
+ * of the temp dir carrying {@link CASE_DIR_PREFIX}, before it consults the keep rules —
+ * ordering that matters, because an opt-out consulted first would let an exported variable
+ * hide a caller passing the wrong path, and the guard would go untested on that machine. It
+ * throws rather than returning quietly: a disposer handed a path it will not remove has a
+ * caller that is wrong, and a silent return is how that stays unnoticed.
+ *
+ * THE RETRIES ARE NOT DECORATION, AND NEITHER IS THE `catch` AROUND THEM. The timeout cases
+ * deliberately leave the wrapper's stray processes alive inside the case dir at the moment
+ * the case ends — a TERM-deaf `tee` still appending to a file under `logDir` is an
+ * `ENOTEMPTY` against a recursive walk — and `rmSync` THROWS once it exhausts its retries.
+ * Since this runs from `onTestFinished`, that throw would redden a case that passed, for a
+ * fact about the filesystem rather than about the code under test. So the two failure kinds
+ * are split: the guard above keeps throwing, because it means the CALLER is wrong, while a
+ * delete that loses the race warns and returns. A warning names the directory that survived,
+ * which is the difference between a bounded, visible leak and the silent one #390 was.
+ */
+export function disposeCaseDir(caseDir: string, options: { readonly failed: boolean }): void {
+  if (!isAbsolute(caseDir)) {
+    throw new Error(
+      `wrapper harness refused to remove ${JSON.stringify(caseDir)}: it is not an absolute path`,
+    );
+  }
+  const path = resolve(caseDir);
+  // macOS matters here exactly as it does in the isolation contract: the temp dir is
+  // `/var/folders/…` and `/var` is a symlink to `/private/var`, so both spellings of the
+  // temp root are legitimate parents of a case dir minted through `tmpdir()`.
+  const roots = new Set([resolve(tmpdir()), realpathSync(tmpdir())]);
+  if (!roots.has(dirname(path)) || !basename(path).startsWith(CASE_DIR_PREFIX)) {
+    throw new Error(
+      `wrapper harness refused to remove ${path}: only a direct child of ${tmpdir()} named ` +
+        `\`${CASE_DIR_PREFIX}*\` is a case dir, and this is a RECURSIVE delete`,
+    );
+  }
+
+  if (options.failed || keepAlways()) {
+    return;
+  }
+  try {
+    rmSync(path, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+  } catch (error) {
+    console.warn(
+      `wrapper harness could not remove the case dir ${path}: ${
+        error instanceof Error ? error.message : String(error)
+      }. It is left on disk; cleanup does not get a vote on the verdict.`,
+    );
+  }
+}
 
 export interface CaseDirs {
   readonly caseDir: string;
@@ -65,9 +158,31 @@ export interface CaseOptions {
  * and a non-repo would take the "not inside a git repo — skipping commit" branch on every
  * run, leaving the healthy case's most consequential steps unexercised. It holds nothing
  * but its own `.git`, so the commit is the idempotent no-op the wrapper documents.
+ *
+ * IT REGISTERS ITS OWN DISPOSAL, and that is a decision rather than a convenience. Roughly
+ * forty call sites across two files ask for a case dir, several of them inside the
+ * twelve-repetition loops, and a disposer the CALLER has to register is one the
+ * forty-first call site forgets — which is how #390 happened in the first place. Binding
+ * the removal to the mint means a new case cannot leak by omission.
+ *
+ * `onTestFinished` rather than an `afterEach`, because a case may mint several dirs and
+ * each must be judged by the result of the test that minted it. It also runs AFTER the
+ * result state is settled, so the verdict is a fact by the time the callback reads it.
+ *
+ * ONLY `fail` KEEPS THE DIRECTORY, PLUS A VERDICT THAT CANNOT BE READ AT ALL. `fail` is
+ * what a plain assertion failure, a timeout and an `afterEach` throw all produce, so it
+ * covers every case that has evidence worth reading. A `skip` has none: its body stopped
+ * before it asserted anything, so keeping its dir is #390 reinstated for that one case. An
+ * ABSENT state keeps the dir, and that asymmetry is deliberate — an unreadable verdict is
+ * exceptional rather than the common path (vitest settles the state before `onFinished`
+ * runs), and the doubtful direction is the one that preserves evidence.
  */
 export function makeCaseDir(options: CaseOptions): CaseDirs {
-  const caseDir = mkdtempSync(join(tmpdir(), "numisma-wrapper-case-"));
+  const caseDir = mkdtempSync(join(tmpdir(), CASE_DIR_PREFIX));
+  onTestFinished((context) => {
+    const state = context.task.result?.state;
+    disposeCaseDir(caseDir, { failed: state === undefined || state === "fail" });
+  });
   const binDir = installFakeBin(caseDir);
   const repoDir = join(caseDir, "repo");
   const dataDir = join(caseDir, "data");
