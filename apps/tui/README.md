@@ -119,6 +119,13 @@ under Node while the terminal glue stays isolated in a Bun-only layer.
   to run when the resolved `dataDir` is the default `<fund>` sibling repo — it
   requires an explicit, non-default `NUMISMA_DATA_DIR` — so it cannot delete the
   real durable log. Destructive within its guarded scope, not read-only.
+- `plans-cli.ts` — the `tsx` plans entry (`pnpm plans`): a top-level `try/catch`
+  that resolves the fold, the `plans.jsonl` sidecar and the `reconciliations.jsonl`
+  trail, hands all three to the tested `formatPlansReport` and sets the exit code.
+  Not read-only either — the fold it takes carries the event log's write-on-read
+  quarantine maintenance, which its own header names — so importing it to assert
+  it would run the act. No spawn test today: unlike `record-fill-cli.ts`, nothing
+  drives this shell, so it is excluded from the number AND untested by any suite.
 - `app.ts` — the self-executing `pnpm dev` entry: path resolution, `prepareStartup`,
   openTUI renderer construction, fail-fast/exit codes, then `mountApp`. Also
   resolves the orders sidecar path and wires `loadAvailableCapital` so the
@@ -139,7 +146,8 @@ under Node while the terminal glue stays isolated in a Bun-only layer.
 The openTUI files run under Bun against the real renderer and never execute under
 Node's `vitest run`, so instrumenting them would only report dead 0% and make the
 percentage dishonest; the `tsx` script entries (`report.ts`, `spine.ts`,
-`spine-reset.ts`) are top-level orchestration with no unit to assert. All are
+`spine-reset.ts`, `plans-cli.ts`) are top-level orchestration with no unit to
+assert. All are
 excluded from the coverage `include` in `vitest.config.ts`, and the exclusion
 (plus every remaining uncovered line) is accounted for concretely in
 [`docs/coverage-rationale.md`](../../docs/coverage-rationale.md).
