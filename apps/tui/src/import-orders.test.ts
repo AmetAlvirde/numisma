@@ -2057,3 +2057,43 @@ describe("importBitgetOpenOrders — the declared rung join", () => {
     expect(setup.outputs.join("")).not.toContain("PICKED —");
   });
 });
+
+/**
+ * THE ORDERING DEPENDENCY THAT MAKES AN EMPTY ANSWER SAFE (#370, symptom 2) — the pin
+ * `record-fill.test.ts` carries for the fill act, on this side of the pair.
+ *
+ * `import-orders-cli.ts` hands this flow `""` for every question when stdin is no
+ * terminal, so the shell can name the missing terminal and let the flow refuse in its own
+ * voice instead of printing a readline internal. That is honest ONLY while the FIRST
+ * question this flow reaches is one that refuses on `""` — a property of the ORDER the
+ * interview asks in, not of the empty string. The funding batch question refuses; the
+ * three questions behind it are ratifications, and `import-orders-cli.ts`'s construction
+ * site enumerates them: the rung-pick prompt reads `""` as ACCEPT EVERY PROPOSED RUNG and,
+ * at its other site, as TAKE THE DEFAULT, and the funding declaration's second question
+ * reads it as NO PER-RUNG OVERRIDES. If any of those is ever reached first, the same `""`
+ * silently ratifies every default and the import WRITES, unattended.
+ *
+ * Until now that dependency was stated in prose on both shells and pinned on only one.
+ * The fixture carries a LADDER on purpose: with `plans` empty no rung question exists to
+ * run ahead of funding, so the case could not see the reorder it exists to catch. With one
+ * in force every ratifying question is reachable, and the assertion below says none of
+ * them was reached.
+ */
+describe("an import nobody can answer refuses at the FIRST question and writes nothing", () => {
+  it("refuses as no-reserve-declared, having asked exactly one question", async () => {
+    // The script repeats once exhausted, so `[""]` answers EVERY question with the empty
+    // string — precisely what the shell hands the flow on a stdin that is no terminal.
+    const setup = await harness({ answers: [""], plans: [planLadder()] });
+
+    const outcome = await importBitgetOpenOrders({ csvPath: setup.csvPath, io: setup.io });
+
+    expect(outcome).toMatchObject({ status: "rejected", reason: "no-reserve-declared" });
+    // THE PIN. One question — the funding declaration — and the refusal came from it.
+    // Reaching a second means a ratifying question now runs ahead of the refusing one,
+    // and the shell's `""` has stopped being an honest answer.
+    expect(setup.asked).toHaveLength(1);
+    expect(setup.asked[0]).toContain("Funding reserve for this batch");
+    // Nothing was written: the sidecar was never created.
+    expect(await readOrDefault(setup.ordersPath, "<<absent>>")).toBe("<<absent>>");
+  });
+});
