@@ -351,7 +351,13 @@ describe("the fold's discard channel", () => {
     expect(late.data.closedPositions).toHaveLength(2);
   });
 
-  it("records the absent leg of a Transfer while the present leg applies", () => {
+  it("discards a Transfer whose destination is absent — the SOURCE is not debited (#371)", () => {
+    // THE BEHAVIOUR THIS REVERSES. The arm used to apply each leg independently, so a
+    // transfer to a reserve the fold has no record of still debited the source: cash
+    // left and never arrived, and the reserves were left quietly unbalanced by the
+    // amount. The channel reported it, but reporting a broken state is worse than not
+    // reaching it — a discard the operator can act on beats a fund that no longer adds
+    // up. Both reserves are now checked before either leg moves.
     const folded = foldEvents(genesis(), [
       {
         id: "evt-transfer",
@@ -364,11 +370,8 @@ describe("the fold's discard channel", () => {
       },
     ]);
 
-    // The debit landed, the credit had nowhere to land: reserves are visibly
-    // unbalanced by 500 — and the channel says so, which is the whole point.
-    expect(folded.data.reserves).toEqual([
-      { ...genesis().reserves[0], amount: 9500, lots: [{ quantity: 9500, tier: "c1" }] },
-    ]);
+    // Untouched — byte-identical to the genesis reserve, not 9500.
+    expect(folded.data.reserves).toEqual(genesis().reserves);
     expect(folded.skipped).toEqual([
       {
         eventId: "evt-transfer",
@@ -378,6 +381,50 @@ describe("the fold's discard channel", () => {
         detail: expect.any(String),
       },
     ]);
+  });
+
+  it("discards a Transfer whose SOURCE is absent, and reports it once", () => {
+    // The mirror leg. The old arm reached this one's discard for free (the debit simply
+    // failed), but it is pinned here so the pre-flight check cannot regress to testing
+    // only the destination.
+    const folded = foldEvents(genesis(), [
+      {
+        id: "evt-transfer-from-ghost",
+        asOf: "2026-06-02",
+        type: "Transfer",
+        fromReserveId: "ghost-cash",
+        toReserveId: "pulse-cash",
+        amount: 500,
+        tier: "c1",
+      },
+    ]);
+
+    expect(folded.data.reserves).toEqual(genesis().reserves);
+    expect(folded.skipped.map((skip) => [skip.eventId, skip.reason])).toEqual([
+      ["evt-transfer-from-ghost", "reserve-absent"],
+    ]);
+  });
+
+  it("reports a Transfer missing BOTH reserves exactly once, not once per leg", () => {
+    // ONE EVENT, ONE FINDING. Two records for one event both survive `dedupeFoldSkips`
+    // — it keys on (eventId, reason) — so they would inflate `discardedEventCount` and
+    // print two operator lines for a single drop. The arm therefore records once and
+    // breaks, rather than asking each leg to report for itself.
+    const folded = foldEvents(genesis(), [
+      {
+        id: "evt-transfer-both-ghost",
+        asOf: "2026-06-02",
+        type: "Transfer",
+        fromReserveId: "ghost-cash",
+        toReserveId: "other-ghost-cash",
+        amount: 500,
+        tier: "c1",
+      },
+    ]);
+
+    expect(folded.data.reserves).toEqual(genesis().reserves);
+    expect(folded.skipped).toHaveLength(1);
+    expect(folded.skipped[0]!.reason).toBe("reserve-absent");
   });
 
   it("records nothing on a complete log, and folds it to the hand-computed read model", () => {

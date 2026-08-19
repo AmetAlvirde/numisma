@@ -301,11 +301,17 @@ describe("walkPendingInbox lifts the fold's discards, deduped", () => {
     });
   });
 
-  it("distinct drops survive the dedup; a Transfer's two absent legs collapse; a clean log lifts nothing", () => {
+  it("distinct drops survive the dedup; each fold's repeat of one collapses; a clean log lifts nothing", () => {
     // The key is (`eventId`, `reason`) — the dedup collapses REPEATS of one finding, not
-    // findings. A Transfer whose BOTH legs name absent reserves is one event dropped
-    // twice for one reason and is genuinely one finding; the unrelated ghost close is a
-    // second, and must survive alongside it.
+    // findings. THE REPEATS COME FROM RE-FOLDING, not from one event recording twice:
+    // since #371 no arm puts two records on a single event within one fold, so the walk's
+    // own loop is the only thing that can produce a repeat. This walk accepts one
+    // candidate, so it folds twice — the build before the first candidate, then the
+    // accept — and BOTH folds see BOTH standing drops. Four records, two findings.
+    //
+    // The Transfer is still the pointed fixture: it names TWO absent reserves and is one
+    // finding however many it names, which is what the both-legs-or-neither arm records.
+    // The unrelated ghost close is a genuinely second finding and must survive alongside.
     const transferBothLegsAbsent: PortfolioEvent = {
       id: "evt-ghost-transfer",
       asOf: "2026-06-02",

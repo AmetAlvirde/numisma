@@ -61,13 +61,18 @@ export interface HeadDigest {
    * the surfaces a reader can act from — see {@link HeadDigest}.
    *
    * DEDUPED, NOT `skipped.length` — a deviation from spec #323 §5, which stated the
-   * field as the raw record count. A `Transfer` records its two legs independently, so
-   * one event with both reserves absent writes TWO records; the raw length would put `2`
-   * here while `unattendedFoldVerdict` — which counts the same log through
-   * `dedupeFoldSkips` — says one event. Two surfaces disagreeing about one log is the
-   * defect ADR-020 exists to close, and this is the surface that cannot be re-derived to
-   * settle it: the digest is committed and the run that wrote it is gone. So both
-   * surfaces count through the ONE key, and the number matches the name.
+   * field as the raw record count. This field is named for EVENTS and `skipped` counts
+   * RECORDS, and the two part company the moment an envelope carries more than one
+   * fold's worth: the ingest walk re-folds the whole log once per accepted event
+   * (ADR-015) and the backfill re-folds it once per anchor, so one standing drop is
+   * reported once per fold and each of those callers hands the concatenation on. A raw
+   * length would put the number of FOLDS here while `unattendedFoldVerdict` — which
+   * counts the same skips through `dedupeFoldSkips` — says one event. Two surfaces
+   * disagreeing about one log is the defect ADR-020 exists to close, and this is the
+   * surface that cannot be re-derived to settle it: the digest is committed and the run
+   * that wrote it is gone. So both surfaces count through the ONE key, and the number
+   * matches the name. (#371 closed the OTHER way they could diverge — a `Transfer`
+   * writing one record per leg — from inside a single fold.)
    */
   discardedEventCount: number;
   headEventId: string | null;

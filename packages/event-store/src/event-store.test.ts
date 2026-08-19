@@ -54,8 +54,9 @@ function markAapl(price: number, id = "mark-aapl") {
 }
 
 /**
- * A `Transfer` whose BOTH legs name reserves the fold has no record of — ONE event, two
- * skip RECORDS, one finding. Authored here; the ids are invented for this test.
+ * A `Transfer` whose BOTH legs name reserves the fold has no record of — ONE event, ONE
+ * skip record, one finding: since #371 the arm checks both reserves before either moves
+ * and records once for the pair. Authored here; the ids are invented for this test.
  */
 function transferBothLegsGhost(id = "transfer-both-ghost") {
   return {
@@ -210,27 +211,82 @@ describe("loadEventLog — log-line quarantine", () => {
     expect(Object.keys(verdict)).toEqual(["messages"]);
   });
 
-  it("the digest and the unattended line report the SAME number for the same log", async () => {
+  it("the digest and the unattended line report the SAME number for one log folded twice", async () => {
     // The two surfaces are read by the same operator hours apart — the evening line as it
     // prints, the digest whenever a bad NAV sends someone back through `head-digest.json`
     // — and the digest is the half that cannot be re-derived to settle a disagreement,
     // because it is committed and the run that wrote it is gone. So they must count the
     // same thing, by construction rather than by two definitions happening to agree.
     //
-    // ONE `Transfer` with both legs absent is the shape that separates them: it writes two
-    // skip RECORDS (each leg records independently, spec #323 slice A) about ONE event.
-    // A raw `skipped.length` says 2 where the verdict says 1.
+    // WHAT SEPARATES THE TWO NUMBERS CHANGED IN #371, AND SO DID THIS FIXTURE. It used to
+    // be ONE `Transfer` with both legs absent, which wrote two skip RECORDS about ONE
+    // event because each leg reported for itself — a raw `skipped.length` said 2 where
+    // the verdict said 1. That arm now records once for the pair, and no arm records a
+    // single event twice within one fold. So ANY fixture built from ONE fold makes
+    // `skipped.length` and `discardedEventCount` agree BY CONSTRUCTION and proves nothing
+    // about either: it would pass just as green against a digest that never deduped.
+    //
+    // RE-FOLDING IS WHAT STILL SEPARATES THEM, and it is why `dedupeFoldSkips` is on this
+    // path at all. Every caller that folds one log more than once per run concatenates
+    // the folds' `skipped` and hands the union on: the ingest walk re-folds on every
+    // accept (ADR-015, `ingest-walk.ts`) and the backfill re-folds once per anchor
+    // (`apps/web/src/push/backfill-core.ts`, whose `foldSkips` is exactly this shape).
+    // This builds that union the way they do — a fold, then a re-fold of the same log
+    // grown by one event — so the standing drop is reported by BOTH folds and the new one
+    // by only the second. THREE records, TWO dropped events, and both surfaces say two.
+    const beforeAccept = await makeStore({
+      log: `${JSON.stringify(openBtc())}\n${JSON.stringify(closeGhost())}\n`,
+    });
+    const afterAccept = await makeStore({
+      log:
+        `${JSON.stringify(openBtc())}\n` +
+        `${JSON.stringify(closeGhost())}\n` +
+        `${JSON.stringify(transferBothLegsGhost())}\n`,
+    });
+    const firstFold = await loadFoldedReview(beforeAccept);
+    const secondFold = await loadFoldedReview(afterAccept);
+    const union = {
+      data: secondFold.data,
+      skipped: [...firstFold.skipped, ...secondFold.skipped],
+    };
+    // The union really does repeat, or the rest of this test would be vacuous again:
+    // `close-ghost` is in it once per fold, and the Transfer only once.
+    expect(union.skipped).toHaveLength(3);
+    expect(union.skipped.filter((skip) => skip.eventId === "close-ghost")).toHaveLength(2);
+
+    const digest = deriveHeadDigest(union, "transfer-both-ghost", "0.7.2");
+    const verdict = unattendedFoldVerdict(union);
+
+    // TWO, not three: the number is dropped EVENTS, never fold reports of them. This is
+    // the assertion `deriveHeadDigest`'s own `dedupeFoldSkips` call exists to hold —
+    // drop that call and the committed digest says three while the line printed beside
+    // it that same evening says two, which is precisely the disagreement ADR-020 closes.
+    expect(digest.discardedEventCount).toBe(2);
+    expect(verdict.messages[0]).toContain("2 event(s)");
+    expect(verdict.messages[0]).toContain(`${digest.discardedEventCount} event(s)`);
+  });
+
+  it("no single event yields two skip records — one fold cannot make the counts diverge", async () => {
+    // THE FOLD-SIDE HALF OF THE INVARIANT ABOVE, kept as its own test because it guards a
+    // different thing: not the dedup, but the arms. Every reason in the closed vocabulary
+    // now means the fold applied NOTHING, and each arm records once and stops, so within
+    // a single fold `skipped.length` and `discardedEventCount` agree — and this reddens
+    // if the `Transfer` arm ever goes back to reporting per LEG, which is the regression
+    // #371 was about.
+    //
+    // It deliberately does NOT stand in for the dedup's own teeth. Its last assertion
+    // holds by construction on a one-fold envelope and would survive `dedupeFoldSkips`
+    // being deleted from the digest; the multi-fold union above is what fails there.
     const paths = await makeStore({
       log: `${JSON.stringify(openBtc())}\n${JSON.stringify(transferBothLegsGhost())}\n`,
     });
     const folded = await loadFoldedReview(paths);
-    expect(folded.skipped).toHaveLength(2); // two records…
 
-    const digest = deriveHeadDigest(folded, "transfer-both-ghost", "0.7.2");
-    const verdict = unattendedFoldVerdict(folded);
-
-    expect(digest.discardedEventCount).toBe(1); // …one event.
-    expect(verdict.messages[0]).toContain(`${digest.discardedEventCount} event(s)`);
+    expect(folded.skipped).toHaveLength(1);
+    expect(folded.skipped[0]!.reason).toBe("reserve-absent");
+    expect(deriveHeadDigest(folded, "transfer-both-ghost", "0.7.2").discardedEventCount).toBe(
+      folded.skipped.length,
+    );
   });
 
   it("says NOTHING over a clean log — the daily run stays byte-identical", async () => {

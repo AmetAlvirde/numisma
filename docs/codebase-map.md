@@ -51,7 +51,7 @@ These are the seams most likely to be misread from the tree alone:
    in `@numisma/event-store` and are consumed by *both* the TUI and the web push.
    Writes (inbox detection, dedup, atomic append, archive, legacy migration) stay
    in `apps/tui/src/event-store.ts`. Both halves were once in the TUI; the read
-   half was extracted (`5ef0c0b`), as was the preferences sidecar (`e5d6edd`).
+   half was extracted (`c2d9357`), as was the preferences sidecar (`50c93f7`).
 
 2. **Orders are not events.** An Order is a claim on capital that has not become
    a transaction. It lives in `orders.jsonl` and is joined to the fold at *read*

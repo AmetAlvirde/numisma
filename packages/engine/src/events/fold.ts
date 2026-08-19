@@ -46,12 +46,18 @@ const SKIP_DETAIL: Record<FoldSkipReason, string> = {
     "The fold has no record of this event's target position — it was never opened in " +
     "this window, or it was already retired — so the event was read and then dropped. " +
     "No state moved.",
+  // BOTH CASH-LEG REASONS SAY "THE EVENT", NOT "THE LEG" (#371). The fold drops the
+  // whole event on either, so prose naming only the leg understated the discard on
+  // exactly the arms where the rest of the event used to carry on.
+  //
+  // "a reserve" rather than "the reserve": a Transfer names two, and either one being
+  // absent raises this.
   "reserve-absent":
-    "The fold has no record of the reserve this event's cash leg names, so that leg was " +
-    "read and then dropped. No balance moved.",
+    "The fold has no record of a reserve this event's cash leg names, so the event was " +
+    "read and then dropped. No state moved.",
   "provenance-absent":
     "This event's cash leg has no cost-basis provenance to inherit — the fold has no " +
-    "lots to attribute it across — so the leg was read and then dropped. No balance moved.",
+    "lots to attribute it across — so the event was read and then dropped. No state moved.",
 };
 
 /**
@@ -61,14 +67,27 @@ const SKIP_DETAIL: Record<FoldSkipReason, string> = {
  * IT EXISTS BECAUSE THE FOLD IS RE-RUN, NOT BECAUSE LISTS ARE LONG. Any caller that
  * folds the same log more than once per run sees the same standing drop once per fold:
  * `walkPendingInbox` re-folds on every accept (ADR-015), so a 13-event batch is 14 folds
- * and one dropped prior arrives 14 times; the legacy migration folds once per line. That
- * is one FINDING reported N times, and N is an artifact of the caller's loop rather than
- * anything about the log. Deduping is therefore structural — without it, an operator
- * counts folds and believes they are counting damage.
+ * and one dropped prior arrives 14 times; the backfill re-folds once per anchor, so a
+ * twelve-anchor replay rediscovers one damaged prior twelve times; the legacy migration
+ * folds once per line. Each of those callers concatenates the folds' `skipped` and hands
+ * the union on. That is one FINDING reported N times, and N is an artifact of the
+ * caller's loop rather than anything about the log. Deduping is therefore structural —
+ * without it, an operator counts folds and believes they are counting damage.
  *
- * THE KEY IS THE PAIR, never the id alone: one event can be dropped for two different
- * reasons and that is two findings. A `Transfer` whose BOTH legs name absent reserves is
- * one event dropped twice for ONE reason and collapses to one finding, correctly.
+ * RE-FOLDING IS NOW THE ONLY WAY A REPEAT ARISES. #371 closed the vocabulary on "the
+ * fold applied NOTHING", and every arm records once and stops, so no single fold can put
+ * two records on one event. It used to: a `Transfer` reported per LEG, which is where
+ * this key's original justification came from and why that example is gone from here.
+ *
+ * THE KEY IS STILL THE PAIR, never the id alone. What repeats across folds is the WHOLE
+ * finding — the same event, dropped for the same reason, by a fold reading the same
+ * prefix — so an id-only key would dedupe today's logs identically and start silently
+ * swallowing findings the moment one event carried two reasons. That it never does is a
+ * DECISION each arm makes in the open (`applyTieredLeg`'s precedence ruling, the
+ * `Transfer` arm's both-legs-or-neither pre-flight), not a property this key may assume
+ * on their behalf: the closed vocabulary fixes what a reason MEANS, never how many an
+ * event may collect. Keyed on the pair, breaking that decision is loud — two findings,
+ * two lines — rather than invisible.
  *
  * FIRST APPEARANCE WINS, so the fold's own deterministic ordering (application order,
  * with the post-loop invalidation records appended) survives the dedup. Pure; the input
@@ -286,10 +305,10 @@ export function foldEvents(
   /**
    * Apply one LOT-DERIVED cash leg. RETURNS WHETHER THE REST OF THE EVENT MAY RUN.
    *
-   * THE DISCARD IS TOTAL, WHICH IS WHY THIS IS A GATE AND NOT A VOID CALL. A
-   * lot-derived leg with no deltas has no cost-basis provenance, and an event whose
-   * cash leg cannot be attributed is dropped WHOLE: no closed-book row, no retirement,
-   * no lot mutation, no registration. `false` means the arm must do nothing at all.
+   * THE DISCARD IS TOTAL, WHICH IS WHY THIS IS A GATE AND NOT A VOID CALL. A cash leg
+   * the fold cannot apply — for EITHER reason it can report — drops the whole event:
+   * no closed-book row, no retirement, no lot mutation, no registration. `false` means
+   * the arm must do nothing at all.
    * Recording the drop and then letting the arm carry on would raise realized P&L by
    * the full proceeds while crediting NO reserve — the cash would simply vanish, which
    * is strictly worse than the invented-`c1` attribution this replaced (that at least
@@ -308,10 +327,19 @@ export function foldEvents(
    * `formatFoldDiscards` lines for a single drop. The channel would over-report the
    * very thing it exists to report exactly once.
    *
-   * A RESERVE MISS IS NOT A DISCARD and returns `true`. That asymmetry is INHERITED,
-   * not introduced here: a missing reserve has always let the arm carry on, and the
-   * cross-ref existence gate rejects an unknown reserve before the fold ever runs, so
-   * on the gated path it cannot happen at all. Only the provenance case gates.
+   * A RESERVE MISS IS ALSO A TOTAL DISCARD and returns `false` (#371). It did not use
+   * to: a missing reserve let the arm carry on, so a close booked its row and retired
+   * the position, a trim booked its partial row and mutated the lots, an open
+   * registered a position, and an add grew one — every one of them against a reserve
+   * that never moved. The vocabulary said `reserve-absent` at four other sites where
+   * it meant "nothing applied", and nothing in the type or the prose told a reader
+   * which sense was in force. Both gates now mean the same thing, so the reason codes
+   * describe WHAT WAS MISSING and the fold's answer to any of them is uniform.
+   *
+   * Reachability is unchanged and remains migration-shaped: the cross-ref existence
+   * gate rejects an unknown reserve before the fold ever runs, so on the gated path a
+   * reserve miss cannot happen. It is reachable through callers that fold the durable
+   * log directly, bypassing both gates — `loadFoldedReview` in `event-store.ts`.
    *
    * Only lot-derived legs route through here. The explicit-tier legs (`Deposit`,
    * `Withdraw`, both `Transfer` legs) call `applyToReserve` directly: their tiers come
@@ -330,6 +358,7 @@ export function foldEvents(
     }
     if (!applyToReserve(reserves, reserveId, deltas)) {
       recordSkip(event, order, "reserve-absent");
+      return false;
     }
     return true;
   };
@@ -588,6 +617,34 @@ export function foldEvents(
         // was proven at ingest.
         const adding = positions.get(event.positionId);
         if (adding) {
+          // CASH LEG FIRST, BECAUSE IT GATES THE ARM — the same hoist the open arm
+          // makes, for the same reason (#371). `provenance-absent` still cannot fire
+          // here: `[event.lot]` is a one-element array literal, so
+          // `reserveDeltasForOpen` always yields exactly one delta. `reserve-absent`
+          // CAN, and it is why the leg moved above the append and why the return is
+          // now honored rather than ignored. Appending the lot and then dropping the
+          // debit grew the position by a lot no reserve paid for — the fund gained an
+          // asset for free, which is NAV invention rather than mere misattribution.
+          //
+          // The deltas do not read `adding.lots`, only `event.lot`, so the hoist
+          // changes nothing an observer can see on the applying path.
+          //
+          // It stays routed through the gate rather than calling `applyToReserve`
+          // directly because this IS a lot-derived leg: its tier comes from
+          // `event.lot.tier`, so it belongs on the lot-derived path by kind, not by
+          // whether today's argument happens to be non-empty. The explicit-tier path
+          // would quietly lose the provenance check the day this site learns to add
+          // more than one lot.
+          if (
+            !applyTieredLeg(
+              event.funding.reserveId,
+              reserveDeltasForOpen([event.lot], event.funding.amount),
+              event,
+              order,
+            )
+          ) {
+            break;
+          }
           adding.lots = [...adding.lots, { ...event.lot }];
           // If this position is still on its entry-VWAC fallback (opened this fold, no
           // real mark yet), refresh that fallback to the new blended VWAC so the scale-in
@@ -623,22 +680,6 @@ export function foldEvents(
               anchor.price = blended;
             }
           }
-          // ROUTED THROUGH THE GATE THOUGH THE DISCARD IS UNREACHABLE HERE, AND THE
-          // RETURN IS DELIBERATELY IGNORED. The array literal `[event.lot]` always
-          // holds exactly one lot, so `reserveDeltasForOpen` always yields exactly one
-          // delta and `provenance-absent` cannot fire on this site — there is nothing
-          // left of the arm to gate anyway, the append happened above. It stays routed
-          // because this IS a lot-derived leg: its tier comes from `event.lot.tier`, so
-          // it belongs on the lot-derived path by kind, not by whether today's argument
-          // happens to be non-empty. Calling `applyToReserve` directly instead would
-          // put a lot-derived leg on the explicit-tier path and quietly lose the
-          // provenance check the day this site learns to add more than one lot.
-          applyTieredLeg(
-            event.funding.reserveId,
-            reserveDeltasForOpen([event.lot], event.funding.amount),
-            event,
-            order,
-          );
         } else {
           recordSkip(event, order, "position-absent");
         }
@@ -691,18 +732,34 @@ export function foldEvents(
           recordSkip(event, order, "reserve-absent");
         }
         break;
-      case "Transfer":
-        // ONE RECORD PER MISSED LEG, not per event. A Transfer whose destination is
-        // absent still debits the source: cash leaves and never arrives, and reserves
-        // are left quietly unbalanced. That is precisely the state the channel exists
-        // to stop being silent about, so each leg reports for itself.
-        if (!applyToReserve(reserves, event.fromReserveId, [{ tier: event.tier, amount: -event.amount }])) {
+      case "Transfer": {
+        // BOTH LEGS OR NEITHER (#371). A Transfer names two reserves and moves one
+        // amount between them, so a missing reserve on either side means the movement
+        // cannot complete. This arm USED TO apply each leg independently and report per
+        // leg, which let a Transfer whose destination was absent still debit the source:
+        // cash left and never arrived, and the reserves were left quietly unbalanced.
+        // That is the silent-and-unbalanced state the Discard Channel exists to end, not
+        // a state worth reaching in order to report it. So both reserves are checked
+        // BEFORE either leg applies, and a miss applies neither.
+        //
+        // ONE RECORD PER EVENT, not per leg. `dedupeFoldSkips` keys on
+        // (`eventId`, `reason`), so two `reserve-absent` records for a single Transfer
+        // would BOTH survive dedupe — inflating `discardedEventCount` and emitting two
+        // `formatFoldDiscards` lines for one drop. The channel would over-report the
+        // very thing it exists to report exactly once. This is the same precedence
+        // reasoning `applyTieredLeg` makes for `provenance-absent` over `reserve-absent`.
+        //
+        // The existence check is deliberately separate from `applyToReserve`'s own
+        // boolean: that boolean reports whether a leg APPLIED, and by the time it could
+        // answer for the second leg the first has already moved.
+        if (!reserves.has(event.fromReserveId) || !reserves.has(event.toReserveId)) {
           recordSkip(event, order, "reserve-absent");
+          break;
         }
-        if (!applyToReserve(reserves, event.toReserveId, [{ tier: event.tier, amount: event.amount }])) {
-          recordSkip(event, order, "reserve-absent");
-        }
+        applyToReserve(reserves, event.fromReserveId, [{ tier: event.tier, amount: -event.amount }]);
+        applyToReserve(reserves, event.toReserveId, [{ tier: event.tier, amount: event.amount }]);
         break;
+      }
       case "ReserveOpened":
         // Birth an EMPTY Reserve. NAV-neutral BY CONSTRUCTION: the event carries no
         // amount and no lots, so there is nothing here that could move the fund — the
@@ -1023,9 +1080,26 @@ export function splitTierRemoval(
  * for everything that arrived through the gate — but it is no longer a SILENT one.
  * The boolean is how the helper signals its miss back to the calling arm, which owns
  * the event and therefore owns the locator; the helper itself sees only a reserve id
- * and could not name the event that named it. Every one of the eight call sites —
- * open funding, close settlement, trim settlement, add funding, `Deposit`, `Withdraw`,
- * and BOTH `Transfer` legs — must record on a `false`, one record per miss. */
+ * and could not name the event that named it.
+ *
+ * A `false` DISCARDS THE WHOLE EVENT, RECORDED ONCE (#371). Six of the eight call sites
+ * read the boolean and do exactly that: `Deposit` and `Withdraw` record and stop, and
+ * open funding, close settlement, trim settlement and add funding read it through
+ * `applyTieredLeg`, whose own `false` is the gate that keeps the rest of their arm from
+ * running. No caller records a miss and then carries on — that half-applying sense of
+ * `reserve-absent` is what #371 removed.
+ *
+ * BOTH `Transfer` LEGS DISCARD THE BOOLEAN, DELIBERATELY. A per-CALL answer is the wrong
+ * shape for that arm: by the time the second leg could report `false`, the first has
+ * already moved cash. It settles existence for both reserves before either call and
+ * records once for the pair, so the legs here are reached only where they cannot fail.
+ *
+ * A NINTH CALL SITE INHERITS "ONE RECORD PER EVENT", NOT "one record per call". Any arm
+ * that calls this more than once for a single event must settle existence up front the
+ * way `Transfer` does, because `dedupeFoldSkips` keys on (`eventId`, `reason`): two
+ * `reserve-absent` records for one event BOTH survive the dedup, inflating
+ * `discardedEventCount` and printing two operator lines for a single drop. The channel
+ * would over-report the very thing it exists to report exactly once. */
 function applyToReserve(
   reserves: Map<string, ReserveRecord>,
   reserveId: string,

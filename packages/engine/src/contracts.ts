@@ -88,6 +88,22 @@ export interface FundReviewData {
  * Why the fold could not apply an event. A CLOSED VOCABULARY — widening it is a spec
  * change, not a build decision; it was widened once, deliberately, to three (#329).
  *
+ * EVERY MEMBER MEANS THE SAME THING ABOUT WHAT THE FOLD DID: it read the event and
+ * APPLIED NOTHING AT ALL. A member names WHAT WAS MISSING, never how much of the event
+ * survived the miss — there is no partial application anywhere in this vocabulary, so
+ * a new member inherits total discard rather than choosing it (#371). That uniformity
+ * is load-bearing and was not always true: `reserve-absent` used to let four arms carry
+ * on — a close booked its row and retired the position, a trim booked a partial row and
+ * mutated lots, an open registered a position, an add grew one, and a Transfer debited
+ * its source — each against a reserve that never moved. The difference lived only in
+ * the shape of the call sites, so the next reason code would have picked a behaviour by
+ * whichever site its author happened to read first. A closed vocabulary whose members
+ * disagree about what membership MEANS has lost the property that made closing it worth
+ * doing.
+ *
+ * The fixed prose in `SKIP_DETAIL` depends on this: each member's notice ends by saying
+ * nothing moved, and that sentence has to be true at every site that can raise it.
+ *
  * `position-absent`: the verb named a position the fold has no record of (never opened
  * in this window, or already retired).
  *
