@@ -76,6 +76,23 @@ the `captureIngestCommit` seam wired into `ingestInbox` — is the `@numisma/tui
   split-brain onto two stores — and must be **rejected with a loud error** (require absolute
   or `~`). price-feed and tui must keep agreeing on the sub-paths (`inbox/transactions.json`,
   `prices/`, `genesis.json`, `events.jsonl`); a resolver split here silently breaks ingest.
+- **The rule binds every DOOR, not just the env knob, and `~` expands at all of them (#369).**
+  The `NUMISMA_DATA_DIR` variable is one of five entry points for a data root; the other four
+  are caller-supplied `dataDir` arguments (`resolveEventStorePaths`, `resolvePreferencesPath`,
+  `resolveSidecarPath`, `resolvePriceFeedPaths`). Stating the invariant only for the env knob
+  left the arguments to four hand-written copies of it, and they drifted: two accepted a bare
+  `"data"` and produced `<cwd>/data/…` silently — the exact split-brain this bullet forbids —
+  and the five disagreed on `~` three ways (expanded, refused as non-absolute, or turned into
+  a directory literally *named* `~`). The predicate is therefore **one shared function**
+  (`normalizeDataDirOverride`), and the `undefined` → default arm stays per-door because the
+  defaults genuinely differ. **`~` is honored at every door**, not only at the env knob: the
+  hazard the rule guards is *CWD-dependence*, and `~/x` has none — it is absolute and
+  homedir-derived, which is this bullet's own invariant verbatim. The counter-argument (`~` is
+  a shell affordance and `node:path` has no notion of it) loses because an env-only tilde rule
+  would need a mode flag on the shared predicate, restoring the per-door divergence the shared
+  predicate exists to remove. `~user` is **not** supported syntax and is refused as relative.
+  One input→outcome table (`@numisma/engine/testkit`) is run against all five doors, so a
+  one-sided edit fails a test rather than reaching production.
 - **The best-effort commit contract has three clauses and a fixed ordering.** The append is
   *already durable* (atomic temp-and-rename) before the capture runs; the capture then
   **never throws / never blocks / never corrupts** it. Ordering is fixed: **append →
