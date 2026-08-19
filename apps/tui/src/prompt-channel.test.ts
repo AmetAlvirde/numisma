@@ -148,14 +148,18 @@ describe("on a stdin that is no terminal the channel says so and returns an empt
 
     await harness.channel.ask("a? ");
 
+    // The array's full contents, so the shell's sentence is the ONLY thing on this
+    // channel — no readline internal alongside it, and nothing else either.
     expect(harness.errors).toEqual([NOTICE]);
-    expect(harness.errors.join("")).not.toContain("readline");
   });
 
-  // CLAUSE 3, AND OBSERVABLE HERE FOR THE FIRST TIME. The import shell puts exactly one
-  // question before refusing, so its once-per-run guard was real and unpinnable; `recordFill`
-  // has nine `ask` sites, so the difference between one notice and nine is the difference
-  // between a legible refusal and a wall of the shell shouting over the flow.
+  // CLAUSE 3, AND THIS IS THE ONLY PLACE IT IS OBSERVABLE. Both shells refuse at their
+  // first question, so an end-to-end run sees one notice whether the guard exists or not
+  // and can only smoke-test it. Here the questions are forced, so deleting the
+  // `toldThereIsNoTerminal` flag turns this case red and nothing else does. What it buys:
+  // `recordFill` reaches nineteen `ask` sites once its delegated interviews are counted,
+  // and the difference between one notice and nineteen is the difference between a legible
+  // refusal and a wall of the shell shouting over the flow.
   it("writes the notice ONCE across an interview of many questions", async () => {
     const harness = channelOn(false);
 

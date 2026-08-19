@@ -243,17 +243,18 @@ describe("record-fill-cli — a run with no terminal refuses in its own voice (#
     // And it says nothing was written, which is the flow's own closing sentence.
     expect(result.stderr).toContain("Nothing was written to");
     expect(result.status).toBe(1);
-  });
-
-  it("says it ONCE, though the interview has nine questions behind that one", async () => {
-    const result = runFill(await cleanDataDir());
-
-    // The once-per-run guard, observable here for the first time: on the import shell
-    // exactly one question is ever put, so the flag was correct and unpinnable. It stays
-    // one here only because the rung pick refuses first — see the ordering pin in
-    // `record-fill.test.ts` — so this assertion and that one fail together if the
-    // interview is ever reordered.
-    const notices = result.stderr.split("No terminal on stdin").length - 1;
-    expect(notices).toBe(1);
+    // WHAT THIS SPAWN HONESTLY DOES NOT PIN, in the voice `import-orders-cli.test.ts`
+    // uses for the same situation on the sibling shell: the notice is written ONCE PER
+    // RUN rather than once per question, and no spawn here can see it. This case briefly
+    // carried a count over the notice, which could not fail — a no-terminal run reaches
+    // EXACTLY ONE question. `record-fill.ts` asks "Which rung filled?" first, gets `""`,
+    // and refuses as `unknown-rung`; every later question sits past that refusal, and no
+    // data-dir state reaches one. Delete the `toldThereIsNoTerminal` flag entirely, write
+    // the notice unconditionally on every `ask`, and this file stays green. That is the
+    // same verdict the import shell recorded, and it lands the same way here.
+    //
+    // The guard IS observed, as a unit, in `prompt-channel.test.ts`: nine questions put
+    // through a no-terminal channel, one notice counted. That is where the difference
+    // between one notice and nineteen is visible, and it needs no process at all.
   });
 });
