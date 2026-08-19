@@ -591,9 +591,18 @@ const RUNS_PER_CASE = decision.run ? resolveRunCount(process.env.NUMISMA_WRAPPER
 
 /**
  * The settle window for a case with no timeout in it. Short ON PURPOSE, and the shortness
- * is load-bearing: the child-reap mutation leaves a stray `sleep` with most of a
- * 5-second watchdog poll still to run, so a generous window here would let the mutated run
- * pass and the control would prove nothing.
+ * is load-bearing in the child-reap control: the mutation leaves a stray `sleep` with PART
+ * of a watchdog poll hop still to run, so a generous window here would outlast the stray on
+ * every run and the control would prove nothing.
+ *
+ * HOW MUCH of the hop is left is not a property of this number. It is decided by where in
+ * the watchdog's repeating poll cycle the run happened to finish, which is ambient — a
+ * phase, not a budget, and no value here makes it one. That is why the control repeats
+ * instead of trusting a single reading; #394 is the red that taught it to.
+ *
+ * As a bound on an ordinary case this is generous rather than tight. A healthy run reaps the
+ * watchdog and its child from inside the EXIT trap, so its pgid is already empty at the
+ * instant the shell exits and none of this window is ever spent.
  */
 const SETTLE_DEADLINE_MS = 2_000;
 
@@ -2598,33 +2607,99 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
     it(
       "makes the healthy case go RED on a stray process left in the run's pgid",
       async () => {
-        const dirs = makeCaseDir(CASE_OPTIONS);
-        // The committed wrapper is never touched: the mutation is applied to a copy that
-        // lives and dies inside the case dir.
-        const mutated = mutateWrapper(WRAPPER_PATH, dirs.caseDir, CHILD_REAP_MUTATION);
-        expect(mutated.startsWith(dirs.caseDir)).toBe(true);
-
-        const record = await launchWrapper({
-          caseDir: dirs.caseDir,
-          wrapperPath: mutated,
-          env: caseEnv(dirs, CASE_OPTIONS),
-          groupLeader: true,
-          settleDeadlineMs: SETTLE_DEADLINE_MS,
-          maxWaitMs: 60_000,
+        // WHY THIS REPEATS, and it is the same argument as the tee-deafness control's: what
+        // the mutation produces is RACY, so one reading of it decides nothing.
+        //
+        // The orphan the mutation leaves behind is a `sleep` of ONE WATCHDOG POLL HOP, and
+        // the hop was already running when the shell exited. How much of it is left is
+        // therefore decided by WHERE IN THE POLL CYCLE the run finished — a phase, not a
+        // budget. Quiet, a fake run finishes early in a hop and the stray has most of five
+        // seconds left, which is why a single reading looked solid for months. Under load the
+        // run's own duration wanders across the cycle, and a run that finished near a hop
+        // boundary leaves a stray with milliseconds to live, gone before the settle window
+        // closes. Measured at 3 contended runs in 5 when #394 was filed, and 3 in 6 again on
+        // the machine this repetition was added on.
+        //
+        // There is nothing to widen here: the phase is uniform, so a longer window makes the
+        // control blinder and a shorter one makes assertion 3's own reading unrepresentative.
+        // What DOES collapse it is asking more than once. At the measured miss rate a single
+        // reading is a coin flip; twelve independent ones miss together about four times in a
+        // thousand, and every attempt is on the record either way.
+        //
+        // NOTHING HERE ACCEPTS AN ABSENCE AS A PASS. Each attempt still asserts, race-free,
+        // that the mutation orphaned a `sleep` at the instant of exit — a wrapper that has
+        // stopped orphaning fails on attempt 1 rather than after twelve — and the loop as a
+        // whole still demands that assertion 3's own field, read through assertion 3's own
+        // window, came back occupied at least once.
+        const attempts: string[] = [];
+        let seen = 0;
+        // The attempt-by-attempt series is the whole diagnosis if this control ever fails:
+        // "expired on all 12" and "the mutation orphaned nothing on attempt 1" are different
+        // problems, and only the series tells them apart. It must survive a throw in the loop.
+        onTestFinished(() => {
+          console.log(`[wrapper harness] child-reap mutation outcomes: ${attempts.join(", ")}`);
         });
+        for (let attempt = 1; attempt <= RUNS_PER_CASE && seen === 0; attempt += 1) {
+          const dirs = makeCaseDir(CASE_OPTIONS);
+          // The committed wrapper is never touched: the mutation is applied to a copy that
+          // lives and dies inside the case dir.
+          const mutated = mutateWrapper(WRAPPER_PATH, dirs.caseDir, CHILD_REAP_MUTATION);
+          expect(mutated.startsWith(dirs.caseDir)).toBe(true);
 
-        // The run itself still reports success — that is precisely the danger. Without the
-        // reaped child the wrapper's own EXIT trap SIGKILLs the watchdog subshell and
-        // orphans its `sleep` into the run's process group, where it holds launchd's
-        // per-label job slot and keeps the log `tee` alive. Assertion 3 is the only thing
-        // that sees it.
-        expect(record.exitCode).toBe(0);
-        expect(record.heartbeat?.lastStep).toBe("complete");
+          const record = await launchWrapper({
+            caseDir: dirs.caseDir,
+            wrapperPath: mutated,
+            env: caseEnv(dirs, CASE_OPTIONS),
+            groupLeader: true,
+            settleDeadlineMs: SETTLE_DEADLINE_MS,
+            maxWaitMs: 60_000,
+          });
+
+          // The run itself still reports success — that is precisely the danger. Without the
+          // reaped child the wrapper's own EXIT trap SIGKILLs the watchdog subshell and
+          // orphans its `sleep` into the run's process group, where it holds launchd's
+          // per-label job slot and keeps the log `tee` alive. Assertion 3 is the only thing
+          // that sees it.
+          expect(record.exitCode, `attempt ${attempt}: the mutated run did not succeed`).toBe(0);
+          expect(
+            record.heartbeat?.lastStep,
+            `attempt ${attempt}: the mutated run did not reach the end`,
+          ).toBe("complete");
+
+          // THE HALF THAT OWES NOTHING TO THE PHASE, asserted on EVERY attempt. The stray is
+          // sleeping out its hop when the shell exits whatever the phase is, so this reading
+          // is the one the race cannot reach — and a red here says the mutation has stopped
+          // biting, which no amount of repeating would fix and which the loop below would
+          // otherwise report as an expiry.
+          expect(
+            record.residueAtExit.join(" | "),
+            `attempt ${attempt}: the child-reap mutation orphaned NOTHING into the pgid at the ` +
+              `instant of exit (${record.residueAtExit.length} process(es) there) — the reap it ` +
+              "removes is no longer what keeps the group clean",
+          ).toMatch(/sleep/);
+
+          // AND THE HALF ASSERTION 3 ACTUALLY TAKES: the same field, after the same window.
+          if (record.pgidResidue.length > 0) {
+            expect(
+              record.pgidResidue.join(" | "),
+              `attempt ${attempt}: something outlived the settle window, but it is not the ` +
+                "watchdog's orphaned timer",
+            ).toMatch(/sleep/);
+            seen += 1;
+          }
+          attempts.push(
+            `${record.pgidResidue.length > 0 ? "SEEN" : "expired"}` +
+              `(run=${record.durationMs}ms, settle=${record.settleMs}ms)`,
+          );
+        }
+
         expect(
-          record.pgidResidue.length,
-          "the child-reap mutation left NOTHING in the pgid — assertion 3 is no longer guarding anything",
+          seen,
+          `the child-reap mutation orphaned a \`sleep\` on every one of ${attempts.length} runs and ` +
+            `it had expired before the ${SETTLE_DEADLINE_MS}ms settle window closed every time, so ` +
+            "assertion 3 has not been seen red and this control is guarding nothing: " +
+            attempts.join(", "),
         ).toBeGreaterThan(0);
-        expect(record.pgidResidue.join(" | ")).toMatch(/sleep/);
 
         // And the same assertion, applied to the same case, passes on the UNMUTATED
         // wrapper — so what went red is the mutation and not the settle window.
@@ -2639,7 +2714,7 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
         });
         expect(healthy.pgidResidue).toEqual([]);
       },
-      120_000,
+      600_000,
     );
   });
 
