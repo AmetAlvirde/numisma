@@ -125,9 +125,13 @@ out-of-band log surgery (option A) is the wrong rule for the common case.
 
 ## Why exactly two verbs
 
-`closedPositionIds` is consulted at four sites. The relaxation reached two of
-them because at the other two the refusal is not over-strict — a backdated verb
-there could not fold correctly either.
+`closedPositionIds` **was** consulted at four sites — that is the premise this
+section needs, because the relaxation is exactly the story of two of those four
+moving off it. It reached two because at the other two the refusal is not
+over-strict: a backdated verb there could not fold correctly either. **Today the
+set is consulted at two**, `crossReferenceClose` and `crossReferenceInvalidation`;
+`crossReferenceTrim` and `crossReferenceAddedTo` read `closedPositionAsOf`
+instead, which is what the ruling column below records.
 
 | site | verb | backdated, would it fold? | ruling |
 | --- | --- | --- | --- |
@@ -184,9 +188,16 @@ the whole class ADR-015 exists to eliminate.
 The same tie-break governs one more site, and it is the honest edge of the rule:
 `fold.ts`'s detect-by-absence pass reports an `InvalidationMarked` dated
 **strictly after** its position's retirement and stays silent on a mark dated
-**on** it, because the closed book does not carry the close's log index and the
-tie is undecidable from what that pass holds (#297's named residual, deliberately
-not widened).
+**on** it. That silence is a **choice, not an impossibility**, and `fold.ts`'s own
+RESIDUALS comment is careful to say so: the fold breaks an equal-`asOf` tie by log
+index, so the same-date case **is decidable**, and the index is not missing state —
+`order` is in scope in the `PositionClosed` arm, right where the closed row is
+pushed. What is missing is only the **closed book's carriage** of it, because that
+pass re-derives retirement dates from `closedPositions` after the loop and those
+rows carry no log index. Carrying it in a fold-local map instead would settle the
+tie outright. So this is a consequence of where the derivation is **sited**, and
+widening the ruled sub-case is #329's business rather than this one's (#297's named
+residual, deliberately not widened).
 
 ## Considered options
 
