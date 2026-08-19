@@ -41,23 +41,37 @@ const paths = resolveEventStorePaths();
  * no terminal, names the missing terminal in this shell's own voice and returns "".
  *
  * `""` IS HONEST HERE ONLY BECAUSE OF THE ORDER `recordFill` ASKS IN, and that is a
- * dependency rather than a property of the empty string. This flow has NINE `ask` sites and
- * they read `""` three different ways:
+ * dependency rather than a property of the empty string. The reachable interview is
+ * NINETEEN `ask` sites, not the nine `record-fill.ts` holds literally: it hands `io.ask`
+ * onward to `authorLadderTarget` (`record-fill-ladder-target.ts`, eight more) and to
+ * `resolveFunding` (`record-fill-funding.ts`, two more), and a delegated question is no
+ * less reachable for being put from another file. They read `""` three ways:
  *
  *   - `record-fill.ts`'s "Which rung filled?" — the FIRST question the flow reaches —
  *     matches no rung and refuses as `unknown-rung`. This is the refusal that makes the
- *     empty answer safe, and nothing has been written when it fires.
- *   - "Filled quantity [n]" reads `""` as TAKE THE REMAINING QUANTITY, and the per-rung
- *     book questions read it as ACCEPT THE PROPOSED VERDICT. Silent ratifications, both.
- *   - the two "[y/N]" confirmations read `""` as NO, and abandon.
+ *     empty answer safe, and nothing has been written when it fires. TEN more stop the
+ *     act on a blank: the fill timestamp, a touched rung's observed quantity and the
+ *     instrument id each reject one, as do `authorLadderTarget`'s five decision fields
+ *     (together, as `incomplete-decision`) and `resolveFunding`'s capital tier; a blank
+ *     position id abandons.
+ *   - SIX are silent ratifications, and they are the hazard. "Filled quantity [n]" takes
+ *     the remaining quantity; the per-rung book question takes its `[r]` default and
+ *     records that rung as resting untouched; "Also record N confirmed cancellation(s)?"
+ *     records NONE and lets the act continue; "Tempo [n]" takes the reserve's; "Cash
+ *     debited [n]" takes the proposed figure; and `authorLadderTarget`'s "Append this lot
+ *     to '<id>'? [Y/n]" — a gate phrased so that SILENCE MEANS YES — attaches the lot to
+ *     an existing Position. That last one is the only thing standing between an
+ *     unattended run and a lot landing in a Position nobody named.
+ *   - only TWO "[y/N]" confirmations read `""` as NO and abandon: "Confirm these derived
+ *     verdicts?" and "Write BOTH?".
  *
  * Only the first is ever reached without a terminal. Reorder the interview — ask the book
  * observation before the rung pick, or make the rung question skippable — and this same
  * `""` ratifies a quantity nobody stated and the run WRITES, unattended, with nobody
  * having answered anything. If that ordering moves, this must become a refusal the domain
  * cannot mistake for consent (a sentinel the questions reject, not a blank), and it must
- * move in the same commit. `record-fill-cli.test.ts` pins the ordering itself so the move
- * is loud rather than silent.
+ * move in the same commit. `record-fill.test.ts` pins the ordering itself — one question
+ * asked, and it is the rung pick — so the move is loud rather than silent.
  */
 const prompt = createPromptChannel({
   isTTY: Boolean(process.stdin.isTTY),

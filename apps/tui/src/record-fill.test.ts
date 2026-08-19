@@ -1121,10 +1121,15 @@ describe("recording a fill over damaged history says so, and still records", () 
  * so the shell can name the missing terminal and let this flow refuse in its own voice
  * instead of printing a readline internal. That is honest ONLY while the FIRST question
  * this flow reaches is one that refuses on `""` — and it is a property of the ORDER the
- * interview asks in, not of the empty string. Three of the nine `ask` sites read `""` as
- * a ratification: the filled-quantity question takes the remaining quantity, and the
- * per-rung book questions accept the proposed verdict. If any of those is ever reached
- * first, the same `""` ratifies a quantity nobody stated and the act WRITES, unattended.
+ * interview asks in, not of the empty string. The reachable interview is NINETEEN `ask`
+ * sites — this file holds nine literally and hands `io.ask` onward to `authorLadderTarget`
+ * and `resolveFunding` for the other ten — and SIX of them read `""` as a ratification:
+ * the filled-quantity question takes the remaining quantity, the per-rung book question
+ * accepts the proposed verdict, the cancellation confirmation records none and CONTINUES,
+ * "Tempo" and "Cash debited" take their bracketed defaults, and `authorLadderTarget`'s
+ * "Append this lot to '<id>'? [Y/n]" attaches the lot on silence, because `isNegative("")`
+ * is false. If any of those is ever reached first, the same `""` ratifies a quantity
+ * nobody stated and the act WRITES, unattended.
  *
  * So the dependency is pinned rather than commented. Both shells' construction sites say
  * the same thing in prose; this is the assertion that goes red when the prose stops

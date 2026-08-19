@@ -22,9 +22,15 @@
  *      WHY there is no answer, the flow names WHAT IT DID about it.
  *   3. THE NOTICE IS WRITTEN ONCE PER RUN, not once per question. The operator learns
  *      there is no terminal from the first unanswerable question; repeating it buries the
- *      flow's refusal under copies of the shell's. Unobservable on the import shell, which
- *      puts exactly one question before refusing — but `recordFill` has NINE `ask` sites,
- *      so here it is behaviour rather than a defensive flag, and it is pinned as such.
+ *      flow's refusal under copies of the shell's. NEITHER SHELL OBSERVES THE DIFFERENCE
+ *      END-TO-END: both refuse at their first question, so both spawns see exactly one
+ *      notice whether the guard exists or not, and counting it there would prove nothing.
+ *      It is pinned where it is visible instead — `prompt-channel.test.ts` drives this
+ *      channel through an interview of many questions and counts one notice. Worth holding
+ *      because the interviews on the far side of those first refusals are long:
+ *      `recordFill` reaches nineteen `ask` sites once the ones it delegates to
+ *      `authorLadderTarget` and `resolveFunding` are counted, and the import shell's rung
+ *      walk can put one question per rung.
  *
  * WHAT `""` MEANS IS THE CALLER'S PROBLEM, AND IT IS AN ORDERING DEPENDENCY. Read as an
  * answer, `""` means different things to different questions — a refusal at one, "take the
