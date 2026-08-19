@@ -306,3 +306,62 @@ describe("on a terminal where the question is aborted the channel ends the ANSWE
     expect(harness.rl.closed).toBe(1);
   });
 });
+
+/**
+ * THE ABANDONMENT LATCH — the fact `""` cannot carry.
+ *
+ * Clause 4 must resolve `""` (that is what lets the domain refuse in its own voice), and
+ * `""` is a RATIFICATION at several questions of both shells' interviews. The string
+ * therefore cannot tell a flow whether an answer was typed or abandoned, so the channel
+ * remembers it beside the string. What the flow does with it is the flow's business and
+ * is pinned where that behaviour lives — `import-orders.test.ts` drives
+ * `importBitgetOpenOrders` with an abandoning `ask` and asserts nothing is appended.
+ * What is pinned HERE is only the latch: when it is set, when it is not, and that it
+ * never clears.
+ */
+describe("the channel remembers that a question was abandoned", () => {
+  it("is false before anything is asked", () => {
+    expect(channelOn(true).channel.aborted()).toBe(false);
+  });
+
+  it("is false after a question that was actually answered", async () => {
+    const harness = channelOn(true, ["reserve-a"]);
+
+    expect(await harness.channel.ask("funding reserve? ")).toBe("reserve-a");
+
+    expect(harness.channel.aborted()).toBe(false);
+  });
+
+  it("latches on the rejecting question, WITHOUT changing what it resolves", async () => {
+    const harness = channelOn(true, [], ctrlDInterface());
+
+    // Both halves in one case on purpose: a latch that suppressed clause 4's `""` would
+    // put `Aborted with Ctrl+D` back on the operator's screen, which is the whole defect
+    // #370 removed.
+    expect(await harness.channel.ask("funding reserve? ")).toBe("");
+    expect(harness.channel.aborted()).toBe(true);
+  });
+
+  it("never clears for the rest of the interview", async () => {
+    const harness = channelOn(true, [], ctrlDInterface());
+
+    await harness.channel.ask("first? ");
+    await harness.channel.ask("second? ");
+    await harness.channel.ask("third? ");
+
+    expect(harness.channel.aborted()).toBe(true);
+  });
+
+  // The no-terminal path never asks readline anything, so no question was ABANDONED —
+  // it was unaskable. That path is governed by each shell's ordering argument, and its
+  // first question refuses on `""` before any write door is reached. Latching here would
+  // report an abandonment that did not happen and would attribute the wrong refusal to a
+  // piped run.
+  it("stays false on a stdin that is no terminal", async () => {
+    const harness = channelOn(false);
+
+    await harness.channel.ask("a? ");
+
+    expect(harness.channel.aborted()).toBe(false);
+  });
+});

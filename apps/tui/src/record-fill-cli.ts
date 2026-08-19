@@ -72,6 +72,31 @@ const paths = resolveEventStorePaths();
  * cannot mistake for consent (a sentinel the questions reject, not a blank), and it must
  * move in the same commit. `record-fill.test.ts` pins the ordering itself — one question
  * asked, and it is the rung pick — so the move is loud rather than silent.
+ *
+ * CTRL-D IS A SECOND DOOR INTO THOSE SIX RATIFICATIONS, AND IT IS NOT A REORDER. The
+ * prompt channel resolves `""` for an ABANDONED question and for every question after it,
+ * because the abort closes the interface (#370, clause 4 of `prompt-channel.ts`). So the
+ * sentence "only the first is ever reached" is true of the NO-TERMINAL path only. Press
+ * Ctrl-D anywhere in this nineteen-question interview and the run races through whatever
+ * is left of it, ratifying the six — the remaining quantity, the per-rung book default,
+ * no cancellations, the reserve's tempo, the proposed cash figure, and the lot appended
+ * to an existing Position.
+ *
+ * WHAT STOPS THIS ACT WRITING ANYWAY IS ITS FINAL GATE, and that was verified rather than
+ * assumed: every writer of the act sits BEHIND `Write BOTH? [y/N]` (`record-fill.ts:900`),
+ * on which `isAffirmative("")` is false, so an abandoned run reaches that gate and
+ * ABANDONS — `writeLogImage` and `appendOrders` are inside the two-file act just past it,
+ * and the advisory trail's `appendReconciliation` is reached only through
+ * `reconcileRecordedFill`, called once after the act is already durable. Nothing writes
+ * ahead of the gate. `Confirm these derived verdicts? [y/N]` sits earlier and abandons on
+ * a blank as well, so most abandoned runs stop before even reaching the final one.
+ *
+ * THAT IS A PROPERTY OF THIS SHELL, NOT OF THE CHANNEL, and it is why this act needs no
+ * equivalent of the import shell's `interview-abandoned` refusal — the import flow has no
+ * terminal gate at all, so it takes the channel's abandonment latch and refuses at its
+ * write door instead. If a writer here is ever moved AHEAD of `Write BOTH?`, or that gate
+ * is ever rephrased so that silence means yes, this argument dies with it and this act
+ * must take the latch too.
  */
 const prompt = createPromptChannel({
   isTTY: Boolean(process.stdin.isTTY),

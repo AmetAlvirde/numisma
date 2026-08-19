@@ -55,6 +55,27 @@ if (!csvPath) {
    * unattended, with nobody having answered anything. If that ordering ever moves, this
    * must become a refusal that the domain cannot mistake for consent (a sentinel the
    * questions reject, not a blank), and it must move in the same commit.
+   *
+   * AND THERE IS A SECOND DOOR INTO THOSE THREE RATIFICATIONS THAT IS NOT A REORDER:
+   * CTRL-D. The prompt channel resolves `""` for an ABANDONED question too, and for the
+   * whole rest of the interview after it, because the abort closes the interface (#370,
+   * clause 4 of `prompt-channel.ts`). That is what makes the FIRST question's Ctrl-D come
+   * back as `no-reserve-declared` in the domain's own voice instead of readline's
+   * `Aborted with Ctrl+D`, and it is the fix #370 asked for. But it also means the three
+   * ratifications above are reachable with blanks after ANY question — the ordering
+   * argument above covers the no-terminal path only, and the paragraph above predicted
+   * exactly this outcome by the one route it did not anticipate.
+   *
+   * WHAT STOPS THE WRITE ANYWAY, since the sentinel is not built yet: the channel LATCHES
+   * the abandonment (`prompt.aborted`), this shell hands that latch to the flow as
+   * `promptAbandoned`, and `importBitgetOpenOrders` refuses as `interview-abandoned`
+   * before `appendOrders` rather than appending. The guarantee is positional-independent —
+   * if the terminal was abandoned, nothing is written — so it does not depend on WHICH
+   * question caught the Ctrl-D, and it survives a reorder of this interview even though
+   * the sentence above does not. `import-orders.test.ts` pins both halves: the first
+   * question still refuses as `no-reserve-declared`, and an interview abandoned after it
+   * never reaches `appendOrders`. The sentinel remains owed; it would move the refusal to
+   * the abandoned question instead of catching it at the door.
    */
   const prompt = createPromptChannel({
     isTTY: Boolean(process.stdin.isTTY),
@@ -104,6 +125,8 @@ if (!csvPath) {
         plansPath: resolvePlansPath(),
         loadPlans,
         ask,
+        // THE LATCH, not a value: read at the write door, long after this bag is built.
+        promptAbandoned: () => prompt.aborted(),
         out: (message) => process.stdout.write(message),
         err: (message) => process.stderr.write(`${message}\n`),
       },

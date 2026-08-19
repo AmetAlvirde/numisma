@@ -110,6 +110,27 @@ export interface OrdersImportIo {
   loadPlans: (path: string) => Promise<LoadedPlans>;
   /** Ask the operator one question; the answer is returned trimmed by the caller. */
   ask: (question: string) => Promise<string>;
+  /**
+   * WHETHER THE TERMINAL CONDUCTING THIS INTERVIEW WAS ABANDONED — optional, and absent
+   * means "it was not". Every caller that has no terminal to abandon (every fixture, and
+   * any future non-interactive driver) is unaffected by omitting it.
+   *
+   * WHY THE FLOW NEEDS A SECOND CHANNEL AT ALL. `ask` can only answer with a string, and
+   * the shell's prompt channel resolves `""` when a question is abandoned by Ctrl-D — it
+   * must, because that is what lets the FIRST question's blank come back as this flow's
+   * own `no-reserve-declared` refusal instead of a readline internal on the operator's
+   * screen (#370). But `""` is a RATIFICATION at three of this flow's questions: the
+   * funding override, and the rung-pick prompt at both of its sites. A Ctrl-D pressed
+   * after the funding declaration therefore used to race through them and land
+   * `planId`/`rungId` joins nobody declared, in an append-only file. The string cannot
+   * carry the difference, so the fact travels beside it.
+   *
+   * CHECKED AT THE WRITE DOOR, WHICH IS WHY THE GUARANTEE IS POSITIONAL-INDEPENDENT: if
+   * the terminal was abandoned, nothing is written — regardless of which question caught
+   * the Ctrl-D, including the last one. A latch that only changed later ANSWERS would
+   * still leak the interview whose final question was the abandoned one.
+   */
+  promptAbandoned?: () => boolean;
   out: (message: string) => void;
   err: (message: string) => void;
 }
@@ -121,6 +142,13 @@ export type OrdersImportRejection =
   | "unreadable-sidecar"
   | "unreadable-sidecar-lines"
   | "no-reserve-declared"
+  /**
+   * THE OPERATOR ABANDONED THE INTERVIEW AT THE TERMINAL — Ctrl-D — and the answers
+   * behind that point are blanks nobody typed. See {@link OrdersImportIo.promptAbandoned}
+   * for why the flow cannot see this in the answers themselves, and `prompt-channel.ts`
+   * for the latch that carries it.
+   */
+  | "interview-abandoned"
   /**
    * A row names a claim already on file and DISAGREES with it in a way that would leave
    * the file claiming LESS than the venue still holds (#174).
@@ -667,6 +695,25 @@ export async function importBitgetOpenOrders(
   const fresh: OrderRecord[] = [...records, ...observations].filter(
     (record) => !currentOnFile.has(appendKey(record)),
   );
+  // THE WRITE DOOR, AND THE LAST THING CHECKED BEFORE IT. An abandoned terminal makes
+  // every answer after the abandonment a blank nobody typed, and three of this flow's
+  // questions read a blank as consent — so the refusal cannot live at any one question,
+  // it has to live here, where every path that writes passes. Positional-independent: it
+  // does not matter which question caught the Ctrl-D, including the last one.
+  //
+  // A REFUSAL, NOT A THROW, and in the established vocabulary — the operator gets the
+  // same `REFUSED — ... Nothing was written` contract as `write-failed`, and the second
+  // sentence is literally true because nothing has been appended at this point.
+  if (io.promptAbandoned?.() === true) {
+    return reject(
+      io,
+      "interview-abandoned",
+      `the interview was abandoned at the terminal (Ctrl-D), so the answers after that ` +
+        `point were blanks nobody typed — and three of this import's questions read a ` +
+        `blank as consent. Nothing about this batch is attributable to a declaration the ` +
+        `operator made, so none of it is written. Run the import again`,
+    );
+  }
   try {
     await io.appendOrders(io.ordersPath, fresh);
   } catch (error) {
