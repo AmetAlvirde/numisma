@@ -96,6 +96,20 @@ export interface DataDirVoice {
  * started. No door wanted that arm; it was what "call `resolve()` and hope" happened
  * to do.
  *
+ * WHAT THE TRIM RETARGETS, AND WHY THAT IS NOT A REFUSAL. The `trim()` is not only the
+ * blank predicate's input — the trimmed string is what gets resolved, so surrounding
+ * whitespace is stripped from every accepted value too. At the env knob that has always
+ * been true; at the four ARGUMENT doors it is new reach, and it changes one pathological
+ * but legal case rather than rejecting it: `resolveEventStorePaths("/tmp/a b ")` used to
+ * yield `/tmp/a b /events.jsonl` — a SIBLING directory whose name ends in a space, beside
+ * the one the caller plainly meant — and now yields `/tmp/a b/events.jsonl`. The value is
+ * RETARGETED, not refused, and that is the right call for the same reason the rest of
+ * this function exists: a trailing-space directory is never what a caller or a launchd
+ * plist intends, the env knob already silently landed on the intended root, and a door
+ * that refused a value the knob accepts would be a fifth disagreement in the very
+ * function written to leave none. Interior whitespace is untouched — `/tmp/a b` is a real
+ * macOS path and stays one.
+ *
  * Expansion is `os.homedir()` at RUNTIME. Never a `/Users/...` literal, in this file or
  * in any test that pins it — ADR-006 forbids the literal, and a committed one would leak
  * the operator's real directory layout into a public repo.

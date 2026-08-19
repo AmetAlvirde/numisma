@@ -113,7 +113,10 @@ export const DATA_DIR_CONTRACT_CASES: readonly DataDirContractCase[] = [
     input: "  /tmp/numisma-authored-contract-root  ",
     outcome: "root",
     root: () => resolve("/tmp/numisma-authored-contract-root"),
-    why: "surrounding whitespace is trimmed, so a padded env value resolves to the same store as the bare one rather than to a sibling",
+    why:
+      "surrounding whitespace is trimmed, so a padded env value resolves to the same store as the bare one rather than to a sibling. " +
+      "This row is NEW reach at the four argument doors: they used to `resolve()` the raw string, so `\"/tmp/a b \"` became `/tmp/a b /events.jsonl` — a SIBLING directory whose name ends in a space. " +
+      "The padded value is RETARGETED onto the intended root, not refused, because the env knob has always trimmed and a door that refused what the knob accepts is the drift this table exists to make unreachable",
   },
   {
     input: "/tmp/numisma-authored-contract-root/../numisma-authored-contract-root",
