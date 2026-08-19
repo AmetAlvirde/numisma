@@ -59,7 +59,7 @@ export default defineConfig({
     // run was STRICTER than CI. That divergence is the bug: a loaded machine could
     // red locally on a case CI would never fail, which is a false red, and a false
     // red is chased. Stating it here makes the budget one fact, applies it to every
-    // suite, and holds as the suite grows and on slower hardware.
+    // suite's TEST BODIES, and holds as the suite grows and on slower hardware.
     //
     // IT IS NOT A TOLERANCE FOR SLOW CODE — it is headroom over scheduler
     // contention this repo does not control, and the distinction is the whole
@@ -80,6 +80,18 @@ export default defineConfig({
     // `testTimeout` is a timer on the same thread, so a `spawnSync` that never
     // returns runs past any value set here. That is why the spawning tests pass
     // their own `timeout` to the spawn — see `apps/tui/src/migrate-legacy-log.test.ts`.
+    //
+    // AND IT DOES NOT GOVERN HOOKS. `testTimeout` bounds test bodies only;
+    // `hookTimeout` and `teardownTimeout` are separate settings, both left at
+    // vitest's 10 s default. That is not a regression — neither the ten deleted
+    // `vi.setConfig({ testTimeout })` calls nor CI's old `--testTimeout` flag
+    // covered hooks either — but it is the ceiling that actually bites here: every
+    // file that lost a declaration cleans up in an `afterEach` that recursively
+    // `rm`s temp dirs, four of them real `.git` trees. Apply the same 19-27x
+    // parallel-load inflation to that cleanup and it runs into 10 s, not 30 s. The
+    // failure prints `Hook timed out in 10000ms`, names no test, and raising the
+    // number above would not have helped — so read it as a hook budget question,
+    // deliberately not answered here, rather than as this budget failing.
     testTimeout: 30_000,
     coverage: {
       provider: "v8",
