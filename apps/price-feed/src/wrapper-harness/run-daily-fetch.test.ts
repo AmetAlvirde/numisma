@@ -695,12 +695,32 @@ function watchdogCardPresent(logDir: string): boolean {
 }
 
 /**
- * How long case 4 will wait for the run to actually be INSIDE the fetch step before it
- * signals. Bounded well under the timeout cases' 3s ceiling on purpose: the whole claim of
- * case 4 is that its signal arrives before the watchdog's, so a wait that could run into the
- * ceiling would be a wait that could silently turn case 4 into a second copy of case 2.
+ * THE ANTI-HANG BACKSTOP ON CASE 4'S WAIT — deliberately NOT a budget, and the distinction
+ * is the whole point of this constant's existence.
+ *
+ * It used to be one: a flat 2000 ms, chosen as a safety strip under the timeout cases' 3 s
+ * ceiling, on the reasoning that a wait which ran into the ceiling could silently turn case
+ * 4 into a second copy of case 2. The reasoning was right; the mechanism was a PROXY for it,
+ * and the proxy is what went red. #372 recorded this exact wait failing under a full
+ * parallel suite with the message "the run never reached the step this signal is aimed at" —
+ * a statement that was simply FALSE. The run reached the step. The machine was busy.
+ *
+ * Measured on 2026-08-19, twelve runs per suite run: on a quiet machine the reach costs
+ * 388-678 ms across 60 samples, but with a second suite running concurrently — the board's
+ * ordinary condition, one worktree per lane — the worst run of each set was 1473, 1460 and
+ * 1282 ms. That is 74% of the old bound consumed by scheduler contention alone, and #372's
+ * original sighting is the same series crossing it.
+ *
+ * So the wait no longer races a clock at all. It races {@link watchdogCardPresent}, which is
+ * the thing case 4's premise is ACTUALLY about, and this number is what remains: a bound on
+ * a run that is neither reaching its step nor being timed out by its own watchdog, which is
+ * a broken wrapper rather than a busy machine. It sits above ceiling + grace so the card
+ * always wins the race on a merely-slow run, and any run that reaches it has outlived the
+ * watchdog that was supposed to bound it.
  */
-const REACH_STEP_BOUND_MS = 2_000;
+const REACH_STEP_BACKSTOP_MS =
+  (TIMEOUT_CASE_OPTIONS.maxRunSeconds + TIMEOUT_CASE_OPTIONS.watchdogGraceSeconds) * 1_000 +
+  2_000;
 
 /**
  * Block until the fake has recorded `command`, so a signal aimed at a step lands while the
@@ -708,22 +728,48 @@ const REACH_STEP_BOUND_MS = 2_000;
  * heartbeat is half of what case 4 asserts, and `LAST_STEP` is set just before the call the
  * sentinel proves happened.
  *
- * FAIL-CLOSED AND BOUNDED. A sentinel that never arrives means the run never reached the
- * step this signal is aimed at, which is a failure of the case; waiting for it with
- * unbounded patience would be indistinguishable from a run that hung before it got there.
+ * FAIL-CLOSED, AND IT RACES THE WATCHDOG RATHER THAN A CLOCK. What case 4 needs is not "the
+ * step arrived inside N milliseconds" but "the step arrived before the watchdog fired", and
+ * those two are only the same statement on an unloaded machine. The watchdog announces
+ * itself: it touches its calling card BEFORE it signals the group
+ * (`run-daily-fetch.sh`, the watchdog subshell), so the losing condition is directly
+ * observable and needs no proxy. Waiting on the card instead of a stopwatch means a slow
+ * machine costs this case latency and never a red, while a watchdog that genuinely got there
+ * first still fails — and fails saying so, instead of claiming the run never reached a step
+ * it plainly reached. See {@link REACH_STEP_BACKSTOP_MS} for the measurements that retired
+ * the stopwatch.
+ *
+ * THREE EXITS, EACH MEANING EXACTLY ONE THING:
+ *   - the sentinel appears — the run is in the step, and the elapsed time is returned for
+ *     the report line;
+ *   - the calling card appears — the watchdog beat the harness, so this run is case 2
+ *     wearing case 4's name and there is nothing left to signal;
+ *   - the backstop expires — neither happened, which is a wrapper that is not running and
+ *     not being bounded by its own watchdog.
  */
 async function waitForFakeToReach(
   caseDir: string,
   command: string,
   label: string,
+  logDir: string,
 ): Promise<number> {
   const sentinel = join(caseDir, "sentinels", sentinelNameFor(command));
   const startedAt = Date.now();
   while (!existsSync(sentinel)) {
-    if (Date.now() - startedAt >= REACH_STEP_BOUND_MS) {
+    // CHECKED BEFORE THE BACKSTOP, because it is the informative half: a run the watchdog
+    // has already claimed should say THAT, not report a generic expiry.
+    if (watchdogCardPresent(logDir)) {
       throw new Error(
-        `${label}: the fake never recorded \`${command}\` within ${REACH_STEP_BOUND_MS}ms — ` +
-          "the run never reached the step this signal is aimed at",
+        `${label}: the watchdog left its calling card after ${Date.now() - startedAt}ms, ` +
+          `before the fake recorded \`${command}\` — the watchdog beat the harness to this ` +
+          "run, so it is a second copy of case 2 rather than an external stop",
+      );
+    }
+    if (Date.now() - startedAt >= REACH_STEP_BACKSTOP_MS) {
+      throw new Error(
+        `${label}: the fake never recorded \`${command}\` within ` +
+          `${REACH_STEP_BACKSTOP_MS}ms, and the watchdog never fired either — the run ` +
+          "reached neither its step nor its own ceiling",
       );
     }
     await sleep(25);
@@ -2291,8 +2337,16 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
       // headroom named. A bare list of milliseconds needs the reader to remember which
       // constant each one is racing, and #372 records the cost of getting that wrong: the
       // file's 475s wall clock looked like the signal and was noise, while the number that
-      // actually moved was one step running at ~60% of its own 2000ms budget. Headroom is
-      // the quantity that goes to zero before a budget flips red, so it is the one printed.
+      // actually moved was one step running at ~60% of the flat 2000ms budget the reach
+      // used to carry. Headroom is the quantity that goes to zero before a bound flips red,
+      // so it is the one printed.
+      //
+      // That budget is gone — the reach now races the watchdog's calling card rather than a
+      // stopwatch (see `waitForFakeToReach`), so its series is judged against the ceiling
+      // like the duration beside it. The series is still worth printing, and arguably worth
+      // more: it is now the only place the contention this case actually runs under is
+      // visible at all, and the measurements in `REACH_STEP_BACKSTOP_MS` came from reading
+      // exactly this line across quiet and contended runs.
       onTestFinished(() => {
         const against = (series: readonly number[], bound: number): string => {
           if (series.length === 0) {
@@ -2302,8 +2356,12 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
           return `${series.join(", ")} — worst ${worst} of ${bound}, ${bound - worst} to spare`;
         };
         console.log(
-          `[wrapper harness] case 4 · reached the step (ms, bound ${REACH_STEP_BOUND_MS}): ` +
-            `${against(reaches, REACH_STEP_BOUND_MS)} · ran for (ms, ceiling ${ceilingMs}): ` +
+          // JUDGED AGAINST THE CEILING, because that is the bound the wait now races: the
+          // watchdog's card lands there, and the backstop above it only catches a wrapper
+          // that never ran. Reporting these against the retired 2000ms strip would print
+          // headroom this case no longer spends.
+          `[wrapper harness] case 4 · reached the step (ms, ceiling ${ceilingMs}): ` +
+            `${against(reaches, ceilingMs)} · ran for (ms, ceiling ${ceilingMs}): ` +
             `${against(durations, ceilingMs)} · settled (ms, deadline ${SETTLE_DEADLINE_MS}): ` +
             `${against(settles, SETTLE_DEADLINE_MS)}`,
         );
@@ -2331,10 +2389,17 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
           // test, never as a wedged worker.
           maxWaitMs: 60_000,
           duringRun: async (pgid) => {
-            reaches.push(await waitForFakeToReach(dirs.caseDir, "prices:fetch", label));
+            reaches.push(await waitForFakeToReach(dirs.caseDir, "prices:fetch", label, dirs.logDir));
             // BEFORE THE CEILING, ASSERTED RATHER THAN ASSUMED. If the watchdog got there
             // first this is case 2 wearing case 4's name — a run that would still exit 124
             // and still pass an exit-code-only test of "something stopped it".
+            //
+            // THE WAIT ABOVE ALREADY RACES THIS CARD, so what is left here is the last
+            // instant it cannot cover: the wait only reads the card while the sentinel is
+            // ABSENT, so a run whose sentinel and card land in the same poll gap would come
+            // back "reached" and be signalled anyway. Re-reading it immediately before the
+            // kill closes that gap. Cheap, and the alternative is signalling a run the
+            // watchdog has already claimed.
             expect(
               watchdogCardPresent(dirs.logDir),
               `${label}: the watchdog fired BEFORE the harness could signal — this run is a ` +
