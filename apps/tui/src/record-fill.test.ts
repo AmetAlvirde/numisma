@@ -308,6 +308,12 @@ describe("the fill act is ALL-OR-NOTHING across both files", () => {
     expect(outcome.status).toBe("abandoned");
     expect(harness.logImage).toBe(logBefore);
     expect(harness.ordersImage).toBe(ordersBefore);
+    // AND SAYS SO. `record-fill-cli.ts` only sets an exit code, so a decline that does not
+    // reach `io.err` leaves the operator a bare prompt and no way to tell whether the fill
+    // landed. Same contract as every refusal this act prints.
+    expect(harness.err).toHaveLength(1);
+    expect(harness.err.join("\n")).toContain("REFUSED — the fill act was not confirmed");
+    expect(harness.err.join("\n")).toContain("Nothing was written to");
   });
 
   it("writes NOTHING when the derived verdicts are not confirmed (`O3`)", async () => {
@@ -322,6 +328,9 @@ describe("the fill act is ALL-OR-NOTHING across both files", () => {
     expect(outcome.status).toBe("abandoned");
     expect(harness.logImage).toBe(logBefore);
     expect(harness.ordersImage).toBe(ordersBefore);
+    expect(harness.err).toHaveLength(1);
+    expect(harness.err.join("\n")).toContain("REFUSED — the derived verdicts were not confirmed");
+    expect(harness.err.join("\n")).toContain("Nothing was written to");
   });
 });
 
@@ -1183,6 +1192,12 @@ describe("an unanswered question abandons the act (#388)", () => {
     { at: 2, question: "Filled quantity", names: "rung-400" },
     { at: 3, question: "the per-rung book observation", names: "rung-300" },
     { at: 5, question: "Confirm these derived verdicts?", names: "verdicts" },
+    // DELEGATED, and included here for the half this file owns: `authorLadderTarget` and
+    // `resolveFunding` return their abandonment as a message with no `io` to speak it, so
+    // this flow is the only place it can reach the operator. Their own suites pin the
+    // words; these two pin that the words are said.
+    { at: 7, question: "Tempo [n]", names: "tempo" },
+    { at: 13, question: "Cash debited [n]", names: "cash debited" },
     { at: 14, question: "Write BOTH?", names: "write both" },
   ];
 
@@ -1201,6 +1216,12 @@ describe("an unanswered question abandons the act (#388)", () => {
       // Nothing was written, which is the whole claim — not "the write door caught it".
       expect(harness.ordersImage).toBe(ordersBefore);
       expect(harness.logImage).toBe(logBefore);
+      // AND THE OPERATOR IS TOLD, in the act's own refusal contract. The message names the
+      // question nobody answered; without this the shell exits 1 having printed nothing,
+      // and the message this case asserts on would be one no operator ever reads.
+      expect(harness.err).toHaveLength(1);
+      expect(harness.err.join("\n").toLowerCase()).toContain(names);
+      expect(harness.err.join("\n")).toContain("Nothing was written to");
     });
   }
 

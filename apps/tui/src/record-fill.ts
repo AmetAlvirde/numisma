@@ -222,12 +222,34 @@ function reject(
 }
 
 /**
+ * An act that ended with nothing written, SAID OUT LOUD — every `abandoned` exit goes here.
+ *
+ * SAME BYTES AS {@link reject}, deliberately. An abandoned act and a refused one differ in
+ * what the operator has to do next, never in what the shell owes them: a line naming why
+ * there is no fill, and the standing promise that both files are untouched. `record-fill-cli.ts`
+ * only sets an exit code, so a message this function does not print is a message nobody
+ * ever reads — which is what a mid-interview Ctrl-D used to be worth: exit 1 and a bare
+ * prompt. `prompt-channel.ts` clause 2 promises two sentences on that path, the shell's WHY
+ * and the flow's WHAT IT DID; this is where the flow's half reaches the screen.
+ *
+ * EVERY caller, including the two `[y/N]` gates where the operator typed a deliberate `n`.
+ * A decline is still an act that wrote nothing, and letting it exit in silence is a small
+ * defect of its own.
+ */
+function abandonWith(io: RecordFillIo, message: string): RecordFillOutcome {
+  io.err(
+    `REFUSED — ${message}\nNothing was written to ${io.eventsPath} or ${io.ordersPath}.`,
+  );
+  return { status: "abandoned", message };
+}
+
+/**
  * The outcome an unanswered question earns where the answer had a DEFAULT or was a gate.
  *
  * `abandoned`, not `rejected`, and that is this act's own vocabulary rather than a new
  * one: nothing was written, nobody declined anything, and the operator's next move is to
  * record the fill again. The MESSAGE names the question — the half a reason token carries
- * badly — which is why nine per-question tokens would have bought nothing.
+ * badly — which is why ten per-question tokens would have bought nothing.
  *
  * `isAffirmative` KEEPS ITS `string` PARAMETER and every caller narrows before it. Widening
  * the helper so `isAffirmative(UNANSWERED)` returned false would compile and would answer
@@ -235,13 +257,12 @@ function reject(
  * `[Y/n]` phrasing makes silence mean yes. A helper that decides what silence means is the
  * defect #388 removes, one layer down.
  */
-function abandon(question: string): RecordFillOutcome {
-  return {
-    status: "abandoned",
-    message:
-      `nobody answered ${question} — the terminal was abandoned (Ctrl-D), or there was ` +
+function abandon(io: RecordFillIo, question: string): RecordFillOutcome {
+  return abandonWith(
+    io,
+    `nobody answered ${question} — the terminal was abandoned (Ctrl-D), or there was ` +
       `none to conduct this interview on`,
-  };
+  );
 }
 
 /**
@@ -672,6 +693,7 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
   // unanswered question here used to record the largest fill this rung could carry.
   if (quantityReply === UNANSWERED) {
     return abandon(
+      io,
       `how much of '${filled.orderId}' filled, and ${filled.remainingQuantity} is the ` +
         `rung's whole remainder rather than an answer`,
     );
@@ -759,7 +781,7 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
     observedAt,
   );
   if (observed.status === "abandoned") {
-    return abandon(observed.question);
+    return abandon(io, observed.question);
   }
   if (observed.status === "bad-quantity") {
     return reject(
@@ -806,10 +828,10 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
   // this answer: the inference is never recorded as an observation.
   const confirmed = await io.ask("Confirm these derived verdicts? [y/N]: ");
   if (confirmed === UNANSWERED) {
-    return abandon("whether the derived verdicts are right");
+    return abandon(io, "whether the derived verdicts are right");
   }
   if (!isAffirmative(confirmed)) {
-    return { status: "abandoned", message: "the derived verdicts were not confirmed" };
+    return abandonWith(io, "the derived verdicts were not confirmed");
   }
 
   const cancelled = proposal.verdicts.filter((verdict) => verdict.verdict === "cancelled");
@@ -822,7 +844,10 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
     // about lines that go into an append-only file. An unanswered question is not that
     // decision, and the act does not get to continue on it.
     if (alsoAnswer === UNANSWERED) {
-      return abandon(`whether to record ${cancelled.length} confirmed cancellation(s) in this act`);
+      return abandon(
+        io,
+        `whether to record ${cancelled.length} confirmed cancellation(s) in this act`,
+      );
     }
     if (isAffirmative(alsoAnswer)) {
       alsoCancelled = cancelled.map((verdict) => verdict.orderId);
@@ -888,7 +913,8 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
 
   // The authoring interview, behind its own seam (#audit-14). Its rejection arms carry the
   // reason token and the message this flow used to build inline, so `reject` still prints
-  // the identical bytes; `abandoned` passes straight through, nothing having been written.
+  // the identical bytes; its `abandoned` message is spoken here, by `abandonWith`, because
+  // a sub-flow that returns a message has no `io` to say it with.
   const authored = await authorLadderTarget(
     io.ask,
     io.out,
@@ -900,7 +926,7 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
     return reject(io, authored.reason, authored.message);
   }
   if (authored.status === "abandoned") {
-    return authored;
+    return abandonWith(io, authored.message);
   }
   const target: LadderTarget = authored.target;
 
@@ -911,7 +937,7 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
   // so `reject` still prints the identical bytes.
   const funding = await resolveFunding(io.ask, folded, resting, reserve, filled, filledQuantity);
   if (funding.status === "abandoned") {
-    return funding;
+    return abandonWith(io, funding.message);
   }
   if (funding.status === "rejected") {
     return reject(io, funding.reason, funding.message);
@@ -985,10 +1011,10 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
   );
   const write = await io.ask("Write BOTH? [y/N]: ");
   if (write === UNANSWERED) {
-    return abandon("whether to write both files");
+    return abandon(io, "whether to write both files");
   }
   if (!isAffirmative(write)) {
-    return { status: "abandoned", message: "the fill act was not confirmed" };
+    return abandonWith(io, "the fill act was not confirmed");
   }
 
   // ---- 8. THE WRITE. Log first, sidecar second, roll the log back if the sidecar fails.

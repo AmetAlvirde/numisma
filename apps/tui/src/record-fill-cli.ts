@@ -69,15 +69,23 @@ const paths = resolveEventStorePaths();
  * PHRASING. Every writer of the act sits behind `Write BOTH? [y/N]`
  * (`record-fill.ts`), on which `isAffirmative("")` is false, so an abandoned run reached
  * that gate and abandoned — after ratifying six defaults on the way, in front of an
- * operator who had already walked away. That argument also had no equivalent for
- * `Append this lot? [Y/n]`, whose `[Y/n]` phrasing pointed the other way and which the
- * import shell's write-door latch does not cover. The refusal lives at each question now,
- * so neither the ordering of this interview nor the phrasing of its gates is load-bearing,
- * and this act still needs no abandonment latch of its own.
+ * operator who had already walked away. So no abandoned fill act ever reached a durable
+ * write, `Append this lot? [Y/n]` included: that gate's `[Y/n]` phrasing pointed the other
+ * way, but it is four questions upstream of the door, so the lot was attached in memory and
+ * the act still refused. What was wrong was resting the whole act's safety on ONE gate's
+ * wording. The refusal lives at each question now, so neither the ordering of this interview
+ * nor the phrasing of its gates is load-bearing, and this act still needs no abandonment
+ * latch of its own.
  *
  * `record-fill.test.ts` pins it: the happy-path script with exactly one answer replaced by
  * the sentinel abandons at THAT question, with both files byte-identical, and the count of
  * questions put says it stopped there rather than racing to the door.
+ *
+ * THE EXIT CODE IS THE SECOND HALF OF THE ANSWER, NEVER THE WHOLE OF IT. This shell maps
+ * any non-`recorded` outcome to 1 and prints nothing itself; the words are `recordFill`'s
+ * to write, and it writes them to `io.err` for `rejected` AND `abandoned` alike. An
+ * abandoned act that reached only this line would leave the operator a dropped prompt and
+ * a status, with no way to tell whether the fill landed.
  */
 const prompt = createPromptChannel({
   isTTY: Boolean(process.stdin.isTTY),
