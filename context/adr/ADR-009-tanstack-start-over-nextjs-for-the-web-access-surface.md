@@ -136,6 +136,16 @@ is the objection; `BETTER_AUTH_URL` is a fixed origin that cannot match a
 per-deployment preview URL without deriving it from `VERCEL_URL` at runtime),
 recorded in `docs/web-deploy-runbook.md`. It is not designed and not scheduled.
 
+_(**The per-route results above were not measured against this app.** There has
+never been a `/dashboard` or an `/api/health` here, so whatever produced that
+table was not this router. Treat the route-by-route numbers as withdrawn rather
+than stale. What survives is the claim the paragraph exists to make, that an
+empty Preview env makes a preview a build check and not a working app, and that
+claim rests on the environment configuration rather than on this table. Read the
+route list from `apps/web/src/routeTree.gen.ts` and current preview behavior
+from `docs/web-deploy-runbook.md`. Two routes have landed since, `/ladder/$planId`
+and the dev-only `/ladder-fixture/$state`.)_
+
 **What did not change.** The prebuilt CLI path is **kept, not deleted**, as the
 documented fallback for when the builder path breaks — it remains fully usable
 instructions in `docs/web-deploy-runbook.md`. Its **invocation did change with

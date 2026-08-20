@@ -58,3 +58,31 @@ my c2 tier?", which a single flat amount structurally cannot.
 - `Close` remains display-only in the prototype (it feeds the price journey, not
   valuation); `markPrice` stays the P&L input. Wiring valuation to the latest
   `Close` is a separate, still-open decision, deliberately *not* fixed here.
+
+## Amendment: where the code landed, 2026-08-20
+
+The decision above is unchanged. Three of its consequences describe a prototype
+state the reliable code has since left, and one mechanism arrived that this record
+predates. Recorded here rather than edited above, so the trade-offs stay legible.
+
+- **The opt-in is now Reserve-only.** "A Position/Reserve with no Lots is untiered"
+  held for both when it was written; it holds only for `ReserveRecord.lots?` today.
+  `PositionRecord.lots` is REQUIRED, and `parse.ts` rejects an empty array outright:
+  an untiered Position is written as one `c1` Lot, and there is no flat
+  `{quantity, averageCost}` shorthand left to fall back to. The honesty argument the
+  bullet makes is untouched — it now lives entirely on the cash side, which is where
+  the untraced remainder actually is.
+- **The back-compat shim is gone.** `normalizePositionLots` exists nowhere in the
+  workspace. That consequence is discharged, not pending, and the fixture format is
+  frozen as it promised.
+- **The glossary broadening was approved.** `context/ubiquitous-language.md` carries
+  it, qualified to match the paragraph above.
+- **Two later rulings decide what this ADR left to the fold.** A cash leg that must
+  inherit cost-basis provenance from position lots, and finds none, is now
+  `provenance-absent` and DISCARDS THE WHOLE EVENT rather than inventing a `c1`
+  attribution the fund never had (ADR-020's Discard Channel, narrowed to one meaning
+  by [ADR-021](./ADR-021-one-meaning-for-the-discard-vocabulary.md)). That is this
+  ADR's "no false c1" rule applied to an event the fold cannot attribute at all. The
+  companion case — lots that exist but carry zero cost — attributes wholly to the
+  canonically first Tier holding a lot, `CAPITAL_TIERS` order, so the split is
+  deterministic instead of dependent on lot order.

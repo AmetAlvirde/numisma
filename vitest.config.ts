@@ -127,7 +127,18 @@ export default defineConfig({
         // performing a real import, a real fill, a real cancel, or a real in-place
         // rewrite of the durable log. That is precisely why the flow lives in its own
         // module — `record-fill-cli.ts` says so in its own header — and those modules
-        // ARE measured. See docs/coverage-rationale.md §1.
+        // ARE measured.
+        //
+        // EXCLUDED IS NOT UNTESTED, and all four of these now prove it. Each has a
+        // suite that spawns the real shell under `tsx` against a throwaway data dir
+        // and asserts its own wiring: `record-fill-cli.test.ts`,
+        // `import-orders-cli.test.ts`, `cancel-order-cli.test.ts` and
+        // `migrate-legacy-log.test.ts`. They stay excluded anyway, and the reason is
+        // now the SECOND one rather than the first: v8 cannot report a spawned
+        // subprocess's coverage back to this process, so instrumenting these files
+        // would report a dishonest 0% for behavior that is in fact driven. Do not
+        // read a line in this list as "nothing tests this."
+        // See docs/coverage-rationale.md §1.
         "apps/tui/src/import-orders-cli.ts",
         "apps/tui/src/record-fill-cli.ts",
         "apps/tui/src/cancel-order-cli.ts",

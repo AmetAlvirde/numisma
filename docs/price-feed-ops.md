@@ -18,18 +18,28 @@ any command below.
 
 | File | Role |
 | --- | --- |
-| `ops/price-feed/run-daily-fetch.sh` | Wrapper the scheduler calls. Sets a PATH that can find `pnpm`, sources tokens, runs `pnpm prices:fetch`; on a clean fetch: (2) `pnpm spine` then (3) an auto-commit of any new data-repo changes scoped to `$NUMISMA_DATA_DIR` — idempotent if no new marks, never pushes — then (4) a post-check that **fails the job** if the durable event log is still uncommitted (lenient warn for the `head-digest.json` breadcrumb). Only once the log is verified does it touch anything derived, local before networked: (5) `pnpm gap-report -- --write` to rewrite `gap-report.json` beside the log and (6) `pnpm backfill` to refresh the hosted projection. Preserves the non-zero exit code so the scheduler notices a failure or rejection. |
+| `ops/price-feed/run-daily-fetch.sh` | Wrapper the scheduler calls. Sets a PATH that can find `pnpm`, sources tokens, runs `pnpm prices:fetch`; on a clean fetch: (2) `pnpm spine` then (3) an auto-commit of any new data-repo changes scoped to `$NUMISMA_DATA_DIR` — idempotent if no new marks, never pushes — then (4) a post-check that **fails the job** if the durable event log is still uncommitted (lenient warn for the `head-digest.json` breadcrumb). Only once the log is verified does it touch anything derived, local before networked: (5) `pnpm gap-report -- --write` to rewrite `gap-report.json` beside the log, (5b) `pnpm operator-notice` to rewrite `operator-notice.txt` beside it, and (6) `pnpm backfill` to refresh the hosted projection. A step-0 heartbeat read and an `EXIT` trap bracket the whole thing. Preserves the non-zero exit code so the scheduler notices a failure or rejection. |
 | `ops/price-feed/com.numisma.pricefeed.daily.plist` | launchd definition firing the wrapper **hourly from 18:00 to 23:00 local** (six intervals; 18:00 is the default mark time), **every day** — plus `RunAtLoad` true. The first fire on an awake machine marks the day; later fires add 0 new marks (though they still spend credits and time). See "Why the window is hourly, not a single 18:00 fire" and "Why the schedule fires 7 days/week" below. |
 | `ops/price-feed/launchagent-reinstall.md` | Runbook for pushing a plist change into the job launchd actually runs. Not executed by anything — it exists because the wrapper installs via `git pull` (launchd runs it in place) while the plist is a resolved copy, so merging a plist change does nothing on its own. |
 
 Both `.plist` / `.sh` files are templates: replace `__REPO_DIR__` / `__HOME__`
-before installing.
+before installing. The plist's `NUMISMA_DATA_DIR` is **not** a placeholder. It
+ships as a literal absolute path (launchd cannot expand `~`), so repoint it at
+your own `<fund>` checkout when you install.
 
-The wrapper also honors three lower-traffic overrides, each with a sensible
-default so most installs never need them: `NUMISMA_REPO_DIR` (repo checkout
-path, else `__REPO_DIR__`/the plist's `EnvironmentVariables`), `NUMISMA_PRICEFEED_ENV`
-(the token env file, else `~/.config/numisma/price-feed.env`), and
-`NUMISMA_PRICEFEED_LOG_DIR` (per-run log directory, else `~/Library/Logs/numisma`).
+The wrapper reads nine `NUMISMA_*` variables in all. Three are lower-traffic
+overrides, each with a sensible default so most installs never need them:
+`NUMISMA_REPO_DIR` (repo checkout path, else `__REPO_DIR__`/the plist's
+`EnvironmentVariables`), `NUMISMA_PRICEFEED_ENV` (the token env file, else
+`~/.config/numisma/price-feed.env`), and `NUMISMA_PRICEFEED_LOG_DIR` (per-run
+log directory, else `~/Library/Logs/numisma`). Two more bound the run's wall
+clock: `NUMISMA_PRICEFEED_MAX_RUN_SECONDS` (default **2700**, comfortably under
+the 3600 s gap between fires; `0` disables the watchdog, for manual debugging
+only) and `NUMISMA_PRICEFEED_WATCHDOG_GRACE_SECONDS` (default **30**, how long
+the watchdog waits after `SIGTERM` before `SIGKILL`). A run the watchdog ends
+exits **124**, and its heartbeat records the step it died at with a
+`timeout:` prefix, as in `lastStep: "timeout:backfill"`, so a wedged network call
+is distinguishable from a step that failed on its own terms.
 
 Two more let a caller put a run on either side of the mark window without
 waiting on the machine clock: `NUMISMA_MARK_TZ` and `NUMISMA_MARK_HOUR`, each
@@ -45,6 +55,21 @@ channels**: it writes the `FATAL` line to the per-run log and leaves a
 heartbeat reading `exit 1` at step `startup` with `markWindow: false`, so a
 typo that kills every fire of an evening shows up as a failed run rather than
 as `job-heartbeat.json` still describing the last good one.
+
+**A set-but-blank `NUMISMA_DATA_DIR` kills the run before anything else, and it
+is the one failure with no heartbeat.** The wrapper reads
+`${NUMISMA_DATA_DIR-…}` without the colon, so *unset* takes the default while
+`""` or `"   "` is a knob the operator got wrong: the run prints a named `FATAL`
+and exits **78** (`EX_CONFIG`, chosen not to collide with 1, 124, 127 or 143).
+No heartbeat is written, deliberately: the heartbeat lives *inside*
+`NUMISMA_DATA_DIR`, which is the broken thing, and guessing a fallback location
+is the defect the refusal exists to prevent. The message lands on inherited
+stderr, which under launchd is
+`~/Library/Logs/numisma/launchd.price-feed.err.log`, **not** the per-run
+`price-feed-<stamp>.log` (that file is not open yet). Open the launchd error log
+when a scheduled run looks like it did nothing at all. The `prices:fetch` CLI
+refuses the same value for the same reason, one layer down
+(`normalizeDataDirOverride`, ADR-006).
 
 ## Where provider tokens live (scheduled environment)
 
@@ -63,7 +88,7 @@ as `job-heartbeat.json` still describing the last good one.
   ```
 
 - **The projection write credential lives here too, and it is not like the other
-  two.** Step 5's `pnpm backfill` throws immediately without
+  two.** Step 6's `pnpm backfill` throws immediately without
   `PROJECTION_WRITE_DATABASE_URL`, so the scheduled run needs it in this same file:
 
   ```sh
@@ -272,7 +297,11 @@ without a signal (issue #185):
   appends 0 new marks.
 - It does nothing at all for a run that **never happened**, and `asOf` is the CDMX
   **calendar date** — so once midnight passes `isFreshBar` refuses yesterday's bar
-  permanently. The day is then unrecoverable by any rerun.
+  permanently. No *rerun of the daily job* can reach the missed day; only an
+  explicit `pnpm prices:fetch --as-of=<date>` can, and only because it asks the
+  providers for that day's bars rather than today's (see "Lost-day recovery"
+  below). That is an operator's deliberate act, never something the schedule
+  does for you.
 
 **What launchd actually does with a slept-through interval**, since the intuitive
 answer is wrong and #185 was filed on the wrong one. From `man 5 launchd.plist`:
@@ -303,8 +332,11 @@ So recovery has to come from the schedule, and it does, in two halves:
 - **`RunAtLoad` true is the belt-and-braces half**, and the boot/login case above is
   precisely what it covers — the one case where no coalesced catch-up exists.
 
-Neither recovers a day the machine was off for the whole window. Nothing can — that
-loss is permanent, and naming it after the fact is the gap report's job (#186).
+Neither half of the schedule recovers a day the machine was off for the whole
+window: nothing fires, so nothing marks. Naming that day after the fact is the
+gap report's job (#186), and repairing it by hand is `--as-of`'s. The loss is
+permanent only for as long as nobody runs the recovery. What no command brings
+back is a day whose provider has since dropped the bar.
 
 **`RunAtLoad` has a cost on the reading side, and it is paid explicitly.** A load can
 happen at any hour, and a pre-18:00 run stores quotes, emits **zero** marks and exits
@@ -451,7 +483,14 @@ Confirm, in order:
    the data dir carries a `generatedAt` from **this** run. Before this step existed
    the file was written only by hand, so it was a day stale every morning — and
    stale precisely on the morning after a miss, the one morning anybody reads it.
-8. **Backfill (step 6):** the log reads `[backfill] N anchor(s) upserted: <first>
+8. **Operator notice (step 5b):** the log reads `[operator-notice] wrote
+   <path>`, and that path is `operator-notice.txt` in the same data dir as
+   `gap-report.json`. On a healthy store the file is present and **empty**.
+   The step can never fail the run: the command exits 0 unconditionally, so a
+   broken notice writer cannot abort the pipeline before `backfill`. A disk
+   failure is the one thing it cannot write into the file, and that goes to
+   this log as `[operator-notice] could NOT write the notice: …`.
+9. **Backfill (step 6):** the log reads `[backfill] N anchor(s) upserted: <first>
    … <last>`, one line per anchored date. `[backfill] failed:
    PROJECTION_WRITE_DATABASE_URL is not set` means the key is missing from the env
    file — the run goes red here, deliberately, rather than leaving the dashboard to
@@ -491,8 +530,9 @@ after everything else had succeeded. The command now floors a zero-argument run 
 the later of the era start and 400 days back (`boundedEraFloor`), so the scheduled
 invocation stays zero-argument — no date for a cron job to get wrong — and can
 never grow into its own cap. The trade, stated: from 2027-08-08 the default report
-is a trailing 400-day window rather than the whole era. A lost day is permanent and
-unfixable, so aging one out is right; `--since` still reaches it.
+is a trailing 400-day window rather than the whole era. A lost day more than 400
+days old is one nobody is going to recover by hand, so aging it out of the
+zero-argument report is right; `--since` still reaches it.
 
 ### Dry-run record
 
@@ -527,8 +567,10 @@ bad day never appends a bad mark. The console/log distinguishes the two cases �
   of the remaining fires in the 18:00–23:00 window re-fetches the symbol, and the
   idempotent id means the retry costs nothing (the marks that already landed are
   not duplicated). A manual `pnpm prices:fetch` does the same thing sooner.
-  **After midnight it is not "caught up" by anything**: `asOf` is the calendar
-  date, so the missed day stays missed and only the gap report will name it.
+  **After midnight no scheduled fire catches it up**: `asOf` is the calendar
+  date, so the daily job can only ever mark today. The missed day is then a job
+  for `pnpm prices:fetch --as-of=<date>` (see "Lost-day recovery" below), and the
+  gap report and the operator notice are what tell you it is owed.
   Investigate only if a symbol fails repeatedly (registry/symbol drift, provider
   outage). The failing symbol is named in the message.
 
@@ -815,7 +857,8 @@ uses `<fund>`** — deliberately, and it should stay that way: a placeholder lef
 unsubstituted here would fail *silently* (a profile reading a non-existent path
 prints nothing, exactly like a healthy machine) rather than loudly in front of the
 operator, and a hole cannot be the third reader of a shared default. The literal
-discloses nothing the committed `ops/price-feed/run-daily-fetch.sh:59` does not
+discloses nothing the committed `DATA_DIR=` line in
+`ops/price-feed/run-daily-fetch.sh` does not
 already write. If your store lives elsewhere, change it in all three places named
 below, not just here.
 
@@ -866,27 +909,29 @@ other two are divergences of *value format*.
 - **A value your shell exports and launchd never sees.** The snippet expands
   `${NUMISMA_DATA_DIR:-…}` in an **interactive login shell**. The wrapper runs
   under **launchd**, which starts the job with a bare, non-login environment —
-  this page's install section and `run-daily-fetch.sh:44-54` exist entirely
+  this page's install section and the wrapper's `PATH_PREPEND=` block exist entirely
   because of that fact, for `PATH`. `NUMISMA_DATA_DIR` is no different: a value
   exported from `~/.zshrc` — the very file this section tells you to edit, and the
   natural place to put it — is **invisible to the scheduled run**. So the wrapper
   writes `operator-notice.txt` into `$HOME/Dev/<fund>/data` while your profile
   `cat`s `/Volumes/ledger/data/operator-notice.txt`, which never exists. `[ -s … ]`
   is false on every new terminal, forever, and the machine reads as clean. Note
-  that the wrapper's `DATA_DIR` is resolved at `run-daily-fetch.sh:59`, **before**
+  that the wrapper's `DATA_DIR` is resolved in its configuration block, **before**
   the private token file is sourced under `set -a`, so putting `NUMISMA_DATA_DIR`
   in `~/.config/numisma/price-feed.env` does not fix this either — it splits the
   run instead (bash writes the notice in the pre-source dir, step 5b's
   `pnpm operator-notice` writes it in the post-source one). The token file is for
   provider tokens; the data dir belongs in the plist.
 - **A `~/`-prefixed value.** The engine expands a leading `~/` itself
-  (`data-dir.ts:50-52`). Bash does **not** expand a tilde that arrives inside a
+  (the tilde arm of `normalizeDataDirOverride` in
+  `packages/engine/src/data-dir.ts`). Bash does **not** expand a tilde that arrives inside a
   variable's value, so the snippet reads a directory literally named `~`. The
   wrapper writes the real notice; your shell reads an empty path and prints
   nothing, forever.
 - **A relative value.** The engine *refuses* it outright with a named error — "a
   relative value resolves differently depending on the working directory, so it is
-  rejected to prevent a split-brain ledger" (`data-dir.ts:53-58`). The snippet has
+  rejected to prevent a split-brain ledger" (the relative arm of the same
+  function). The snippet has
   no such guard: it resolves the value against whatever directory the shell
   happened to start in, which differs between terminals.
 
@@ -952,6 +997,20 @@ and on the next run the row is gone. That standing debt on every new shell is th
 pressure the channel exists to apply. The date is repeated inside the command line
 on purpose, so a line that reaches you alone — grepped, quoted into a standup,
 wrapped by a narrow terminal — still says which day it recovers.
+
+**The enumeration is capped at `MAX_NOTICE_LOST_DAYS` days** (ten, in
+`packages/event-store/src/operator-notice.ts`), which is a width ceiling on the
+notice, never a narrowing of the derivation. Past ten the **most recent** days
+are the ones kept, because a lost day never clears itself and the tail of the
+window is where the still-actionable damage sits. One tail line names the rest:
+
+```text
+Numisma: 4 earlier lost day(s) withheld — enumerate them with pnpm gap-report.
+```
+
+That pointer works because the notice and a bare `pnpm gap-report` open the same
+window (`defaultGapReportSince`), so the command really does enumerate the days
+the cap held back. The line appears only when days were actually withheld.
 
 **Venue-dark days are COUNTED on one line, never enumerated, and only the RECENT
 ones are counted at all**:

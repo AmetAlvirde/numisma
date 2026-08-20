@@ -19,7 +19,7 @@
  *
  * ADR-001's split, once more: every decision about what the file MEANS is pure
  * (`listPlansAsOf` in the engine, `formatPlansReport` beside this shell) and only the
- * two reads and the exit code live here.
+ * three reads and the exit code live here.
  *
  * THE EXIT CODE IS THE POINT. `0` ONLY IF the file loaded and every line in it was
  * readable — one-directional, deliberately. Non-zero does NOT imply a bad plan line:

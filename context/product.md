@@ -28,17 +28,29 @@ execution behavior, and decision history across Tempos.
 
 ## Access Surface
 
-- Initial access surface: local-first TUI.
-- Future access surfaces may include web SaaS, automation surfaces, or
-  additional clients.
+- The authoring surface is the local-first TUI. Every write — ingest, orders,
+  fills, plans — happens on the operator's machine, against the durable log.
+- A second, **read-only** surface has since shipped: a hosted, single-tenant,
+  session-gated projection of the composition, fed by one-way local→cloud push
+  (ADR-007, ADR-009, ADR-016). It is phone-checkable review, never an authoring
+  surface: nothing it serves can be written back, and it holds a narrowed
+  allow-listed shape of the fund, not the log.
+- Further access surfaces (automation, additional clients) remain open.
 
 ## Work Boundaries
 
 - MVP work centers on manual portfolio tracking, execution-integrated
   journaling, review dashboards, and close workflows.
 - MVP work excludes broker or exchange integrations, automated execution, team
-  workflows, second-party approvals, SaaS deployment, and full back-test or
+  workflows, second-party approvals, multi-tenant SaaS, and full back-test or
   forward-test engines.
+- **The hosted projection is deployment, not SaaS (ADR-007/008/011/016).** The
+  exclusion above was once written as "SaaS deployment" and is now narrower,
+  because a single-tenant read-only projection shipped. What stays excluded is
+  what made SaaS a boundary in the first place: more than one tenant, sign-up,
+  team workflows, and any write path from the cloud back to the log. One seeded
+  account, sign-up disabled, and a session verified before any fund value is
+  read.
 - **Automated market data works through the two-plane price model (ADR-005):** a
   disposable, re-fetchable price store beside the event log, and the sparse
   `PriceMarked` valuation mark on the existing validated inbox. Prices arrive
@@ -52,6 +64,14 @@ execution behavior, and decision history across Tempos.
   placement — the MVP exclusion of broker/exchange integrations and automated
   execution above still holds; only the import step exists, and it is
   deliberately not (yet) automated or piped (ADR-014).
+- **A plan is a declaration the Fund is measured against, never an instruction
+  it executes.** A position's intended ladder or cadence is authored by hand in
+  a durable sidecar (`data/plans.jsonl`, outside the event log), and supersession
+  is by append so an as-of replay shows the plan that was in effect then.
+  Nothing places an order from it. Its only enforcement is being *shown*: the
+  desk report marks each active position against what actually filled, and
+  `data/reconciliations.jsonl` records that the comparison was made and what it
+  said. A gap is reported as unknown, never as clean.
 - Taxes may be annotated or exported later, but tax logic is not core decision
   logic for the MVP.
 

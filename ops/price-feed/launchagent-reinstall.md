@@ -168,8 +168,13 @@ tail -25 "$(/bin/ls -t ~/Library/Logs/numisma/price-feed-*.log | head -1)"
 
 On a second run of the same evening, want: `0 new transactions found, N duplicates
 skipped` at `spine`, `no tracked data changes to commit (idempotent no-op run)` at
-`commit`, `post-check OK`, `[backfill] N anchor(s) upserted`, and
-`price-feed daily run complete.`
+`commit`, `post-check OK`, `[operator-notice] wrote <path>` at step 5b,
+`[backfill] N anchor(s) upserted`, and `price-feed daily run complete.`
+
+A healthy evening also leaves `operator-notice.txt` **present and empty** beside
+the heartbeat: step 5b truncates it when there is nothing to report, so a new
+terminal prints nothing. A non-empty file after a clean reinstall run is a
+finding to read, not a wiring fault.
 
 ## Rollback
 
@@ -200,8 +205,8 @@ healthy run.
 Two things keep this bounded, and they are worth knowing before anyone "fixes" it:
 
 - **It does not corrupt the staleness signal.** `prices-fetch` is not in the
-  wrapper's `MARKS_LANDED_STEPS` (`commit post-check gap-report backfill complete`,
-  `run-daily-fetch.sh:121`), so a run that dies there does **not** stamp
+  wrapper's `MARKS_LANDED_STEPS` (`commit post-check gap-report operator-notice
+  backfill complete`), so a run that dies there does **not** stamp
   `lastMarkWindowFinishedAt`. The carried value survives, and staleness is still
   judged against the last run that genuinely marked. The failure is a false alarm
   about *health*, never a false reassurance about *marks* — which is the direction

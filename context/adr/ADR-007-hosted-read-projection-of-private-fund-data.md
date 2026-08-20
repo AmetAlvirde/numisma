@@ -363,6 +363,16 @@ blast-radius paragraph's own terms rather than around them:
   `reason`, its `effectiveAt`, the per-line skip detail, and every fold diagnostic. The rungs ship
   as `priceUsd` alone.
 
+  > **⚠ Superseded 2026-08-11 by ADR-016 (authentication is the disclosure ceiling), which names
+  > these two sentences as the cost of not amending here.** `sizeUsd` **does** ship, and the rungs
+  > do **not** ship as `priceUsd` alone: the wire rung also carries its `id` and per-rung
+  > execution state, and the branch root carries the ladder's `planId` and a `tornActs` count.
+  > `sizeUsd` crossed because the `aria-hidden` chart's accessible substitute is generated from
+  > per-rung declared size and from nothing else (ADR-019), which is a use the phone-glance
+  > argument above never considered. The rest of this bullet, `reason`, `effectiveAt`, the skip
+  > detail, the fold diagnostics, stands unamended. The current wire is
+  > `apps/web/src/projection/contract.ts`; read it, not this list.
+
 **This AMENDS the "not stop levels" sentence, and says so.** The first amendment closes with:
 *"the cloud again holds only derived dashboard values, not stop levels, strategy tags, or trade
 history."* Read as a claim about invalidation levels, strategy tags and the closed book, that
@@ -400,6 +410,18 @@ additive growth because the version-history note's C5 carve-outs cover optional 
 existing branches, not a new top-level branch. The window is deploy → `pnpm backfill`, upsert-only
 (every existing row overwritten in place at v4, row count unchanged), minutes long,
 operator-controlled, entered green.
+
+> **⚠ The pin has moved again, and the cutover-window mechanism this paragraph describes is
+> gone.** `COMPOSITION_SNAPSHOT_SCHEMA_VERSION` is 6 as of the venue-dark verdict (#266); v5
+> was the Fill Path. More importantly, the reader stopped testing the stored version for
+> **equality** and now accepts a **range**:
+> `MIN_SUPPORTED_SNAPSHOT_SCHEMA_VERSION ≤ stored ≤ current`, via `isSupportedSchemaVersion`
+> (spec #285 / G-D9). That reverses the deploy order: the reader ships first understanding both
+> shapes, so a bump no longer opens a window in which every stored row is unreadable and the
+> phone refuses. The doctrine underneath, *a read-model schema change is a re-push, never a
+> data migration*, is untouched. Both constants live in
+> `apps/web/src/projection/contract.ts`; take the numbers from there rather than from any
+> amendment, including this note.
 
 **Degrade the branch, never the anchor.** A sidecar that cannot be read must not cost the phone
 its NAV. `source: "unreadable"` and `state: "unreadable"` are how a broken read reaches the

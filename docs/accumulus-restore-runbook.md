@@ -20,7 +20,9 @@ below are sufficient, and a wrapper is deferred until a second failure shape dem
 Not tampering — **buggy-but-honest feature code appending a structurally-valid,
 semantically-wrong event** through the sanctioned ingest path. The reproduced failure: a
 wrong btc mark (+44%, inside the ±50% magnitude guard, so legitimately appended) drove
-NAV from \$19,760.70 to \$22,863.31 and no validation layer caught it. Once such an
+NAV up by about a sixth, say from \$10,000.00 to \$11,600.00, and no validation layer
+caught it. Those two figures are synthesized: this repository is public, so the real
+ones live in the private notes vault (the ADR-012 convention). Once such an
 append lands, this runbook answers the two questions the operator otherwise cannot
 answer cheaply: **when** did the value go wrong, and how do I **go back**.
 
@@ -95,14 +97,15 @@ resolve by keeping every surviving line **except** the reverted one, then
 
 **The daily wrapper's commit is per-run, not per-file.** `run-daily-fetch.sh` stages
 and commits every tracked sidecar that changed in the same commit as the price marks
-(`events.jsonl`, `genesis.json`, `preferences.jsonl`, `orders.jsonl`) — whatever
+(`events.jsonl`, `genesis.json`, `preferences.jsonl`, `orders.jsonl`,
+`plans.jsonl`) — whatever
 changed that run rides in together. If an `orders:import` or a preferences change
 landed the same day as the bad mark, `git revert` on that commit undoes **all of
 it**, not just the price mark: the `OrderRecord`s and any preferences edits from that
 run disappear too, silently — no skip, no warning, nothing in `available-capital`
 naming what left. Before reverting, run `git show <bad-sha> --stat` and read the diff
 of every changed file, not just `events.jsonl`; if the commit also touched
-`orders.jsonl` or `preferences.jsonl`, either accept losing those changes or use the
+`orders.jsonl`, `preferences.jsonl` or `plans.jsonl`, either accept losing those changes or use the
 surgical `checkout` alternative below to keep them and hand-remove only the bad
 event line.
 

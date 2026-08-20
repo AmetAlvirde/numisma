@@ -18,7 +18,7 @@ not be read."*
 
 The reason is that **a skipped row has no id to be given.**
 `synthesizeOrderId` (`packages/engine/src/orders/ingest.ts`) derives the id from
-venue, pair, side, price and submitted-at — the very tokens that failed to parse.
+venue, symbol, side, price and `observedAt` — the very tokens that failed to parse.
 A durable *"something was here"* could therefore never be matched by a later
 import, and so could never be **retired** by one: a permanent blot on every future
 report with no verb to close it.

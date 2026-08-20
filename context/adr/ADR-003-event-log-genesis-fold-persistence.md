@@ -15,7 +15,12 @@ they reach the log. Chosen because the domain is already event-shaped and immuta
 persisting the *stream of actions* rather than a mutable snapshot is the honest
 model and yields replay, durable audit history, and as-of review for free. Per
 ADR-001 the fold is pure `@numisma/engine` domain while file IO, inbox detection,
-dedup persistence, and startup orchestration stay in `@numisma/tui`.
+dedup persistence, and startup orchestration stay outside it. (The IO half has since
+split: the READ path — `loadGenesis` / `loadEventLog` / `loadFoldedReview` — moved
+into `@numisma/event-store` so the TUI and the web push shell fold one log rather
+than two copies; ingest, dedup persistence, the append and the git capture are still
+`apps/tui`'s. The boundary this ADR draws is unchanged; only which package holds the
+read side is.)
 
 ## Considered Options
 
@@ -253,7 +258,12 @@ in slice #103.
   `settlement` cash leg rides on it exactly as `PositionClosed`'s does (the
   cash-settlement amendment's on-the-trade-leg discipline, preserved).
   `PositionAddedTo { positionId, lot, funding }` scales into an existing Position; the
-  atomic `funding` cash leg rides on it exactly as `PositionOpened`'s does.
+  atomic `funding` cash leg rides on it exactly as `PositionOpened`'s does. **This
+  amendment is no longer the end of the enumeration.** `ReserveOpened` landed as the
+  tenth verb under its own decision — see
+  [ADR-012](./ADR-012-reserve-opened-tenth-event-verb.md) — so
+  `PortfolioEventType` in `packages/engine/src/events/types.ts` is the count, and
+  this list is the history of how it got there.
 - **The fold now mutates open-position lots — a new capability.** Before this
   amendment the fold only ever *created* a Position (open) or *retired* it
   (close/delete); reserves were the only records it mutated in place (the
@@ -366,12 +376,11 @@ not, and the reason is *structural*, not a matter of discipline:
   `fundValueUsd` (sourced from the canonical `buildCompositionReport`, never a side calc),
   open/closed Position counts, the head event id, and the writing-app version — every field
   recomputable from the log by a fold. **Corrected in place 2026-08-13 (spec #323 →
-  ADR-020, the Discard Channel): schema v2 adds a fifth recomputable field,
+  ADR-020, the Discard Channel): schema v2 adds a recomputable field,
   `discardedEventCount`** — the number of DISTINCT events the capture fold read and could
   not apply (`dedupeFoldSkips(folded.skipped).length`, the Discard Channel's own key, so
   this artifact and the unattended verdict line can never report different figures for
-  one log; a `Transfer` records each absent leg, and that is two records about one
-  event) — so a nonzero discard is visible on the one artifact
+  one log) — so a nonzero discard is visible on the one artifact
   premised on nobody replaying the log to re-check it; still a count only, still no
   reader, still recomputable, so this bullet's claim is amended, not broken. The rejected "dated full snapshot" was a *replacement*
   for the actions log; the Head Digest is a *pointer into* it.
@@ -384,20 +393,23 @@ not, and the reason is *structural*, not a matter of discipline:
   a shadow source of truth**, whatever it contains. That is precisely why this ADR's
   snapshot-rejection is *honored*, not contradicted: the fold-over-events remains the only
   truth, and the digest is merely the breadcrumb that makes the search for a bad append
-  cheap. Validated on live data — a wrong-but-valid mark's `19760.70 → 22863.31` NAV jump was
+  cheap. Validated on live data — a wrong-but-valid mark's NAV jump was
   pinned to one commit by `git log -p head-digest.json`, then `git revert` + re-fold restored
-  `19760.70`; the fold stayed truth, the digest only made the search a one-liner.
+  the prior NAV; the fold stayed truth, the digest only made the search a one-liner. (Values
+  are withheld — this repository is public; they live in the private notes vault.)
 
 ### The anti-drift invariant (named, ADR-cited)
 
 Elevated here from an incidental test assertion to a **named invariant of this ADR**,
 analogous to the realized-P&L amendment's blank-the-closed-book lock:
 
-> `deriveHeadDigest(folded).fundValueUsd === buildCompositionReport(folded.data).totals.fundValueUsd`
+> `deriveHeadDigest(folded, headEventId, appVersion).fundValueUsd === buildCompositionReport(folded.data).totals.fundValueUsd`
 >
 > (`folded` is the whole `FoldedReview` envelope since ADR-020 — `deriveHeadDigest` takes
-> it, never a bare `FundReviewData`, so a caller structurally cannot derive a digest that
-> omits `discardedEventCount`.)
+> it as its FIRST argument, never a bare `FundReviewData`, so a caller structurally
+> cannot derive a digest that omits `discardedEventCount`. The head id and the writing
+> app version are the caller's, not the fold's, which is why they are separate
+> arguments.)
 
 The Head Digest's value **must equal the canonical composition report's fund value,
 byte-for-byte** — never a rounded, reformatted, or independently computed number. Any change
@@ -419,7 +431,7 @@ ADR-006 for the substrate and the glossary's new **Head Digest** row.
 
 The fold stays a **pure projection** in `@numisma/engine`; `deriveHeadDigest` and
 `formatIngestCommitMessage` are pure (no IO), and the write of `head-digest.json` is runtime
-IO in `@numisma/tui`. The log stays **append-only** and the atomic temp-and-rename append is
+IO in `apps/tui`. The log stays **append-only** and the atomic temp-and-rename append is
 unchanged — the digest is written *after* the append is already durable, and its write
 failing is one more best-effort loud-warn (ADR-006's commit contract), so it can never block
 or corrupt an append. Considered and rejected here: **giving the digest an engine reader /

@@ -15,7 +15,9 @@ logic), `apps/web/src/components/FillPath.tsx` and
 `apps/web/src/components/PriceDropPathChart.tsx` (presentation only —
 [ADR-019](../context/adr/ADR-019-the-chart-is-presentation-its-accessible-substitute-is-generated.md)),
 `apps/web/src/ladder/convexity-caption.ts` (the chart's generated accessible
-substitute).
+substitute), `apps/web/src/ladder/rung-state-copy.ts` (the words a rung's state
+prints, authored on the web from facts and never read off the wire), and
+`apps/web/src/styles.css` (the row tints, the only place `color-mix()` appears).
 
 ---
 

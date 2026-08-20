@@ -49,7 +49,8 @@ position open — and then silently vanished at fold (`foldEvents`'s
 composition report's `warnings: []`. [Precision note, 2026-08-08: read the
 `warnings` here as the report's, not the fold's. `foldEvents` returns
 `FundReviewData`, which has NO warnings field — the only `warnings` in
-`contracts.ts` is on `CompositionReport` (`:487`). The fold has no diagnostics
+`contracts.ts` is on `CompositionReport` (`:577` today; still the file's only
+`warnings` field). The fold has no diagnostics
 channel to warn on at all; that is ledger item 18, still open, and it is why
 every rule of this class has to sit at ingest. **Corrected in place 2026-08-13
 (spec #323, implementing #293 — closes ledger item 18): `foldEvents` now
@@ -60,7 +61,11 @@ Channel (ADR-020), not as a field ON the read model — the distinction this ADR
 amendment's whole point turns on (a verb the fold drops for naming an absent
 Position or Reserve now surfaces as a `skipped` record rather than nothing at
 all; this ADR's own MUST FIX 1 was closed at ingest, not by that channel, and
-is unaffected). The historical claim above is accurate for the state at
+is unaffected). ADR-021 then went further than this note describes: every
+`FoldSkipReason` — `position-absent`, `reserve-absent`, `provenance-absent` —
+means the fold applied NOTHING AT ALL, so a close naming a missing reserve now
+leaves the position open rather than booking its row against a reserve that
+never moved. The historical claim above is accurate for the state at
 2026-08-08 and is left standing as the record of what MUST FIX 1 actually
 found.**] On the repo's own `cash-settlement.fixtures.ts` the shadow reached `amount
 3100 / c1 1400 / c2 1700` where the fold produced `amount 2300 / c1 1200 / c2
@@ -222,9 +227,11 @@ L ≈ 100k.
   unification the gate folds **before** the append, where a fold throw correctly
   refuses the batch. That is the right behavior (a book that cannot be folded must
   not be extended) but it is strictly more that ingest can now fail on, and it is
-  not what the guarded block below it teaches a reader to expect. The one throw
-  `foldEvents` actually carries on this path is its exhaustiveness latch, which is
-  a compile-time-guarded impossibility.
+  not what the guarded block below it teaches a reader to expect. The only throw
+  `foldEvents` can actually reach on this path is its exhaustiveness latch, which is
+  a compile-time-guarded impossibility. (`foldEvents` does carry a second throw —
+  an `asOf` strictly before `genesis.review.asOf` — but the gate folds with no
+  `asOf` at all, so it is unreachable here.)
 
 - **The last-close anchor survives the deletion — verified, because it is the one
   input that looked like it might not.** The shadow's `lastClose` map existed
@@ -255,8 +262,11 @@ L ≈ 100k.
   lands, so the gate's world for it is smaller.** The gate walks a batch in LOG
   order; the fold applies it in **(`asOf`, then log) order**. A verb dated before
   the event that creates its target therefore reaches the fold FIRST and hits a
-  skip branch — `PositionClosed`'s `if (closing)`, `PositionTrimmed`'s
-  `if (trimming)`, `PositionAddedTo`'s `if (adding)` — and never lands at all.
+  skip branch — the `PositionClosed`, `PositionTrimmed` and `PositionAddedTo` arms
+  each raise `position-absent` when the fold has no record of the target — and
+  never lands at all. (The `PositionClosed` arm was an `if (closing)` guard when
+  this was written; it is an inverted early return now, and since ADR-020 the drop
+  is reported on `skipped` rather than being silent.)
   Measured on `[PositionOpened asOf 06-05 btc-pos, PositionClosed asOf 06-03
   btc-pos]`: both events pass both gates, the fold leaves btc-pos **open**, mints no
   closed-book row and books no proceeds, so `closedPositionIds` comes back EMPTY

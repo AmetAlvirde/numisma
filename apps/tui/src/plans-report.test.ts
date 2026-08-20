@@ -277,8 +277,16 @@ describe("the plans desk report", () => {
 /**
  * THE RUNBOOK IS PART OF THE SLICE, so its load-bearing property is asserted rather
  * than remembered: its verification step reads the RENDERED OUTPUT and the EXIT
- * CODE, never the stderr. A runbook that told the operator to watch for a warning
- * would re-introduce the exact failure the exit code exists to remove.
+ * CODE, never the error channel. A runbook that told the operator to watch stderr
+ * for a warning would re-introduce the exact failure the exit code exists to remove.
+ *
+ * The guard is on the INSTRUCTION, not on the word. `plans-cli.ts:65-67` really does
+ * write the fold's discards to `process.stderr`, deliberately outside
+ * `report.exitCode`, and the runbook is required to say what those lines are and that
+ * they never move the verdict — that defends the same property. What it may never do
+ * is send the operator to that channel to decide whether the run passed. The failure
+ * shape is an instruction, not a location, so the assertion is not scoped to a
+ * section.
  */
 describe("the plans authoring runbook", () => {
   const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -294,8 +302,13 @@ describe("the plans authoring runbook", () => {
     expect(text).toMatch(/EXIT=0|exit(s)? 0/);
     // The durability half is confirmed by looking at git history, not by a warning.
     expect(text).toContain("git -C ~/Dev/<fund> log -- data/plans.jsonl");
-    // No instruction anywhere to read the error channel for the verdict.
-    expect(text).not.toMatch(/stderr/i);
+    // No instruction anywhere to read the error channel for the verdict. Naming the
+    // stderr lines is allowed — the shell really writes them — so match an instruction
+    // verb bound to `stderr` inside one sentence, in either order, rather than the
+    // bare word.
+    const SENDS_THE_READER_TO_STDERR =
+      /(?:watch|check|read|look at|inspect|monitor|scan|grep|tail|verify|confirm)[^.\n]{0,80}stderr|stderr[^.\n]{0,80}(?:to (?:check|confirm|verify|see|know|tell)|for the (?:verdict|warning|result|answer|error))/i;
+    expect(text).not.toMatch(SENDS_THE_READER_TO_STDERR);
   });
 
   it("works the non-ISO date trap through, because a parse-based check misses it", () => {
