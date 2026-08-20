@@ -14,6 +14,15 @@ up as "unreachable."
 Line numbers drift as files change; they are anchors, not contracts. Re-run
 `pnpm coverage` for the live picture.
 
+**Vintages, stated once.** §§2, 4, 5 and 6 are re-derived from ONE run at
+`c336139` (#389), on a checkout with no gated integration Postgres:
+`push-core.integration.test.ts`, `backfill.integration.test.ts` and
+`provision.integration.test.ts` all skip, and the figures that turn on that say
+so where they stand. §7 carries its own vintage, `e1d6265`, and was NOT
+re-derived here; several of its rows have drifted since (`record-fill.ts` and
+`import-orders.ts` among them), which is that section's own re-derivation to do,
+not this one's to quietly half-fix.
+
 ## 1. Excluded from instrumentation (not in the number at all)
 
 These files are excluded in `vitest.config.ts`. They are not Node-unit-testable
@@ -89,26 +98,26 @@ state the pipeline already excludes, so they are documented rather than tested.
 
 **`packages/engine/src/parse.ts`**
 
-- `validateNamedRecords` `!Array.isArray(value)` (~L148-150) — every caller
+- `validateNamedRecords` `!Array.isArray(value)` (~L149-151) — every caller
   (`portfolios` directly, plus `validateAccounts` / `validateInstruments`) only
   runs after the top-level `requiredArrays` loop has already confirmed the value
   is an array.
-- `validateReserves` `!Array.isArray(value)` (~L233-235) and `validatePositions`
-  `!Array.isArray(value)` (~L261-263) — `reserves` and `positions` are both in
+- `validateReserves` `!Array.isArray(value)` (~L234-236) and `validatePositions`
+  `!Array.isArray(value)` (~L262-264) — `reserves` and `positions` are both in
   the same top-level `requiredArrays` check, so these are unreachable from
   `parseFundReview`.
 - `validateCapitalRecordIds` `if (!isRecord(record) || typeof record.id !==
-  "string") continue` (~L415-417) — by the time this runs, every reserve and
+  "string") continue` (~L402-404) — by the time this runs, every reserve and
   position has passed `validateCapitalRecordShape`, which already required a
   record carrying a non-empty string `id`.
 - `parseReviewInput` invalid-json catch, `error instanceof Error ? error.message
-  : String(error)` false branch (~L448) — `JSON.parse` only throws `SyntaxError`
+  : String(error)` false branch (~L435) — `JSON.parse` only throws `SyntaxError`
   (an `Error`), so the `String(error)` fallback never runs.
 
 **`apps/tui/src/review-file.ts`**
 
 - `normalizeLoadFundReviewError` `error instanceof Error ? error : new
-  Error(String(error))` false branch (~L108) — the only throwers reaching it
+  Error(String(error))` false branch (~L116) — the only throwers reaching it
   (`readFile`, `parseFundReviewError`) throw `Error` instances; the
   non-`Error` fallback is a defensive coercion. (The `ENOENT`/`EISDIR`/`EACCES`
   branches above it *are* tested, the last one skipped only when running as
@@ -118,30 +127,32 @@ state the pipeline already excludes, so they are documented rather than tested.
 
 - `buildCanonicalState` Reserve `portfolioLabel` fallback
   `portfolios.get(reserve.portfolioId)?.name ?? reserve.portfolioId` (~L176) and
-  the Position `portfolioLabel` fallback (~L339) — both run only after
+  the Position `portfolioLabel` fallback (~L344) — both run only after
   `validateCapitalBase` has already excluded any record whose `portfolioId` is
   missing, so `portfolios.get(...)` always resolves and the optional-chain /
   `?? id` miss is unreachable.
-- `accountLabel` `account ? … : fallback` false branch (~L436) — same reason:
+- `accountLabel` `account ? … : fallback` false branch (~L441) — same reason:
   `validateCapitalBase` excludes any record with a missing `accountId`, so every
   record that reaches `accountLabel` has a resolved Account.
 
 **`packages/engine/src/format.ts`**
 
-- `sectionRows` `?.rows ?? []` miss (~L153) — the five composition sections are
+- `sectionRows` `?.rows ?? []` miss (~L275) — the five composition sections are
   always present in the report, so `.find(...)` never returns undefined and the
   `?? []` fallback is unreachable from `formatCompositionReport`.
 
 **`apps/tui/src/dashboard.ts`**
 
-- `emptyDetailMessage` Tempo branch (~L345-346) and Account branches
-  (~L348-350) — `emptyDetailMessage` is reached only when a drill-down's detail
+- `emptyDetailMessage` Tempo branch (`:387-389`) and Account branches
+  (`:390-392`) — `emptyDetailMessage` is reached only when a drill-down's detail
   body is empty, and only a Portfolio drill-down can be empty (it filters to
   Positions, so a Portfolio holding only Reserves yields no rows). A Tempo row
   exists only because a line carries that Tempo, and an Account row only because
   a line carries that Account, so their drill-downs are never empty and these
-  messages never render. The Portfolio branch (~L342-343) *is* tested
-  (`dashboard.test.ts`).
+  messages never render. The Portfolio branch (`:384-385`) *is* tested
+  (`dashboard.test.ts`). **These six lines are the whole of what the run reports
+  as `dashboard.ts`'s uncovered range, `:387-392`** — the range §4 names below.
+  They are accounted for here, and §4 used to say they were not.
 
 ## 3. Low-value presentation branches
 
@@ -166,7 +177,7 @@ a regression could break while the suite stayed green. It is now unit-tested:
   `fund-composition-*.test.ts` suite (`fund-composition-warnings.test.ts`,
   `fund-composition-dashboard.test.ts`). Lot-level invalid warnings are no longer
   three hand-rolled checks with three strictnesses — audit finding 5 (A3) unified
-  them into ONE predicate, `invalidLotFields` (`packages/engine/src/internal.ts:209-234`),
+  them into ONE predicate, `invalidLotFields` (`packages/engine/src/internal.ts:209-240`),
   which `canonical.ts:299` calls as defense in depth "on the same rule both ingest
   doors enforce." `invalidLotFields` reports quantity/cost/tier/`entryFx` off a
   single `isFiniteNumber` floor (`internal.ts:117`), tightened by
@@ -181,9 +192,12 @@ a regression could break while the suite stayed green. It is now unit-tested:
   empty-detail message, typed vs untyped detail columns, zero-denominator
   tier-table guards, and the `detailTitle` / summary-focus placeholder branches
   are all in `dashboard.test.ts`. NOT 100% branches (audit finding 41 — this
-  bullet used to claim it was): `:387-392` is a real, reachable render arm not
-  yet itemized here; tracked as an open small gap, not dressed up as
-  unreachable.
+  bullet used to claim it was). What the remaining `:387-392` IS, however, this
+  bullet also got wrong: it called the range "a real, reachable render arm not
+  yet itemized here," and it is neither unitemized nor reachable. It is
+  `emptyDetailMessage`'s Tempo arm (`:387-389`) and Account arms (`:390-392`) —
+  §2's entry, which gives the concrete reason no Tempo or Account drill-down can
+  ever be empty. One gap, one accounting, in §2.
 - **`packages/engine/src/format.ts`** (97.97% lines, uncovered `:119-120` and
   `:388-391`) — the `formatRowFocus` "No live records" placeholder, the
   `formatDataSafety` "no warnings" string, and the empty-section body are
@@ -197,9 +211,9 @@ a regression could break while the suite stayed green. It is now unit-tested:
   real, reachable behavior; neither is unreachable-by-design. Tracked as open,
   same posture as the §5 spine remainder.
 
-What remains uncovered after #72, beyond the two real gaps just named in
-`dashboard.ts` and `format.ts`, is the §2 defensive guards — each listed there
-with a concrete reason.
+What remains uncovered after #72, beyond the two real gaps named in
+`format.ts`, is the §2 defensive guards — `dashboard.ts`'s whole remainder among
+them — each listed there with a concrete reason.
 
 ## 5. Event-sourcing spine (ADR-003) — newly added
 
@@ -219,7 +233,7 @@ holds only the write/ingest half (`ingestInbox`, `migrateLegacyLog`, inbox
 archival, magnitude-threshold env plumbing, `parseAsOfArg`); its read-path unit
 tests moved with the code into `packages/event-store/src/event-store.test.ts`.
 
-- **`packages/engine/src/events/*.ts`** (93.85% lines, re-measured at `0428f75`) —
+- **`packages/engine/src/events/*.ts`** (93.87% lines, re-measured at `c336139`) —
   the covered core is the fold itself (`events/fold.ts` — its figure and its
   vintage are quoted ONLY in its own paragraph below, so the two cannot drift
   apart) and the ingest
@@ -230,54 +244,61 @@ tests moved with the code into `packages/event-store/src/event-store.test.ts`.
   rejection-message branches**. `events/parse.ts` (83.33% lines) is the bulk of
   the gap — 78 lines across 39 ranges, EVERY one the same shape: a
   `return eventError(...)` for one malformed field in one `parse*` function
-  (`parseDeposit`/`parseWithdraw`, `parseTransfer`, `parsePositionTrimmed`,
-  `parsePositionAddedTo`, and siblings), the "not every malformed-field
-  fixture exists yet" gap the rest of the file already documents. This is a
-  summary, not the full list (that would misrepresent a partial excerpt as
-  complete) — the two largest blocks sit inside `:554-583`
+  (`parseReserveMove`, which serves both `Deposit` and `Withdraw`,
+  `parseTransfer`, `parsePositionTrimmed`, `parsePositionAddedTo`, and
+  siblings), the "not every malformed-field fixture exists yet" gap the rest of
+  the file already documents. This is a summary, not the full list (that would
+  misrepresent a partial excerpt as complete) — the two largest blocks sit inside `:554-583`
   (`parsePositionTrimmed`'s `positionId`/`removals`/`settlement.reserveId`/
   `settlement.proceeds` fields) and `:607-623` (`parsePositionAddedTo`'s
   `positionId`/`funding.reserveId`/`funding.amount` fields).
-  `events/crossref.ts` (re-measured 2026-08-08, after PR #261) adds `:330-333`
+  `events/crossref.ts` (re-measured at `c336139`) adds `:452-455`
   (the `_never` exhaustiveness latch on the event-type switch — unreachable at
   runtime by construction, same category as `events/fold.ts`'s own `_never`
   latch, cited once in the `fold.ts` paragraph below and deliberately not
-  renumbered here as well, and the other `_never` rows in §7), `:558-562`
-  (`ReserveOpened` colliding with an
-  existing position id), `:1090-1097` (`PositionTrimmed`'s settlement-proceeds
-  deviation-threshold rejection), `:1141-1142` (`PositionAddedTo`'s
-  funding-leg debit-check error-message wrapping), and `:1204-1205,1267-1268`
-  (the `Transfer`/`PositionOpened` cross-reference error-message wrapping) —
-  the validator/cross-reference logic runs, but not every individual
+  renumbered here as well, and the other `_never` rows in §7), `:719-723`
+  (`ReserveOpened` colliding with an existing position id), and three
+  error-message wrappings of a cash-leg debit check that failed: `:1371-1372`
+  (`PositionAddedTo`'s funding leg), `:1434-1435` (`Transfer`'s source leg),
+  and `:1497-1498` (`PositionOpened`'s funding leg) — the
+  validator/cross-reference logic runs, but not every individual
   malformed-field or error-wrapping fixture exists yet. (PR #261's
   `position-seal.test.ts` closed the `PositionTrimmed` unknown-position-id and
   already-closed rejection branches this bullet used to cite as open — they
-  measure covered in the fresh run.)
+  measure covered in the fresh run.) The `PositionTrimmed` settlement-proceeds
+  deviation-threshold rejection this bullet used to carry as a fourth range is
+  covered too, and is withdrawn rather than renumbered: it sits at `:1288-1295`
+  now, and the run counts four hits on it.
 
-  `events/fold.ts` (98.04% lines, re-measured at `9e888d7`, after #371) has
-  **three** ranges open — the same three as the previous vintage, all renumbered
-  since. The ranges below are the UNCOVERED-LINE report (v8 provider,
-  the "Uncovered Line #s" column), which is the unit the rest of this file uses;
-  a branch-location span is a different measurement and is not what is quoted
-  here:
+  `events/fold.ts` (98.04% lines, re-measured at `c336139`) has
+  **three** ranges open — the same three as the previous vintage, and not one
+  of them has moved a line since. The ranges below are the UNCOVERED-LINE
+  report (v8 provider, the "Uncovered Line #s" column), which is the unit the
+  rest of this file uses; a branch-location span is a different measurement and
+  is not what is quoted here:
 
   - `:732-733` — the `Withdraw` arm's `recordSkip(event, order,
     "reserve-absent")`, taken when `applyToReserve` finds no such reserve. A
     Discard-Channel skip record rather than a numeric guard. The `if` at `:731`
     is covered — the arm runs on every applying `Withdraw` — so the range starts
     inside it. Cited as `:691-692` before; only the lines moved.
-  - `:794-797,799-800` — the `foldEvents` exhaustiveness latch (`const _never:
+  - `:794-800` — the `foldEvents` exhaustiveness latch (`const _never:
     never = event; throw new Error(...)`), categorized like the other `_never`
     latch rows (§7's `skip-message.ts`/`orders/ingest.ts`/`orders/select.ts`):
     unreachable at runtime by construction, kept live so a new verb fails the
-    build rather than falling through silently. NOT CONTIGUOUS, and the hole is
-    not a typo: `:798` is the last line of the thrown message's string
-    concatenation and measures covered, so writing this as `:794-800` would
-    claim an uncovered line that is not one. Cited as `:737-740,742-743` before
-    — the same shape, the same hole — and only the lines moved.
+    build rather than falling through silently. **This citation is a correction,
+    not a move.** It read `:794-797,799-800` before, on the reasoning that `:798`
+    measures covered and a contiguous range would therefore claim a line that is
+    not uncovered. `:798` measures nothing. It is the last line of the thrown
+    message's string concatenation, it carries NO STATEMENT AT ALL, and the text
+    reporter bridges it rather than breaking the range there — the exact case
+    §7's derivation rule spells out. Citing the split range meant quoting raw
+    statement hits where every other citation in this file quotes the run. The
+    line numbers themselves are unchanged since `9e888d7`; only the reading of
+    `:798` was wrong.
   - `:1119-1120` — the zero-`totalQuantity` early `return 0` in
     `weightedAverageCost`. The `if` at `:1118` is covered. Cited as `:1045-1046`
-    before; only the lines moved.
+    before #371 moved it; unchanged since.
 
   The `Transfer` arm's own `reserve-absent` skip is NO LONGER among them. #371
   replaced its two per-leg `applyToReserve` failure branches with a single
@@ -300,34 +321,34 @@ tests moved with the code into `packages/event-store/src/event-store.test.ts`.
   zero-`tierTotal` early return, is no longer uncovered** — the helper still
   exists (`splitTierRemoval`, `fold.ts:1044`, its `if (tierTotal === 0)` early
   return at `:1053-1055`), it simply measures covered. Those two numbers are
-  re-measured at `9e888d7` with the rest of this paragraph; #371 moved them and
+  re-measured at `c336139` with the rest of this paragraph; #371 moved them and
   the first re-measurement pass renumbered the open ranges above without
   reaching this sentence. The `PriceMarked`-carries-`usdMxn` FX-update branch
   this bullet used to name is covered too.
-- **`packages/event-store/src/event-store.ts`** (the read path, 96.03% lines) —
+- **`packages/event-store/src/event-store.ts`** (the read path, 97.27% lines) —
   the covered core is `loadEventLog`'s quarantine handling and
   `loadFoldedReview`'s fail-loud fold, exercised by
-  `packages/event-store/src/event-store.test.ts`. Uncovered (`:85-86,222-223`):
+  `packages/event-store/src/event-store.test.ts`. Uncovered (`:117-118,419-420`):
   `loadGenesis`'s validation-failure throw (a corrupt `genesis.json`, defensive)
   and `readOptional`'s non-`ENOENT` rethrow (an unexpected fs error the call path
   does not otherwise produce — defensive).
-- **`apps/tui/src/event-store.ts`** (the write/ingest path, 87.5% lines,
-  uncovered `:99-100,102-103,164-166,210-211,234-237,249-253,262-266`) — the
+- **`apps/tui/src/event-store.ts`** (the write/ingest path, 88.44% lines,
+  uncovered `:101-102,104-105,171-173,276-277,302-305,317-321,330-334`) — the
   covered core is the validated ingest boundary, dedup, atomic append, archive,
   and quarantine (`event-store.test.ts`). Argv/env parsing (`parseAsOfArg`,
   `parseMagnitudeThresholdArg`) no longer lives here at all — audit finding 35
   extracted it to `spine-args.ts` (100% covered, see below). The gap is NOT
   exclusively `migrateLegacyLog`'s abort paths (this bullet used to claim it
-  was): `ingestInbox` itself is still open in two places — `:99-100` the
-  invalid-JSON throw and `:102-103` the non-array-shape throw on a malformed
-  inbox, both ahead of the walk — and `:164-166` the best-effort
+  was): `ingestInbox` itself is still open in two places — `:101-102` the
+  invalid-JSON throw and `:104-105` the non-array-shape throw on a malformed
+  inbox, both ahead of the walk — and `:171-173` the best-effort
   durable-log-capture `catch`, which downgrades a fold/git failure in
   `captureIngestCommit` to a `process.stderr.write` warning rather than
   failing the ingest (the append already landed atomically by that point).
-  `migrateLegacyLog`'s own remainder is `:210-211` (the empty-log no-op early
-  return, not a throw) and its genuine ABORT paths — `:234-237` the
-  invalid-JSON-line throw, `:249-253` the not-a-migratable-legacy-event throw,
-  and `:262-266` the invalid-remigrated-event throw.
+  `migrateLegacyLog`'s own remainder is `:276-277` (the empty-log no-op early
+  return, not a throw) and its genuine ABORT paths — `:302-305` the
+  invalid-JSON-line throw, `:317-321` the not-a-migratable-legacy-event throw,
+  and `:330-334` the invalid-remigrated-event throw.
 - **`apps/tui/src/spine-args.ts`** (100% lines/branches) — the argv/env knobs
   lifted out of `event-store.ts` (audit finding 35): `parseAsOfArg` (both the
   space-separated and `--as-of=<date>` equals-form) and
@@ -375,8 +396,10 @@ for what that number measures.
   header-forwarding regression — an injected `auth` whose `getSession` outcome
   depends on the forwarded cookie, so the incoming request cookie must actually
   reach `auth.api.getSession({ headers })` (a dropped/blank cookie fails the test,
-  the assertion a stubbed session return cannot make). `loadDashboard` is fully
-  covered (100% branch/func). The remaining uncovered lines are the thin
+  the assertion a stubbed session return cannot make). `loadDashboard` itself is
+  fully covered. The FILE measures 78.26% lines, 100% branch, 100% functions,
+  uncovered `:84-88` — a figure this bullet never carried, so a reader had to
+  take "the remaining uncovered lines" on trust. Those five lines are the thin
   `getDashboard = createServerFn(...).handler(...)` wrapper that wires the real
   `getRequest()` / `auth` / `getReaderPool()` into `loadDashboard` — framework
   wiring that needs the TanStack Start server runtime, in the same category as the
@@ -388,10 +411,11 @@ for what that number measures.
   the DB-applying `provisionProjection()` is exercised by the gated integration
   test (`provision.integration.test.ts`), which asserts the real 8/8 credential
   invariants against a throwaway Postgres. With the test DB present, `provision.ts`
-  is 100% covered; without it, `provisionProjection()`'s whole body (`:117-125`,
-  9 lines: the DDL apply plus the grant-statement loop, 83.33% functions —
-  the one uncovered function) shows uncovered, not merely "two `pool.query`
-  lines" (the integration test skips) — flagged honestly, not hidden. The
+  is 100% covered; without it — which is how the run behind these figures ran —
+  `provisionProjection()`'s whole body (`:117-125`, 9 lines: the DDL apply plus
+  the grant-statement loop) shows uncovered, not merely "two `pool.query` lines",
+  and the file measures 82.35% lines, 100% branch, 83.33% functions: it is the
+  one uncovered function in the package. Flagged honestly, not hidden. The
   thin CLI (`provision-projection.ts`), the self-executing auth applier
   (`apply-auth-schema.ts`), and the shared test substrate
   (`pg-substrate.testkit.ts`, via the `**/*.testkit.ts` exclude) are excluded per
@@ -414,24 +438,51 @@ for what that number measures.
   exercised by the gated `push-core.integration.test.ts`: two pushes of the same
   key yield exactly one row with `pushed_at` refreshed and `report` /
   `schema_version` updated (no delete, no duplicate), pushed through the WRITER cred
-  on the #123 throwaway-Postgres substrate. Measured 100% statements / 100% lines
-  / 100% functions EVEN WITH THE TEST DB ABSENT, which is not the reassurance it
-  looks like and is why the number is spelled out: `backfill-core.test.ts` drives
-  `upsertSnapshot` through a fake pool, so the SQL string is executed but never
-  parsed by Postgres. Only the gated integration test proves the `ON CONFLICT`
-  clause is valid and idempotent against a real server; a green line count here
-  says the branch ran, not that the statement is correct SQL. Branches sit at
-  88.88% (8/9), the one gap being `loadReserveFloorAsOf`'s no-policy-in-effect arm
-  (`pickPolicyAsOf(...)?.reserveTargetPct` returning `undefined`) — R1's absent
-  floor, asserted at the reader instead (`verdict.test.ts`'s R5 case). The blast
-  radius this real fold opens — `apps/web` now depends on `@numisma/event-store`,
-  the reader for the whole private event log — is guarded structurally, not by
+  on the #123 throwaway-Postgres substrate. **Both figures this paragraph used to
+  carry are now false and are replaced, not adjusted.** With the test DB absent it
+  measures 95.83% statements / 95.83% lines / 100% functions / 69.56% branch
+  (16/23), where the text said 100/100/100 and 88.88% branch — the branch number
+  off by nineteen points in the direction that flatters the code, which is the one
+  direction a documented figure must never drift. The line figure was still worth
+  spelling out and still is, because it overstates the assurance either way:
+  `backfill-core.test.ts` drives `upsertSnapshot` through a fake pool, so the SQL
+  string is executed but never parsed by Postgres. Only the gated integration test
+  proves the `ON CONFLICT` clause is valid and idempotent against a real server; a
+  green line count here says the branch ran, not that the statement is correct SQL.
+  The ONE arm this paragraph used to name as the whole gap is not in it any
+  more: `loadReserveFloorAsOf`'s no-policy-in-effect arm
+  (`pickPolicyAsOf(...)?.reserveTargetPct` returning `undefined`), R1's absent
+  floor, measures covered in this run at 13 hits. What is open instead, cited
+  the way §7's derivation rule requires — the run's zero-hit statement lines,
+  because this file is below 100% lines — is `:302-303,380-381,384-385`:
+  `loadVenueDarkAsOf`'s `catch` body, which answers an unreadable durable log
+  with `undefined` rather than a fabricated verdict, and `loadFillInputs`'s two
+  refusals to guess, on an unreadable orders sidecar and on a book that came
+  back partially read. Three more branch-only companions sit outside that
+  column: `:330` is `fold.data.closedPositions ?? []`'s default-array arm,
+  `:382` is the `absent`-status empty-book arm of the orders ternary, and
+  `:567` is `pushAnchorAndReport`'s `input.emit ?? console.error` default,
+  never taken because every test injects its own sink. (The remaining branch
+  lines, `:301`, `:379` and `:383`, are the guards ahead of the three cited
+  bodies, not separate behavior.) Seven unexercised arms in all, every one real
+  and reachable, in the same two shapes §7's preamble names.
+
+  The blast radius this real fold opens — `apps/web` now depends on
+  `@numisma/event-store`, the reader for the whole private event log — is
+  guarded structurally, not by
   a coverage number: `apps/web/src/event-store-import-guard.test.ts` asserts no
   `apps/web` source file outside `src/push/` imports that package.
 
-**Excluded (`.ts` dead weight — see §1 table):** `push/push.ts` (self-executing
-script — now a thin argv/credential wrapper over the measured `push-core.ts`) and
-`auth/seed-account.ts` (self-executing single-tenant seed script), `lib/auth.ts` /
+**Excluded (`.ts` dead weight — see §1 table, which is the authority and which
+this list now names file for file, having previously named three of them):**
+`push/push.ts`, `push/backfill.ts` and `push/gap-report.ts` (self-executing
+scripts, each a thin argv/credential/exit-code wrapper over a measured core:
+`push-core.ts`, `backfill-core.ts`, `gap-report-core.ts`),
+`auth/seed-account.ts` and `auth/verify-rate-limit.ts` (the single-tenant seed
+and the rate-limit attack script, both self-executing over cores that are
+themselves measured), `projection/provision-projection.ts` and
+`auth/apply-auth-schema.ts` (the provisioning and auth-schema CLIs, named again
+in the `provision.ts` bullet above), `lib/auth.ts` /
 `lib/auth-client.ts` / `lib/query.ts` / `routes/api/auth/$.ts` (framework wiring
 with module-level side effects, not Node-unit-testable), and `routeTree.gen.ts`
 (generated). Each would otherwise be dishonest 0%.
@@ -514,8 +565,11 @@ exists). That last one is the audit's T7, blocked on the deferred component-test
 harness (D1) and held meanwhile by
 [ADR-019](../context/adr/ADR-019-the-chart-is-presentation-its-accessible-substitute-is-generated.md)
 rather than by a test. It is a real, open gap — recorded, not closed by analogy.
-The generated caption that substitute consists of is fully measured
-(`ladder/convexity-caption.test.ts`).
+The generated caption that substitute consists of measures 100% lines and
+95.65% branch (`ladder/convexity-caption.test.ts`) — NOT "fully measured", which
+this sentence used to claim while §7's own row for the file named the one open
+arm, `:135`'s empty caption. A prose adjective and a figure in the same document
+now agree.
 
 This increment still does **not** add a React Testing Library toolchain (jsdom +
 RTL + the react vite plugin in the test path) — the reliability payoff does not
