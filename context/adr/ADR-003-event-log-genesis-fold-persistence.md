@@ -393,9 +393,10 @@ not, and the reason is *structural*, not a matter of discipline:
   a shadow source of truth**, whatever it contains. That is precisely why this ADR's
   snapshot-rejection is *honored*, not contradicted: the fold-over-events remains the only
   truth, and the digest is merely the breadcrumb that makes the search for a bad append
-  cheap. Validated on live data — a wrong-but-valid mark's `19760.70 → 22863.31` NAV jump was
+  cheap. Validated on live data — a wrong-but-valid mark's NAV jump was
   pinned to one commit by `git log -p head-digest.json`, then `git revert` + re-fold restored
-  `19760.70`; the fold stayed truth, the digest only made the search a one-liner.
+  the prior NAV; the fold stayed truth, the digest only made the search a one-liner. (Values
+  are withheld — this repository is public; they live in the private notes vault.)
 
 ### The anti-drift invariant (named, ADR-cited)
 

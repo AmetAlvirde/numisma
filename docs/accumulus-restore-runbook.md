@@ -20,7 +20,9 @@ below are sufficient, and a wrapper is deferred until a second failure shape dem
 Not tampering — **buggy-but-honest feature code appending a structurally-valid,
 semantically-wrong event** through the sanctioned ingest path. The reproduced failure: a
 wrong btc mark (+44%, inside the ±50% magnitude guard, so legitimately appended) drove
-NAV from \$19,760.70 to \$22,863.31 and no validation layer caught it. Once such an
+NAV up by about a sixth, say from \$10,000.00 to \$11,600.00, and no validation layer
+caught it. Those two figures are synthesized: this repository is public, so the real
+ones live in the private notes vault (the ADR-012 convention). Once such an
 append lands, this runbook answers the two questions the operator otherwise cannot
 answer cheaply: **when** did the value go wrong, and how do I **go back**.
 

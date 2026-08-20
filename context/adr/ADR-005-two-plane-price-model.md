@@ -64,7 +64,15 @@ the runtime (a dedicated headless `apps/price-feed`).
   self-enforcing: sub-period fetches re-emit the same id and are skipped by both the
   inbox merge and the ingest dedup, so more fetching never multiplies marks. The specific
   timezone default and the "which fetch instant" rule are configurable; the invariant is
-  not.
+  not. _(Extended by `--as-of` recovery, #373: a recovery run marks a **past** trading
+  day, so its price is the provider's bar for that day and its `fetchedAt` is now, which
+  the "fetch taken at/after the period boundary" phrasing above does not describe. The
+  invariant this consequence exists to protect is untouched, because the deterministic
+  `pm-<instrumentId>-<asOf>` id still admits exactly one mark per instrument per period
+  and a recovery run for an already-marked day is skipped by the same dedup. The store
+  location moved too: ADR-006 put the durable tree in the private sibling repo, so
+  `data/prices/` names a path under the resolved `dataDir`, not one inside this
+  checkout.)_
 - **Zero engine change to add prices.** The fetcher is another author on the already-
   decoupled, validated inbox channel — no new event type, no parser/fold change, no
   `EVENT_SCHEMA_VERSION` bump. `PriceMarked` keeps its exact shape (`id`, `asOf`, `type`,
