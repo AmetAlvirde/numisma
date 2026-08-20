@@ -35,13 +35,16 @@
  *
  * IT HOLDS THIS ACT'S WORST RATIFICATION, AND #388 IS WHY THAT MATTERS. `Append this lot
  * to '<id>'? [Y/n]` is phrased so that SILENCE MEANS YES: `isNegative("")` is false, so an
- * unanswered question used to attach the lot to an existing Position — and unlike the
- * import flow, nothing downstream of here latched the abandonment, so no second door ever
- * stood behind it. The channel now hands an `UNANSWERED` that `isNegative` cannot be given,
- * and this gate abandons on it. The sentinel is checked AT the question rather than widened
- * into `isNegative`, which would return false for it and attach the lot exactly as before.
- * `Tempo [n]` gets the same treatment for the same reason — a default nobody chose is
- * still a value written onto a durable Position.
+ * unanswered question used to attach the lot to an existing Position. IT NEVER REACHED A
+ * WRITE: the lot was attached in memory, and `Write BOTH? [y/N]` four questions later
+ * refused the same abandoned terminal, because `isAffirmative("")` is false. What was
+ * wrong was the shape, not the outcome — the act's safety rested on ONE gate's phrasing,
+ * so this gate meaning YES on silence was a defect waiting on a reordering rather than one
+ * already costing durable bytes. The channel now hands an `UNANSWERED` that `isNegative`
+ * cannot be given, and this gate abandons on it. The sentinel is checked AT the question
+ * rather than widened into `isNegative`, which would return false for it and attach the lot
+ * exactly as before. `Tempo [n]` gets the same treatment for the same reason — a default
+ * nobody chose is still a value written onto a durable Position.
  */
 import {
   resolveLadderPosition,
@@ -68,19 +71,29 @@ function isNegative(answer: string): boolean {
 }
 
 /**
+ * An answer as text, with {@link UNANSWERED} read as the empty string.
+ *
+ * MODULE-LOCAL AND STAYING THAT WAY. Every question in this file that reaches for it —
+ * the five decision fields and the position id — ALREADY refuses a blank, so "nobody typed
+ * anything" and "nobody could be asked" earn the identical outcome and collapsing them
+ * costs nothing. That argument is per-question, not per-repo: at `Append this lot? [Y/n]`
+ * or `Tempo [n]`, twenty lines below, the same collapse would hand a default to a keystroke
+ * nobody made, which is the defect #388 removes. A shared home would put it within reach of
+ * those questions; here it is within reach only of the ones it is sound for.
+ */
+const text = (answer: Answer): string => (answer === UNANSWERED ? "" : answer.trim());
+
+/**
  * The five authored decision fields. All required; a blank one abandons the act.
  *
  * AN UNANSWERED ONE LANDS IN THE SAME PLACE — `incomplete-decision`, the arm this pass
  * already has for "one of these is missing". A question that was never put is the emptiest
  * a field can be, and the operator's next move (open the Position again, with all five in
- * hand) does not change with the reason it was missing. `text` is what turns the sentinel
- * into the empty string these five already refuse, and it is deliberately local to the
- * five fields that treat the two identically.
+ * hand) does not change with the reason it was missing.
  */
 async function askDecision(
   ask: (question: string) => Promise<Answer>,
 ): Promise<PositionDecision | undefined> {
-  const text = (answer: Answer): string => (answer === UNANSWERED ? "" : answer.trim());
   const entryThesis = text(await ask("  Entry thesis: "));
   const invalidationCondition = text(await ask("  Invalidation condition: "));
   const riskBudget = text(await ask("  Risk budget: "));
@@ -149,8 +162,7 @@ export async function authorLadderTarget(
   // never heard of a Tempo, so the decision context is authored here, at the moment of
   // the fill, and nowhere else.
   out("First fill on this ladder — opening the Position.\n");
-  const idAnswer = await ask("  Position id: ");
-  const positionId = idAnswer === UNANSWERED ? "" : idAnswer.trim();
+  const positionId = text(await ask("  Position id: "));
   if (!positionId) {
     return { status: "abandoned", message: "no position id was given" };
   }
