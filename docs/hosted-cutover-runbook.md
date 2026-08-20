@@ -234,12 +234,14 @@ of what ADR-011 asked for, which is an **outage, not a bill**.
 hard caps (100 CU-hrs compute, 0.5 GB storage, 5 GB transfer) suspend the
 database rather than billing past them.
 
-**This matters for D5's accepted cost.** `src/lib/auth.ts` says DB-backed rate
-limiting's write-on-every-attempt cost is "bounded out-of-band by an explicit
-Neon spend threshold (D6)." **No such threshold exists.** The bound today is
-the Free tier's hard caps — which works, but not for the reason the code
-comment gives, and it **disappears on upgrade to a paid plan**. If you ever
+**This matters for D5's accepted cost.** DB-backed rate limiting writes to
+Neon on every auth attempt, including rejected ones, and ADR-011 D6 bounds
+that with an explicit Neon spend threshold. **No such threshold exists.** The
+bound today is the Free tier's hard caps, which works but by a different
+mechanism, and it **disappears on upgrade to a paid plan**. If you ever
 upgrade, setting a threshold becomes load-bearing, not optional.
+`apps/web/src/lib/auth.ts` carries this correction inline where the config is
+read; that comment and this step must move together.
 
 **If the fund view goes down unexpectedly, check the Neon usage caps before
 assuming a code defect** — a suspended-database outage and a broken deploy
@@ -324,7 +326,8 @@ path clones the whole repo and resolves them fine.
 **Why here — and why before step 6, which the old numbering had backwards:**
 step 6's rotation is verified by signing in at the **deployed** URL, so the
 deploy has to exist first. Deploying the reader before any real v2 row exists
-is safe: `getLatestSnapshot` returns `status: "stale"` for a v1-shaped row and
+is safe: `getSnapshotHistory` (`apps/web/src/projection/snapshot-reader.ts`)
+returns `status: "stale"` for a row outside the supported version range and
 `status: "empty"` once step 1 has run and before step 8's push. And per step 2,
 **this deploy is what actually removes the owner credentials from the running
 runtime.**
@@ -340,10 +343,12 @@ that matters for steps 6 and 7 and for `BETTER_AUTH_URL`.
 
 **CORRECTED — the previous version's Plan A ("change the password via the
 running app's sign-in + change-password UI") points at a UI that does not
-exist. The app has five routes: `__root`, `api/auth/$`, `index` (`/`, the
+exist. The app has seven routes: `__root`, `api/auth/$`, `index` (`/`, the
 glance triage surface), `big-picture` (`/big-picture`, the composition
-dashboard, moved here by D11), and `login`. There is no change-password
-screen and no client call to one.**
+dashboard, moved here by D11), `ladder.$planId` (the fill path), the dev-only
+`ladder-fixture.$state`, and `login`. There is no change-password screen and
+no client call to one. Check `apps/web/src/routeTree.gen.ts` if that ever
+looks out of date.**
 
 The tracer seeded `amet@example.com` with `prototype-pw-123`. It is no longer
 in the repo but may still be live, and it is written in plaintext in an earlier
@@ -501,14 +506,19 @@ all expected rather than faults:
   the previous date's row refreshes and the dashboard keeps showing that date.
   Expected on a weekend or market holiday.
 - **Staleness is version-mismatch only — there is no age check.** `stale` fires
-  when a stored row's schema version disagrees with the reader. An `asOf` that
-  hasn't moved in days renders exactly as "ok".
+  when a stored row's schema version falls **outside the range the reader
+  supports** (`MIN_SUPPORTED_SNAPSHOT_SCHEMA_VERSION` …
+  `COMPOSITION_SNAPSHOT_SCHEMA_VERSION`), not on any disagreement. The range
+  is what lets the reader ship before the first row at a new version, so a
+  bump no longer opens a window where the phone refuses everything. An `asOf`
+  that hasn't moved in days renders exactly as "ok".
 
 **Two success signals — do not report one for the other.**
 
-1. **Push-side (code half):** exit `0`, prints
+1. **Push-side (code half):** the line
    `[push] pushed snapshot fundId=<slug> asOf=<log's last event date>
-   schemaVersion=5 feedGap=<arrived>/<expected> reserveFloor=<pct|absent>
+   schemaVersion=<COMPOSITION_SNAPSHOT_SCHEMA_VERSION, 6 at the time of
+   writing> feedGap=<arrived>/<expected> reserveFloor=<pct|absent>
    suppressed=[<keys>] dca=<loaded|unreadable>/<count>`; exactly one row for
    that `(fund_id, as_of)`; the `report` JSONB carries exactly `dashboard`,
    `dca`, `glance`, and `totals` — four keys, and the query sorts them, so
@@ -531,6 +541,18 @@ all expected rather than faults:
    ```
 
    (`numisma_push` holds SELECT, so this needs no extra credential.)
+
+   **Exit `0` is no longer the whole push-side signal, and reading it as one
+   will make you call a good run bad.** The row is upserted *before* the run
+   reports, so the exit code answers "was anything worth explaining" rather
+   than "did the snapshot land" (`pushAnchorAndReport` in
+   `apps/web/src/push/push-core.ts`). A discarded preferences policy line
+   exits **1** with the `pushed snapshot` line printed and the row in the
+   database; a fold discard prints prose on stderr and exits **0**, because it
+   points into append-only history and can never extinguish. So: read the
+   `[push]` lines on stderr and the query above, and treat a bare non-zero
+   exit as a thing to explain, not as a failed push. A push that genuinely
+   failed writes nothing and prints no `pushed snapshot` line at all.
 2. **Gate-closing (the actual signal, map 8.1):** the deployed URL, opened
    **on the phone away from the desk**, shows that same composition with that
    same `asOf`. Exit `0` on the push is **not** the gate closing; only the
@@ -544,7 +566,9 @@ the dashboard for **at least one week** spanning at least one weekend:
   date, never frozen while the log grows.
 - A weekend / no-new-marks day shows the previous trading day's `asOf`
   unchanged, and this is *not* logged as an incident.
-- No push fails, and no push writes more than one row per day.
+- No push fails (no row written), and no push writes more than one row per
+  day. A non-zero exit that still wrote its row is a diagnostic to read, not a
+  failed day. See the exit-code note above.
 - The numbers on the phone match the local fold, hand-checked at least once
   mid-week.
 
@@ -627,7 +651,7 @@ these connection strings rely on. On that upgrade, change them to
 | Seeded account password rotated — old rejected, new accepted | manual | PASS — both halves verified at the deployed URL | 2026-07-25 |
 | Rate-limit attack against the deployed URL (`auth:verify-limit`) | manual | PASS — 150 attempts, `403=14 429=136`, first 429 at #15, exit 0 | 2026-07-25 |
 | Rate-limit counter is DB-backed (D5), not per-instance memory | manual | PASS — 1 row, `has_signin_bucket=t`, `max_count=11` | 2026-07-25 |
-| First real push, push-side signal | manual | PASS — `fundId=<fund>-fund asOf=2026-07-24 schemaVersion=2` (v2 was current then; v5 current now, reader accepts 4–5); 1 row; keys `{dashboard,totals}` | 2026-07-25 |
+| First real push, push-side signal | manual | PASS — `fundId=<fund>-fund asOf=2026-07-24 schemaVersion=2` (v2 was current then; v6 current now, and the reader accepts the range 4–6, via `isSupportedSchemaVersion` in `apps/web/src/projection/contract.ts`); 1 row; keys `{dashboard,totals}` (four keys now: `dashboard`, `dca`, `glance`, `totals`) | 2026-07-25 |
 | First real push, **gate-closing** signal (phone, away from desk) | manual | TODO | TODO |
 | Soak: one week spanning a weekend, four conditions hold | manual | TODO | TODO |
 

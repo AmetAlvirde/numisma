@@ -11,6 +11,9 @@ root (`0.8.0`). Deployed to Vercel as project `numisma-web`; see
 
 - **The dashboard**: reads the `composition_snapshot` projection table
   (read-only credential) and renders it behind a session gate.
+- **The fill path**: `/ladder/$planId` renders one declared DCA ladder as a
+  path partly walked: per-rung state, the generated convexity caption, and
+  the `@tanstack/charts` Price Drop Path (ADR-018, ADR-019).
 - **The push shell**: a one-way, local-to-cloud sync of the folded
   `CompositionReport` (never the raw event log) into the projection DB.
 - **The auth server**: Better Auth (email/password, single-tenant, no
@@ -32,21 +35,29 @@ DB at runtime.
   a Vercel Build Output API v3 artifact at `apps/web/.vercel/output`.
 - **React 19**, **Node ≥24** (root `package.json` `engines`), **pg** 8.x for
   raw Postgres access (no ORM).
+- **`@tanstack/charts` 0.11.0** draws the fill path's Price Drop Path. It is
+  pre-alpha and exact-pinned; the adoption, its three version-dated API
+  workarounds, and the +29.9 kB route-local cost are ADR-018. The chart is
+  presentation only (`aria-hidden`, no focus/pointer/keyboard/tooltip); its
+  accessible substitute is the rung list plus the generated caption from
+  `src/ladder/convexity-caption.ts`. That is ADR-019.
 - **Better Auth** 1.6.23 for the auth server; schema managed by the pinned
   `@better-auth/cli@1.4.21` (vendored, checked-in SQL — see
   `docs/projection-provisioning.md`).
 
 ## Route map
 
-Five routes, all under `src/routes/` (file-based, `routeTree.gen.ts` is
+Seven routes, all under `src/routes/` (file-based, `routeTree.gen.ts` is
 generated and committed):
 
 | Route | File | Behavior |
 | --- | --- | --- |
 | `__root` | `src/routes/__root.tsx` | Shell: `<html>`, `QueryClientProvider`, TanStack Router `Scripts`. |
-| `/` | `src/routes/index.tsx` | **Triage/glance surface** (D11): "does anything need me before I next sit at the desk?" Session-gated loader (`getDashboard`); redirects to `/login` if unauthenticated. |
+| `/` | `src/routes/index.tsx` | **Triage/glance surface** (D11): "does anything need me before I next sit at the desk?" Session-gated loader (`getDashboard`); redirects to `/login` if unauthenticated. Also carries the DCA card, the one standing card D11's polarity is deliberately reversed for, because it is checked at triage frequency. It taps through to `/ladder/$planId`. |
 | `/big-picture` | `src/routes/big-picture.tsx` | The full composition dashboard (summary + section tables) — moved here from `/` by the D11 route move. Same session-gated loader. |
-| `/login` | `src/routes/login.tsx` | Email/password sign-in only. No signup link, no `/signup` route — single-tenant (ADR-007). Navigates to `/` on success. |
+| `/ladder/$planId` | `src/routes/ladder.$planId.tsx` | The fill path for one declared ladder, reached by tapping the `/` DCA card. Same session-gated loader; `$planId` is the plan record's own id, and an unknown or malformed one renders a not-found card naming which it is. Spot comes from a browser fetch (`src/lib/binance-spot.ts`), not the loader, because Binance answers Vercel's US-hosted functions with HTTP 451. |
+| `/ladder-fixture/$state` | `src/routes/ladder-fixture.$state.tsx` | **Dev-only** twin of the route above, rendering the same cards from synthesized ladders so every started-ladder state can be looked at. Outside `import.meta.env.DEV` the loader returns `disabled`; the fixtures are reached by dynamic import inside that branch, so a production build drops the module entirely. No loader, no pool, no real data. |
+| `/login` | `src/routes/login.tsx` | Email/password sign-in only. No signup link, no `/signup` route — single-tenant (ADR-007). The submitted email is trimmed and lowercased; the password never is. Navigates to `/` on success. |
 | `/api/auth/$` | `src/routes/api/auth/$.ts` | Catch-all mounting Better Auth's handler (`auth.handler`) for `GET`/`POST`. |
 
 There is no change-password screen and no client call to one — see
@@ -61,15 +72,23 @@ record. The event log stays local and canonical.
 
 - **`pnpm push`** (`src/push/push.ts` → `push-core.ts`) — folds the real
   durable event log into a `CompositionReport`, narrows it to the
-  ADR-007/D8 allow-listed `ProjectionReport` shape (`totals`, `dashboard`,
-  `glance` — never raw theses, risk budgets, or stop levels), and upserts
-  one row via `ON CONFLICT (fund_id, as_of) DO UPDATE` using
-  `PROJECTION_WRITE_DATABASE_URL`. No fixture path, no flag to fall back to
-  one.
+  ADR-007/D8 allow-listed `ProjectionReport` shape (four branches: `totals`,
+  `dashboard`, `glance`, `dca` — never raw theses, risk budgets, or stop
+  levels), and upserts one row via `ON CONFLICT (fund_id, as_of) DO UPDATE`
+  using `PROJECTION_WRITE_DATABASE_URL`. No fixture path, no flag to fall back
+  to one. The row is upserted **before** the run reports, so a discard never
+  costs the anchor its NAV (`pushAnchorAndReport` in `src/push/push-core.ts`,
+  asserted by `src/push/discard-channel.test.ts`). Diagnostics compose on
+  `RunReport` (`src/push/unattended-report.ts`) by **kind**, each kind bounded
+  and deduped separately, and kinds do not share an exit policy: a discarded
+  preferences policy line exits **1** (the row still landed), while a fold
+  discard is prose on stderr and exits 0, because it points into append-only
+  history and can never extinguish.
 - **`pnpm backfill`** (`src/push/backfill.ts` → `backfill-core.ts`) —
   replays every anchored date in the log into the projection DB. Idempotent,
   zero-argument (enumerates the log's own dates). Also produces the replay
-  fixture (`--fixture` / `--fixture-only`) used by tests.
+  fixture (`--fixture` / `--fixture-only`) used by tests; `--fixture-only`
+  needs no credential at all.
 - **`pnpm gap-report`** (`src/push/gap-report.ts` → `gap-report-core.ts`) —
   reports days missing from the log against a calendar floor/ceiling.
   Requires no environment (no DB URL, no data-dir var). Exit 0 even when
@@ -83,6 +102,21 @@ record. The event log stays local and canonical.
   (`numisma_push`: SELECT/INSERT/UPDATE, no DELETE; `numisma_web`: SELECT
   only), applied through the pg driver with the one-shot
   `PROJECTION_ADMIN_DATABASE_URL`. See `docs/projection-provisioning.md`.
+
+`push` and `backfill`, the two unattended writers, open their pool through
+`projectionPoolConfig` (`src/push/projection-pool.ts`), which sets a
+**client-side** `query_timeout` above the server's `statement_timeout`. That
+one value is the hang-breaker: a sleeping laptop kills the socket with no FIN,
+and without a client-side deadline node-postgres waits forever, holding
+launchd's per-label job slot and silently costing every later fire. Read that
+file's header before changing any of the four numbers.
+
+The stored `schema_version` is `COMPOSITION_SNAPSHOT_SCHEMA_VERSION` in
+`src/projection/contract.ts`. The reader accepts a **range**,
+`MIN_SUPPORTED_SNAPSHOT_SCHEMA_VERSION ≤ stored ≤ current` via
+`isSupportedSchemaVersion`, rather than an equality test, so the reader ships
+first and the deploy no longer opens a window in which the phone refuses every
+stored row. Take the two constants from that file; they move.
 
 The dashboard reader (`src/lib/dashboard.ts` → `src/projection/snapshot-reader.ts`
 for the values, with `src/projection/contract.ts` supplying the pg-free contract
@@ -174,12 +208,23 @@ Notable groups:
   `.vercel/output/static` assets for leaked server-only tokens (the pg
   driver, connection strings, `BETTER_AUTH_SECRET`, the table name). Skips
   on an unbuilt tree; runs in CI after `pnpm --filter @numisma/web build`.
+- `src/glance/*.test.ts`, `src/ladder/*.test.ts` cover the triage verdict, the DCA
+  card's view model, and the fill path's pure modules (`fill-path-view.ts`,
+  `price-drop-path.ts`, `convexity-caption.ts`, `started-ladder.fixtures.ts`).
+  The render surfaces stay thin because the decisions live in these modules.
 - `src/routes/route-move.test.ts` — source-level assertions that `/` is the
   glance and `/big-picture` carries the composition tables (D11), since
-  this repo has no render-testing toolchain by decision.
+  this repo has no render-testing toolchain by decision. It also walks
+  `/ladder/$planId`'s whole reachable import graph and fails on an engine
+  **value** import in any form, and pins that route's loader to the one
+  session-gated line so a fixture path can never be branched into it.
+  `src/ladder/started-ladder.fixtures.test.ts` holds the other half: the
+  dev-only route's gate and its dynamic import, asserted against the route's
+  own source.
 - `src/event-store-import-guard.test.ts`,
-  `src/preferences-import-guard.test.ts` — confine privileged local-disk
-  reads to the push path, keeping the render surface from reaching them.
+  `src/preferences-import-guard.test.ts`, `src/plans-import-guard.test.ts` —
+  confine privileged local-disk reads to the push path, keeping the render
+  surface from reaching them.
 
 Run from the repo root: `pnpm test` (root Vitest config, `vitest.config.ts`,
 picks up every workspace `*.test.ts` including these). There is no
@@ -195,3 +240,8 @@ per-package `test` script in `apps/web/package.json`.
   taking this app from merged to live with real data.
 - ADR-007, ADR-008, ADR-009, ADR-010, ADR-011 (`context/adr/`) — the
   decisions this app implements.
+- ADR-016 (`context/adr/`): authentication is the disclosure ceiling. What a
+  field has to clear to earn a place on the wire, and the three limits that
+  ruling did **not** move.
+- ADR-018, ADR-019 (`context/adr/`): the charting library, and why the chart
+  is presentation with a generated accessible substitute.

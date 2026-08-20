@@ -109,7 +109,8 @@ real Postgres, and a provisioning regression fails the build. The shape:
   present and applies idempotently; it fails if the file is missing) →
   **`pnpm --filter @numisma/web build`** (produces the client bundle) →
   `pnpm test` (no timeout flag — the 30 s budget is stated once in
-  `vitest.config.ts`, so CI and a local run share it).
+  `vitest.config.ts`, so CI and a local run share it) → the openTUI startup
+  smoke, gated to PRs targeting `main` and run on Bun.
 
 The build step exists so the **ADR-007 client-bundle invariant** test
 (`apps/web/src/client-bundle.integration.test.ts`) RUNS in CI rather than
@@ -119,6 +120,10 @@ connection string, `BETTER_AUTH_SECRET`, or the `composition_snapshot` table
 name) leaked into the client. On an unbuilt local tree it skips loudly. This
 guards ADR-007's structural "no secrets in the browser" property against a
 future value-import of a server module into a `.tsx` component.
+
+Two things do **not** run here, and a green check does not claim they did:
+the price-feed wrapper harness (macOS-only, so it skips and says so in the test
+output) and, on a plain branch push, the startup smoke.
 
 See the workflow file for the authoritative, current definition.
 
