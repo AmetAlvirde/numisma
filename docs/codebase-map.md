@@ -27,11 +27,11 @@ placeholder convention itself, are documented in
 
 | Path | Package | Runtime | What it owns | Read first |
 | --- | --- | --- | --- | --- |
-| `packages/engine` | `@numisma/engine` | Node, IO-free | The pure fund domain: parse → validate → fold → compose → format, plus the pure half of the price model and the whole Orders model. No file, network, or terminal IO. | `src/index.ts` (curated barrel, no `export *`), `src/events/types.ts` |
-| `packages/event-store` | `@numisma/event-store` | Node | The durable log's **read** path — path resolution, genesis load, log load with quarantine, `loadFoldedReview` — plus the gap-report and heartbeat sidecars. | `README.md`, then `src/` |
-| `packages/preferences` | `@numisma/preferences` | Node | Sidecar file IO for `preferences.jsonl` and `orders.jsonl`. Append-only, validated on load, cross-process locked for orders. | `README.md` |
-| `apps/tui` | `@numisma/tui` | Bun (dashboard) + Node (CLIs) | The local access surface: the log's **write/ingest** half, startup orchestration, the openTUI dashboard, the three Orders CLIs, and the smokes. | `README.md` §Entry points, `src/event-store.ts` |
-| `apps/price-feed` | `@numisma/price-feed` | Node, headless | The market-data runtime shell: three provider adapters, the disposable price store, the atomic inbox emit, and the fetch-time spine-guard pre-check. | `README.md`, `src/cli.ts` (wiring only — the report and exit contract are in `src/cli-main.ts`, the argv parser in `src/cli-args.ts`) |
+| `packages/engine` | `@numisma/engine` | Node, IO-free | The pure fund domain: parse → validate → fold → compose → format, plus the pure half of the price model, the whole Orders model, the pure halves of the plans and reconciliations sidecars, and the one data-dir predicate (`normalizeDataDirOverride`) every runtime plane routes through. No file, network, or terminal IO. | `src/index.ts` (curated barrel, no `export *`), `src/events/types.ts` |
+| `packages/event-store` | `@numisma/event-store` | Node | The durable log's **read** path — path resolution, genesis load, log load with quarantine, `loadFoldedReview` — plus the gap-report, heartbeat, and operator-notice sidecars. | `README.md`, then `src/` |
+| `packages/preferences` | `@numisma/preferences` | Node | Sidecar file IO for `preferences.jsonl`, `orders.jsonl`, `plans.jsonl`, and `reconciliations.jsonl`. Append-only, validated on load, appended through one cross-process lock + temp + rename shell (`src/sidecar-io.ts`). | `README.md` |
+| `apps/tui` | `@numisma/tui` | Bun (dashboard) + Node (CLIs) | The local access surface: the log's **write/ingest** half, startup orchestration, the openTUI dashboard, the three Orders CLIs, the `pnpm plans` desk report, and the smokes. | `README.md` §Entry points, `src/event-store.ts` |
+| `apps/price-feed` | `@numisma/price-feed` | Node, headless | The market-data runtime shell: three provider adapters, the disposable price store, the atomic inbox emit, the fetch-time spine-guard pre-check, and the `operator-notice` CLI the daily wrapper runs. Its `src/wrapper-harness/` drives the real `ops/price-feed/run-daily-fetch.sh` against a fake bin. | `README.md`, `src/cli.ts` (wiring only — the report and exit contract are in `src/cli-main.ts`, the argv parser in `src/cli-args.ts`) |
 | `apps/web` | `@numisma/web` | TanStack Start (Vite + Nitro), React 19 | The hosted read-projection dashboard, its Better Auth server, and the push/provisioning scripts. | `README.md`, `src/push/push.ts` |
 
 **The dependency rule:** apps depend on packages, never the reverse; packages
@@ -43,6 +43,23 @@ four deliberate subpath exports (`@numisma/engine/format`,
 package's `src/`. `pnpm typecheck` enforces both
 the public surfaces and the no-deep-import boundary — it is a real gate, not a
 formality.
+
+## Repo tooling: `ops/`
+
+`ops/` is outside the workspace globs and belongs to no package. Two things live
+there.
+
+| Path | What it owns |
+| --- | --- |
+| `ops/price-feed/` | The launchd side of the daily price run: `run-daily-fetch.sh` (the wrapper the scheduler executes), the `com.numisma.pricefeed.daily.plist` template, and `launchagent-reinstall.md`. |
+| `ops/testkit/` | The git-backed substrate the repo-wide guards and test discovery share. `repo-sources.testkit.ts` answers "what files are part of this repo" with `git ls-files` instead of a hand-maintained directory denylist, and `gitignored-path-globs.ts` derives vitest's `exclude` globs from `git ls-files --others --ignored` instead of parsing `.gitignore` as text. Both replaced denylists that failed *toward green* — silently dropping tests while the shortened suite still reported success. |
+
+`gitignored-path-globs.ts` deliberately does **not** carry the `.testkit.ts`
+suffix: that suffix marks coverage-excluded test-only substrate, and this module
+is imported by `vitest.config.ts`, so it runs before every test on every
+invocation. Nothing else typechecks this directory — no package tsconfig
+includes it and the root config has no `include` — so `tsconfig.ops.json` covers
+`ops/**` plus `vitest.config.ts`, and `pnpm typecheck` runs it as its last step.
 
 ## The two IO boundaries worth understanding first
 
@@ -83,12 +100,13 @@ These are the seams most likely to be misread from the tree alone:
 | [`coverage-rationale.md`](./coverage-rationale.md) | What the measured coverage number includes, what is excluded, and why each exclusion is honest. |
 | [`domain-model.md`](./domain-model.md) | The domain vocabulary: the verbs, position semantics, the closed book, the invalidation watch, the profit-split, and Orders. |
 | [`ladder-fill-path.md`](./ladder-fill-path.md) | The DCA ladder card's two product rules: the day-zero projection (and why it is already reliable by construction), and the three-colour state key the picture and the rung list share. |
+| [`plans-authoring-runbook.md`](./plans-authoring-runbook.md) | How to write a `plans.jsonl` line by hand, what the allowlist edit costs, and how to read `pnpm plans` back. |
 | [`scripts.md`](./scripts.md) | The full `pnpm` script reference across all workspace members. |
 | [`local-data.md`](./local-data.md) | The durable-store rule, the `<dataDir>` layout, the write allowlist, and the `<fund>`/`<exchange>` placeholder convention. |
 
 ## Decisions
 
-Fifteen ADRs, indexed with current status in
+Twenty-one ADRs, indexed with current status in
 [`context/adr/INDEX.md`](../context/adr/INDEX.md). The ones that explain the
 most structure:
 
@@ -101,6 +119,10 @@ most structure:
   security posture.
 - **ADR-013** / **ADR-014** — Orders as claims beside the log, and why a skipped
   export row is never persisted.
+- **ADR-020** / **ADR-021** — the Discard Channel: a component that drops an
+  input returns that discard as part of its own result rather than refusing the
+  run, and every `FoldSkipReason` means the same thing about what the fold
+  applied (nothing at all).
 
 ADR bodies are **historical records**: they are not rewritten when a decision
 later changes. Status changes are recorded in the header and in dated status-update
@@ -110,16 +132,20 @@ is newer — ADR-012's Consequences section is a live example.
 ## Verifying the tree
 
 ```
-pnpm typecheck   # all six members; guards public surfaces + no deep imports
-pnpm test        # full Vitest suite
-pnpm verify      # typecheck → test → smoke:startup, the full gate
-pnpm coverage    # the measured Node-side number
+pnpm typecheck    # all six members, then ops/ + vitest.config.ts via tsconfig.ops.json
+pnpm test         # full Vitest suite
+pnpm test:wrapper # the price-feed wrapper harness, trigger bypassed
+pnpm verify       # typecheck → test → smoke:startup, the full gate
+pnpm coverage     # the measured Node-side number
 ```
 
-`pnpm test` measured **1538 passed / 19 skipped across 115 files** (118 files
-total, 3 fully skipped) at the time this map was written; re-run rather than
-trusting the figure. (The 19 skips are the Postgres integration suites, which
-opt out unless `NUMISMA_TEST_DATABASE_URL` is set — they are not failures.)
+The tree carries **166 test files** as of this writing. No pass/skip count is
+recorded here on purpose: the last one this map printed went stale within days
+and was believed anyway. Run the suite. Two families of skip are expected and
+are not failures — the Postgres integration suites opt out unless
+`NUMISMA_TEST_DATABASE_URL` is set, and the price-feed wrapper harness arms
+itself only when its trigger says the wrapper is in play (`pnpm test:wrapper`
+forces it, `NUMISMA_WRAPPER_TEST=never` mutes it). Each says which it is.
 
 Tests are co-located with their subjects (`*.test.ts` beside the module), so the
 test for any file is its sibling. Characterization snapshots and the engine↔TUI

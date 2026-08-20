@@ -95,14 +95,15 @@ resolve by keeping every surviving line **except** the reverted one, then
 
 **The daily wrapper's commit is per-run, not per-file.** `run-daily-fetch.sh` stages
 and commits every tracked sidecar that changed in the same commit as the price marks
-(`events.jsonl`, `genesis.json`, `preferences.jsonl`, `orders.jsonl`) — whatever
+(`events.jsonl`, `genesis.json`, `preferences.jsonl`, `orders.jsonl`,
+`plans.jsonl`) — whatever
 changed that run rides in together. If an `orders:import` or a preferences change
 landed the same day as the bad mark, `git revert` on that commit undoes **all of
 it**, not just the price mark: the `OrderRecord`s and any preferences edits from that
 run disappear too, silently — no skip, no warning, nothing in `available-capital`
 naming what left. Before reverting, run `git show <bad-sha> --stat` and read the diff
 of every changed file, not just `events.jsonl`; if the commit also touched
-`orders.jsonl` or `preferences.jsonl`, either accept losing those changes or use the
+`orders.jsonl`, `preferences.jsonl` or `plans.jsonl`, either accept losing those changes or use the
 surgical `checkout` alternative below to keep them and hand-remove only the bad
 event line.
 

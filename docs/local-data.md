@@ -58,6 +58,22 @@ Every runtime plane resolves the same root through one rule
   is rejected loudly rather than silently split-braining the store. launchd
   cannot expand `~`, so the plist sets an absolute value (see
   [`docs/price-feed-ops.md`](./price-feed-ops.md)).
+- **Set but blank is refused, not treated as unset.** `""` or whitespace-only
+  throws, naming what accepting it would have cost. An empty value is what an
+  unset shell variable expands to, and silently falling through to the default
+  would send every write to the real ledger instead of the store the caller
+  meant to configure. To choose the default deliberately, unset the variable.
+
+That rule has exactly one implementation. Five doors take a data root — the env
+knob plus four caller-supplied arguments — and they route every **present**
+value through `normalizeDataDirOverride` in `@numisma/engine`, so no plane can
+disagree with another about any input. Only the `undefined` arm is per-door,
+because the defaults genuinely differ (the engine's is the accumulus root; the
+sidecar and store doors delegate to `resolveDataDir()`; the price-feed door's
+argument is required and has no default). `@numisma/engine/testkit` publishes
+the one input→outcome table, and each door's own suite runs it, so a door that
+stops routing through the shared predicate fails in its own package naming the
+input it disagreed on.
 
 ## Layout
 
@@ -70,19 +86,32 @@ Under that root (`<dataDir>`, e.g. `~/Dev/<fund>/data`):
 | `<dataDir>/head-digest.json`           | Derived, versioned summary of the folded head (the Head Digest) — a breadcrumb that makes a bad-NAV search cheap; schema v2 adds `discardedEventCount`, the number of distinct events the fold read and could not apply — counted through the channel's own dedup key, so it matches the evening run's fold line for the same log (ADR-020, the Discard Channel); never a source of truth (nothing folds it back). | tracked |
 | `<dataDir>/preferences.jsonl`          | Append-only profit-split policy sidecar, validated on load.                           | tracked         |
 | `<dataDir>/orders.jsonl`               | Append-only Orders sidecar — resting claims on capital, joined to the fold at read time and never folded into NAV (ADR-013). | tracked |
-| `<dataDir>/orders.jsonl.lock`          | Transient exclusive-create lock guarding a concurrent `orders.jsonl` write.           | ignored         |
+| `<dataDir>/plans.jsonl`                | Append-only per-position plan sidecar — what the operator declared a position's ladder or cadence would be. Supersession is by append; `pickPlanAsOf` selects the latest `effectiveAt <= asOf`. Authoring it by hand is [its own runbook](./plans-authoring-runbook.md). | tracked |
+| `<dataDir>/reconciliations.jsonl`      | Append-only trail of what a reader **showed the operator**: at a named moment, whether a fill agreed with its plan, with the declared values copied in as shown. Never authoritative over `plans.jsonl`, never folded, and written best-effort after the fill is already durable. | tracked |
+| `<dataDir>/*.jsonl.lock`               | Transient exclusive-create lock guarding a concurrent sidecar append (`orders.jsonl`, `plans.jsonl`, `reconciliations.jsonl` share one lock + temp + rename shell). | ignored         |
 | `<dataDir>/gap-report.json`            | Derived standup artifact — dates/counts of the fetch window, overwritten every run, no rotation or history. | ignored         |
 | `<dataDir>/job-heartbeat.json`         | Derived launchd-run outcome (one slot, overwritten every run) — where and how the last scheduled run ended. | ignored         |
+| `<dataDir>/operator-notice.txt`        | Derived liveness banner in plain text, rewritten every run with no rotation — the file a shell profile `cat`s on every new terminal. Empty means healthy. | ignored |
 | `<dataDir>/inbox/transactions.json`    | Disposable write channel: drop an array of new events here to be ingested on startup. | ignored         |
 | `<dataDir>/ingested/<wall-clock>.json` | Archive of a consumed inbox — stamped, never clobbered.                               | ignored         |
 | `<dataDir>/prices/`                    | Disposable price-quote cache (upserted every fetch).                                  | ignored         |
 | `<dataDir>/events.jsonl.quarantine`    | The side lane for corrupt log lines, surfaced rather than aborting the load.          | ignored         |
 
-`<fund>`'s `.gitignore` is an **allowlist**: only the five durable files are
-tracked; `prices/`, `inbox/`, `ingested/`, `*.tmp`, `*.quarantine`, the
-`orders.jsonl.lock` lock file, and the derived `gap-report.json` /
-`job-heartbeat.json` sidecars are structurally excluded, so the disposable
+`<fund>`'s `.gitignore` is an **allowlist**: only the seven durable files are
+tracked — `genesis.json`, `events.jsonl`, `head-digest.json`,
+`preferences.jsonl`, `orders.jsonl`, `plans.jsonl`, `reconciliations.jsonl`.
+`prices/`, `inbox/`, `ingested/`, `*.tmp`, `*.quarantine`, the `*.jsonl.lock`
+lock files, and the derived `gap-report.json` / `job-heartbeat.json` /
+`operator-notice.txt` artifacts are structurally excluded, so the disposable
 cache can never enter history.
+
+A file joins that list by ADR-006's membership test — *is this durable,
+non-re-derivable truth?* — and joining it means one line in each of four
+places, in this order: the `<fund>` allowlist, `TRACKED_FILES`
+(`apps/tui/src/ingest-commit.ts`), the daily wrapper's explicit-add loop, and
+the wrapper's strict `git status --porcelain` post-check. Reversed, the
+post-check reports clean over a file git is discarding.
+`apps/tui/src/durable-log-guards.test.ts` asserts both ends of the first two.
 
 ## Reversibility
 

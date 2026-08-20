@@ -111,15 +111,16 @@ the `captureIngestCommit` seam wired into `ingestInbox` — is the `@numisma/tui
   itself into that history.
 - **The allowlist `.gitignore` polarity is load-bearing.** The <fund> repo tracks exactly the
   four durable text files (`genesis.json`, `events.jsonl`, `preferences.jsonl`,
-  `head-digest.json`) — now six, with `orders.jsonl` and `plans.jsonl`; `prices/`,
+  `head-digest.json`) — now seven, with `orders.jsonl`, `plans.jsonl` and
+  `reconciliations.jsonl`; `prices/`,
   `inbox/`, `ingested/`, `*.tmp`, and `*.quarantine` are
   ignored. The polarity is an *allowlist* (deny-by-default with named exceptions), so the
   disposable, re-fetchable cache is **structurally unable to enter durable history** — a
   stray `prices/foo.json` or `*.tmp` cannot be committed even by mistake, and the scoped
   stage above reinforces the same guarantee from the writer side. _(Amended: the list is
-  now six files — `orders.jsonl` joined it under the amendment below, and `plans.jsonl`
-  followed as the one-line extension that amendment's general membership test provides
-  for.)_
+  now seven files — `orders.jsonl` joined it under the amendment below, and
+  `plans.jsonl` then `reconciliations.jsonl` followed as the one-line extensions that
+  amendment's general membership test provides for.)_
 - **The retired in-repo `data/` store is orphaned and must be retired as part of this
   decision.** The flip repointed all code at the <fund> repo but left a full *stale* duplicate
   ledger under `numisma/data/`, which has **already diverged** (on the audit machine:
@@ -198,8 +199,14 @@ answers yes belongs in the allowlist, in `TRACKED_FILES`, in the explicit-add lo
 the strict post-check — as one line in each. (`plans.jsonl` — the operator-authored,
 append-only per-position plan sidecar — is exactly such a one-line extension, taken
 without a second amendment: it is durable, non-re-derivable truth, and as-of replay
-depends on its history. The tracked list is therefore six: `genesis.json`,
-`events.jsonl`, `preferences.jsonl`, `head-digest.json`, `orders.jsonl`, `plans.jsonl`.)
+depends on its history. `reconciliations.jsonl` — the trail of what a reader showed the
+operator — followed on the same terms, and its right to a place turns on one fact: each
+line carries its own copy of the plan values **as shown**, and plan supersession is by
+append, so a line dated earlier but appended later changes what re-derivation returns
+for a fill already recorded. A past verdict is therefore not recomputable from
+`plans.jsonl`, which is what makes the trail truth rather than a cache. The tracked list
+is therefore seven: `genesis.json`, `events.jsonl`, `preferences.jsonl`,
+`head-digest.json`, `orders.jsonl`, `plans.jsonl`, `reconciliations.jsonl`.)
 
 **The warrant is DURABILITY, not secrecy.** This ADR's own justification for the sibling
 repo is that the log had *"no history and no backup"*, leaving the operator unable to tell
@@ -225,6 +232,6 @@ than disciplinary; the membership test is what makes each inclusion arguable.
 file in the <fund> checkout, **and** that `TRACKED_FILES` names exactly that list.
 Either end alone is false assurance — an allowlisted file nothing stages is never
 committed, and a staged file the allowlist omits is discarded. The guard is written over
-the **list**, so a sixth member costs one line there too. It runs against the real
+the **list**, so each further member costs one line there too. It runs against the real
 <fund> repo's checkout when present and skips the allowlist half (never the `TRACKED_FILES`
 half) where that private repo is absent.
