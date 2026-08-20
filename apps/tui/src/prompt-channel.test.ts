@@ -256,7 +256,7 @@ describe("on a terminal where the question is aborted the channel ends the ANSWE
   // `record-fill-cli.ts` both print `error.message` there — putting Node's own wording,
   // "Aborted with Ctrl+D", on the operator's screen and ending the run. The consequence
   // the issue names: the domain's refusal, `REFUSED — no funding reserve was declared for
-  // this batch`, was never reached. Resolving with `""` is the same answer the
+  // this batch`, was never reached. Resolving with `UNANSWERED` is the same answer the
   // no-terminal path gives, and it lets the domain refuse in its own voice.
   it("RESOLVES with UNANSWERED when the question rejects with Node's measured Ctrl-D abort", async () => {
     const harness = channelOn(true, [], ctrlDInterface());

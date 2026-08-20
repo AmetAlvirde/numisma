@@ -245,8 +245,8 @@ const SHELLS: Shell[] = [
             skipped: [],
           }),
           // THIS FLOW MUST REFUSE BEFORE IT ASKS ANYTHING, so the honest answer is the one
-        // no question can use: `UNANSWERED` (#388).
-        ask: async () => UNANSWERED,
+          // no question can use: `UNANSWERED` (#388).
+          ask: async () => UNANSWERED,
           out: () => {},
           err: () => {},
         },

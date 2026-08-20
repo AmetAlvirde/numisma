@@ -330,7 +330,7 @@ function reject(
  *
  * ONE REASON, MANY QUESTIONS. The token is the flow's existing `interview-abandoned`; the
  * MESSAGE names the prompt, because that is the half the operator needs and the half a
- * reason code is bad at carrying. Nine per-question tokens would inflate the union without
+ * reason code is bad at carrying. Five per-question tokens would inflate the union without
  * changing anybody's next move, which is to run the import again.
  */
 function rejectAbandonedInterview(io: OrdersImportIo, question: string): OrdersImportOutcome {
@@ -742,11 +742,17 @@ export async function importBitgetOpenOrders(
   const fresh: OrderRecord[] = [...records, ...observations].filter(
     (record) => !currentOnFile.has(appendKey(record)),
   );
-  // THE WRITE DOOR, AND THE LAST THING CHECKED BEFORE IT. An abandoned terminal makes
-  // every answer after the abandonment a blank nobody typed, and three of this flow's
-  // questions read a blank as consent — so the refusal cannot live at any one question,
-  // it has to live here, where every path that writes passes. Positional-independent: it
-  // does not matter which question caught the Ctrl-D, including the last one.
+  // THE WRITE DOOR, AND THE SECOND DOOR ONLY (#388). It is no longer what stops an
+  // abandoned interview writing: `ask` resolves `UNANSWERED`, every question of this flow
+  // refuses it where it stands, and the refusal names the question the operator walked
+  // away from. No blank is involved and no question reads one as consent.
+  //
+  // WHAT IT STILL BUYS is a guarantee that does not depend on any one question being
+  // written correctly: if the terminal was abandoned, nothing is written, whichever
+  // question caught the Ctrl-D. A regression in the new per-question refusals meets this
+  // rather than a gap. In production it is unreachable — reaching it means an `ask`
+  // returned the sentinel, and every path that could have is already gone — which is
+  // exactly what a second door should look like. Removing it is its own change.
   //
   // A REFUSAL, NOT A THROW, and in the established vocabulary — the operator gets the
   // same `REFUSED — ... Nothing was written` contract as `write-failed`, and the second
@@ -755,10 +761,10 @@ export async function importBitgetOpenOrders(
     return reject(
       io,
       "interview-abandoned",
-      `the interview was abandoned at the terminal (Ctrl-D), so the answers after that ` +
-        `point were blanks nobody typed — and three of this import's questions read a ` +
-        `blank as consent. Nothing about this batch is attributable to a declaration the ` +
-        `operator made, so none of it is written. Run the import again`,
+      `the interview was abandoned at the terminal (Ctrl-D) and reached this batch's write ` +
+        `anyway, which means a question of this import failed to refuse an answer nobody ` +
+        `gave. Nothing about this batch is attributable to a declaration the operator ` +
+        `made, so none of it is written. Run the import again`,
     );
   }
   try {
