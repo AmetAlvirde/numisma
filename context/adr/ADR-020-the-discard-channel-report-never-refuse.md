@@ -77,8 +77,13 @@ the caller cannot see, cannot count, cannot test and cannot decide about. Clause
 
 **It is not an argument for a shared loader abstraction.** Three compliant
 implementations of a stated contract is the goal; one abstraction over three
-sources with different record types is not (ADR-004's name-debt note covers why
-the sidecar class has no shared module).
+sources with different record types is not. **Narrowed 2026-08-20:** this
+sentence originally deferred to ADR-004's name-debt note "for why the sidecar
+class has no shared module", which that note never argued and which is no longer
+true — `packages/preferences/src/sidecar-io.ts` is a real shared module holding
+the lock, the temp sibling and the atomic rename. What it deliberately does NOT
+hold is any record shape, validation or vocabulary, which is the abstraction this
+paragraph rejects. Shared MECHANICS, separate CONTRACTS.
 
 ## The kind, and its reserved capacity
 
@@ -152,6 +157,17 @@ surface that consumes the fold), and clause 5 says a dropped event does not fail
 the fold. What those documents still have to decide is theirs and is not decided
 here: the closed reason vocabulary for a dropped event, which surfaces carry the
 `skipped[]` and how far, and where each surface's verdict function lives.
+
+**All three of those landed, and this is where to find them.** The vocabulary is
+`FoldSkipReason` in `packages/engine/src/contracts.ts`, closed at
+`position-absent` / `reserve-absent` / `provenance-absent` — and ADR-021 then
+ruled that every member means the same thing about what the fold did, which the
+"prefer a new reason over widening an existing one's meaning" consequence below
+would have read as forbidding; ADR-021 settles that it does not. `foldEvents`
+returns `{data, skipped}` and `dedupeFoldSkips` is the one dedup key every
+counting surface goes through. The verdict lives in
+`packages/event-store/src/event-store.ts` as `unattendedFoldVerdict`, consumed
+by the web push shell and two TUI commands.
 
 ## Considered options
 

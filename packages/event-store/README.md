@@ -6,9 +6,10 @@ shell fold the same log rather than keeping two copies to drift
 package`). It is Node-compatible — plain `node:fs/promises`, no Bun, no
 terminal, no git, no argv — and depends only on `@numisma/engine` (ADR-001
 keeps the pure fold + event validation there; this package is the thin IO
-shell around `foldEvents` / `parseEvent`). Also owns two read-only sidecars
-derived from or alongside the log: the gap report (#186) and the daily job's
-heartbeat (#191).
+shell around `foldEvents` / `parseEvent`). Also owns three sidecars derived
+from or alongside the log: the gap report (#186), the daily job's heartbeat
+(#191), and the operator notice (#357) — the liveness banner's push twin, the
+one file this package composes rather than only reads.
 
 **Deliberately read-only.** The write half — inbox ingest, dedup persistence,
 atomic append, archival, the one-shot legacy migration, git capture — stays in
@@ -21,7 +22,7 @@ Enumerated explicitly in `src/index.ts`:
 
 | Export | Kind | Purpose |
 | --- | --- | --- |
-| `resolveEventStorePaths`, `resolveDataDirDefault` | functions | Resolve `{genesis, log, inbox, ingestedDir}` under the shared `NUMISMA_DATA_DIR`-honoring data root (thin wrapper over the engine's `resolveDataDir`). |
+| `resolveEventStorePaths`, `resolveDataDirDefault` | functions | Resolve `{genesis, log, inbox, ingestedDir}` under the shared `NUMISMA_DATA_DIR`-honoring data root (thin wrapper over the engine's `resolveDataDir`). No `dataDir` takes the default; a PRESENT one routes through the engine's `normalizeDataDirOverride` (#369) — blank REFUSED, `~` expanded, absolute normalized, relative refused — the same predicate every other door uses, so no door can be softer than another. The blank arm matters most here: this resolver owns `genesis.json` and `events.jsonl`, and silently resolving `""` to the process's CWD would seed a SECOND ledger beside whatever directory the job started in. |
 | `loadGenesis` | function | Read + structurally validate the immutable `genesis.json` seed; throws on invalid shape. |
 | `loadEventLog` | function | Read `events.jsonl`, validate each line via `parseEvent`; a corrupt line is diverted to `{quarantined}` (and durably surfaced to `events.jsonl.quarantine`) rather than aborting the load. |
 | `assertLogFullyLoaded` | function | Throw loud if any line was quarantined — refuses to fold a partial log (a dropped material event would silently skew NAV). Also used by the TUI's own ingest guard. |
@@ -31,8 +32,10 @@ Enumerated explicitly in `src/index.ts`:
 | `quarantineLogPath` | function | `${logPath}.quarantine` — the side-lane path. |
 | `readOptional` | function | Read a file that may not exist, mapping `ENOENT` to `undefined`. THE canonical definition — imported by the TUI's ingest/migration paths and `apps/price-feed`'s inbox reader. `@numisma/preferences` deliberately keeps its own private copy rather than depend on this package (see `packages/preferences/src/sidecar-io.ts`); do not "fix" that duplication. |
 | `EventStorePaths`, `QuarantinedLine`, `EventLogLoad` | types | The path bundle, one quarantined line `{lineNumber, line, reason}`, and the load result `{events, quarantined}`. |
-| `LAUNCHD_ERA_START`, `REPORT_TIME_ZONE`, `computeGapReport`, `dueThrough`, `boundedEraFloor`, `formatGapReport`, `formatGapSummary` | values, functions | The gap report (#186): a pure, synchronous derivation over already-loaded events answering "which calendar days since 2026-07-03 did the price feed not run on?" Two verdicts only — `no-anchor` (no event carries the date) and `no-marks` (anchored but zero `PriceMarked` events). Never reports `marksOn(D) < 13`. |
-| `GapReport`, `GapWindow`, `LostDay`, `LostDayReason` | types | The gap-report shapes. |
+| `LAUNCHD_ERA_START`, `MAX_WINDOW_DAYS`, `REPORT_TIME_ZONE`, `computeGapReport`, `dueThrough`, `boundedEraFloor`, `defaultGapReportSince`, `formatGapReport`, `formatGapSummary`, `formatLostDays`, `formatVenueDarkDays` | values, functions | The gap report (#186, #266): a pure, synchronous derivation over already-loaded events answering "which calendar days since 2026-07-03 did the price feed not run on?" and "which days did a whole VENUE owe marks and produce none?" Two lost-day verdicts only — `no-anchor` (no event carries the date) and `no-marks` (anchored but zero `PriceMarked` events); never reports `marksOn(D) < 13`. The window WIDTH lives here beside the era floor, not with any command: `MAX_WINDOW_DAYS` is 400 and `defaultGapReportSince` clamps the unsupplied floor to whichever of the era start and `MAX_WINDOW_DAYS`-back is LATER, because a fixed era start and a fixed ceiling would otherwise collide on 2027-08-08 and turn the 18:00 job permanently red. Three surfaces take that same floor (the report command, the TUI banner, the operator notice), which is why one copy of the width lives with the derivation. |
+| `GapReport`, `GapWindow`, `LostDay`, `LostDayReason`, `VenueDarkDay` | types | The gap-report shapes. `venueDark` is its own key and is never folded into `lost`. |
+| `formatOperatorNotice`, `formatNoticeCheckFailure`, `NoticeGapFindings` | functions, type | The operator notice's pure composition (#357): the liveness banner's PUSH twin, catted by the shell profile on every new terminal because every other surface here is pull-only and a lost day nobody goes looking for stays lost. It adds no derivation. It composes the DATA half only — the gap findings; the JOB half is the wrapper's own bash (#376). Its admission rule: a line earns the notice only if a move the operator can make today deletes it. So it ENUMERATES lost days (remediable, self-extinguishing), capped at ten, and COUNTS venue-dark days in one line, admitting them only when within the last seven days — a US market holiday's venue-dark day is permanent and no command will ever clear it, so an unbounded enumeration would make "empty means healthy" unreachable on the real store. Both bounds are module constants in `operator-notice.ts`, exported there so the tests drive them rather than restate them. Deliberately NOT unified with the TUI banner: the two share the primitives, not the rendering. |
+| `OPERATOR_NOTICE_FILENAME`, `operatorNoticePath`, `loadOperatorNoticeLines`, `writeOperatorNotice`, `writeOperatorNoticeFile` | value, functions | The operator notice's one disk touch: `operator-notice.txt` beside the log. |
 | `loadGapReport`, `gapReportPath`, `writeGapReportFile`, `GAP_REPORT_FILENAME`, `GAP_REPORT_SCHEMA_VERSION` | functions, values | The gap report's one async shell: read the log, assert fully loaded, derive, and (de)serialize `gap-report.json` beside the log. Content is dates and counts only — no NAV, positions, prices, or balances. |
 | `HEARTBEAT_FILENAME`, `HEARTBEAT_SCHEMA_VERSION`, `parseHeartbeat`, `formatHeartbeatWarning` | values, functions | The daily job's heartbeat (#191): parse the bash-written `job-heartbeat.json` breadcrumb (never throws — unreadable/malformed reads as `undefined`) and derive up to three warning lines (non-zero exit, a future-dated run, or staleness measured against the last in-window run vs. the gap report's ceiling). |
 | `JobHeartbeat` | type | The breadcrumb shape: `schemaVersion`, `startedAt`, `finishedAt`, `exitCode`, `lastStep`, `markWindow`, optional `lastMarkWindowFinishedAt`. |
@@ -84,19 +87,26 @@ the production entry point on purpose — test scaffolding shared with
 | `events.jsonl.quarantine` | One `QuarantinedLine` JSON per line | this package, on read (`surfaceQuarantine`) |
 | `gap-report.json` | `{schemaVersion, generatedAt, since, until, calendarDays, anchorsChecked, lost[], summary, lines[]}` | this package (`writeGapReportFile`) |
 | `job-heartbeat.json` | `JobHeartbeat` (see above) | `ops/price-feed/run-daily-fetch.sh` (bash, not this package) |
+| `operator-notice.txt` | Plain lines the shell profile cats on a new terminal; empty when there is nothing to say | this package (`writeOperatorNoticeFile`) for the gap half; the wrapper's bash writes the job half (#376) |
 
 ## Dependencies
 
-Workspace: `@numisma/engine` only (`resolveDataDir`, `foldEvents`,
-`parseEvent`, `parseFundReview`, `tradingDayAsOf`, `addDays`,
-`INBOX_PATH_SEGMENTS`, and the `FundReviewData`/`PortfolioEvent` types).
+Workspace: `@numisma/engine` only (`resolveDataDir`,
+`normalizeDataDirOverride`, `foldEvents`, `dedupeFoldSkips`, `deriveHeadDigest`,
+`parseEvent`, `parseFundReview`, `tradingDayAsOf`, `addDays`, `weekdayName`,
+`owesMarkOn`, `instrumentsForSource`, `PRICE_SOURCES`,
+`TRADING_DAY_TIME_ZONE`, `INBOX_PATH_SEGMENTS`, and the
+`FundReviewData`/`PortfolioEvent`/`FoldedReview` types).
 Nothing depends on Bun, openTUI, or terminal rendering.
 
 ## Tests
 
 Colocated with source: `src/event-store.test.ts`, `src/gap-report.test.ts`,
-`src/gap-report-io.test.ts`, `src/heartbeat.test.ts`. `src/gap-report-io.test.ts`
-includes the field-allowlist privacy walk over `gap-report.json`.
+`src/gap-report-io.test.ts`, `src/heartbeat.test.ts`,
+`src/operator-notice.test.ts` (the composition, synchronous and disk-free) and
+`src/operator-notice-io.test.ts` (its one disk touch).
+`src/gap-report-io.test.ts` includes the field-allowlist privacy walk over
+`gap-report.json`.
 
 ## Verification
 

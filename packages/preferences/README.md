@@ -35,7 +35,7 @@ where the two disagree `src/index.ts` is right:
 
 | Export | Kind | Purpose |
 | --- | --- | --- |
-| `resolvePreferencesPath` | function | Resolve `<dataDir>/preferences.jsonl` under the shared `resolveDataDir` root (never CWD-relative). |
+| `resolvePreferencesPath` | function | Resolve `<dataDir>/preferences.jsonl` under the shared `resolveDataDir` root (never CWD-relative). No `dataDir` takes that default; a PRESENT one routes through the engine's `normalizeDataDirOverride` (#369), the same one predicate every other door in the workspace uses — blank refused, `~` expanded, absolute normalized, relative refused. Only the refusal's VOICE is this door's own: silently resolving a blank here would serve a Reserve floor from a file nothing writes. |
 | `loadPreferences` | function | Read the append-only sidecar into a total `LoadedPreferences` envelope: `{load, entries, skipped}` — a `LoadOutcome`, the ordered validated `ProfitPolicyEntry[]`, and one `SkippedPreferenceLine` per discarded line. A missing file is `{status: "loaded"}` with empty buckets (the normal starting state); any other read error is `{status: "load-failed", message}`. Never throws. |
 | `unattendedPreferencesVerdict`, `UnattendedPreferencesVerdict` | function, type | The unattended-caller policy over a `LoadedPreferences`, as a value rather than a convention: `{exitCode, messages}`. Non-zero iff anything was skipped or the load failed; prose-only messages that name the file, the 1-based line and the reason, never the line's content. |
 | `seedDefaultPreferences` | function | The **only** preferences writer: seed a **new** sidecar with the fund's locked default policy, only if it holds no valid entry yet — not a read-gap fallback; never call it to paper over a missing/quarantined policy. Its one-line append is inline; there is no general `appendPreference` entry point (see below). |
@@ -119,7 +119,9 @@ where the two disagree `src/index.ts` is right:
 
 ## Dependencies
 
-Workspace: `@numisma/engine` only (`resolveDataDir`, `defaultProfitPolicyEntry`,
+Workspace: `@numisma/engine` only (`resolveDataDir`,
+`normalizeDataDirOverride` — the ONE data-dir predicate every door here routes
+through, `defaultProfitPolicyEntry`, `pickPolicyAsOf`,
 `parseOrderRecord`, `serializeOrderRecord`, the plan and reconciliation record
 contracts with their closed vocabularies and the strict calendar-date predicate,
 and the `ProfitPolicyEntry` / `SplitBasis` / `OrderRecord` /

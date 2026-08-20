@@ -34,7 +34,7 @@ nobody had named: **the log could birth a Position after t0 (`PositionOpened`)
 but not a Reserve.** It surfaced because the fund's operator needed to
 reclassify a fixed sum of <exchange> cash from Tempo Pulse to Tempo Capital and was
 being pushed toward editing the `"immutable t0 seed"` genesis file
-(`packages/event-store/src/event-store.ts:13`, `:79`) to do it — the only
+(`packages/event-store/src/event-store.ts:13`) to do it — the only
 Reserve-creating path that existed.
 
 The **tenth event verb, `ReserveOpened`**, closes the asymmetry. It creates an
@@ -44,7 +44,7 @@ currency}`, no lots, no funding leg, **NAV-neutral by construction**
 Movement then reuses the existing **`Transfer`** verb, which needed no change:
 it already has no constraint that the two reserves share a Tempo, and `tier`
 already rides across a Transfer so moving cash cannot launder its provenance
-(`packages/engine/src/events/types.ts:159-171`). **The missing piece was never a
+(`TransferEvent`, `packages/engine/src/events/types.ts:165-172`). **The missing piece was never a
 movement verb — it was the destination container.**
 
 ## Considered Options
@@ -55,7 +55,8 @@ movement verb — it was the destination container.**
   touching anything that already worked.
 - **Editing genesis — REJECTED.** It would retroactively rewrite t0 and every
   fold since, against the seed the code itself calls the `"immutable t0 seed"`
-  twice (`packages/event-store/src/event-store.ts:13`, `:79`). The whole point
+  (`packages/event-store/src/event-store.ts:13`; it said so twice when this was
+  written, and the second site is now `resolveEventStorePaths`' own docstring). The whole point
   of an append-only log on an immutable seed (ADR-003) is that history is never
   rewritten to answer a later question.
 - **`Redistribute`, one verb that creates and moves atomically — REJECTED.**
@@ -80,7 +81,7 @@ movement verb — it was the destination container.**
   it.
 - **`ReserveOpened` with a mandatory opening balance, symmetric with
   `PositionOpened` — REJECTED.** `PositionOpened` requires at least one lot
-  (`parseLots`, `packages/engine/src/events/parse.ts:528`), and mirroring that shape
+  (`parseLots`, `packages/engine/src/events/parse.ts:526`), and mirroring that shape
   would make a Reserve birthable only by draining another Reserve's balance
   into it at creation. That is false for the new-venue case — a Reserve at a
   brand-new exchange or a new Tempo's cash pocket at an existing venue has no
@@ -118,11 +119,11 @@ authoritative and the money did arrive. That is exactly the failure
 `Transfer`'s own doc claims to prevent — tier "rides across so moving cash
 cannot launder its provenance." The fix, now built into `foldEvents`'s
 `ReserveOpened` arm (`fold.ts`, cited by name) and its cross-reference shadow
-(`buildEventReference`, `packages/engine/src/events/crossref.ts:551`): the
+(`buildEventReference`, `packages/engine/src/events/crossref.ts:369`; the `lots: []` shadow it builds is at `:554-571`): the
 Reserve is born with an
 **empty array**, not an absent field. An empty array is truthy, so the first
 credit pushes a real tier lot; `buildReserveTierContributions`
-(`packages/engine/src/compose/canonical.ts:392-393`) reads a length-0 lot array
+(`packages/engine/src/compose/canonical.ts:391-393`) reads a length-0 lot array
 as untiered, so a Reserve born and never funded
 still composes correctly into the tier rollup. NAV-neutrality is unharmed —
 empty lots sum to zero. **Generalized, this is the nugget worth keeping:**
@@ -132,13 +133,13 @@ meaning (here, "no `lots` field" already meant "untiered," a sentinel this
 verb's naive reading would have collided with).
 
 - **A currency mismatch against the account is a HARD REJECT at ingest, not a
-  warning.** `packages/engine/src/compose/canonical.ts:136-146` already
+  warning.** `packages/engine/src/compose/canonical.ts:135-145` already
   *excludes with a warning* a Reserve whose currency disagrees with its
   account's — a read-model-side safety net for the existing genesis-only
   Reserve set. Without an ingest-side gate, `ReserveOpened` would be the one
   path that admits such a Reserve into the *durable log* only to have it vanish
   from the read model downstream. `crossReferenceReserveOpened`
-  (`packages/engine/src/events/crossref.ts:394-437`) rejects the mismatch loud
+  (`crossReferenceReserveOpened`, `packages/engine/src/events/crossref.ts:695-762`) rejects the mismatch loud
   at ingest instead, which is why `EventReference`'s account lookup widened from
   a bare id `Set<string>` to a `Map<string, Currency>` — the check needs the
   account's currency, not just its existence. Rejecting keeps the tenth verb

@@ -139,15 +139,21 @@ the second member of that kind. The class is:
 > own on-load validation contract, joined to the fold at read time by a pure
 > selector, and never folded.**
 
-> **Counting note, added 2026-08-10.** There are THREE counts in this record and they
+> **Counting note, added 2026-08-10; the membership tallies re-derived 2026-08-20.**
+> There are THREE counts in this record and they
 > do not all agree, which is not an error in any of them: **sidecar-class membership**
-> counts `preferences.jsonl` (1), `orders.jsonl` (2), `plans.jsonl` (3); **durable
+> counts `preferences.jsonl` (1), `orders.jsonl` (2), `plans.jsonl` (3) and
+> `reconciliations.jsonl` (4, added by #321 after this note was written — the trail
+> of what the operator was told, pure half in
+> `packages/engine/src/reconciliations.ts`, IO half in
+> `packages/preferences/src/reconciliations.ts`); **durable
 > artifacts** counts `events.jsonl` first, which is why ADR-013 correctly calls
 > `orders.jsonl` "a third durable artifact" while this ADR correctly calls it the
 > second member; and **tracked files** — ADR-006's `.gitignore` allowlist /
 > `TRACKED_FILES` census (INDEX.md's ADR-006 row) — counts `genesis.json`,
 > `events.jsonl`, `preferences.jsonl`, `head-digest.json`, `orders.jsonl`,
-> `plans.jsonl`, making `plans.jsonl` the **sixth** tracked file under that count. The
+> `plans.jsonl`, making `plans.jsonl` the **sixth** tracked file under that count, and
+> `reconciliations.jsonl` the seventh. The
 > event log is deliberately NOT in the sidecar class — that is this amendment's whole
 > point. `plans.jsonl` shipped calling itself the class's "fourth member" in five places
 > by crossing the first two counts above; say which count you mean. (This note does not
@@ -290,7 +296,11 @@ silently select the wrong policy." The reasoning was real, was correct, and exis
 nowhere but a validator's docstring — so the second member of the class
 (`orders.jsonl`) reached for a different stamp for its own reasons and nothing in the
 record connected the two choices. Naming it here makes it inheritable: a fourth member
-does not get to rediscover it.
+does not get to rediscover it. **It did not have to: the regex is now
+`ISO_DATE_SHAPE` in `packages/engine/src/plans.ts`, behind the exported
+`isIsoCalendarDate` predicate, and `preferences.ts` calls it rather than keeping its
+own copy — so the rule this paragraph asked to be inheritable is now one function
+every member shares.**
 
 **Corrected 2026-08-10, fix-forward on this increment's own review.** That paragraph
 first shipped saying `preferences.jsonl` "has enforced this rule in code since it
