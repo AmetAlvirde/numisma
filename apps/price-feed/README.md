@@ -60,6 +60,18 @@ shared inbox, and `pnpm spine` (in `apps/tui`) owns the guarded, validated appen
   `runPriceFetch` + `scanFetchedMarks`; `src/cli-args.ts` is the argv parser,
   shape-only, which refuses an unknown argument rather than ignoring it. Still
   no domain logic — every decision lives behind `runPriceFetch`.
+- **The path resolver** (`src/paths.ts`, `resolvePriceFeedPaths`), which turns one
+  data root into the prices dir, the inbox, and the read-only genesis/log the
+  pre-check needs. It validates the root through the engine's shared
+  `normalizeDataDirOverride` BEFORE any `resolve()` can launder it, so a blank
+  or relative value is refused instead of quietly becoming the process's CWD.
+- **The operator-notice entry** (`src/operator-notice-cli.ts`,
+  `pnpm operator-notice`), a zero-argument shell that rewrites
+  `operator-notice.txt` beside the durable log. Every decision (what the notice
+  says, where it goes) lives in `@numisma/event-store`; this file resolves the
+  store, reads the clock once, and hands both over. It always exits 0, because
+  the wrapper runs under `set -e` and a notice writer must never abort the run
+  it reports on.
 
 ## Runtime constraints
 
@@ -72,7 +84,10 @@ shared inbox, and `pnpm spine` (in `apps/tui`) owns the guarded, validated appen
   alike — is built only when the provider bar's `observationDate` equals the
   run's trading-day `asOf`. A stale bar (market-closed weekend/holiday for
   equities, a late/missed fire or provider hiccup for crypto) is an INFO skip
-  (`staleMarkSkips`), never a failure.
+  (`staleMarkSkips`) on the live daily path, never a failure. Under an explicit
+  `--as-of` the same skip on an OWED instrument is a FAILURE: the request was
+  pinned to the target date, so a bar dated anything else means the day did not
+  come back.
 - **MXN honesty:** `*-mxn` instruments store their raw USD leg as the
   disposable quote; the derived `USD × FIX` value lives only on the mark
   (with the `usdMxn` snapshot attached), never in the store. A missing or
@@ -86,14 +101,19 @@ shared inbox, and `pnpm spine` (in `apps/tui`) owns the guarded, validated appen
   therefore takes ~1 extra minute.
 - **Partial progress always kept:** a per-symbol fetch failure is recorded
   and the run continues; the process exits non-zero (`process.exitCode = 1`)
-  if any symbol failed OR the spine pre-check found a mark the guard would
-  reject, so a scheduler notices — but only after everything that DID succeed
-  has already been stored/emitted.
+  if any symbol failed, OR the spine pre-check found a mark the guard would
+  reject, OR (under `--as-of`) an owed instrument produced no mark, so a
+  scheduler notices. That exit comes only after everything that DID succeed has already
+  been stored/emitted.
 - **`NUMISMA_DATA_DIR` resolution:** the data root is resolved once via
   `@numisma/engine`'s `resolveDataDir()` at import time (`src/config.ts`) —
-  unset/empty → the absolute, homedir-derived `<fund>` default
-  (`~/Dev/<fund>/data`); `~`-prefixed → expanded; absolute → normalized; a
-  relative path is REJECTED loudly (never a CWD-relative `"data"`). See
+  unset → the absolute, homedir-derived `<fund>` default (`~/Dev/<fund>/data`);
+  `~`-prefixed → expanded; absolute → normalized; a relative path is REJECTED
+  loudly (never a CWD-relative `"data"`), and so is a set-but-blank or
+  whitespace-only value, which is a misconfigured knob rather than an absent
+  one. Every door onto a data root routes through the one predicate
+  `normalizeDataDirOverride`: the env knob and the four caller-supplied
+  arguments, `resolvePriceFeedPaths` among them. See
   `packages/engine/src/data-dir.ts`.
 
 ## What it writes
@@ -110,10 +130,23 @@ shared inbox, and `pnpm spine` (in `apps/tui`) owns the guarded, validated appen
 ## CLI
 
 ```sh
-pnpm prices:fetch
+pnpm prices:fetch                       # today's closes, the daily job
+pnpm prices:fetch --as-of=2026-08-14    # recover ONE past trading day
+pnpm prices:fetch -- --as-of 2026-08-14 # same, through pnpm's flag-forwarding idiom
 ```
 
-No argv flags. All configuration is environment/`DEFAULT_CONFIG`-driven:
+`--as-of` is the only flag, and it takes one past date per run: the providers
+are asked for that day's bars, the quotes are stored, and the marks are dated
+that day while `fetchedAt` records the actual run. There is no range flag; loop the
+command for several days, which is safe because the inbox merges by id. The
+parser refuses what it does not understand rather than ignoring it (a dropped
+`--asof=` typo would run the daily job and report success, which is
+indistinguishable from a finished recovery), and `runPriceFetch` refuses a date
+that is not a real calendar day or is not strictly in the past. Both refusals
+print one sentence with no stack trace and exit 1. `docs/price-feed-ops.md` has
+the full recovery procedure.
+
+Everything else is environment/`DEFAULT_CONFIG`-driven:
 
 | Variable | Purpose |
 | --- | --- |
@@ -121,9 +154,14 @@ No argv flags. All configuration is environment/`DEFAULT_CONFIG`-driven:
 | `BANXICO_TOKEN` | Banxico SIE free token (USD/MXN FIX). Missing → `*-mxn` derivations fail loud; direct crypto/equity marks still emit. |
 | `NUMISMA_DATA_DIR` | Overrides the data root (see resolution rule above). |
 
-Exit code is non-zero if any provider fetch failed or the spine-guard
-pre-check found a would-be-rejected mark; zero otherwise (including a clean
-pre-mark-time run that stored quotes but emitted no marks).
+Exit code is non-zero if any provider fetch failed, the spine-guard pre-check
+found a would-be-rejected mark, or a `--as-of` run left an owed instrument
+absent; zero otherwise (including a clean pre-mark-time run that stored quotes
+but emitted no marks). Under `--as-of` the run also prints an owed / marked /
+absent tally, and every registry instrument lands in exactly one of three
+states: not owed by its venue that day, owed and marked, or owed and absent.
+The exit code cannot tell a market holiday from a provider failure. It says
+only that the day did not come back, so read the `ABSENT` lines.
 
 See `docs/price-feed-ops.md` for the scheduled (launchd) operation of this
 CLI, token setup, and triage; `ops/price-feed/launchagent-reinstall.md` for
@@ -146,12 +184,22 @@ unchanged.
 
 Every non-trivial module is co-located with a `*.test.ts` file directly beside
 it in `src/`: `atomic-write.test.ts`, `banxico-provider.test.ts`,
-`binance-provider.test.ts`, `fetch-prices.test.ts`, `inbox.test.ts`,
-`index.test.ts` (the barrel's exact-set runtime-surface lock — see
-`docs/codebase-map.md`), `rejection-check.test.ts`, `schedule-window.test.ts`
+`binance-provider.test.ts`, `cli-args.test.ts`, `cli-main.test.ts`,
+`fetch-prices.test.ts`, `inbox.test.ts`, `index.test.ts` (the barrel's
+exact-set runtime-surface lock — see `docs/codebase-map.md`), `paths.test.ts`,
+`provider.test.ts`, `rejection-check.test.ts`, `schedule-window.test.ts`
 (asserts properties of the launchd plist template and the wrapper script that
 have an oracle elsewhere — see its own header comment),
-`twelvedata-provider.test.ts`. Run via the repo root:
+`twelvedata-provider.test.ts`.
+
+`src/wrapper-harness/` is the exception to co-location: it drives
+`ops/price-feed/run-daily-fetch.sh` as a real process against an authored fake
+`pnpm` inside a temp directory. It is macOS-only (bash 3.2, BSD `ps`, a
+hand-rolled watchdog), so it never runs in CI, arms itself on a `pnpm test`
+when its own subject changed, and runs on demand via `pnpm test:wrapper`. See
+`docs/price-feed-ops.md` for the arming rules and the isolation refusal.
+
+Run via the repo root:
 
 ```sh
 pnpm test        # whole monorepo, vitest run

@@ -159,8 +159,10 @@ HEARTBEAT_FILE="$DATA_DIR/job-heartbeat.json"
 #
 # WHAT THAT DOES *NOT* BUY, STATED PLAINLY BECAUSE AN EARLIER VERSION OF THIS COMMENT
 # CLAIMED IT DID. Having no override of its own does not make the two halves agree, because
-# the DATA DIR they hang off can still diverge inside one run. `DATA_DIR` is resolved at the
-# top of this file (line 59), and `$ENV_FILE` is sourced much later under `set -a`, which
+# the DATA DIR they hang off can still diverge inside one run. `DATA_DIR` is resolved by the
+# `DATA_DIR="${NUMISMA_DATA_DIR-...}"` assignment near the top of this file, in the block
+# that resolves it BEFORE the heartbeat trap, and `$ENV_FILE` is sourced much later under
+# `set -a`, which
 # EXPORTS every assignment in it. So a `NUMISMA_DATA_DIR=` line in the private token file
 # splits the run in two: bash `$DATA_DIR` — and therefore this variable, `$HEARTBEAT_FILE`,
 # and the `git -C "$DATA_DIR"` in steps 3 and 4 — keeps the PRE-SOURCE value, while step
@@ -171,7 +173,7 @@ HEARTBEAT_FILE="$DATA_DIR/job-heartbeat.json"
 # what is recorded here is the true shape of it: THE ONE SUPPORTED CONFIGURATION IS THAT
 # `NUMISMA_DATA_DIR` IS NOT SET IN `$ENV_FILE`. That file is for provider tokens; put the
 # data dir in the LaunchAgent plist's `EnvironmentVariables`, which is in the environment
-# before line 59 runs and therefore cannot split anything.
+# before that assignment runs and therefore cannot split anything.
 OPERATOR_NOTICE_FILE="$DATA_DIR/operator-notice.txt"
 
 # --- THE ONE FAILED-NOTICE WRITER, SHARED BY BOTH BASH SITES (#376) ----------
