@@ -173,7 +173,7 @@ interface ShellRun {
 // `ask` returns before `createInterface` is ever called. No case in this file constructs a
 // readline interface, and therefore none can observe one being closed. What IS pinned is
 // the no-terminal branch in front of it — the notice, its placement at the first
-// unanswerable question, and the empty answer the domain then refuses on.
+// unanswerable question, and the `UNANSWERED` the domain then refuses on.
 describe("import-orders-cli — the shell's own contract (argv, exit codes, env, no-terminal stdin)", () => {
   const createdDirs: string[] = [];
 
@@ -311,7 +311,7 @@ describe("import-orders-cli — the shell's own contract (argv, exit codes, env,
     // that `Funding reserve for this batch` never reaches stdout was the obvious probe and
     // it went vacuous under #346: that string exists only as the argument handed to `ask`
     // (`import-orders-funding-declaration.ts:68`), and a spawned run takes the no-terminal
-    // branch, which returns "" WITHOUT writing the question anywhere. The absence proved
+    // branch, which answers WITHOUT writing the question anywhere. The absence proved
     // nothing — it holds on a run that asked and on a run that did not. The notice does
     // discriminate: `ask` writes it the first time it is called on a stdin that is no
     // terminal, so stderr staying clean of it is the observable fact that NO QUESTION WAS
@@ -423,13 +423,13 @@ describe("import-orders-cli — the shell's own contract (argv, exit codes, env,
     // eagerly consumed a piped stdin, so the stream had already ended by the time the first
     // question was put. The shell now builds the interface AT the first question, and when
     // stdin is no terminal it never builds one at all — it says so in its own voice and
-    // returns an empty answer, which is the one honest answer an unattended run can give.
+    // answers `UNANSWERED`, which is the one honest answer an unattended run can give.
     //
-    // WHAT THAT UNLOCKS is the first test in this repo of `no-reserve-declared`
-    // (`import-orders.ts:588`). That refusal fires only when `declareFunding` returns
-    // undefined, which happens only on an empty batch answer — so before this change it was
-    // reachable exclusively from a TTY, i.e. from nowhere a test can stand. The shell
-    // returning "" rather than throwing is what puts it under a spawn.
+    // WHAT THAT UNLOCKS is the first test in this repo of `no-reserve-declared`. That
+    // refusal fires when `declareFunding` reports `not-declared`, which happens on an empty
+    // batch answer and on an unanswered one alike (#388) — so before the channel existed it
+    // was reachable exclusively from a TTY, i.e. from nowhere a test can stand. The shell
+    // ANSWERING rather than throwing is what puts it under a spawn.
 
     it("names the missing terminal, lets the FLOW refuse, exits 1, writes nothing", async () => {
       const dir = await dataDir();

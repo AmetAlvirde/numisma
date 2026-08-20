@@ -28,7 +28,7 @@
  * There is no pty, no spawn and no child process anywhere in this file: nothing below
  * presses Ctrl-D, and nothing below is end-to-end coverage of a terminal delivering one.
  * What is pinned is: given a `question()` that rejects with the shape Node really
- * produces, this channel resolves with `""`.
+ * produces, this channel resolves with `UNANSWERED`.
  *
  * THAT SHAPE WAS MEASURED, NOT ASSUMED — node v24.14.0, `node:readline/promises` over an
  * in-process `PassThrough` pair with `terminal: true`, a pending `question()`, and a raw
@@ -48,7 +48,7 @@
  * Every fake is authored. Nothing here touches `process`, stdin, or a real readline.
  */
 import { describe, expect, it } from "vitest";
-import { createPromptChannel, type PromptInterface } from "./prompt-channel.js";
+import { createPromptChannel, UNANSWERED, type PromptInterface } from "./prompt-channel.js";
 
 const NOTICE = "No terminal on stdin: authored notice.";
 
@@ -190,7 +190,7 @@ describe("the prompt channel builds its interface at the first question, never a
   });
 });
 
-describe("on a stdin that is no terminal the channel says so and returns an empty answer", () => {
+describe("on a stdin that is no terminal the channel says so and answers UNANSWERED", () => {
   it("never touches readline at all", async () => {
     const harness = channelOn(false);
 
@@ -202,13 +202,14 @@ describe("on a stdin that is no terminal the channel says so and returns an empt
     expect(harness.rl.asked).toEqual([]);
   });
 
-  it("RESOLVES with '' rather than throwing", async () => {
+  it("RESOLVES with UNANSWERED rather than throwing", async () => {
     const harness = channelOn(false);
 
     // Throwing would unwind through the shell's outer catch and end the run there, which
-    // makes the domain's own refusal for an unanswered interview unreachable. The empty
-    // answer is the one answer a run with no terminal can honestly give.
-    await expect(harness.channel.ask("a? ")).resolves.toBe("");
+    // makes the domain's own refusal for an unanswered interview unreachable. And the
+    // value is NOT `""`: a run with no terminal did not answer nothing, it could not be
+    // asked, and `UNANSWERED` is the only value no question can read as consent (#388).
+    await expect(harness.channel.ask("a? ")).resolves.toBe(UNANSWERED);
   });
 
   it("writes the shell's own sentence, not readline's", async () => {
@@ -232,7 +233,7 @@ describe("on a stdin that is no terminal the channel says so and returns an empt
     const harness = channelOn(false);
 
     for (let index = 0; index < 9; index += 1) {
-      expect(await harness.channel.ask(`q${index}? `)).toBe("");
+      expect(await harness.channel.ask(`q${index}? `)).toBe(UNANSWERED);
     }
 
     expect(harness.errors).toEqual([NOTICE]);
@@ -257,10 +258,13 @@ describe("on a terminal where the question is aborted the channel ends the ANSWE
   // the issue names: the domain's refusal, `REFUSED — no funding reserve was declared for
   // this batch`, was never reached. Resolving with `""` is the same answer the
   // no-terminal path gives, and it lets the domain refuse in its own voice.
-  it("RESOLVES with '' when the question rejects with Node's measured Ctrl-D abort", async () => {
+  it("RESOLVES with UNANSWERED when the question rejects with Node's measured Ctrl-D abort", async () => {
     const harness = channelOn(true, [], ctrlDInterface());
 
-    await expect(harness.channel.ask("funding reserve? ")).resolves.toBe("");
+    // The SAME value clause 2 gives, which is #388's whole point: "there was no terminal"
+    // and "the operator walked away" are one fact to every question downstream, and
+    // neither is a blank line somebody typed.
+    await expect(harness.channel.ask("funding reserve? ")).resolves.toBe(UNANSWERED);
 
     // It really did reach readline — this is the terminal path, not the guard.
     expect(harness.built).toBe(1);
@@ -271,14 +275,15 @@ describe("on a terminal where the question is aborted the channel ends the ANSWE
   // whatever the flow asks next reaches a closed readline and rejects with
   // `ERR_USE_AFTER_CLOSE` — the readline internal #370's symptom 2 took off the
   // operator's screen. It must not come back through this door. Every later question
-  // answers `""` too, which is what carries a nineteen-question interview all the way to
-  // the domain's refusal instead of ending it at the first one.
-  it("keeps answering '' for the rest of the interview once the interface is closed", async () => {
+  // answers `UNANSWERED` too, which is what carries a nineteen-question interview to a
+  // refusal rather than a stack trace — and, since #388, what makes every question after
+  // the abandoned one refuse in turn instead of ratifying its default.
+  it("keeps answering UNANSWERED for the rest of the interview once the interface is closed", async () => {
     const harness = channelOn(true, [], ctrlDInterface());
 
-    expect(await harness.channel.ask("first? ")).toBe("");
-    expect(await harness.channel.ask("second? ")).toBe("");
-    expect(await harness.channel.ask("third? ")).toBe("");
+    expect(await harness.channel.ask("first? ")).toBe(UNANSWERED);
+    expect(await harness.channel.ask("second? ")).toBe(UNANSWERED);
+    expect(await harness.channel.ask("third? ")).toBe(UNANSWERED);
 
     expect(harness.rl.asked).toEqual(["first? ", "second? ", "third? "]);
     // Still one interface. An abort is not a reason to build another one.
@@ -335,10 +340,10 @@ describe("the channel remembers that a question was abandoned", () => {
   it("latches on the rejecting question, WITHOUT changing what it resolves", async () => {
     const harness = channelOn(true, [], ctrlDInterface());
 
-    // Both halves in one case on purpose: a latch that suppressed clause 4's `""` would
-    // put `Aborted with Ctrl+D` back on the operator's screen, which is the whole defect
-    // #370 removed.
-    expect(await harness.channel.ask("funding reserve? ")).toBe("");
+    // Both halves in one case on purpose: a latch that suppressed clause 4's resolution
+    // would put `Aborted with Ctrl+D` back on the operator's screen, which is the whole
+    // defect #370 removed.
+    expect(await harness.channel.ask("funding reserve? ")).toBe(UNANSWERED);
     expect(harness.channel.aborted()).toBe(true);
   });
 

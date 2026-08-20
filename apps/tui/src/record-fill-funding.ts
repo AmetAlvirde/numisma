@@ -20,6 +20,13 @@
  * REJECTIONS ARE RETURNED, NOT PRINTED, and every message is byte-identical to what the
  * inline code fed `reject(io, …)`. The reason union is declared narrowly here rather than
  * imported from `RecordFillRejection` — no back-edge — and is assignable at the call site.
+ *
+ * ITS TWO QUESTIONS SPLIT ON #388. The capital tier already refuses anything that is not
+ * `c1`/`c2`/`c3`, so an `UNANSWERED` joins the blank there and stays `ambiguous-tier`, message and all.
+ * `Cash debited [n]` did not: a blank takes the proposed figure, so an abandoned terminal
+ * used to debit a reserve for an amount nobody stated. It abandons now — a fourth arm on
+ * the outcome, matching the one `authorLadderTarget` already had, rather than a new reason
+ * token, because the operator declined nothing and there is nothing to correct.
  */
 import {
   composeAvailableCapital,
@@ -30,9 +37,12 @@ import {
   type ReserveRecord,
   type RestingOrder,
 } from "@numisma/engine";
+import { UNANSWERED, type Answer } from "./prompt-channel.js";
 
 export type FundingOutcome =
   | { status: "resolved"; fundingAmount: number; tier: CapitalTier }
+  /** A question here went unanswered. The caller has written nothing. */
+  | { status: "abandoned"; message: string }
   | {
       status: "rejected";
       reason: "bad-quantity" | "uncovered-override" | "ambiguous-tier";
@@ -48,7 +58,7 @@ export type FundingOutcome =
  * that could drift from it.
  */
 export async function resolveFunding(
-  ask: (question: string) => Promise<string>,
+  ask: (question: string) => Promise<Answer>,
   folded: FundReviewData,
   resting: readonly RestingOrder[],
   reserve: ReserveRecord,
@@ -56,7 +66,17 @@ export async function resolveFunding(
   filledQuantity: number,
 ): Promise<FundingOutcome> {
   const proposedFunding = filled.price * filledQuantity;
-  const fundingAnswer = (await ask(`Cash debited [${proposedFunding}]: `)).trim();
+  const cashReply = await ask(`Cash debited [${proposedFunding}]: `);
+  // THE `[n]` DEFAULT IS AN ANSWER THE OPERATOR GIVES BY PRESSING ENTER, and an
+  // unanswered question gives nothing. Taking the proposal here would debit a reserve on
+  // a keystroke nobody made.
+  if (cashReply === UNANSWERED) {
+    return {
+      status: "abandoned",
+      message: `nobody answered the cash debited for this fill, and ${proposedFunding} is a proposal, not an answer`,
+    };
+  }
+  const fundingAnswer = cashReply.trim();
   const fundingAmount = fundingAnswer === "" ? proposedFunding : Number(fundingAnswer);
   if (!Number.isFinite(fundingAmount) || fundingAmount <= 0) {
     return {
@@ -137,7 +157,13 @@ export async function resolveFunding(
         `at Transfer time and this act does not get to re-decide it`,
     };
   }
-  const answer = (await ask("  Capital tier for this lot (c1/c2/c3): ")).trim();
+  // A QUESTION THAT ALREADY REFUSED, AND IT KEEPS ITS REFUSAL WORD FOR WORD. A blank is
+  // not a capital tier and neither is a question nobody answered, so the sentinel reads as
+  // the empty string here rather than earning an arm of its own. That collapse is safe
+  // ONLY because this prompt advertises no default; `Cash debited [n]` above does, which
+  // is why it checks the sentinel itself.
+  const tierAnswer = await ask("  Capital tier for this lot (c1/c2/c3): ");
+  const answer = tierAnswer === UNANSWERED ? "" : tierAnswer.trim();
   if (answer !== "c1" && answer !== "c2" && answer !== "c3") {
     return {
       status: "rejected",

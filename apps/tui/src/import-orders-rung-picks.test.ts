@@ -29,9 +29,10 @@
  * Every ladder, price and id here is SYNTHESIZED: invented round figures and a counted,
  * obviously-fake UUID that is stable across runs.
  */
-import type { BitgetOpenOrder, InForceLadder } from "@numisma/engine";
+import type { BitgetOpenOrder, InForceLadder, RungPick } from "@numisma/engine";
 import { describe, expect, it } from "vitest";
 import { declareRungPicks } from "./import-orders-rung-picks.js";
+import { UNANSWERED, type Answer } from "./prompt-channel.js";
 
 const PLAN_A = "00000000-0000-4000-8000-00000000000a";
 const PLAN_B = "00000000-0000-4000-8000-00000000000b";
@@ -67,15 +68,15 @@ function order(overrides: Partial<BitgetOpenOrder> = {}): BitgetOpenOrder {
 }
 
 /** An `ask` that replays a script and records what it was asked; an unscripted prompt throws. */
-function scriptedAsk(answers: readonly string[]): {
-  ask: (question: string) => Promise<string>;
+function scriptedAsk(answers: readonly Answer[]): {
+  ask: (question: string) => Promise<Answer>;
   asked: string[];
 } {
   const asked: string[] = [];
   const remaining = [...answers];
   return {
     asked,
-    ask: async (question: string) => {
+    ask: async (question: string): Promise<Answer> => {
       asked.push(question);
       const next = remaining.shift();
       if (next === undefined) {
@@ -86,10 +87,30 @@ function scriptedAsk(answers: readonly string[]): {
   };
 }
 
+/**
+ * The picks, unwrapped — every case below drives a pass that COMPLETES.
+ *
+ * `declareRungPicks` returns an outcome rather than a bare map since #388, because a pass
+ * that was abandoned mid-interview has no picks to report and used to be indistinguishable
+ * from a pass that picked nothing. The abandonment arm is asserted directly in its own
+ * describe at the bottom; everywhere else the wrapper keeps the assertion on the picks,
+ * which is what those cases are about, and turns an unexpected abandonment into a loud
+ * failure rather than a silently empty map.
+ */
+async function picksFrom(
+  ...args: Parameters<typeof declareRungPicks>
+): Promise<Record<string, RungPick>> {
+  const outcome = await declareRungPicks(...args);
+  if (outcome.status !== "picked") {
+    throw new Error(`the pass abandoned at: ${outcome.question}`);
+  }
+  return outcome.picks;
+}
+
 describe("the batch pass — the happy path is one Enter", () => {
   it("one Enter accepts the whole batch of proposals", async () => {
     const { ask, asked } = scriptedAsk([""]);
-    const picks = await declareRungPicks(ask, [order()], LADDERS);
+    const picks = await picksFrom(ask, [order()], LADDERS);
     expect(picks).toEqual({ "order-1": { planId: PLAN_A, rungId: "rung-1" } });
     // ONE question, and only one: a batch the operator accepts costs a single keystroke.
     expect(asked).toHaveLength(1);
@@ -97,7 +118,7 @@ describe("the batch pass — the happy path is one Enter", () => {
 
   it("shows every order beside the rung its price matched, before asking", async () => {
     const { ask, asked } = scriptedAsk([""]);
-    await declareRungPicks(
+    await picksFrom(
       ask,
       [order(), order({ id: "order-2", price: 900 }), order({ id: "order-3", price: 850 })],
       LADDERS,
@@ -113,19 +134,19 @@ describe("the batch pass — the happy path is one Enter", () => {
 
   it("an order with no proposal is written with no pick — the legacy path, not an error", async () => {
     const { ask } = scriptedAsk([""]);
-    const picks = await declareRungPicks(ask, [order({ id: "order-x", price: 850 })], LADDERS);
+    const picks = await picksFrom(ask, [order({ id: "order-x", price: 850 })], LADDERS);
     expect(picks).toEqual({});
   });
 
   it("asks nothing at all when no ladder is in force", async () => {
     const { ask, asked } = scriptedAsk([]);
-    expect(await declareRungPicks(ask, [order()], [])).toEqual({});
+    expect(await picksFrom(ask, [order()], [])).toEqual({});
     expect(asked).toEqual([]);
   });
 
   it("never shows the operator a plan id — not in the batch pass, not in an override", async () => {
     const { ask, asked } = scriptedAsk(["n", ""]);
-    await declareRungPicks(ask, [order()], LADDERS);
+    await picksFrom(ask, [order()], LADDERS);
     expect(asked).not.toHaveLength(0);
     for (const question of asked) {
       expect(question).not.toContain(PLAN_A);
@@ -143,7 +164,7 @@ describe("the batch pass — the happy path is one Enter", () => {
 describe("a rung is proposed to at most one order", () => {
   it("does not propose one rung to two orders at the same price", async () => {
     const { ask, asked } = scriptedAsk([""]);
-    const picks = await declareRungPicks(
+    const picks = await picksFrom(
       ask,
       [order(), order({ id: "order-2", price: 1000 })],
       LADDERS,
@@ -158,7 +179,7 @@ describe("a rung is proposed to at most one order", () => {
     // Across imports, not just within one: the pick-list used to read no order book at
     // all, so a rung declared by a line on disk was proposed again to a re-placed order.
     const { ask, asked } = scriptedAsk([""]);
-    const picks = await declareRungPicks(ask, [order()], LADDERS, [
+    const picks = await picksFrom(ask, [order()], LADDERS, [
       { planId: PLAN_A, rungId: "rung-1" },
     ]);
 
@@ -182,7 +203,7 @@ describe("the prompt says WHICH silence it is reporting", () => {
       },
     ];
     const { ask, asked } = scriptedAsk([""]);
-    await declareRungPicks(ask, [order(), order({ id: "order-2", price: 850 })], twoAt1000);
+    await picksFrom(ask, [order(), order({ id: "order-2", price: 850 })], twoAt1000);
 
     expect(asked[0]).toContain("2 ladders declare a rung at this price");
     expect(asked[0]).toContain("no rung declared at this price");
@@ -202,7 +223,7 @@ describe("the override pass — any rung of any in-force ladder, or none", () =>
 
   it("declining the batch offers every rung of every ladder, numbered", async () => {
     const { ask, asked } = scriptedAsk(["n", "3"]);
-    const picks = await declareRungPicks(ask, [order()], TWO_LADDERS);
+    const picks = await picksFrom(ask, [order()], TWO_LADDERS);
     const question = asked[1] ?? "";
     expect(question).toContain("1) pos-a 2026-08-01 · rung at 1000 (size 250)");
     expect(question).toContain("2) pos-a 2026-08-01 · rung at 900 (size 250)");
@@ -214,7 +235,7 @@ describe("the override pass — any rung of any in-force ladder, or none", () =>
 
   it("a blank line keeps the proposal, so a dissent costs one line and agreement costs none", async () => {
     const { ask, asked } = scriptedAsk(["n", ""]);
-    expect(await declareRungPicks(ask, [order()], LADDERS)).toEqual({
+    expect(await picksFrom(ask, [order()], LADDERS)).toEqual({
       "order-1": { planId: PLAN_A, rungId: "rung-1" },
     });
     // The default is shown, or a blank line means something the operator cannot see.
@@ -223,11 +244,11 @@ describe("the override pass — any rung of any in-force ladder, or none", () =>
 
   it("an override can decline the join entirely, and `none` is the default with no proposal", async () => {
     const declined = scriptedAsk(["n", "0"]);
-    expect(await declareRungPicks(declined.ask, [order()], LADDERS)).toEqual({});
+    expect(await picksFrom(declined.ask, [order()], LADDERS)).toEqual({});
 
     const unproposed = scriptedAsk(["n", ""]);
     expect(
-      await declareRungPicks(unproposed.ask, [order({ price: 850 })], LADDERS),
+      await picksFrom(unproposed.ask, [order({ price: 850 })], LADDERS),
     ).toEqual({});
     expect(unproposed.asked[1]).toContain("[none]");
   });
@@ -236,14 +257,14 @@ describe("the override pass — any rung of any in-force ladder, or none", () =>
     // ALLOWED, and flagged by the report rather than refused here: the operator is
     // permitted to know something the price match does not.
     const { ask } = scriptedAsk(["n", "2"]);
-    expect(await declareRungPicks(ask, [order({ price: 1000 })], LADDERS)).toEqual({
+    expect(await picksFrom(ask, [order({ price: 1000 })], LADDERS)).toEqual({
       "order-1": { planId: PLAN_A, rungId: "rung-2" },
     });
   });
 
   it("re-asks rather than guessing when the answer is not a choice", async () => {
     const { ask, asked } = scriptedAsk(["n", "banana", "9", "2"]);
-    expect(await declareRungPicks(ask, [order()], LADDERS)).toEqual({
+    expect(await picksFrom(ask, [order()], LADDERS)).toEqual({
       "order-1": { planId: PLAN_A, rungId: "rung-2" },
     });
     // Four prompts: the batch, then the pick asked three times. A guess here would write
@@ -253,7 +274,7 @@ describe("the override pass — any rung of any in-force ladder, or none", () =>
 
   it("asks once per order, in the batch's own order", async () => {
     const { ask, asked } = scriptedAsk(["n", "", "0"]);
-    const picks = await declareRungPicks(
+    const picks = await picksFrom(
       ask,
       [order(), order({ id: "order-2", price: 900 })],
       LADDERS,
@@ -269,7 +290,7 @@ describe("the override pass — any rung of any in-force ladder, or none", () =>
     // operator one. Re-placing a rung whose earlier order was cancelled is ordinary, and
     // a permanent block on an append-only claim would make it unreachable forever.
     const { ask } = scriptedAsk(["n", "1"]);
-    const picks = await declareRungPicks(ask, [order()], LADDERS, [
+    const picks = await picksFrom(ask, [order()], LADDERS, [
       { planId: PLAN_A, rungId: "rung-1" },
     ]);
     expect(picks).toEqual({ "order-1": { planId: PLAN_A, rungId: "rung-1" } });
@@ -278,10 +299,56 @@ describe("the override pass — any rung of any in-force ladder, or none", () =>
   it("takes y/yes as acceptance, in any case and with any surrounding space", async () => {
     for (const answer of ["y", "Y", "yes", " YES "]) {
       const { ask, asked } = scriptedAsk([answer]);
-      expect(await declareRungPicks(ask, [order()], LADDERS)).toEqual({
+      expect(await picksFrom(ask, [order()], LADDERS)).toEqual({
         "order-1": { planId: PLAN_A, rungId: "rung-1" },
       });
       expect(asked).toHaveLength(1);
     }
+  });
+});
+
+/**
+ * BOTH QUESTIONS HERE RATIFY, WHICH IS WHY #388 REACHED THEM (#370's second door).
+ *
+ * `Accept all? [Y/n]` reads a blank as ACCEPT EVERY PROPOSAL — the reason the happy path
+ * is one Enter, and the reason an abandoned terminal used to write a declared
+ * `planId`/`rungId` join onto every rung of the batch. The per-order prompt reads a blank
+ * as KEEP THE PROPOSAL, inside a `for(;;)` that re-asks until the answer is a choice: an
+ * unanswered question there would either spin forever or ratify, depending on which branch
+ * it fell into. Neither happens now.
+ */
+describe("a question that was never answered (#388)", () => {
+  it("abandons the batch pass rather than accepting every proposal on screen", async () => {
+    const { ask, asked } = scriptedAsk([UNANSWERED]);
+
+    const outcome = await declareRungPicks(ask, [order()], LADDERS);
+
+    expect(outcome).toEqual({
+      status: "abandoned",
+      question: "whether to accept the proposed rung picks",
+    });
+    // One question, and the override pass was never opened.
+    expect(asked).toHaveLength(1);
+  });
+
+  it("still accepts every proposal on a real blank — one Enter is unchanged", async () => {
+    const { ask } = scriptedAsk([""]);
+
+    expect(await picksFrom(ask, [order()], LADDERS)).toEqual({
+      "order-1": { planId: PLAN_A, rungId: "rung-1" },
+    });
+  });
+
+  it("abandons the override loop rather than keeping the proposal or spinning", async () => {
+    const { ask, asked } = scriptedAsk(["n", UNANSWERED]);
+
+    const outcome = await declareRungPicks(ask, [order()], LADDERS);
+
+    expect(outcome.status).toBe("abandoned");
+    // The message names the rung — the loop is per order, so "the override pass" would not
+    // tell the operator where it stopped.
+    expect(outcome.status === "abandoned" && outcome.question).toContain("BTCUSDT");
+    // TWO questions: the loop did not re-ask a terminal that cannot answer.
+    expect(asked).toHaveLength(2);
   });
 });

@@ -101,6 +101,7 @@ import {
 import { formatFoldDiscards } from "@numisma/event-store";
 import type { OrdersLoad } from "@numisma/preferences";
 import { nextLogImage, serializeEvent } from "./event-store.js";
+import { UNANSWERED, type Answer } from "./prompt-channel.js";
 import { resolveFunding } from "./record-fill-funding.js";
 import { authorLadderTarget } from "./record-fill-ladder-target.js";
 import { renderSkipMessage } from "./skip-message.js";
@@ -138,7 +139,18 @@ export interface RecordFillIo {
    * telling is not the fill's date.
    */
   toldAt: () => string;
-  ask: (question: string) => Promise<string>;
+  /**
+   * Ask the operator one question. Resolves what they typed, or `UNANSWERED` when there
+   * was no terminal to ask or the question was abandoned — see `prompt-channel.ts`.
+   *
+   * EVERY QUESTION OF THIS ACT REFUSES THE SENTINEL, including the ones it delegates to
+   * `authorLadderTarget` and `resolveFunding`, which take this same function. The ones
+   * that already refused a blank keep their reason token (`unknown-rung`, `bad-timestamp`,
+   * `bad-quantity`, `unknown-instrument`, `ambiguous-tier`, `incomplete-decision`); the
+   * ones that took a DEFAULT abandon, which is this act's existing word for "nothing was
+   * written and nobody said to write it".
+   */
+  ask: (question: string) => Promise<Answer>;
   out: (message: string) => void;
   err: (message: string) => void;
 }
@@ -209,6 +221,44 @@ function reject(
   return { status: "rejected", reason, message };
 }
 
+/**
+ * The outcome an unanswered question earns where the answer had a DEFAULT or was a gate.
+ *
+ * `abandoned`, not `rejected`, and that is this act's own vocabulary rather than a new
+ * one: nothing was written, nobody declined anything, and the operator's next move is to
+ * record the fill again. The MESSAGE names the question — the half a reason token carries
+ * badly — which is why nine per-question tokens would have bought nothing.
+ *
+ * `isAffirmative` KEEPS ITS `string` PARAMETER and every caller narrows before it. Widening
+ * the helper so `isAffirmative(UNANSWERED)` returned false would compile and would answer
+ * NO to `Write BOTH?` — right by luck at that gate, and wrong at `Append this lot?`, whose
+ * `[Y/n]` phrasing makes silence mean yes. A helper that decides what silence means is the
+ * defect #388 removes, one layer down.
+ */
+function abandon(question: string): RecordFillOutcome {
+  return {
+    status: "abandoned",
+    message:
+      `nobody answered ${question} — the terminal was abandoned (Ctrl-D), or there was ` +
+      `none to conduct this interview on`,
+  };
+}
+
+/**
+ * An answer as text, with {@link UNANSWERED} read as the empty string.
+ *
+ * ONLY FOR QUESTIONS THAT ALREADY REFUSE A BLANK. At those — the rung pick, the fill
+ * timestamp, a touched rung's observed quantity, the instrument id — "nobody typed
+ * anything" and "nobody could be asked" earn the same refusal in the same words, and
+ * collapsing them here is what keeps those refusals exactly where they were. Reaching for
+ * this at a question with a DEFAULT would hand the default to a keystroke nobody made,
+ * which is the whole defect #388 removes; those questions check the sentinel themselves
+ * and {@link abandon}.
+ */
+function typedOrNothing(answer: Answer): string {
+  return answer === UNANSWERED ? "" : answer.trim();
+}
+
 function isAffirmative(answer: string): boolean {
   const normalized = answer.trim().toLowerCase();
   return normalized === "y" || normalized === "yes";
@@ -246,7 +296,9 @@ function describeVerdict(verdict: ProposedVerdict): string {
  */
 type BookObservationResult =
   | { status: "observed"; observation: BookObservation }
-  | { status: "bad-quantity"; orderId: string; answer: string };
+  | { status: "bad-quantity"; orderId: string; answer: string }
+  /** The `[r]` default is not an observation somebody made. */
+  | { status: "abandoned"; question: string };
 
 /**
  * Ask the operator what the venue shows for every OTHER rung of the ladder.
@@ -294,11 +346,16 @@ async function observeBook(
     if (rung.orderId === filled.orderId) {
       continue;
     }
-    const answer = (
-      await io.ask(`  ${rung.orderId} — [r]esting untouched / [t]ouched / [g]one? [r]: `)
-    )
-      .trim()
-      .toLowerCase();
+    const reply = await io.ask(
+      `  ${rung.orderId} — [r]esting untouched / [t]ouched / [g]one? [r]: `,
+    );
+    // THE `[r]` DEFAULT IS THE CONSERVATIVE ANSWER, WHICH IS NOT THE SAME AS A SAFE ONE.
+    // "resting untouched" is a positive claim about the venue that monotonicity reasons
+    // over, and an unanswered question makes no claim at all.
+    if (reply === UNANSWERED) {
+      return { status: "abandoned", question: `what the venue shows for rung '${rung.orderId}'` };
+    }
+    const answer = reply.trim().toLowerCase();
     if (answer === "g" || answer === "gone") {
       continue; // absent from the observation = disappeared
     }
@@ -306,12 +363,12 @@ async function observeBook(
       // The BASIS is named in the prompt, because the operator is reading a column and
       // only they can tell which number they are reading. Asking for "filled_quantity"
       // bare is what let a delta and a running total mean the same field (#176).
-      const rawQuantity = (
+      const rawQuantity = typedOrNothing(
         await io.ask(
           `      filled_quantity observed — the venue's CUMULATIVE total for this rung ` +
             `since it was placed, not just this session's: `,
-        )
-      ).trim();
+        ),
+      );
       const quantity = Number(rawQuantity);
       if (rawQuantity === "" || !Number.isFinite(quantity) || quantity <= 0) {
         // THE BOUNDARY IS `<= 0`, NOT MERELY UNPARSEABLE — and a literal `0` is refused
@@ -580,7 +637,11 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
   }
   io.out(`Resting rungs:\n${rungs.map((rung, index) => describeRung(index, rung)).join("\n")}\n`);
 
-  const picked = (await io.ask("Which rung filled? [index or order id]: ")).trim();
+  // THE FIRST QUESTION OF THE ACT, and the one a run with no terminal reaches. It already
+  // refused a blank as `unknown-rung`; the sentinel joins that arm word for word, which is
+  // what keeps `record-fill-cli.test.ts` — "the missing terminal in the shell's voice, and
+  // the refusal in the flow's" — pinning the same two sentences through #388.
+  const picked = typedOrNothing(await io.ask("Which rung filled? [index or order id]: "));
   const byIndex = /^\d+$/.test(picked) ? rungs[Number(picked)] : undefined;
   const filled = byIndex ?? rungs.find((rung) => rung.orderId === picked);
   if (!filled) {
@@ -590,7 +651,7 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
   // The prompt states the rule in advance and the refusal restates it — both from the one
   // shared phrase (#181), so neither can promise the operator a looser rule than the
   // predicate on the next line enforces.
-  const observedAt = (await io.ask(`Fill timestamp (${OBSERVED_AT_RULE}): `)).trim();
+  const observedAt = typedOrNothing(await io.ask(`Fill timestamp (${OBSERVED_AT_RULE}): `));
   if (!isObservedAtStamp(observedAt)) {
     return reject(
       io,
@@ -606,9 +667,16 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
     );
   }
 
-  const quantityAnswer = (
-    await io.ask(`Filled quantity [${filled.remainingQuantity}]: `)
-  ).trim();
+  const quantityReply = await io.ask(`Filled quantity [${filled.remainingQuantity}]: `);
+  // A DEFAULT NOBODY TOOK. The bracketed figure is the whole remainder of the rung, so an
+  // unanswered question here used to record the largest fill this rung could carry.
+  if (quantityReply === UNANSWERED) {
+    return abandon(
+      `how much of '${filled.orderId}' filled, and ${filled.remainingQuantity} is the ` +
+        `rung's whole remainder rather than an answer`,
+    );
+  }
+  const quantityAnswer = quantityReply.trim();
   const filledQuantity =
     quantityAnswer === "" ? filled.remainingQuantity : Number(quantityAnswer);
   if (!Number.isFinite(filledQuantity) || filledQuantity <= 0) {
@@ -690,6 +758,9 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
     filledQuantity,
     observedAt,
   );
+  if (observed.status === "abandoned") {
+    return abandon(observed.question);
+  }
   if (observed.status === "bad-quantity") {
     return reject(
       io,
@@ -733,20 +804,27 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
 
   // `O3`. Nothing above this line has written anything and nothing below writes without
   // this answer: the inference is never recorded as an observation.
-  if (!isAffirmative(await io.ask("Confirm these derived verdicts? [y/N]: "))) {
+  const confirmed = await io.ask("Confirm these derived verdicts? [y/N]: ");
+  if (confirmed === UNANSWERED) {
+    return abandon("whether the derived verdicts are right");
+  }
+  if (!isAffirmative(confirmed)) {
     return { status: "abandoned", message: "the derived verdicts were not confirmed" };
   }
 
   const cancelled = proposal.verdicts.filter((verdict) => verdict.verdict === "cancelled");
   let alsoCancelled: string[] = [];
   if (cancelled.length > 0) {
-    if (
-      isAffirmative(
-        await io.ask(
-          `Also record ${cancelled.length} confirmed cancellation(s) in this act? [y/N]: `,
-        ),
-      )
-    ) {
+    const alsoAnswer = await io.ask(
+      `Also record ${cancelled.length} confirmed cancellation(s) in this act? [y/N]: `,
+    );
+    // A BLANK DECLINES AND LETS THE ACT CONTINUE, which is a decision the operator made
+    // about lines that go into an append-only file. An unanswered question is not that
+    // decision, and the act does not get to continue on it.
+    if (alsoAnswer === UNANSWERED) {
+      return abandon(`whether to record ${cancelled.length} confirmed cancellation(s) in this act`);
+    }
+    if (isAffirmative(alsoAnswer)) {
       alsoCancelled = cancelled.map((verdict) => verdict.orderId);
     }
   }
@@ -793,8 +871,13 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
   const instrument = folded.instruments.find(
     (entry) => entry.symbol === filled.symbol || filled.symbol.startsWith(`${entry.symbol}/`),
   );
-  const instrumentId =
-    instrument?.id ?? (await io.ask(`Instrument id for ${filled.symbol}: `)).trim();
+  let instrumentId = instrument?.id;
+  if (instrumentId === undefined) {
+    // The fold knows no instrument for this symbol, and neither does an unanswered
+    // question — same `unknown-instrument` refusal, same words, that a blank has always
+    // earned.
+    instrumentId = typedOrNothing(await io.ask(`Instrument id for ${filled.symbol}: `));
+  }
   if (!instrumentId || !folded.instruments.some((entry) => entry.id === instrumentId)) {
     return reject(
       io,
@@ -827,6 +910,9 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
   // rejection arms carry the reason token and the message this flow used to build inline,
   // so `reject` still prints the identical bytes.
   const funding = await resolveFunding(io.ask, folded, resting, reserve, filled, filledQuantity);
+  if (funding.status === "abandoned") {
+    return funding;
+  }
   if (funding.status === "rejected") {
     return reject(io, funding.reason, funding.message);
   }
@@ -897,7 +983,11 @@ export async function recordFill(io: RecordFillIo): Promise<RecordFillOutcome> {
         .map((record) => `  ${io.ordersPath}  ${JSON.stringify(record)}`)
         .join("\n")}\n`,
   );
-  if (!isAffirmative(await io.ask("Write BOTH? [y/N]: "))) {
+  const write = await io.ask("Write BOTH? [y/N]: ");
+  if (write === UNANSWERED) {
+    return abandon("whether to write both files");
+  }
+  if (!isAffirmative(write)) {
     return { status: "abandoned", message: "the fill act was not confirmed" };
   }
 

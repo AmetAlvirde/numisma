@@ -27,6 +27,13 @@
  * declaration.ts` AND STAY THAT WAY, on that module's own argument: de-duplicating them
  * means choosing a shared home for a TUI-wide prompt primitive — a decision, not a move —
  * so neither leaf imports the other.
+ *
+ * BOTH OF ITS QUESTIONS RATIFY, WHICH IS WHY #388 REACHED HERE FIRST. `Accept all? [Y/n]`
+ * reads a blank as ACCEPT EVERY PROPOSAL and the per-order prompt reads one as KEEP THE
+ * PROPOSED RUNG — two durable `planId`/`rungId` joins on an append-only file, from a line
+ * nobody typed. The channel's `UNANSWERED` is refused at each question rather than widened
+ * into `isAffirmative`, which would decline the batch and then walk the per-order loop
+ * ratifying every proposal in turn. The helper keeps its `string` parameter.
  */
 import {
   matchRungsByPrice,
@@ -34,6 +41,7 @@ import {
   type InForceLadder,
   type RungPick,
 } from "@numisma/engine";
+import { UNANSWERED, type Answer } from "./prompt-channel.js";
 
 /** How one rung is shown when the operator is asked about it. */
 function describeOrder(order: BitgetOpenOrder): string {
@@ -74,6 +82,11 @@ function labelOf(choices: readonly RungChoice[], pick: RungPick): string | undef
   )?.label;
 }
 
+export type RungPickOutcome =
+  | { status: "picked"; picks: Record<string, RungPick> }
+  /** A question in this pass went unanswered. No proposal was accepted or declined. */
+  | { status: "abandoned"; question: string };
+
 /**
  * Prompt for the declared rung join, one batch at a time.
  *
@@ -92,14 +105,14 @@ function labelOf(choices: readonly RungChoice[], pick: RungPick): string | undef
  * inference; a pick is something the operator said, and only the inference is blocked.
  */
 export async function declareRungPicks(
-  ask: (question: string) => Promise<string>,
+  ask: (question: string) => Promise<Answer>,
   orders: readonly BitgetOpenOrder[],
   ladders: readonly InForceLadder[],
   declaredOnFile: readonly RungPick[] = [],
-): Promise<Record<string, RungPick>> {
+): Promise<RungPickOutcome> {
   const choices = offerRungs(ladders);
   if (choices.length === 0) {
-    return {};
+    return { status: "picked", picks: {} };
   }
 
   // ONE RUNG STANDS FOR ONE ORDER, ACROSS THE BATCH **AND** ACROSS IMPORTS. Without this
@@ -157,9 +170,17 @@ export async function declareRungPicks(
   // Enter. It is NOT the refusal a blank funding answer is: there, a blank means the
   // operator declared no reserve and nothing may be written; here, every proposal is
   // already on screen and the question is only whether to keep them.
+  //
+  // AND THAT IS EXACTLY WHY UNANSWERED CANNOT REACH THE LINE BELOW. The blank's acceptance
+  // is earned by the operator having READ the summary this prompt just printed; a question
+  // that was never put earns nothing, and one Enter nobody pressed would ratify every
+  // proposal on screen.
+  if (accepted === UNANSWERED) {
+    return { status: "abandoned", question: "whether to accept the proposed rung picks" };
+  }
   const answer = accepted.trim();
   if (answer === "" || isAffirmative(answer)) {
-    return Object.fromEntries(proposals);
+    return { status: "picked", picks: Object.fromEntries(proposals) };
   }
 
   const menu = choices.map((choice, index) => `    ${index + 1}) ${choice.label}`).join("\n");
@@ -180,7 +201,14 @@ export async function declareRungPicks(
     // default would write a durable join into an append-only file that nobody declared,
     // and the operator would have no way to know which reading was taken.
     for (;;) {
-      const reply = (await ask(question)).trim();
+      const answered = await ask(question);
+      // THE RE-ASK LOOP IS NOT A PLACE TO WAIT OUT AN ABANDONED TERMINAL. Every later
+      // question resolves UNANSWERED too, so re-asking would spin; and falling through to
+      // the blank's branch would keep the proposed rung, which is the ratification.
+      if (answered === UNANSWERED) {
+        return { status: "abandoned", question: `which rung ${describeOrder(order)} filled` };
+      }
+      const reply = answered.trim();
       if (reply === "") {
         if (proposed !== undefined) {
           picks[order.id] = proposed;
@@ -197,5 +225,5 @@ export async function declareRungPicks(
       }
     }
   }
-  return picks;
+  return { status: "picked", picks };
 }

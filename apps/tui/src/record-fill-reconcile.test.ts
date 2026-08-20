@@ -39,6 +39,7 @@ import {
   type ReconciliationRecord,
 } from "@numisma/engine";
 import type { OrdersLoad } from "@numisma/preferences";
+import { UNANSWERED } from "./prompt-channel.js";
 
 // The spy `S1a` is asserted with. It wraps the REAL selector and delegates to it, so
 // every other test in this file exercises production behaviour unchanged; the only thing
@@ -250,7 +251,9 @@ class Harness {
         this.appended.push(record);
       },
       toldAt: () => TOLD_AT,
-      ask: async () => this.answers.shift() ?? "",
+      // An exhausted script answers `UNANSWERED` — what the real channel gives when there
+      // is nobody to ask — rather than `""`, which would take the next default (#388).
+      ask: async () => this.answers.shift() ?? UNANSWERED,
       out: (message) => this.out.push(message),
       err: (message) => this.err.push(message),
     };

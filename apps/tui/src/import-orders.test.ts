@@ -28,6 +28,7 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 import { describeMerge } from "./import-orders-merge-notice.js";
 import { importBitgetOpenOrders, type OrdersImportIo } from "./import-orders.js";
+import { UNANSWERED, type Answer } from "./prompt-channel.js";
 
 const createdDirs: string[] = [];
 
@@ -160,7 +161,7 @@ interface HarnessOptions {
    * single harness can drive two successive imports (the re-import and re-price cases)
    * with the operator answering the same way both times.
    */
-  answers?: string[];
+  answers?: Answer[];
   /**
    * The LIVE reserves the folded fund carries, as `{ id, amount }` — synthesized into a
    * real `FundReviewData` by {@link syntheticFund}, because the guard takes the fund now
@@ -257,7 +258,11 @@ async function harness(options: HarnessOptions = {}): Promise<Harness> {
         if (answers.length === 0) {
           answers = [...script];
         }
-        return answers.shift() ?? "";
+        // A HARNESS WITH NO SCRIPT AT ALL ANSWERS `UNANSWERED`, NOT `""` (#388) — what the
+        // real channel hands this flow when there is no terminal. The funding question
+        // reads both the same way, `no-reserve-declared`, which is the point of collapsing
+        // them there; every other question refuses the sentinel outright.
+        return answers.shift() ?? UNANSWERED;
       },
       out: (message) => {
         outputs.push(message);
@@ -2059,38 +2064,37 @@ describe("importBitgetOpenOrders — the declared rung join", () => {
 });
 
 /**
- * THE ORDERING DEPENDENCY THAT MAKES AN EMPTY ANSWER SAFE (#370, symptom 2) — the pin
+ * A RUN NOBODY CAN ANSWER REFUSES AT THE FIRST QUESTION (#370, symptom 2) — the pin
  * `record-fill.test.ts` carries for the fill act, on this side of the pair.
  *
- * `import-orders-cli.ts` hands this flow `""` for every question when stdin is no
+ * `import-orders-cli.ts` hands this flow `UNANSWERED` for every question when stdin is no
  * terminal, so the shell can name the missing terminal and let the flow refuse in its own
- * voice instead of printing a readline internal. That is honest ONLY while the FIRST
- * question this flow reaches is one that refuses on `""` — a property of the ORDER the
- * interview asks in, not of the empty string. The funding batch question refuses; the
- * three questions behind it are ratifications, and `import-orders-cli.ts`'s construction
- * site enumerates them: the rung-pick prompt reads `""` as ACCEPT EVERY PROPOSED RUNG and,
- * at its other site, as TAKE THE DEFAULT, and the funding declaration's second question
- * reads it as NO PER-RUNG OVERRIDES. If any of those is ever reached first, the same `""`
- * silently ratifies every default and the import WRITES, unattended.
+ * voice instead of printing a readline internal. The funding batch question is the first
+ * this flow reaches, it refuses a declaration it did not get, and the sentinel lands on
+ * that same `no-reserve-declared` arm word for word.
  *
- * Until now that dependency was stated in prose on both shells and pinned on only one.
- * The fixture carries a LADDER on purpose: with `plans` empty no rung question exists to
- * run ahead of funding, so the case could not see the reorder it exists to catch. With one
- * in force every ratifying question is reachable, and the assertion below says none of
- * them was reached.
+ * WHAT THIS CASE USED TO BE. It pinned an ORDERING DEPENDENCY: `""` refused at the funding
+ * question and RATIFIED at the three behind it — accept every proposed rung, take the
+ * default, no per-order overrides — so the empty answer was honest only while funding was
+ * asked first, and a reorder would have let an unattended run write. #388 removed the
+ * dependency: all four questions refuse the sentinel now, the three ratifying ones as
+ * `interview-abandoned`. This case guards what it always measured — one question, the
+ * domain's own refusal, nothing on disk.
+ *
+ * The fixture carries a LADDER on purpose: with `plans` empty no rung question exists at
+ * all, so the case could not tell a flow that stopped from one that had nowhere to go.
  */
 describe("an import nobody can answer refuses at the FIRST question and writes nothing", () => {
   it("refuses as no-reserve-declared, having asked exactly one question", async () => {
-    // The script repeats once exhausted, so `[""]` answers EVERY question with the empty
-    // string — precisely what the shell hands the flow on a stdin that is no terminal.
-    const setup = await harness({ answers: [""], plans: [planLadder()] });
+    // The script repeats once exhausted, so this answers EVERY question with the
+    // sentinel — precisely what the shell hands the flow on a stdin that is no terminal.
+    const setup = await harness({ answers: [UNANSWERED], plans: [planLadder()] });
 
     const outcome = await importBitgetOpenOrders({ csvPath: setup.csvPath, io: setup.io });
 
     expect(outcome).toMatchObject({ status: "rejected", reason: "no-reserve-declared" });
     // THE PIN. One question — the funding declaration — and the refusal came from it.
-    // Reaching a second means a ratifying question now runs ahead of the refusing one,
-    // and the shell's `""` has stopped being an honest answer.
+    // Reaching a second would mean some question downstream accepted the sentinel.
     expect(setup.asked).toHaveLength(1);
     expect(setup.asked[0]).toContain("Funding reserve for this batch");
     // Nothing was written: the sidecar was never created.
@@ -2102,25 +2106,29 @@ describe("an import nobody can answer refuses at the FIRST question and writes n
  * THE OTHER DOOR INTO THOSE RATIFYING QUESTIONS: CTRL-D, WHICH IS NOT A REORDER.
  *
  * The case above pins the ORDERING argument — funding is asked first and refuses, so a
- * run with no terminal never reaches a ratification. That argument covers the no-terminal
- * path only. `prompt-channel.ts` clause 4 resolves `""` for an ABANDONED question too,
- * and for every question after it, because the abort closes the interface. So an operator
- * who types a real reserve, sees the override question, realises the reserve is the wrong
- * one and presses Ctrl-D used to get: the override blank read as "no overrides", the
- * rung-pick blank read as ACCEPT EVERY PROPOSAL, and `appendOrders` called with
- * `planId`/`rungId` joins nobody declared — durably, in an append-only file, attributed
- * to the reserve they were in the act of taking back. Before #370's channel change the
- * same keystroke ended the run with nothing on disk.
+ * run with no terminal never reaches a ratification. `prompt-channel.ts` clause 4 hands an
+ * abandoned question the same answer clause 2 does, and for every question after it,
+ * because the abort closes the interface. So an operator who types a real reserve, sees
+ * the override question, realises the reserve is the wrong one and presses Ctrl-D used to
+ * get: the override blank read as "no overrides", the rung-pick blank read as ACCEPT EVERY
+ * PROPOSAL, and `appendOrders` called with `planId`/`rungId` joins nobody declared —
+ * durably, in an append-only file, attributed to the reserve they were in the act of
+ * taking back.
  *
- * THE ASSERTION IS AT THIS SEAM RATHER THAN THE CHANNEL'S, because this is the layer
- * where the behaviour changed — the channel returning `""` was never the defect. No pty,
- * no spawn: `ask` is injected, and `promptAbandoned` is the channel's latch as a
- * predicate. The guarantee it pins is positional-independent — if the terminal was
- * abandoned, nothing is written — so it holds for a Ctrl-D at the LAST question too,
- * which is the case a latch that only re-answered later questions would still leak.
+ * TWO DOORS NOW STOP THAT, AND THEY ARE ASSERTED SEPARATELY. #388 gave the channel a
+ * sentinel no operator can type, so the question the operator walked away from refuses on
+ * its own and the run stops THERE — the first case below. The write-door latch (#386) is
+ * the second door and is still proven on its own terms in the case after it: even with
+ * every question answered, an abandoned terminal writes nothing. The second is redundant
+ * with the first by construction; it is kept one increment longer so a regression in the
+ * new per-question refusals meets a proven guarantee rather than a gap.
+ *
+ * THE ASSERTIONS ARE AT THIS SEAM RATHER THAN THE CHANNEL'S, because this is the layer
+ * where the behaviour changed. No pty, no spawn: `ask` is injected, and `promptAbandoned`
+ * is the channel's latch as a predicate.
  */
 describe("an interview abandoned at the terminal writes NOTHING (#370, clause 4)", () => {
-  /** Answers the funding question once, then `""` forever — what the channel really does. */
+  /** Answers the funding question once, then UNANSWERED forever — what the channel does. */
   function abandonAfterFirstAnswer(setup: Harness): { appended: number } {
     const calls = { appended: 0 };
     let abandoned = false;
@@ -2132,7 +2140,7 @@ describe("an interview abandoned at the terminal writes NOTHING (#370, clause 4)
         return "reserve-a";
       }
       abandoned = true;
-      return "";
+      return UNANSWERED;
     };
     setup.io.promptAbandoned = () => abandoned;
     setup.io.appendOrders = async () => {
@@ -2141,14 +2149,14 @@ describe("an interview abandoned at the terminal writes NOTHING (#370, clause 4)
     return calls;
   }
 
-  it("refuses as interview-abandoned and never reaches appendOrders", async () => {
+  it("refuses as interview-abandoned AT the abandoned question, and never reaches appendOrders", async () => {
     const setup = await harness({ plans: [planLadder()] });
     const calls = abandonAfterFirstAnswer(setup);
 
     const outcome = await importBitgetOpenOrders({ csvPath: setup.csvPath, io: setup.io });
 
-    // THE PIN. Without the write-door check this is `imported / appended: 2`, carrying
-    // declared rung joins the operator never accepted.
+    // THE PIN. Without a refusal at the question this is `imported / appended: 2`,
+    // carrying declared rung joins the operator never accepted.
     expect(calls.appended).toBe(0);
     expect(outcome).toMatchObject({ status: "rejected", reason: "interview-abandoned" });
     // The operator gets the refusal contract's literal second sentence, not a stack.
@@ -2157,19 +2165,43 @@ describe("an interview abandoned at the terminal writes NOTHING (#370, clause 4)
         (message) => message.startsWith("REFUSED —") && message.includes("Nothing was written"),
       ),
     ).toBe(true);
-    // And the interview really did get past the refusing question — otherwise this case
-    // would be passing for the reason the case above already covers.
-    expect(setup.asked.length).toBeGreaterThan(1);
+    // WHERE IT STOPPED, WHICH IS THE #388 HALF. Exactly two questions: the funding
+    // declaration, answered, and the override question, abandoned. The rung-pick prompts
+    // were never put, so the refusal came from the question the operator walked away from
+    // rather than from the write door thirty lines later. Before #388 this was FOUR.
+    expect(setup.asked).toHaveLength(2);
     expect(setup.asked[0]).toContain("Funding reserve for this batch");
+    expect(setup.asked[1]).toContain("Override the funding reserve");
+    // And the refusal names the question, which is what a single reason token cannot.
+    expect(outcome.status === "rejected" && outcome.message).toContain("override the reserve");
+  });
+
+  it("STILL refuses at the write door when every question was answered but the terminal was abandoned", async () => {
+    // THE SECOND DOOR, ON ITS OWN TERMS (#386, kept by #388). No question here goes
+    // unanswered — every one of them gets a real string — so nothing in the interview
+    // refuses, and the ONLY thing between this run and `appendOrders` is the latch. That
+    // is what makes the guarantee positional-independent: it does not matter which
+    // question caught the Ctrl-D, including the last one.
+    const setup = await harness({ answers: ["reserve-a", "n", ""], plans: [planLadder()] });
+    let appended = 0;
+    setup.io.appendOrders = async () => {
+      appended += 1;
+    };
+    setup.io.promptAbandoned = () => true;
+
+    const outcome = await importBitgetOpenOrders({ csvPath: setup.csvPath, io: setup.io });
+
+    expect(appended).toBe(0);
+    expect(outcome).toMatchObject({ status: "rejected", reason: "interview-abandoned" });
   });
 
   it("still lets a Ctrl-D at the FIRST question refuse as no-reserve-declared", async () => {
-    // #370's actual fix, unregressed: the channel's first rejecting question resolves
-    // `""`, the domain reads that as NO RESERVE DECLARED, and the operator gets the
-    // domain's own words rather than `Aborted with Ctrl+D`. The latch is true here too,
-    // but the funding refusal fires long before the write door, so it is that refusal —
-    // the specific one #370 names — the operator sees, not the new one.
-    const setup = await harness({ answers: [""], plans: [planLadder()] });
+    // #370's actual fix, unregressed, and #388 deliberately did not move it: the funding
+    // question already refused a blank, so the sentinel lands on that same arm with the
+    // same words. The operator gets the domain's own refusal rather than `Aborted with
+    // Ctrl+D`. The latch is true here too, but the funding refusal fires long before the
+    // write door, so it is that refusal — the specific one #370 names — the operator sees.
+    const setup = await harness({ answers: [UNANSWERED], plans: [planLadder()] });
     setup.io.promptAbandoned = () => true;
 
     const outcome = await importBitgetOpenOrders({ csvPath: setup.csvPath, io: setup.io });

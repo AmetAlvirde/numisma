@@ -20,6 +20,7 @@
 import { describe, expect, it } from "vitest";
 import type { PositionRecord, ReserveRecord } from "@numisma/engine";
 import { authorLadderTarget } from "./record-fill-ladder-target.js";
+import { UNANSWERED, type Answer } from "./prompt-channel.js";
 
 function reserve(overrides: Partial<ReserveRecord> = {}): ReserveRecord {
   return {
@@ -58,13 +59,13 @@ function position(id: string, overrides: Partial<PositionRecord> = {}): Position
  * An unmatched prompt throws rather than defaulting to `""`, so a prompt this test did not
  * anticipate is a loud failure instead of a silently-blank answer that happens to abandon.
  */
-function scripted(answers: Record<string, string>) {
+function scripted(answers: Record<string, Answer>) {
   const asked: string[] = [];
   const printed: string[] = [];
   return {
     asked,
     printed,
-    ask: async (question: string): Promise<string> => {
+    ask: async (question: string): Promise<Answer> => {
       asked.push(question);
       const hit = Object.entries(answers).find(([key]) => question.includes(key));
       if (!hit) {
@@ -342,5 +343,86 @@ describe("authorLadderTarget — first fill on the ladder opens the Position (T6
       "  Planned holding horizon: ",
       "  Strategy: ",
     ]);
+  });
+});
+
+/**
+ * THE WORST RATIFICATION IN THE ACT, AND THE ONE WITH NO SECOND DOOR (#388).
+ *
+ * `Append this lot to '<id>'? [Y/n]` is phrased so that SILENCE MEANS YES. Before the
+ * sentinel, a Ctrl-D anywhere earlier in this nineteen-question interview resolved `""`
+ * here, `isNegative("")` was false, and the lot was attached to an existing Position —
+ * durably, with no operator having said so. The import flow's write-door latch does not
+ * cover this file, and `record-fill` has no equivalent, so nothing else caught it.
+ *
+ * The first case is the whole fix; the second is there so the fix cannot be mistaken for
+ * "the gate got stricter". A real blank still appends, which is what `[Y/n]` promises.
+ */
+describe("a question nobody answered is not consent (#388)", () => {
+  it("abandons rather than appending the lot when the append gate went unanswered", async () => {
+    const io = scripted({ "Append this lot": UNANSWERED });
+
+    const outcome = await authorLadderTarget(
+      io.ask,
+      io.out,
+      [position("position-synthetic")],
+      reserve(),
+      "instrument-synthetic",
+    );
+
+    expect(outcome.status).toBe("abandoned");
+    // The operator is told WHICH Position they did not agree to, and why silence was not
+    // taken for a yes.
+    expect(outcome.status === "abandoned" && outcome.message).toContain("position-synthetic");
+    expect(outcome.status === "abandoned" && outcome.message).toContain("silence");
+  });
+
+  it("still appends on a real blank — the [Y/n] default is unchanged", async () => {
+    const io = scripted({ "Append this lot": "" });
+
+    const outcome = await authorLadderTarget(
+      io.ask,
+      io.out,
+      [position("position-synthetic")],
+      reserve(),
+      "instrument-synthetic",
+    );
+
+    expect(outcome).toEqual({
+      status: "authored",
+      target: { mode: "add", positionId: "position-synthetic" },
+    });
+  });
+
+  it("abandons on an unanswered tempo rather than writing the reserve's own", async () => {
+    // `Tempo [n]` advertises the reserve's tempo as its default, and a Position carries
+    // whatever lands here for the rest of its life.
+    const io = scripted({
+      "Position id": "position-new",
+      Tempo: UNANSWERED,
+      ...FIVE_FIELDS,
+    });
+
+    const outcome = await authorLadderTarget(io.ask, io.out, [], reserve(), "instrument-synthetic");
+
+    expect(outcome.status).toBe("abandoned");
+    expect(outcome.status === "abandoned" && outcome.message).toContain("tempo");
+    // It stopped AT the tempo: the five decision fields were never put.
+    expect(io.asked.some((question) => question.includes("Entry thesis"))).toBe(false);
+  });
+
+  it("refuses an unanswered decision field as incomplete-decision, exactly as a blank one does", async () => {
+    // One of the fifteen that already refused. The reason token does not move, because
+    // the operator's next move — open the Position again with all five in hand — does not.
+    const io = scripted({
+      "Position id": "position-new",
+      Tempo: "",
+      ...FIVE_FIELDS,
+      "Risk budget": UNANSWERED,
+    });
+
+    const outcome = await authorLadderTarget(io.ask, io.out, [], reserve(), "instrument-synthetic");
+
+    expect(outcome).toMatchObject({ status: "rejected", reason: "incomplete-decision" });
   });
 });
