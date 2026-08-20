@@ -103,7 +103,7 @@ the venue shows, and it stays in the sidecar until it becomes one of those.
   splitting the file and running `parseEvent` line by line; today through
   `loadEventLog` + `assertLogFullyLoaded` (`:140-141`), with the same policy
   applied again to inbox candidates by `walkPendingInbox` (`:164`, throwing at
-  `:170`). launchd runs it daily from the working checkout. It **never reads
+  `:173`). launchd runs it daily from the working checkout. It **never reads
   `orders.jsonl`** — verified by grep, then and now: the string `orders` does
   not appear in that file at all. Adding lines to a file the daily check does
   not open cannot break the daily check.
