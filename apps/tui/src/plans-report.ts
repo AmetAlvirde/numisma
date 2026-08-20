@@ -1,7 +1,8 @@
 /**
  * THE DESK RENDERING of `plans.jsonl` — pure, IO-free, and the whole of what
- * `pnpm plans` decides. The shell around it (`plans-cli.ts`) reads two files, hands
- * the results here, prints one string and sets one exit code.
+ * `pnpm plans` decides. The shell around it (`plans-cli.ts`) reads three things — the
+ * fold, the `plans.jsonl` sidecar and the `reconciliations.jsonl` trail — hands the
+ * results here, prints one string and sets one exit code.
  *
  * WHY THIS SURFACE EXISTS AT ALL. The durability chain proves the sidecar is
  * COMMITTED — never that it parses, never which `positionId` a line attributed to,

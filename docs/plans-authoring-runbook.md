@@ -13,8 +13,9 @@ command below. Every figure on this page is **synthetic**; no real position, pri
 size appears in the numisma checkout.
 
 **The file is authored by hand, by you.** Agents never write it and never touch the
-`<fund>` checkout. `pnpm plans` is read-only: it reads the file and reports, it never
-appends and never touches git.
+`<fund>` checkout. `pnpm plans` never appends a plan line and never touches git; it
+reads and reports. It is not write-free, though, and the exception belongs to the
+event log rather than to this file. See the first note at the foot of this page.
 
 This page is the companion to three neighbours:
 [`durable-log-ops.md`](./durable-log-ops.md) (the durable-file floor these lines rely
@@ -56,6 +57,10 @@ The other two links are code and are guarded by test
 (`apps/tui/src/durable-log-guards.test.ts` asserts **both ends**: not `check-ignore`'d,
 and named in `TRACKED_FILES`). Run `pnpm test` and confirm that file is green before you
 trust the file to survive.
+
+`data/reconciliations.jsonl` is on the same floor and needs the same allowlist entry.
+Section 5a reads it; `pnpm orders:fill` writes it, and you never do. Run the
+`check-ignore` above against it too while you are in the `<fund>` checkout.
 
 ## 1. The envelope
 
@@ -185,7 +190,11 @@ cd ~/Dev/numisma
 pnpm plans ; echo "EXIT=$?"
 ```
 
-Read the row for the position you just authored and confirm three facts:
+The page opens with the two paths it read, `Plans — …` and `Trail — …`, and the
+date it read them at. With no `--as-of` that date is **today in the fund's own
+trading-day timezone**, never the machine's idea of a date.
+
+Read the row for the position you just authored and confirm four facts:
 
 - **the state** — `pending` for a position not yet born (declared, not yet realized),
   `active` once it exists on the book, `ended` after a terminator, `none` when no line is
@@ -193,20 +202,51 @@ Read the row for the position you just authored and confirm three facts:
 - **the `effectiveAt` that was selected** — it must be the date you authored, not an
   earlier one. A different date here is the section 3 trap, or a supersession that did not
   win;
-- **the body** — the rung count for a ladder, the cadence and anchor for a time plan.
+- **the body** — the rung count for a ladder, the cadence and anchor for a time plan;
+- **the trail marker, on an `active` row only.** The command also reads
+  `reconciliations.jsonl`, the trail `pnpm orders:fill` appends a verdict to, so an
+  `active` row can say whether its most recent fill agreed with the plan. A clean
+  verdict prints **nothing extra**, and it may do so only because every other outcome
+  prints an explicit qualifier: `!! FILL <date> DISAGREED` naming the mismatch kinds, or
+  one of four `??` qualifiers saying why the answer is unknown (no trail file, no line
+  for this position, an unreadable trail line, or a fill recorded while the sidecar
+  itself was unreadable). A bare `active` row therefore means *checked and clean*, not
+  *not checked*. Markers carry no figures, only a kind and the fill's own date.
+  `pending` rows are deliberately unmarked: a position that does not exist has no fills,
+  and a `no-line` qualifier on every pending row is the noise that stops a marker being
+  read.
 
-Then confirm **`EXIT=0`**. The contract is exact and one-directional: the command exits
-`0` **only if** the file was read and **every** line in it was readable. Any skipped line
-exits non-zero after printing the diagnostics, which name the line number, the bucket, and
-what to do — a corrupt line (append a corrected one) against a line this checkout is too
-old to understand (pull and retry). The diagnostics never quote the line itself, because
-plan bodies carry your figures; go and read line *N* in your editor.
+Then confirm **`EXIT=0`**. The contract is exact and one-directional, and it now spans
+**both** files: the command exits `0` **only if** each file was read and **every** line
+in it was readable. Any skipped line in either exits non-zero after printing the
+diagnostics, which name the line number, the bucket, and what to do — a corrupt line
+(append a corrected one) against a line this checkout is too old to understand (pull and
+retry). Both files' diagnostics land in the one block, under one heading, so a trail
+message cannot hide behind a section you did not scroll to. The diagnostics never quote
+the line itself, because plan bodies carry your figures; go and read line *N* in your
+editor.
+
+An **absent** trail is deliberately not a failure. Before your first recorded fill its
+absence is the normal state, and a daily non-zero there would cry wolf. The `?? NO
+TRAIL` qualifier on the row is how that case is said instead.
+
+Two counts sit below the rows and are reported separately on purpose: `unattributable
+line(s)` for the sidecar and `unattributable trail line(s)` for the trail. Each is a
+line too broken to name a position at all, so it belongs to no row; the two are never
+summed, because a plans typo and a torn machine write are different repairs.
 
 **Do not read a non-zero exit backwards.** It does not mean your plan line is bad. The
 command also exits `1` when it cannot read the *event log* — a quarantined log line, or an
 `--as-of` earlier than genesis — and in that case it never reached the sidecar and printed
 no plans diagnostics at all. So read the output, not just the code: **no diagnostics block
 means the failure was upstream of `plans.jsonl`**, and `pnpm spine` is where to look.
+
+A third kind of line can appear on stderr before the page, and it is neither of the
+above: the **fold's discards**, every event the fold read and could not apply, named
+one per line. It is printed here because born-ness is derived from that fold, so a
+dropped `PositionOpened` or `PositionClosed` can move a row's state. It **never** moves
+the exit code: the log is append-only, so a discard does not extinguish, and this code is
+the plans report's own verdict.
 
 An absent `plans.jsonl` is the normal starting state and exits `0` with no rows. Use
 `--as-of YYYY-MM-DD` to ask what the file said on a prior date.

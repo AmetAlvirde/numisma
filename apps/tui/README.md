@@ -21,9 +21,11 @@ sidecar-class axis, which excludes the log, it is the second. Say which count
 you mean.) The sidecar's own read/write IO
 (`resolveOrdersPath`, `loadOrders`, `appendOrders`) lives in
 [`@numisma/preferences`](../../packages/preferences), alongside the general
-preferences sidecar — this package only wires that IO to its three interactive
-flows (`import-orders.ts`, `record-fill.ts`, `cancel-order.ts`) through the CLI
-entries below.
+preferences sidecar and the `plans.jsonl` / `reconciliations.jsonl` loaders — this
+package only wires that IO to its three order flows (`import-orders.ts`,
+`record-fill.ts`, `cancel-order.ts`) through the CLI entries below. Two of the
+three interview the operator; `cancel-order.ts` takes its whole assertion from
+argv so it stays scriptable.
 
 ## Entry points
 
@@ -35,12 +37,13 @@ root-level script from the repo's `package.json` (all of them delegate to
 | `pnpm` script | Entry file | Read-only? | What it does |
 | --- | --- | --- | --- |
 | `dev` | `app.ts` | no (ingests inbox) | Bun openTUI dashboard: `prepareStartup` (ingest → fold) then `mountApp`. |
-| `report` | `report.ts` | yes | Folds genesis + log and prints the composition report. Never ingests. |
-| `spine` | `spine.ts` | no (ingests inbox) | Node tracer: ingest → fold (`--as-of <date>`, optional) → render. `--magnitude-threshold=<n>` / `SPINE_MAGNITUDE_THRESHOLD` opts into a wider fat-finger guard for one run. |
+| `report` | `report.ts` | yes | Folds genesis + log and prints the composition report. Never ingests. Enumerates every event the fold discarded on stderr, before the report. |
+| `spine` | `spine.ts` | no (ingests inbox) | Node tracer: ingest → fold (`--as-of <date>`, optional) → render, with the same stderr enumeration of the fold's discards. `--magnitude-threshold=<n>` / `SPINE_MAGNITUDE_THRESHOLD` opts into a wider fat-finger guard for one run. |
+| `plans` | `plans-cli.ts` | no (the fold's read maintains the log's quarantine lane) | Desk command over `plans.jsonl`: renders each declared position's state as of `--as-of <date>` (or today in the fund's timezone), annotates an `active` row from the `reconciliations.jsonl` trail, and exits 1 if either file skipped a line. See [`docs/plans-authoring-runbook.md`](../../docs/plans-authoring-runbook.md). |
 | `spine:reset` | `spine-reset.ts` | no (destructive, guarded) | Deletes `events.jsonl` and restores the latest archived inbox. Refuses on the default `<fund>` `dataDir`; needs an explicit `NUMISMA_DATA_DIR`. |
-| `migrate:log` | `migrate-legacy-log.ts` | no (rewrites the log) | One-shot ADR-003 v2 cash-leg migration from an operator-authored `data/migration-cash-legs.json`. Fails loud, writes nothing on any invalid/missing leg. |
+| `migrate:log` | `migrate-legacy-log.ts` | no (rewrites the log) | One-shot ADR-003 v2 cash-leg migration from an operator-authored `data/migration-cash-legs.json`. Fails loud, writes nothing on any invalid/missing leg. A log with nothing in it to migrate — absent, empty, or blank lines only — reports zero and touches no disk (#345). |
 | `orders:import <csv>` | `import-orders-cli.ts` | no (appends orders) | Interactive `<exchange>` open-orders import into `orders.jsonl`. Never touches the event log. Exit 0 on `imported-partial` (ADR-014). |
-| `orders:fill` | `record-fill-cli.ts` | no (appends orders + log) | Interactive fill recording: retires the claim in `orders.jsonl` and appends the resulting transaction to `events.jsonl`. |
+| `orders:fill` | `record-fill-cli.ts` | no (appends orders + log + trail) | Interactive fill recording: retires the claim in `orders.jsonl`, appends the resulting transaction to `events.jsonl`, and reconciles the fill against the `plans.jsonl` line that claims the position, appending the verdict to `reconciliations.jsonl`. |
 | `orders:cancel <orderId> [observedAt]` | `cancel-order-cli.ts` | no (appends orders) | Scriptable (argv-only, no prompt) retirement of one resting rung in `orders.jsonl`. Never touches the event log. |
 | `smoke:tui` | `smoke-openTui.ts` | yes (in-memory) | Bun keypress smoke against a synthetic fund review; no disk IO. |
 | `smoke:startup` | `smoke-startup-openTui.ts` | no (builds a temp on-disk store) | Bun startup smoke: drives `prepareStartup` + `mountApp` through the real renderer against a temp-dir event store. |
@@ -74,7 +77,20 @@ under Node while the terminal glue stays isolated in a Bun-only layer.
   `event-store.test.ts`).
 - `startup.ts` — `prepareStartup`, the data path that runs before the renderer
   (`--as-of` → ingest → surface report → fold), shared by `app.ts` and the
-  openTUI verification harness (`startup.test.ts`).
+  openTUI verification harness (`startup.test.ts`). Its `loadData` thunk returns
+  the fold's whole `{data, skipped}` envelope; the renderer takes `.data` at the
+  composition root, because a thunk typed as bare `FundReviewData` hands its
+  consumer a fold indistinguishable from one taken over a complete log. The
+  `livenessLines` and `foldLines` seams are both optional with **no default** —
+  omitted means silent — and only `pnpm dev` supplies either, because only
+  `pnpm dev` hands the terminal to a renderer and has nowhere else to say it.
+- `prompt-channel.ts` — the one place a shell's readline lifecycle and its
+  no-terminal refusal live, shared by `import-orders-cli.ts` and
+  `record-fill-cli.ts` (`prompt-channel.test.ts`). It builds the interface at
+  the first question rather than at startup, writes its no-terminal notice once
+  per run, and resolves an `UNANSWERED` sentinel — a symbol no operator can type
+  — for a question it could not put or that the operator aborted, so the flow
+  reaches its own refusal instead of the shell printing a readline internal.
 
 **Excluded from the coverage number (orders/migration CLI shells):**
 
@@ -84,22 +100,32 @@ under Node while the terminal glue stays isolated in a Bun-only layer.
   `include` — not for thinness alone but because **importing the shell runs the
   act**: each is a self-executing entry (top-level await / a `main()` that
   calls itself) binding the real fs and the real data dir to a flow module —
-  plus a real readline prompt in the two importers that have one
-  (`import-orders-cli.ts`, `record-fill-cli.ts`; `cancel-order-cli.ts` is
-  deliberately promptless so it stays scriptable, and the migration takes only
-  argv) — so a test cannot load one to assert it without performing a
+  plus a real readline prompt in the two shells that interview
+  (`import-orders-cli.ts`, `record-fill-cli.ts`, both through the shared
+  `prompt-channel.ts`; `cancel-order-cli.ts` is deliberately promptless so it
+  stays scriptable, and the migration takes only argv) — so a test cannot load
+  one to assert it without performing a
   real import, a real fill, a real cancel, or a real in-place rewrite of the
   durable log (`record-fill-cli.ts` says so in its own header). The flows they
   bind — `import-orders.ts`, `record-fill.ts`, `cancel-order.ts`, and
   `event-store.ts`'s `migrateLegacyLog` — are the tested units and DO count
-  toward the measured number. `record-fill-cli.ts` itself is STILL EXCLUDED
-  from the number (v8 does not instrument a spawned subprocess) but is no
-  longer untested: `record-fill-cli.test.ts` drives the shell end to end via
-  `spawnSync(tsx, …)` against a throwaway `mkdtemp` data dir and asserts its
-  own wiring — excluded from the coverage number, not untested. The other
-  three shells (`import-orders-cli.ts`, `cancel-order-cli.ts`,
-  `migrate-legacy-log.ts`) have no such spawn test today and remain
-  untested-by-any-suite. See `docs/coverage-rationale.md` §1.
+  toward the measured number.
+
+  **Excluded is not untested. All four now have a spawn suite**, each driving
+  the real shell via `spawnSync(tsx, …)` against a throwaway `mkdtemp` data dir
+  and asserting only what the shell itself owns — argv, the env-to-path
+  plumbing, the exit-code mapping, the prompt lifecycle — never re-testing the
+  flow's refusal taxonomy: `record-fill-cli.test.ts` (the shell pairs
+  `loadEventLog` with `assertLogFullyLoaded`, so a partial log cannot reach
+  `recordFill`), `import-orders-cli.test.ts` (the usage branch, the three-way
+  exit-code mapping, and the `imported-partial` → 0 branch ADR-014 argues for),
+  `cancel-order-cli.test.ts` (the positional `observedAt` mapping and the
+  stated no-TTY contract), and `migrate-legacy-log.test.ts` (the mapping read,
+  the two stdout sentences and the `touched === 0` boundary). v8 still cannot
+  instrument a spawned subprocess, so all four stay out of the coverage number.
+  `plans-cli.ts` is the one shell in `apps/tui` with no driver at all. Across
+  the repo it is one of two, beside `apps/price-feed/src/operator-notice-cli.ts`.
+  See `docs/coverage-rationale.md` §1.
 
 **Excluded from the coverage number (scripts + Bun-only wiring):**
 
@@ -124,12 +150,17 @@ under Node while the terminal glue stays isolated in a Bun-only layer.
   trail, hands all three to the tested `formatPlansReport` and sets the exit code.
   Not read-only either — the fold it takes carries the event log's write-on-read
   quarantine maintenance, which its own header names — so importing it to assert
-  it would run the act. No spawn test today: unlike `record-fill-cli.ts`, nothing
-  drives this shell, so it is excluded from the number AND untested by any suite.
+  it would run the act. No spawn test today: unlike the four orders/migration
+  shells above, nothing in the tree drives this one, so it is excluded from the
+  number AND untested by any suite.
 - `app.ts` — the self-executing `pnpm dev` entry: path resolution, `prepareStartup`,
   openTUI renderer construction, fail-fast/exit codes, then `mountApp`. Also
   resolves the orders sidecar path and wires `loadAvailableCapital` so the
-  dashboard joins `orders.jsonl` to the fold at read time (never merged).
+  dashboard joins `orders.jsonl` to the fold at read time (never merged). It is
+  the only entry point that supplies `startup.ts`'s `livenessLines` and
+  `foldLines` seams: both write to the pre-alternate-screen channel, because
+  once `renderer.start()` opens the alternate screen anything on stderr is
+  painted over.
 - `mount-app.ts` — the openTUI-coupled wiring: renderable construction, keypress
   subscription, `dashboard.content` writes, and `requestRender`. Holds the
   `@opentui/core` import and the engine calls (`buildDashboardDetail`,

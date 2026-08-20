@@ -98,13 +98,15 @@ the venue shows, and it stays in the sidecar until it becomes one of those.
   the marker tracks — persisted record shape — is untouched.
 - **This increment has NO forward-compatibility cliff.** The single largest risk
   the prior increment carried is simply absent here.
-  `apps/price-feed/src/rejection-check.ts` reads `data/events.jsonl`, splits it
-  line by line, and runs `parseEvent` over every non-blank line, **throwing on
-  any it cannot parse** (`:152`, and again over inbox candidates at `:178`).
-  launchd runs it daily from the working checkout. It **never reads
-  `orders.jsonl`** — verified by grep: the string `orders` does not appear in
-  that file at all. Adding lines to a file the daily check does not open cannot
-  break the daily check.
+  `apps/price-feed/src/rejection-check.ts` reads `data/events.jsonl` and
+  **throws on anything it cannot read** — at the time of this decision by
+  splitting the file and running `parseEvent` line by line; today through
+  `loadEventLog` + `assertLogFullyLoaded` (`:140-141`), with the same policy
+  applied again to inbox candidates by `walkPendingInbox` (`:164`, throwing at
+  `:170`). launchd runs it daily from the working checkout. It **never reads
+  `orders.jsonl`** — verified by grep, then and now: the string `orders` does
+  not appear in that file at all. Adding lines to a file the daily check does
+  not open cannot break the daily check.
 
 **The naming claim: `kind` not `type`, `observedAt` not `asOf`.**
 
@@ -123,7 +125,7 @@ every read, which is the whole reason the sidecar is a separate file.
 **`observedAt` earns its keep independently of that argument**, and this is the
 half that would stand even if the naming claim did not. `parseEvent` gates the
 envelope's `asOf` to a bare `YYYY-MM-DD` date —
-`packages/engine/src/events/parse.ts:118`, `if (typeof input.asOf !== "string" ||
+`packages/engine/src/events/parse.ts:119`, `if (typeof input.asOf !== "string" ||
 !isIsoDate(input.asOf))`, rejecting anything else with *"Event asOf must be an ISO
 date (YYYY-MM-DD)"* — while the venue's timestamps are **second-granular**.
 Matching the log's word would mean matching the log's precision, and matching the

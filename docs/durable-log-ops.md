@@ -1,13 +1,20 @@
 # Durable-log operations (verify, test, reproduce)
 
 The durable ledger — `events.jsonl`, `genesis.json`, `preferences.jsonl`,
-`orders.jsonl`, and the derived `head-digest.json` breadcrumb — lives in the
-private sibling repo
+`orders.jsonl`, `plans.jsonl`, `reconciliations.jsonl`, and the derived
+`head-digest.json` breadcrumb — lives in the private sibling repo
 **`<fund>`** (`~/Dev/<fund>/data` by default, or wherever `NUMISMA_DATA_DIR`
 points). Every successful ingest commits the log + Head Digest under **your own git
 identity**, so a bad-but-honest NAV is **locatable** (`git log -p head-digest.json`)
 and **reversible** (`git revert` + re-fold). This is the reliable conversion of PRD
 #114 (ADR-006 sibling-repo substrate; ADR-003 amendment for the derived Head Digest).
+
+Those seven names are the **durable-file floor**, and it is a tested list, not a
+prose one. `apps/tui/src/durable-log-guards.test.ts` asserts both ends of it: that
+`<fund>`'s allowlist does not `check-ignore` any of them, and that `TRACKED_FILES`
+in `apps/tui/src/ingest-commit.ts` names exactly those seven. A new durable file is
+silently ephemeral until both ends know it, which is the precondition
+[`plans-authoring-runbook.md`](./plans-authoring-runbook.md) §0 walks through.
 
 Throughout this page, `<fund>` stands for your own private data repository — the same
 convention as `<dataDir>` — so substitute your actual repo name/path before running
@@ -100,6 +107,12 @@ lives once, pure and IO-free, in `@numisma/engine` (`packages/engine/src/data-di
 - an absolute path → normalized;
 - a **relative** path → **rejected loudly** (a relative value would resolve
   differently for `pnpm prices:fetch` at the repo root vs. a package's own script).
+
+Surrounding whitespace is stripped before any of those arms runs, so `"/tmp/a b "`
+resolves to `/tmp/a b` rather than to a sibling directory whose name ends in a
+space. Interior whitespace is untouched, so `/tmp/a b` is a real macOS path and stays
+one. The rule reaches five doors, not one: the env knob plus the four functions that
+take a data root as an argument, so none of them can disagree with the knob.
 
 ```sh
 NUMISMA_DATA_DIR=data pnpm report
