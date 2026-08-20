@@ -29,6 +29,7 @@
 import type { BitgetOpenOrder } from "@numisma/engine";
 import { describe, expect, it } from "vitest";
 import { declareFunding } from "./import-orders-funding-declaration.js";
+import { UNANSWERED, type Answer } from "./prompt-channel.js";
 
 function order(overrides: Partial<BitgetOpenOrder> = {}): BitgetOpenOrder {
   return {
@@ -53,15 +54,15 @@ function order(overrides: Partial<BitgetOpenOrder> = {}): BitgetOpenOrder {
  * throws rather than returning a blank, so a mutation that asks one question too many
  * fails loudly instead of being read as an empty answer.
  */
-function scriptedAsk(answers: readonly string[]): {
-  ask: (question: string) => Promise<string>;
+function scriptedAsk(answers: readonly Answer[]): {
+  ask: (question: string) => Promise<Answer>;
   asked: string[];
 } {
   const asked: string[] = [];
   const remaining = [...answers];
   return {
     asked,
-    ask: async (question: string) => {
+    ask: async (question: string): Promise<Answer> => {
       asked.push(question);
       const next = remaining.shift();
       if (next === undefined) {
@@ -81,6 +82,7 @@ describe("the batch answer", () => {
   it("is the declared reserve, and a declined override pass leaves no overrides", async () => {
     const { ask, asked } = scriptedAsk(["reserve-a", "n"]);
     expect(await declareFunding(ask, [order()])).toEqual({
+      status: "declared",
       fundingReserveId: "reserve-a",
       overrides: {},
     });
@@ -91,6 +93,7 @@ describe("the batch answer", () => {
   it("is TRIMMED — surrounding whitespace is not part of the reserve id (`M5`)", async () => {
     const { ask } = scriptedAsk(["  reserve-a  ", "n"]);
     expect(await declareFunding(ask, [order()])).toEqual({
+      status: "declared",
       fundingReserveId: "reserve-a",
       overrides: {},
     });
@@ -98,13 +101,13 @@ describe("the batch answer", () => {
 
   it("declares nothing when blank, and does not go on to ask about overrides", async () => {
     const { ask, asked } = scriptedAsk([""]);
-    expect(await declareFunding(ask, [order()])).toBeUndefined();
+    expect(await declareFunding(ask, [order()])).toEqual({ status: "not-declared" });
     expect(asked).toEqual([BATCH_QUESTION]);
   });
 
   it("declares nothing when it is only whitespace", async () => {
     const { ask, asked } = scriptedAsk(["   "]);
-    expect(await declareFunding(ask, [order()])).toBeUndefined();
+    expect(await declareFunding(ask, [order()])).toEqual({ status: "not-declared" });
     expect(asked).toEqual([BATCH_QUESTION]);
   });
 });
@@ -132,6 +135,7 @@ describe("the override question's answer", () => {
     it(`declines the per-order pass on ${JSON.stringify(answer)} (\`M1\`)`, async () => {
       const { ask, asked } = scriptedAsk(["reserve-a", answer]);
       expect(await declareFunding(ask, [order()])).toEqual({
+        status: "declared",
         fundingReserveId: "reserve-a",
         overrides: {},
       });
@@ -162,6 +166,7 @@ describe("the per-order override pass", () => {
     const { ask } = scriptedAsk(["reserve-a", "y", "reserve-b", "", "reserve-a", "  reserve-c  "]);
 
     expect(await declareFunding(ask, orders)).toEqual({
+      status: "declared",
       fundingReserveId: "reserve-a",
       // `rung-2` answered blank and `rung-3` answered the batch back: a redundant override
       // is not an override, and neither appears as a key.
@@ -174,13 +179,17 @@ describe("the per-order override pass", () => {
     const { ask, asked } = scriptedAsk(["reserve-a", "y", "reserve-b", "reserve-c"]);
 
     const declaration = await declareFunding(ask, orders);
-    expect(Object.keys(declaration?.overrides ?? {})).toEqual(["rung-1", "rung-2"]);
+    expect(declaration.status === "declared" && Object.keys(declaration.overrides)).toEqual([
+      "rung-1",
+      "rung-2",
+    ]);
     expect(asked).toHaveLength(4);
   });
 
   it("asks nothing per order when the batch has no orders", async () => {
     const { ask, asked } = scriptedAsk(["reserve-a", "y"]);
     expect(await declareFunding(ask, [])).toEqual({
+      status: "declared",
       fundingReserveId: "reserve-a",
       overrides: {},
     });
@@ -231,5 +240,62 @@ describe("the per-order prompt", () => {
     const { ask, asked } = scriptedAsk(["reserve-zulu", "y", ""]);
     await declareFunding(ask, [order()]);
     expect(asked[2]).toContain("[reserve-zulu]");
+  });
+});
+
+/**
+ * THE ANSWER NO OPERATOR CAN TYPE (#388), AND THE TWO THINGS IT DOES HERE.
+ *
+ * The batch question ALREADY refused a blank as `no-reserve-declared`, and that refusal is
+ * #370's actual fix — a Ctrl-D on question one reaches the domain rather than printing
+ * `Aborted with Ctrl+D`. So the sentinel joins the blank there, word for word: the reason
+ * the caller raises does not move.
+ *
+ * The other two questions are the change. `Override … for any individual order? [y/N]`
+ * read a blank as "no overrides" and the per-order prompt read one as "use the batch
+ * answer" — both ratifications, both durable `fundingReserveId` values on an append-only
+ * line, and both reachable by a Ctrl-D pressed one question after the operator named a
+ * reserve they were in the act of taking back.
+ */
+describe("a question that was never answered", () => {
+  it("declares nothing at the batch question — the same arm a blank lands on", async () => {
+    const { ask, asked } = scriptedAsk([UNANSWERED]);
+
+    expect(await declareFunding(ask, [order()])).toEqual({ status: "not-declared" });
+    // And it stops there, exactly as the blank case does.
+    expect(asked).toEqual([BATCH_QUESTION]);
+  });
+
+  it("abandons at the override question instead of quietly declining the pass", async () => {
+    const { ask, asked } = scriptedAsk(["reserve-a", UNANSWERED]);
+
+    expect(await declareFunding(ask, [order()])).toEqual({
+      status: "abandoned",
+      question: "whether to override the reserve per order",
+    });
+    // Nothing was declared — not even the reserve the first answer named, which is the
+    // point: the operator walked away one question after naming it.
+    expect(asked).toEqual([BATCH_QUESTION, OVERRIDE_QUESTION]);
+  });
+
+  it("abandons at a per-order prompt instead of taking the batch answer for that rung", async () => {
+    const { ask } = scriptedAsk(["reserve-a", "y", UNANSWERED]);
+
+    const outcome = await declareFunding(ask, [order()]);
+
+    expect(outcome.status).toBe("abandoned");
+    // The message names the rung, because "somewhere in the override pass" is not
+    // something an operator can act on.
+    expect(outcome.status === "abandoned" && outcome.question).toContain("BTCUSDT");
+  });
+
+  it("still reads a real blank in the override pass as `take the batch answer`", async () => {
+    const { ask } = scriptedAsk(["reserve-a", "y", ""]);
+
+    expect(await declareFunding(ask, [order()])).toEqual({
+      status: "declared",
+      fundingReserveId: "reserve-a",
+      overrides: {},
+    });
   });
 });

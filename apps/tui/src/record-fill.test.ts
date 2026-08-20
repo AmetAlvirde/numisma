@@ -32,6 +32,7 @@ import {
   type ReconciliationRecord,
 } from "@numisma/engine";
 import type { OrdersLoad } from "@numisma/preferences";
+import { UNANSWERED, type Answer } from "./prompt-channel.js";
 import { recordFill, type RecordFillIo, type RecordFillOutcome } from "./record-fill.js";
 
 const ORDERS_PATH = "/synthetic/orders.jsonl";
@@ -95,12 +96,12 @@ class Harness {
   readonly asked: string[] = [];
   /** Trail lines the advisory reconcile appended — held, never asserted on here. */
   readonly reconciliations: ReconciliationRecord[] = [];
-  private readonly answers: string[];
+  private readonly answers: Answer[];
 
   constructor(options: {
     records?: OrderRecord[];
     events?: PortfolioEvent[];
-    answers: string[];
+    answers: Answer[];
     failWrite?: "log" | "orders" | "orders-and-rollback";
   }) {
     this.ordersImage = (options.records ?? ladderRecords())
@@ -167,7 +168,11 @@ class Harness {
       toldAt: () => "2026-01-05T18:07:00-06:00",
       ask: async (question) => {
         this.asked.push(question);
-        return this.answers.shift() ?? "";
+        // AN EXHAUSTED SCRIPT ANSWERS `UNANSWERED`, NOT `""` (#388). That is what the real
+        // channel hands a flow when there is nobody to ask, and it is the honest model of
+        // a harness that ran out: `""` would silently take whatever default the next
+        // question advertises and let the act carry on past the end of its own script.
+        return this.answers.shift() ?? UNANSWERED;
       },
       out: (message) => this.out.push(message),
       err: (message) => this.err.push(message),
@@ -220,7 +225,7 @@ class Harness {
  * The full happy-path answer sequence for opening the ladder's Position on the TOP rung.
  * Order mirrors the prompts in `recordFill`.
  */
-function openTopRungAnswers(): string[] {
+function openTopRungAnswers(): Answer[] {
   return [
     "rung-400", // which rung filled
     "2026-01-05T12:00:00", // fill timestamp
@@ -303,6 +308,12 @@ describe("the fill act is ALL-OR-NOTHING across both files", () => {
     expect(outcome.status).toBe("abandoned");
     expect(harness.logImage).toBe(logBefore);
     expect(harness.ordersImage).toBe(ordersBefore);
+    // AND SAYS SO. `record-fill-cli.ts` only sets an exit code, so a decline that does not
+    // reach `io.err` leaves the operator a bare prompt and no way to tell whether the fill
+    // landed. Same contract as every refusal this act prints.
+    expect(harness.err).toHaveLength(1);
+    expect(harness.err.join("\n")).toContain("REFUSED — the fill act was not confirmed");
+    expect(harness.err.join("\n")).toContain("Nothing was written to");
   });
 
   it("writes NOTHING when the derived verdicts are not confirmed (`O3`)", async () => {
@@ -317,6 +328,9 @@ describe("the fill act is ALL-OR-NOTHING across both files", () => {
     expect(outcome.status).toBe("abandoned");
     expect(harness.logImage).toBe(logBefore);
     expect(harness.ordersImage).toBe(ordersBefore);
+    expect(harness.err).toHaveLength(1);
+    expect(harness.err.join("\n")).toContain("REFUSED — the derived verdicts were not confirmed");
+    expect(harness.err.join("\n")).toContain("Nothing was written to");
   });
 });
 
@@ -904,7 +918,7 @@ describe("the named crash window is DETECTABLE", () => {
  */
 describe("the cash-debited override is weighed against the reserve's available", () => {
   /** The answer sequence with the `Cash debited` prompt answered explicitly. */
-  function answersWithCash(cash: string, answers = openTopRungAnswers()): string[] {
+  function answersWithCash(cash: string, answers = openTopRungAnswers()): Answer[] {
     answers[answers.length - 2] = cash;
     return answers;
   }
@@ -1115,30 +1129,29 @@ describe("recording a fill over damaged history says so, and still records", () 
 });
 
 /**
- * THE ORDERING DEPENDENCY THAT MAKES AN EMPTY ANSWER SAFE (#370, symptom 2).
+ * A RUN NOBODY CAN ANSWER REFUSES AT THE FIRST QUESTION (#370, symptom 2).
  *
- * `record-fill-cli.ts` hands the flow `""` for every question when stdin is no terminal,
- * so the shell can name the missing terminal and let this flow refuse in its own voice
- * instead of printing a readline internal. That is honest ONLY while the FIRST question
- * this flow reaches is one that refuses on `""` — and it is a property of the ORDER the
- * interview asks in, not of the empty string. The reachable interview is NINETEEN `ask`
- * sites — this file holds nine literally and hands `io.ask` onward to `authorLadderTarget`
- * and `resolveFunding` for the other ten — and SIX of them read `""` as a ratification:
- * the filled-quantity question takes the remaining quantity, the per-rung book question
- * accepts the proposed verdict, the cancellation confirmation records none and CONTINUES,
- * "Tempo" and "Cash debited" take their bracketed defaults, and `authorLadderTarget`'s
- * "Append this lot to '<id>'? [Y/n]" attaches the lot on silence, because `isNegative("")`
- * is false. If any of those is ever reached first, the same `""` ratifies a quantity
- * nobody stated and the act WRITES, unattended.
+ * `record-fill-cli.ts` hands this flow `UNANSWERED` for every question when stdin is no
+ * terminal, so the shell can name the missing terminal and let this flow refuse in its own
+ * voice instead of printing a readline internal. The rung pick is the first question this
+ * act reaches, it refuses anything that matches no rung, and the sentinel lands on that
+ * arm word for word — so the operator reads `no resting rung matches ''` from the domain
+ * rather than `readline was closed` from Node.
  *
- * So the dependency is pinned rather than commented. Both shells' construction sites say
- * the same thing in prose; this is the assertion that goes red when the prose stops
- * being true.
+ * WHAT THIS CASE USED TO BE, AND WHY IT IS STILL HERE. It used to pin an ORDERING
+ * DEPENDENCY: `""` was a refusal at the first question and a ratification at six of the
+ * other eighteen, so the empty answer was honest only while the refusing question came
+ * first, and a reorder would have let an unattended run ratify a quantity nobody stated.
+ * #388 removed the dependency — the sentinel is refused at all nineteen questions, six of
+ * them for the first time — so a reorder is no longer a hazard and this case no longer
+ * guards one. It guards what it always MEASURED: that a run with nobody at the terminal
+ * ends at one question, in the domain's words, with both files untouched.
  */
 describe("an interview nobody can answer refuses at the FIRST question and writes nothing", () => {
   it("refuses as unknown-rung, having asked exactly one question", async () => {
-    // No scripted answers at all: the harness's `ask` falls through to `""` every time,
-    // which is precisely what the shell hands the flow on a stdin that is no terminal.
+    // No scripted answers at all: the harness's `ask` falls through to `UNANSWERED` every
+    // time, which is precisely what the shell hands the flow on a stdin that is no
+    // terminal.
     const harness = new Harness({ answers: [] });
     const ordersBefore = harness.ordersImage;
     const logBefore = harness.logImage;
@@ -1149,12 +1162,94 @@ describe("an interview nobody can answer refuses at the FIRST question and write
     if (outcome.status !== "rejected") throw new Error("expected a rejection");
     expect(outcome.reason).toBe("unknown-rung");
     // THE PIN. One question — the rung pick — and the refusal came from it. Reaching a
-    // second means a ratifying question now runs ahead of the refusing one, and the
-    // shell's `""` has stopped being an honest answer.
+    // second would mean some question downstream accepted the sentinel as an answer.
     expect(harness.asked).toHaveLength(1);
     expect(harness.asked[0]).toContain("Which rung filled?");
     // Nothing was written on either side before the refusal fired.
     expect(harness.logImage).toBe(logBefore);
     expect(harness.ordersImage).toBe(ordersBefore);
+  });
+});
+
+/**
+ * A QUESTION NOBODY ANSWERED STOPS THE ACT WHERE IT STANDS (#388).
+ *
+ * Before the sentinel the channel resolved `""` for an abandoned question AND for every
+ * question after it, because the Ctrl-D closes the interface. This act reads `""` as a
+ * DEFAULT at four of its own prompts, so one keystroke midway through a nineteen-question
+ * interview carried the run onward with: the rung's whole remainder recorded as the fill,
+ * every other rung claimed as resting untouched, no cancellations recorded, and the
+ * proposed cash figure debited. Only the final `Write BOTH? [y/N]` stopped it, and only
+ * because that gate happens to be phrased so silence means no — a property of the
+ * PHRASING, which is not a guarantee.
+ *
+ * Each case takes the fully-scripted happy path and blanks exactly ONE answer with the
+ * sentinel, so what the case measures is that question and nothing else. The act must
+ * abandon and both files must be byte-identical afterwards.
+ */
+describe("an unanswered question abandons the act (#388)", () => {
+  const cases: { at: number; question: string; names: string }[] = [
+    { at: 2, question: "Filled quantity", names: "rung-400" },
+    { at: 3, question: "the per-rung book observation", names: "rung-300" },
+    { at: 5, question: "Confirm these derived verdicts?", names: "verdicts" },
+    // DELEGATED, and included here for the half this file owns: `authorLadderTarget` and
+    // `resolveFunding` return their abandonment as a message with no `io` to speak it, so
+    // this flow is the only place it can reach the operator. Their own suites pin the
+    // words; these two pin that the words are said.
+    { at: 7, question: "Tempo [n]", names: "tempo" },
+    { at: 13, question: "Cash debited [n]", names: "cash debited" },
+    { at: 14, question: "Write BOTH?", names: "write both" },
+  ];
+
+  for (const { at, question, names } of cases) {
+    it(`abandons rather than taking the answer to '${question}'`, async () => {
+      const answers = openTopRungAnswers();
+      answers[at] = UNANSWERED;
+      const harness = new Harness({ answers });
+      const ordersBefore = harness.ordersImage;
+      const logBefore = harness.logImage;
+
+      const outcome = await recordFill(harness.io);
+
+      expect(outcome.status).toBe("abandoned");
+      expect(outcome.status === "abandoned" && outcome.message.toLowerCase()).toContain(names);
+      // Nothing was written, which is the whole claim — not "the write door caught it".
+      expect(harness.ordersImage).toBe(ordersBefore);
+      expect(harness.logImage).toBe(logBefore);
+      // AND THE OPERATOR IS TOLD, in the act's own refusal contract. The message names the
+      // question nobody answered; without this the shell exits 1 having printed nothing,
+      // and the message this case asserts on would be one no operator ever reads.
+      expect(harness.err).toHaveLength(1);
+      expect(harness.err.join("\n").toLowerCase()).toContain(names);
+      expect(harness.err.join("\n")).toContain("Nothing was written to");
+    });
+  }
+
+  it("stops AT the abandoned question rather than racing to the write door", async () => {
+    // The #388 half. `Filled quantity` is the third question of nineteen; before this
+    // change the run answered it with the rung's whole remainder and went on to put every
+    // question after it. Counting them is what tells the two behaviours apart.
+    const answers = openTopRungAnswers();
+    answers[2] = UNANSWERED;
+    const harness = new Harness({ answers });
+
+    await recordFill(harness.io);
+
+    expect(harness.asked).toHaveLength(3);
+    expect(harness.asked[2]).toContain("Filled quantity");
+  });
+
+  it("refuses an unanswered rung pick as unknown-rung, exactly as a blank one does", async () => {
+    // One of the fifteen that already refused, and the one a run with no terminal reaches
+    // first. The reason token and the words do not move — that is what keeps
+    // `record-fill-cli.test.ts` pinning the same two sentences.
+    const answers = openTopRungAnswers();
+    answers[0] = UNANSWERED;
+    const harness = new Harness({ answers });
+
+    const outcome = await recordFill(harness.io);
+
+    expect(outcome).toMatchObject({ status: "rejected", reason: "unknown-rung" });
+    expect(outcome.status === "rejected" && outcome.message).toContain("no resting rung matches");
   });
 });

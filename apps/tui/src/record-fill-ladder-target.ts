@@ -32,6 +32,19 @@
  * to the same function — so the operator's bytes are unchanged. The reason union is
  * declared narrowly HERE rather than imported from `RecordFillRejection`, which keeps the
  * back-edge out; it is assignable to the wider token set at the call site.
+ *
+ * IT HOLDS THIS ACT'S WORST RATIFICATION, AND #388 IS WHY THAT MATTERS. `Append this lot
+ * to '<id>'? [Y/n]` is phrased so that SILENCE MEANS YES: `isNegative("")` is false, so an
+ * unanswered question used to attach the lot to an existing Position. IT NEVER REACHED A
+ * WRITE: the lot was attached in memory, and `Write BOTH? [y/N]` four questions later
+ * refused the same abandoned terminal, because `isAffirmative("")` is false. What was
+ * wrong was the shape, not the outcome — the act's safety rested on ONE gate's phrasing,
+ * so this gate meaning YES on silence was a defect waiting on a reordering rather than one
+ * already costing durable bytes. The channel now hands an `UNANSWERED` that `isNegative`
+ * cannot be given, and this gate abandons on it. The sentinel is checked AT the question
+ * rather than widened into `isNegative`, which would return false for it and attach the lot
+ * exactly as before. `Tempo [n]` gets the same treatment for the same reason — a default
+ * nobody chose is still a value written onto a durable Position.
  */
 import {
   resolveLadderPosition,
@@ -40,6 +53,7 @@ import {
   type PositionRecord,
   type ReserveRecord,
 } from "@numisma/engine";
+import { UNANSWERED, type Answer } from "./prompt-channel.js";
 
 export type LadderTargetOutcome =
   | { status: "authored"; target: LadderTarget }
@@ -56,15 +70,35 @@ function isNegative(answer: string): boolean {
   return normalized === "n" || normalized === "no";
 }
 
-/** The five authored decision fields. All required; a blank one abandons the act. */
+/**
+ * An answer as text, with {@link UNANSWERED} read as the empty string.
+ *
+ * MODULE-LOCAL AND STAYING THAT WAY. Every question in this file that reaches for it —
+ * the five decision fields and the position id — ALREADY refuses a blank, so "nobody typed
+ * anything" and "nobody could be asked" earn the identical outcome and collapsing them
+ * costs nothing. That argument is per-question, not per-repo: at `Append this lot? [Y/n]`
+ * or `Tempo [n]`, twenty lines below, the same collapse would hand a default to a keystroke
+ * nobody made, which is the defect #388 removes. A shared home would put it within reach of
+ * those questions; here it is within reach only of the ones it is sound for.
+ */
+const text = (answer: Answer): string => (answer === UNANSWERED ? "" : answer.trim());
+
+/**
+ * The five authored decision fields. All required; a blank one abandons the act.
+ *
+ * AN UNANSWERED ONE LANDS IN THE SAME PLACE — `incomplete-decision`, the arm this pass
+ * already has for "one of these is missing". A question that was never put is the emptiest
+ * a field can be, and the operator's next move (open the Position again, with all five in
+ * hand) does not change with the reason it was missing.
+ */
 async function askDecision(
-  ask: (question: string) => Promise<string>,
+  ask: (question: string) => Promise<Answer>,
 ): Promise<PositionDecision | undefined> {
-  const entryThesis = (await ask("  Entry thesis: ")).trim();
-  const invalidationCondition = (await ask("  Invalidation condition: ")).trim();
-  const riskBudget = (await ask("  Risk budget: ")).trim();
-  const plannedHoldingHorizon = (await ask("  Planned holding horizon: ")).trim();
-  const strategy = (await ask("  Strategy: ")).trim();
+  const entryThesis = text(await ask("  Entry thesis: "));
+  const invalidationCondition = text(await ask("  Invalidation condition: "));
+  const riskBudget = text(await ask("  Risk budget: "));
+  const plannedHoldingHorizon = text(await ask("  Planned holding horizon: "));
+  const strategy = text(await ask("  Strategy: "));
   if (
     !entryThesis ||
     !invalidationCondition ||
@@ -86,7 +120,7 @@ async function askDecision(
  * ambiguity away.
  */
 export async function authorLadderTarget(
-  ask: (question: string) => Promise<string>,
+  ask: (question: string) => Promise<Answer>,
   out: (message: string) => void,
   positions: readonly PositionRecord[],
   reserve: ReserveRecord,
@@ -108,7 +142,17 @@ export async function authorLadderTarget(
   }
 
   if (ladder.status === "one") {
-    if (isNegative(await ask(`Append this lot to '${ladder.positionId}'? [Y/n]: `))) {
+    const append = await ask(`Append this lot to '${ladder.positionId}'? [Y/n]: `);
+    if (append === UNANSWERED) {
+      return {
+        status: "abandoned",
+        message:
+          `nobody answered whether to append this lot to '${ladder.positionId}' — the gate ` +
+          `is phrased so that silence means yes, and silence from an abandoned terminal is ` +
+          `not consent`,
+      };
+    }
+    if (isNegative(append)) {
       return { status: "abandoned", message: "the ladder's existing Position was declined" };
     }
     return { status: "authored", target: { mode: "add", positionId: ladder.positionId } };
@@ -118,11 +162,18 @@ export async function authorLadderTarget(
   // never heard of a Tempo, so the decision context is authored here, at the moment of
   // the fill, and nowhere else.
   out("First fill on this ladder — opening the Position.\n");
-  const positionId = (await ask("  Position id: ")).trim();
+  const positionId = text(await ask("  Position id: "));
   if (!positionId) {
     return { status: "abandoned", message: "no position id was given" };
   }
-  const tempoAnswer = (await ask(`  Tempo [${reserve.tempo}]: `)).trim();
+  const tempoReply = await ask(`  Tempo [${reserve.tempo}]: `);
+  if (tempoReply === UNANSWERED) {
+    return {
+      status: "abandoned",
+      message: `nobody answered the tempo for '${positionId}', and the reserve's own tempo is a default, not an answer`,
+    };
+  }
+  const tempoAnswer = tempoReply.trim();
   const decision = await askDecision(ask);
   if (!decision) {
     return {

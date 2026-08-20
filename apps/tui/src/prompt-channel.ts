@@ -14,12 +14,12 @@
  *      eagerly consumes stdin, so constructing it up front ends a piped stream before any
  *      question is put and the first `ask` rejects with `ERR_USE_AFTER_CLOSE`. Memoized,
  *      so one interview shares one interface, and a run that never asks never builds one.
- *   2. ON A STDIN THAT IS NO TERMINAL, THE CHANNEL SAYS SO AND RETURNS "". It does not
- *      throw: throwing unwinds through the shell's outer catch and ends the run there,
- *      which makes the domain's own refusal for an unanswered interview unreachable. The
- *      empty answer is the one answer a run with no terminal can honestly give, and the
- *      domain then refuses in its own voice. Two sentences, two layers: the shell names
- *      WHY there is no answer, the flow names WHAT IT DID about it.
+ *   2. ON A STDIN THAT IS NO TERMINAL, THE CHANNEL SAYS SO AND RESOLVES {@link UNANSWERED}.
+ *      It does not throw: throwing unwinds through the shell's outer catch and ends the run
+ *      there, which makes the domain's own refusal for an unanswered interview unreachable.
+ *      A question nobody could be asked has no answer, and `UNANSWERED` is how the channel
+ *      says exactly that; the domain then refuses in its own voice. Two sentences, two
+ *      layers: the shell names WHY there is no answer, the flow names WHAT IT DID about it.
  *   3. THE NOTICE IS WRITTEN ONCE PER RUN, not once per question. The operator learns
  *      there is no terminal from the first unanswerable question; repeating it buries the
  *      flow's refusal under copies of the shell's. NEITHER SHELL OBSERVES THE DIFFERENCE
@@ -31,69 +31,59 @@
  *      `recordFill` reaches nineteen `ask` sites once the ones it delegates to
  *      `authorLadderTarget` and `resolveFunding` are counted, and the import shell's rung
  *      walk can put one question per rung.
- *   4. A QUESTION THAT REJECTS RESOLVES WITH "" TOO (#370, symptom 1). At a REAL terminal
- *      `isTTY` is true, so clause 2's guard never fires; Ctrl-D then makes
+ *   4. A QUESTION THAT REJECTS RESOLVES {@link UNANSWERED} TOO (#370, symptom 1). At a REAL
+ *      terminal `isTTY` is true, so clause 2's guard never fires; Ctrl-D then makes
  *      `rl.question()` reject, and that rejection used to unwind through each shell's
  *      outer catch, which prints `error.message` — putting Node's own wording, "Aborted
  *      with Ctrl+D" (measured: `AbortError`, code `ABORT_ERR`), on the operator's screen
  *      and ending the run there. So the domain's refusal, the message the operator
  *      actually needs, was never reached. Clause 2's reasoning applies unchanged: a
- *      question with no answer has one honest answer, `""`, and the domain refuses in its
- *      own voice. This clause is only the second door into the same decision.
+ *      question with no answer resolves the value that MEANS no answer, and the domain
+ *      refuses in its own voice. This clause is only the second door into the same
+ *      decision, and #388 collapsed the two meanings into one: "never able to answer" and
+ *      "abandoned mid-interview" are the same fact to every question downstream.
  *
- *      WHY THE CATCH IS WIDE AND NOT NARROWED TO THE ABORT. `.catch(() => "")` swallows
- *      every rejection, which is deliberate. Two rejections were measured and BOTH mean
- *      the same thing: `ABORT_ERR` (Ctrl-D) and `ERR_USE_AFTER_CLOSE` / "readline was
- *      closed", which is what every question AFTER the Ctrl-D gets, because the abort
- *      closes the interface. Narrowing to `ABORT_ERR` would therefore fix the first
- *      question and hand the operator the readline internal on the second — the exact
- *      string clause 1 exists to keep off the screen. And the generalisation holds past
- *      what was measured: whatever makes a question reject, no answer arrived, and the
- *      domain must be allowed to say so. A rejected question is a missing ANSWER, never a
- *      run that cannot continue — the shells' outer catch is for the domain's failures,
- *      not for the prompt's.
+ *      WHY THE CATCH IS WIDE AND NOT NARROWED TO THE ABORT. `.catch(() => UNANSWERED)`
+ *      swallows every rejection, which is deliberate. Two rejections were measured and
+ *      BOTH mean the same thing: `ABORT_ERR` (Ctrl-D) and `ERR_USE_AFTER_CLOSE` /
+ *      "readline was closed", which is what every question AFTER the Ctrl-D gets, because
+ *      the abort closes the interface. Narrowing to `ABORT_ERR` would therefore fix the
+ *      first question and hand the operator the readline internal on the second — the
+ *      exact string clause 1 exists to keep off the screen. And the generalisation holds
+ *      past what was measured: whatever makes a question reject, no answer arrived, and
+ *      the domain must be allowed to say so. A rejected question is a missing ANSWER,
+ *      never a run that cannot continue — the shells' outer catch is for the domain's
+ *      failures, not for the prompt's.
  *
- * WHAT `""` MEANS IS THE CALLER'S PROBLEM, AND IT IS AN ORDERING DEPENDENCY. Read as an
- * answer, `""` means different things to different questions — a refusal at one, "take the
- * default" at another. It is safe only while the FIRST question a run reaches unanswerable
- * is one that refuses on it. That dependency now governs BOTH paths, and clause 4 WIDENS
- * IT. Clause 2 only ever reaches the FIRST question — a no-terminal run is refused there
- * and never gets further, which is why each shell's construction site can argue safety
- * from the ordering alone. Clause 4 lands wherever the operator presses Ctrl-D, which is
- * any question in the interview and every question after it. Both shells enumerate their
- * questions and both name the ones that read `""` as a silent ratification rather than a
- * refusal — six of `record-fill`'s nineteen, three of the import shell's. Those are now
- * reachable by Ctrl-D, and the sentence "only the first is ever reached" is true of the
- * no-terminal path only.
+ * WHAT AN UNANSWERED QUESTION MEANS IS NO LONGER AN ORDERING DEPENDENCY (#388). This
+ * channel used to resolve `""`, and `""` is an ANSWER: a refusal at one question, "take
+ * the default" at another, and outright consent at a third — so the safety of both
+ * abandonment paths rested on the FIRST question a run reached unanswerable being one that
+ * refuses. That sentence was true of the no-terminal path and false of Ctrl-D, which lands
+ * wherever the operator presses it. `UNANSWERED` removes the dependency rather than
+ * surviving it: no operator can type a symbol, so no question can mistake it for consent,
+ * and each question refuses the moment it is handed one. Reorder either interview and
+ * nothing about that changes.
  *
- * SO CLAUSE 4 DOES NOT SHIP ALONE. A mid-interview Ctrl-D in `orders:import` was measured
- * reaching `import-orders.ts`'s `appendOrders` with `planId`/`rungId` joins nobody
- * declared — the batch attributed to a reserve the operator was in the act of taking back
- * — where the same keystroke previously ended the run with nothing on disk. Two things
- * stand between the widened `""` and a durable write now:
+ * THE SENTINEL IS A SYMBOL AND NOT A MAGIC STRING, DELIBERATELY. A reserved string flows
+ * through `isAffirmative("\0abandoned")` and is silently ratified — the same defect one
+ * layer down, with an invariant humans must remember forever. `Answer` makes every call
+ * site a TYPE ERROR instead: `.trim()` does not exist on `string | symbol`, and a helper
+ * typed `(answer: string)` will not take one, so the compiler enumerated all 24 sites once
+ * and enforces them from here on. It is not a discriminated record either
+ * (`{answered:true,text} | {answered:false}`): that buys no extra safety and breaks every
+ * test harness, because a fake `ask` typed `Promise<string>` stays assignable to
+ * `Promise<Answer>` under a union and does not under a record.
  *
- *   - THIS CHANNEL LATCHES THE ABANDONMENT (`aborted` below). The rejecting question
- *     still resolves `""` — clause 4 is unchanged, and the first-question Ctrl-D still
- *     ends in the domain's own refusal — but the channel REMEMBERS that a question was
- *     abandoned, so the fact survives the string that cannot carry it.
- *   - AND THE FLOW REFUSES AT ITS WRITE DOOR. `import-orders.ts` takes the latch as an
- *     injected predicate and refuses as `interview-abandoned` before `appendOrders`.
- *     THAT GUARANTEE IS POSITIONAL-INDEPENDENT — if the terminal was abandoned, nothing
- *     is written — so it holds no matter which question caught the Ctrl-D, INCLUDING the
- *     last question of an interview, which a latch that only re-answered later questions
- *     would still leak. `record-fill` reaches its own writes only through
- *     `Write BOTH? [y/N]`, on which `isAffirmative("")` is false, so an abandoned run
- *     there abandons at that gate; its construction site now says so.
- *
- * THE SENTINEL IS STILL OWED. What the latch does NOT buy is an unanswered question
- * distinguishable from an empty one AT THE QUESTION: every ratifying question in between
- * still reads the blank as consent, and the operator still watches a batch be ratified
- * before the write door refuses it. A sentinel the questions reject rather than a blank
- * would move the refusal to the question that was actually abandoned, and would remove
- * the ordering dependency instead of merely surviving it. Both construction sites still
- * name it, and it belongs to whichever increment makes that distinction. Each shell states
- * the dependency at its own site and each pins it, because neither this module nor the
- * other shell can see it.
+ * THE ABANDONMENT LATCH IS THE SECOND DOOR NOW, NOT THE GUARANTEE. Before the sentinel,
+ * a mid-interview Ctrl-D in `orders:import` was measured reaching `import-orders.ts`'s
+ * `appendOrders` with `planId`/`rungId` joins nobody declared, and the only thing standing
+ * between the widened `""` and a durable write was this channel latching the abandonment
+ * (`aborted` below) so the flow could refuse at its write door. The questions refuse for
+ * themselves now, so the refusal lands ON the abandoned question and the latch can no
+ * longer be the thing that saves a run. It is kept anyway, one increment longer, so a
+ * regression in the new per-question refusals meets a guarantee that is still proven
+ * rather than a gap; removing it is its own change.
  *
  * EVERYTHING IS INJECTED — `isTTY` as a value, the interface as a factory, the error sink
  * as a function — so the channel is testable with no terminal, no process and no spawn.
@@ -103,7 +93,31 @@
  * rejecting `question()`, and does NOT cover a real terminal delivering a real Ctrl-D.
  */
 
-/** The readline surface this channel uses — structural, so a test can hand it a fake. */
+/**
+ * THE ANSWER THAT IS NOT ONE — resolved by both abandonment paths, and by nothing else.
+ *
+ * A symbol because no operator can type one and no `Answer` can be confused for one. See
+ * the module header for why this is not a reserved string and not a record.
+ */
+export const UNANSWERED = Symbol("unanswered");
+
+/**
+ * What a question resolves: what the operator typed, or {@link UNANSWERED}.
+ *
+ * The union is what forces the discipline. Every consumer must narrow before it can treat
+ * the value as text, and `string` is still assignable to it — so a test fake that only
+ * ever answers can stay a `Promise<string>` function.
+ */
+export type Answer = string | typeof UNANSWERED;
+
+/**
+ * The readline surface this channel uses — structural, so a test can hand it a fake.
+ *
+ * IT RESOLVES A `string`, NEVER AN {@link Answer}. This is readline's own contract, and the
+ * sentinel is the CHANNEL's word about a question, not the terminal's: what readline does
+ * when there is no answer is reject, and turning that into `UNANSWERED` is clause 4's job
+ * one layer up.
+ */
 export interface PromptInterface {
   question(query: string): Promise<string>;
   close(): void;
@@ -129,23 +143,29 @@ export interface PromptChannelIo {
 }
 
 export interface PromptChannel {
-  ask: (question: string) => Promise<string>;
+  /**
+   * Put one question. Resolves what the operator typed, or {@link UNANSWERED} when there
+   * was no terminal to ask (clause 2) or the question was abandoned (clause 4).
+   */
+  ask: (question: string) => Promise<Answer>;
   /**
    * WHETHER ANY QUESTION IN THIS RUN WAS ABANDONED — a latch, set the first time a
    * `question()` rejects and never cleared. Readable without touching module state,
    * because it is a closure over this channel's own interview and nothing else.
    *
-   * IT DOES NOT CHANGE WHAT `ask` RESOLVES. Clause 4 stands exactly as written: the
-   * rejecting question still resolves `""`, so a Ctrl-D at the FIRST question still lets
-   * the domain refuse in its own voice rather than printing a readline internal — that is
-   * #370's actual fix and this latch must not regress it. What the latch adds is a fact
-   * the flow can consult BEFORE it writes: an answer of `""` that came from an abandoned
-   * terminal is not an answer at all, and no shell can tell the two apart from the string.
+   * IT IS THE SECOND DOOR, NOT THE FIRST. `ask` resolves `UNANSWERED` on the abandoned
+   * question and on every question after it, and each question refuses that value where it
+   * stands — so the refusal the operator reads names the question they walked away from.
+   * The latch adds nothing to that; what it still buys is a flow-level guarantee that does
+   * not depend on any one question having been written correctly: if the terminal was
+   * abandoned, `import-orders.ts` writes nothing. #388 kept it for exactly one increment
+   * longer so a regression in the per-question refusals meets a proven guarantee instead
+   * of a gap.
    *
    * THE NO-TERMINAL PATH DOES NOT SET IT. Clause 2 never asks readline anything, so no
-   * question was abandoned there; that path is still governed by the ordering argument
-   * each construction site makes, and the first question refuses on `""` before any write
-   * door is reached.
+   * question was abandoned there — it was unaskable. Both paths resolve the same sentinel,
+   * which is the point of #388; only this latch still tells them apart, and only for the
+   * benefit of the write-door check.
    */
   aborted: () => boolean;
   /**
@@ -163,21 +183,22 @@ export function createPromptChannel(io: PromptChannelIo): PromptChannel {
 
   return {
     aborted: () => aQuestionWasAbandoned,
-    ask: (question: string): Promise<string> => {
+    ask: (question: string): Promise<Answer> => {
       if (!io.isTTY) {
         if (!toldThereIsNoTerminal) {
           toldThereIsNoTerminal = true;
           io.err(io.noTerminalNotice);
         }
-        return Promise.resolve("");
+        // CLAUSE 2. There was nowhere to put the question, so there is no answer to give.
+        return Promise.resolve(UNANSWERED);
       }
       rl ??= io.createInterface();
       // CLAUSE 4. A rejected question is an ANSWER that did not arrive, not a run that
       // cannot continue. See the module docstring for why the catch is this wide.
       // THE LATCH IS SET HERE AND NOWHERE ELSE — see `PromptChannel.aborted`.
-      return rl.question(question).catch(() => {
+      return rl.question(question).catch((): Answer => {
         aQuestionWasAbandoned = true;
-        return "";
+        return UNANSWERED;
       });
     },
     close: (): void => {

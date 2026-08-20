@@ -244,7 +244,8 @@ describe("record-fill-cli — a run with no terminal refuses in its own voice (#
     // uses for the same situation on the sibling shell: the notice is written ONCE PER
     // RUN rather than once per question, and no spawn here can see it. This case briefly
     // carried a count over the notice, which could not fail — a no-terminal run reaches
-    // EXACTLY ONE question. `record-fill.ts` asks "Which rung filled?" first, gets `""`,
+    // EXACTLY ONE question. `record-fill.ts` asks "Which rung filled?" first, gets the
+    // channel's `UNANSWERED`,
     // and refuses as `unknown-rung`; every later question sits past that refusal, and no
     // data-dir state reaches one. Delete the `toldThereIsNoTerminal` flag entirely, write
     // the notice unconditionally on every `ask`, and this file stays green. That is the

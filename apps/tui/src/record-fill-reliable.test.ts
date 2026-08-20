@@ -28,6 +28,7 @@ import { appendOrders, appendReconciliation, loadOrders, loadPlans } from "@numi
 import { afterEach, describe, expect, it } from "vitest";
 import { restoreLogImage, writeLogImage } from "./event-store.js";
 import { recordFill, type RecordFillIo } from "./record-fill.js";
+import { UNANSWERED } from "./prompt-channel.js";
 
 const createdDirs: string[] = [];
 
@@ -195,7 +196,9 @@ function realIo(
       reconciliationsPath: resolve(dataDir, "reconciliations.jsonl"),
       appendReconciliation,
       toldAt: () => "2026-01-05T18:07:00-06:00",
-      ask: async () => remaining.shift() ?? "",
+      // An exhausted script answers `UNANSWERED` — what the real channel gives when there
+      // is nobody to ask — rather than `""`, which would take the next default (#388).
+      ask: async () => remaining.shift() ?? UNANSWERED,
       out: () => undefined,
       err: (message) => err.push(message),
     },

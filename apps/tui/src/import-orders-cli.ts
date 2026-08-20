@@ -34,48 +34,37 @@ if (!csvPath) {
    * THE PROMPT CHANNEL — lazy interface, no-terminal notice, one-per-run (#346). The
    * mechanism lives in `prompt-channel.ts` now rather than here, because
    * `record-fill-cli.ts` needed the identical three decisions and had none of them
-   * (#370). What stays here is the part only this shell can know: what `""` MEANS to
-   * the questions this flow puts.
+   * (#370). What stays here is the part only this shell can know: the sentence the
+   * operator reads when there is no terminal, which names WHICH interview cannot be
+   * conducted.
    *
-   * `""` IS HONEST AT EXACTLY ONE CALL SITE, AND THAT IS AN ORDERING DEPENDENCY, not a
-   * property of the empty string. Read as an answer, `""` means different things to the
-   * questions this flow can put:
+   * THIS SITE USED TO ENUMERATE WHAT `""` MEANT TO EACH OF THIS FLOW'S QUESTIONS, AND WHY
+   * THE ORDERING MADE THAT SAFE. Both are obsolete (#388). The channel no longer answers a
+   * question it could not put with a blank line — it answers `UNANSWERED`, a symbol no
+   * operator can type — and every question of this interview refuses it:
    *
-   *   - `import-orders-funding-declaration.ts`'s batch question reads it as NO RESERVE
-   *     DECLARED, so `declareFunding` returns undefined and the flow refuses as
-   *     `no-reserve-declared`. This is the refusal that makes the empty answer safe.
-   *   - `import-orders-rung-picks.ts` reads it as ACCEPT EVERY PROPOSED RUNG, and, at its
-   *     other site, as TAKE THE DEFAULT.
-   *   - the funding declaration's second question reads it as NO PER-RUNG OVERRIDES.
+   *   - the batch reserve refuses it as `no-reserve-declared`, word for word as it refuses
+   *     a blank, which is what keeps #370's fix exactly where #370 put it;
+   *   - the funding override question, and the rung-pick prompt at both of its sites,
+   *     refuse it as `interview-abandoned` naming the question that went unanswered.
    *
-   * The last three are ratifications. A no-terminal run never reaches them ONLY because
-   * funding is asked FIRST and refuses the whole batch before any rung question is put.
-   * Reorder the interview — ask rung picks before funding, or make the funding question
-   * skippable — and this same `""` silently ratifies every default and the run WRITES,
-   * unattended, with nobody having answered anything. If that ordering ever moves, this
-   * must become a refusal that the domain cannot mistake for consent (a sentinel the
-   * questions reject, not a blank), and it must move in the same commit.
+   * Those last three are the ones that read a blank as CONSENT — accept every proposed
+   * rung, take the batch answer for this rung, no per-order overrides — and they are why
+   * the old argument needed the ordering at all: it was safe only while the first question
+   * a run reached unanswerable was one that refused. That was true of a piped run and
+   * false of Ctrl-D, which lands wherever the operator presses it. Reordering this
+   * interview no longer changes any of it.
    *
-   * AND THERE IS A SECOND DOOR INTO THOSE THREE RATIFICATIONS THAT IS NOT A REORDER:
-   * CTRL-D. The prompt channel resolves `""` for an ABANDONED question too, and for the
-   * whole rest of the interview after it, because the abort closes the interface (#370,
-   * clause 4 of `prompt-channel.ts`). That is what makes the FIRST question's Ctrl-D come
-   * back as `no-reserve-declared` in the domain's own voice instead of readline's
-   * `Aborted with Ctrl+D`, and it is the fix #370 asked for. But it also means the three
-   * ratifications above are reachable with blanks after ANY question — the ordering
-   * argument above covers the no-terminal path only, and the paragraph above predicted
-   * exactly this outcome by the one route it did not anticipate.
-   *
-   * WHAT STOPS THE WRITE ANYWAY, since the sentinel is not built yet: the channel LATCHES
-   * the abandonment (`prompt.aborted`), this shell hands that latch to the flow as
+   * THE LATCH IS THE SECOND DOOR, AND IT IS STILL WIRED. The channel remembers that a
+   * question was abandoned (`prompt.aborted`), this shell hands that fact to the flow as
    * `promptAbandoned`, and `importBitgetOpenOrders` refuses as `interview-abandoned`
-   * before `appendOrders` rather than appending. The guarantee is positional-independent —
-   * if the terminal was abandoned, nothing is written — so it does not depend on WHICH
-   * question caught the Ctrl-D, and it survives a reorder of this interview even though
-   * the sentence above does not. `import-orders.test.ts` pins both halves: the first
-   * question still refuses as `no-reserve-declared`, and an interview abandoned after it
-   * never reaches `appendOrders`. The sentinel remains owed; it would move the refusal to
-   * the abandoned question instead of catching it at the door.
+   * before `appendOrders`. With the per-question refusals in place nothing reaches that
+   * check that would not already have been refused — it is redundant by construction, and
+   * kept one increment longer so a regression in the new refusals meets a guarantee that
+   * is still proven rather than a gap. `import-orders.test.ts` pins the two doors
+   * separately: an interview abandoned at the override question refuses AT that question
+   * having put exactly two, and a run whose every question was answered on an abandoned
+   * terminal still writes nothing.
    */
   const prompt = createPromptChannel({
     isTTY: Boolean(process.stdin.isTTY),

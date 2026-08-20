@@ -38,65 +38,54 @@ const paths = resolveEventStorePaths();
  * run ended the stream before the first question was put and `ask` rejected with
  * `ERR_USE_AFTER_CLOSE` — `readline was closed`, a readline internal printed verbatim to
  * the operator by the outer catch below. The channel builds lazily and, on a stdin that is
- * no terminal, names the missing terminal in this shell's own voice and returns "".
+ * no terminal, names the missing terminal in this shell's own voice and hands the flow
+ * `UNANSWERED` — a symbol no operator can type — for every question it could not put.
  *
- * `""` IS HONEST HERE ONLY BECAUSE OF THE ORDER `recordFill` ASKS IN, and that is a
- * dependency rather than a property of the empty string. The reachable interview is
- * NINETEEN `ask` sites, not the nine `record-fill.ts` holds literally: it hands `io.ask`
- * onward to `authorLadderTarget` (`record-fill-ladder-target.ts`, eight more) and to
- * `resolveFunding` (`record-fill-funding.ts`, two more), and a delegated question is no
- * less reachable for being put from another file. They read `""` three ways:
+ * THIS SITE USED TO ENUMERATE WHAT `""` MEANT TO EACH OF THIS ACT'S QUESTIONS, AND TO
+ * ARGUE THAT THE ORDER `recordFill` ASKS IN MADE IT SAFE. The enumeration is obsolete
+ * (#388) and the argument is retired with it. What survives, because it is still true and
+ * still worth knowing: THE REACHABLE INTERVIEW IS NINETEEN `ask` SITES, not the nine
+ * `record-fill.ts` holds literally. It hands `io.ask` onward to `authorLadderTarget`
+ * (`record-fill-ladder-target.ts`, eight more) and to `resolveFunding`
+ * (`record-fill-funding.ts`, two more), and a delegated question is no less reachable for
+ * being put from another file. Every one of the nineteen refuses the sentinel:
  *
- *   - `record-fill.ts`'s "Which rung filled?" — the FIRST question the flow reaches —
- *     matches no rung and refuses as `unknown-rung`. This is the refusal that makes the
- *     empty answer safe, and nothing has been written when it fires. TEN more stop the
- *     act on a blank: the fill timestamp, a touched rung's observed quantity and the
- *     instrument id each reject one, as do `authorLadderTarget`'s five decision fields
- *     (together, as `incomplete-decision`) and `resolveFunding`'s capital tier; a blank
- *     position id abandons.
- *   - SIX are silent ratifications, and they are the hazard. "Filled quantity [n]" takes
- *     the remaining quantity; the per-rung book question takes its `[r]` default and
- *     records that rung as resting untouched; "Also record N confirmed cancellation(s)?"
- *     records NONE and lets the act continue; "Tempo [n]" takes the reserve's; "Cash
- *     debited [n]" takes the proposed figure; and `authorLadderTarget`'s "Append this lot
- *     to '<id>'? [Y/n]" — a gate phrased so that SILENCE MEANS YES — attaches the lot to
- *     an existing Position. That last one is the only thing standing between an
- *     unattended run and a lot landing in a Position nobody named.
- *   - only TWO "[y/N]" confirmations read `""` as NO and abandon: "Confirm these derived
- *     verdicts?" and "Write BOTH?".
+ *   - ELEVEN keep the refusal a blank already earned, in the same words — the rung pick
+ *     (`unknown-rung`, and it is the first question this act reaches, so it is the one a
+ *     piped run refuses at), the fill timestamp, a touched rung's observed quantity, the
+ *     instrument id, `authorLadderTarget`'s five decision fields (together, as
+ *     `incomplete-decision`) and `resolveFunding`'s capital tier; a blank position id
+ *     abandons, and so does an unanswered one.
+ *   - THE OTHER EIGHT ARE THE CHANGE, and they are the ones that used to read a blank as
+ *     an answer. "Filled quantity [n]" took the rung's whole remainder; the per-rung book
+ *     question took its `[r]` default and claimed that rung was resting untouched; "Also
+ *     record N confirmed cancellation(s)?" recorded none and let the act continue;
+ *     "Tempo [n]" took the reserve's; "Cash debited [n]" took the proposed figure; the two
+ *     "[y/N]" confirmations declined; and `authorLadderTarget`'s "Append this lot to
+ *     '<id>'? [Y/n]" — phrased so that SILENCE MEANS YES — attached the lot to an existing
+ *     Position. All eight now abandon the act, naming the question nobody answered.
  *
- * Only the first is ever reached without a terminal. Reorder the interview — ask the book
- * observation before the rung pick, or make the rung question skippable — and this same
- * `""` ratifies a quantity nobody stated and the run WRITES, unattended, with nobody
- * having answered anything. If that ordering moves, this must become a refusal the domain
- * cannot mistake for consent (a sentinel the questions reject, not a blank), and it must
- * move in the same commit. `record-fill.test.ts` pins the ordering itself — one question
- * asked, and it is the rung pick — so the move is loud rather than silent.
+ * WHAT USED TO STOP THIS ACT WRITING WAS ITS FINAL GATE, AND THAT WAS A PROPERTY OF THE
+ * PHRASING. Every writer of the act sits behind `Write BOTH? [y/N]`
+ * (`record-fill.ts`), on which `isAffirmative("")` is false, so an abandoned run reached
+ * that gate and abandoned — after ratifying six defaults on the way, in front of an
+ * operator who had already walked away. So no abandoned fill act ever reached a durable
+ * write, `Append this lot? [Y/n]` included: that gate's `[Y/n]` phrasing pointed the other
+ * way, but it is four questions upstream of the door, so the lot was attached in memory and
+ * the act still refused. What was wrong was resting the whole act's safety on ONE gate's
+ * wording. The refusal lives at each question now, so neither the ordering of this interview
+ * nor the phrasing of its gates is load-bearing, and this act still needs no abandonment
+ * latch of its own.
  *
- * CTRL-D IS A SECOND DOOR INTO THOSE SIX RATIFICATIONS, AND IT IS NOT A REORDER. The
- * prompt channel resolves `""` for an ABANDONED question and for every question after it,
- * because the abort closes the interface (#370, clause 4 of `prompt-channel.ts`). So the
- * sentence "only the first is ever reached" is true of the NO-TERMINAL path only. Press
- * Ctrl-D anywhere in this nineteen-question interview and the run races through whatever
- * is left of it, ratifying the six — the remaining quantity, the per-rung book default,
- * no cancellations, the reserve's tempo, the proposed cash figure, and the lot appended
- * to an existing Position.
+ * `record-fill.test.ts` pins it: the happy-path script with exactly one answer replaced by
+ * the sentinel abandons at THAT question, with both files byte-identical, and the count of
+ * questions put says it stopped there rather than racing to the door.
  *
- * WHAT STOPS THIS ACT WRITING ANYWAY IS ITS FINAL GATE, and that was verified rather than
- * assumed: every writer of the act sits BEHIND `Write BOTH? [y/N]` (`record-fill.ts:900`),
- * on which `isAffirmative("")` is false, so an abandoned run reaches that gate and
- * ABANDONS — `writeLogImage` and `appendOrders` are inside the two-file act just past it,
- * and the advisory trail's `appendReconciliation` is reached only through
- * `reconcileRecordedFill`, called once after the act is already durable. Nothing writes
- * ahead of the gate. `Confirm these derived verdicts? [y/N]` sits earlier and abandons on
- * a blank as well, so most abandoned runs stop before even reaching the final one.
- *
- * THAT IS A PROPERTY OF THIS SHELL, NOT OF THE CHANNEL, and it is why this act needs no
- * equivalent of the import shell's `interview-abandoned` refusal — the import flow has no
- * terminal gate at all, so it takes the channel's abandonment latch and refuses at its
- * write door instead. If a writer here is ever moved AHEAD of `Write BOTH?`, or that gate
- * is ever rephrased so that silence means yes, this argument dies with it and this act
- * must take the latch too.
+ * THE EXIT CODE IS THE SECOND HALF OF THE ANSWER, NEVER THE WHOLE OF IT. This shell maps
+ * any non-`recorded` outcome to 1 and prints nothing itself; the words are `recordFill`'s
+ * to write, and it writes them to `io.err` for `rejected` AND `abandoned` alike. An
+ * abandoned act that reached only this line would leave the operator a dropped prompt and
+ * a status, with no way to tell whether the fill landed.
  */
 const prompt = createPromptChannel({
   isTTY: Boolean(process.stdin.isTTY),

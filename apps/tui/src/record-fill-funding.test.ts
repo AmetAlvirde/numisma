@@ -26,6 +26,7 @@ import {
   type RestingOrder,
 } from "@numisma/engine";
 import { resolveFunding } from "./record-fill-funding.js";
+import { UNANSWERED, type Answer } from "./prompt-channel.js";
 
 function reserve(overrides: Partial<ReserveRecord> = {}): ReserveRecord {
   return {
@@ -99,11 +100,11 @@ function rung(overrides: Partial<CommittedRung> = {}): CommittedRung {
 }
 
 /** Answers keyed by a prompt SUBSTRING; an unanticipated prompt throws rather than blanks. */
-function scripted(answers: Record<string, string>) {
+function scripted(answers: Record<string, Answer>) {
   const asked: string[] = [];
   return {
     asked,
-    ask: async (question: string): Promise<string> => {
+    ask: async (question: string): Promise<Answer> => {
       asked.push(question);
       const hit = Object.entries(answers).find(([key]) => question.includes(key));
       if (!hit) {
@@ -403,5 +404,35 @@ describe("resolveFunding — the tier is READ, never re-decided (T4)", () => {
 
     expect(outcome.status).toBe("rejected");
     expect(io.asked).toEqual(["Cash debited [4000]: "]);
+  });
+});
+
+/**
+ * A QUESTION NOBODY ANSWERED IS NOT A KEYSTROKE ON THE DEFAULT (#388).
+ *
+ * The two prompts here split, and the split is the whole rule. `Cash debited [n]`
+ * advertises a default, so an unanswered one used to debit a reserve for a figure nobody
+ * stated; it abandons now. The capital tier advertises none and already refused anything
+ * that is not `c1`/`c2`/`c3`, so an unanswered one lands on that same refusal, token and
+ * message unchanged.
+ */
+describe("an unanswered question (#388)", () => {
+  it("abandons the cash leg rather than debiting the proposed figure", async () => {
+    const io = scripted({ "Cash debited": UNANSWERED });
+
+    const outcome = await resolveFunding(io.ask, fold(reserve()), NO_RESTING, reserve(), rung(), 10);
+
+    expect(outcome.status).toBe("abandoned");
+    expect(outcome.status === "abandoned" && outcome.message).toContain("4000");
+    // It stopped at the cash question: the tier was never reached.
+    expect(io.asked).toHaveLength(1);
+  });
+
+  it("still takes the proposed figure on a real blank", async () => {
+    const io = scripted({ "Cash debited": "" });
+
+    const outcome = await resolveFunding(io.ask, fold(reserve()), NO_RESTING, reserve(), rung(), 10);
+
+    expect(outcome).toMatchObject({ status: "resolved", fundingAmount: 4000 });
   });
 });

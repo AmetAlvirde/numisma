@@ -57,6 +57,7 @@ import {
 } from "./import-orders-report.js";
 import { renderUnattributedRefusal } from "./import-orders-unattributed-refusal.js";
 import { plural } from "./plural.js";
+import type { Answer } from "./prompt-channel.js";
 import { renderSkipMessage } from "./skip-message.js";
 
 /** Everything this flow touches that is not a pure function, in one injectable bag. */
@@ -108,27 +109,32 @@ export interface OrdersImportIo {
    */
   plansPath: string;
   loadPlans: (path: string) => Promise<LoadedPlans>;
-  /** Ask the operator one question; the answer is returned trimmed by the caller. */
-  ask: (question: string) => Promise<string>;
+  /**
+   * Ask the operator one question. Resolves what they typed, or `UNANSWERED` when there
+   * was no terminal to ask or the question was abandoned — see `prompt-channel.ts`. Every
+   * question in this flow narrows before it reads the answer as text, and every one of
+   * them refuses the sentinel: the batch reserve and the per-order override in
+   * `declareFunding`, both prompts in `declareRungPicks`.
+   */
+  ask: (question: string) => Promise<Answer>;
   /**
    * WHETHER THE TERMINAL CONDUCTING THIS INTERVIEW WAS ABANDONED — optional, and absent
    * means "it was not". Every caller that has no terminal to abandon (every fixture, and
    * any future non-interactive driver) is unaffected by omitting it.
    *
-   * WHY THE FLOW NEEDS A SECOND CHANNEL AT ALL. `ask` can only answer with a string, and
-   * the shell's prompt channel resolves `""` when a question is abandoned by Ctrl-D — it
-   * must, because that is what lets the FIRST question's blank come back as this flow's
-   * own `no-reserve-declared` refusal instead of a readline internal on the operator's
-   * screen (#370). But `""` is a RATIFICATION at three of this flow's questions: the
-   * funding override, and the rung-pick prompt at both of its sites. A Ctrl-D pressed
-   * after the funding declaration therefore used to race through them and land
-   * `planId`/`rungId` joins nobody declared, in an append-only file. The string cannot
-   * carry the difference, so the fact travels beside it.
+   * IT IS THE SECOND DOOR NOW (#388). It was the only one: `ask` used to answer `""` for
+   * an abandoned question, `""` is a RATIFICATION at three of this flow's questions — the
+   * funding override and the rung-pick prompt at both of its sites — so a Ctrl-D pressed
+   * after the funding declaration raced through them and landed `planId`/`rungId` joins
+   * nobody declared. The string could not carry the difference, so the fact travelled
+   * beside it. `ask` now answers `UNANSWERED`, which those three questions refuse where
+   * they stand, and the refusal names the question the operator walked away from rather
+   * than arriving at the door.
    *
-   * CHECKED AT THE WRITE DOOR, WHICH IS WHY THE GUARANTEE IS POSITIONAL-INDEPENDENT: if
-   * the terminal was abandoned, nothing is written — regardless of which question caught
-   * the Ctrl-D, including the last one. A latch that only changed later ANSWERS would
-   * still leak the interview whose final question was the abandoned one.
+   * WHAT THE LATCH STILL BUYS is a guarantee that holds without depending on any one
+   * question being written correctly: if the terminal was abandoned, nothing is written —
+   * regardless of which question caught the Ctrl-D. It is kept for exactly that reason
+   * while the per-question refusals are new. Removing it is its own change (#388).
    */
   promptAbandoned?: () => boolean;
   out: (message: string) => void;
@@ -143,10 +149,18 @@ export type OrdersImportRejection =
   | "unreadable-sidecar-lines"
   | "no-reserve-declared"
   /**
-   * THE OPERATOR ABANDONED THE INTERVIEW AT THE TERMINAL — Ctrl-D — and the answers
-   * behind that point are blanks nobody typed. See {@link OrdersImportIo.promptAbandoned}
-   * for why the flow cannot see this in the answers themselves, and `prompt-channel.ts`
-   * for the latch that carries it.
+   * THE OPERATOR ABANDONED THE INTERVIEW AT THE TERMINAL — Ctrl-D — or there was no
+   * terminal to conduct it on, which is the same fact to every question here.
+   *
+   * RAISED AT THE QUESTION THAT WENT UNANSWERED, and the message names it: `declareFunding`
+   * and `declareRungPicks` each return an `abandoned` arm carrying the question, and this
+   * flow turns either into this one reason. ONE reason rather than one per question, on
+   * purpose — the operator's next move is identical whichever prompt they walked away from
+   * (run the import again), and a reason token exists to distinguish next moves.
+   *
+   * ALSO RAISED AT THE WRITE DOOR, from {@link OrdersImportIo.promptAbandoned}. That check
+   * is redundant with the per-question refusals and is kept one increment longer as a
+   * belt on a guarantee that does not depend on any single question (#388).
    */
   | "interview-abandoned"
   /**
@@ -309,6 +323,25 @@ function reject(
   // be able to mistake a refusal for a quiet no-op.
   io.err(`REFUSED — ${message}\nNothing was written to ${io.ordersPath}.`);
   return { status: "rejected", reason, message };
+}
+
+/**
+ * The refusal an unanswered question earns, wherever in the interview it was put.
+ *
+ * ONE REASON, MANY QUESTIONS. The token is the flow's existing `interview-abandoned`; the
+ * MESSAGE names the prompt, because that is the half the operator needs and the half a
+ * reason code is bad at carrying. Five per-question tokens would inflate the union without
+ * changing anybody's next move, which is to run the import again.
+ */
+function rejectAbandonedInterview(io: OrdersImportIo, question: string): OrdersImportOutcome {
+  return reject(
+    io,
+    "interview-abandoned",
+    `the interview stopped at ${question} — either the terminal was abandoned (Ctrl-D) or ` +
+      `there was no terminal to conduct it on, so that question was never answered. This ` +
+      `import attributes every rung to a declaration the operator made, and there is no ` +
+      `such declaration to attribute to. Nothing is written. Run the import again`,
+  );
 }
 
 /**
@@ -612,8 +645,13 @@ export async function importBitgetOpenOrders(
     // `io.ask` ALONE, not the bag: that module reads the prompt channel and nothing else,
     // and its signature says so — see its header.
     const declaration = await declareFunding(io.ask, admitted);
-    if (declaration === undefined) {
+    if (declaration.status === "not-declared") {
       return reject(io, "no-reserve-declared", "no funding reserve was declared for this batch");
+    }
+    // THE REFUSAL LANDS ON THE QUESTION THAT WAS WALKED AWAY FROM (#388), not thirty lines
+    // later at the write door. Nothing has been built, let alone written.
+    if (declaration.status === "abandoned") {
+      return rejectAbandonedInterview(io, declaration.question);
     }
 
     // THE DECLARED RUNG JOIN (#286), prompted after the funding declaration and before
@@ -624,13 +662,22 @@ export async function importBitgetOpenOrders(
     ladders = await loadInForceLadders(io, observedAt.slice(0, 10) as IsoDate);
     // `io.ask` ALONE again: the pick-list reads the prompt channel and nothing else —
     // the book on file arrives as VALUES, read here where the file already is.
-    const rungPicks = await declareRungPicks(
+    const picked = await declareRungPicks(
       io.ask,
       admitted,
       ladders,
       declaredJoinsOnFile(existingRecords),
     );
-    records.push(...buildOrderPlacedRecords(admitted, { ...declaration, rungPicks }));
+    if (picked.status === "abandoned") {
+      return rejectAbandonedInterview(io, picked.question);
+    }
+    records.push(
+      ...buildOrderPlacedRecords(admitted, {
+        fundingReserveId: declaration.fundingReserveId,
+        overrides: declaration.overrides,
+        rungPicks: picked.picks,
+      }),
+    );
 
     // `O1`. Coverage is checked over the WHOLE resting book — what is already on file plus
     // this batch — because a reserve funds every claim against it, not one import's slice.
@@ -695,11 +742,17 @@ export async function importBitgetOpenOrders(
   const fresh: OrderRecord[] = [...records, ...observations].filter(
     (record) => !currentOnFile.has(appendKey(record)),
   );
-  // THE WRITE DOOR, AND THE LAST THING CHECKED BEFORE IT. An abandoned terminal makes
-  // every answer after the abandonment a blank nobody typed, and three of this flow's
-  // questions read a blank as consent — so the refusal cannot live at any one question,
-  // it has to live here, where every path that writes passes. Positional-independent: it
-  // does not matter which question caught the Ctrl-D, including the last one.
+  // THE WRITE DOOR, AND THE SECOND DOOR ONLY (#388). It is no longer what stops an
+  // abandoned interview writing: `ask` resolves `UNANSWERED`, every question of this flow
+  // refuses it where it stands, and the refusal names the question the operator walked
+  // away from. No blank is involved and no question reads one as consent.
+  //
+  // WHAT IT STILL BUYS is a guarantee that does not depend on any one question being
+  // written correctly: if the terminal was abandoned, nothing is written, whichever
+  // question caught the Ctrl-D. A regression in the new per-question refusals meets this
+  // rather than a gap. In production it is unreachable — reaching it means an `ask`
+  // returned the sentinel, and every path that could have is already gone — which is
+  // exactly what a second door should look like. Removing it is its own change.
   //
   // A REFUSAL, NOT A THROW, and in the established vocabulary — the operator gets the
   // same `REFUSED — ... Nothing was written` contract as `write-failed`, and the second
@@ -708,10 +761,10 @@ export async function importBitgetOpenOrders(
     return reject(
       io,
       "interview-abandoned",
-      `the interview was abandoned at the terminal (Ctrl-D), so the answers after that ` +
-        `point were blanks nobody typed — and three of this import's questions read a ` +
-        `blank as consent. Nothing about this batch is attributable to a declaration the ` +
-        `operator made, so none of it is written. Run the import again`,
+      `the interview was abandoned at the terminal (Ctrl-D) and reached this batch's write ` +
+        `anyway, which means a question of this import failed to refuse an answer nobody ` +
+        `gave. Nothing about this batch is attributable to a declaration the operator ` +
+        `made, so none of it is written. Run the import again`,
     );
   }
   try {

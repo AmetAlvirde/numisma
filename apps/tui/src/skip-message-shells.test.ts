@@ -33,6 +33,7 @@ import { loadAvailableCapital } from "./available-capital.js";
 import { cancelOrder } from "./cancel-order.js";
 import { importBitgetOpenOrders } from "./import-orders.js";
 import { recordFill } from "./record-fill.js";
+import { UNANSWERED } from "./prompt-channel.js";
 
 const ORDERS_PATH = "/synthetic/orders.jsonl";
 const EVENTS_PATH = "/synthetic/events.jsonl";
@@ -204,7 +205,9 @@ const SHELLS: Shell[] = [
           throw new Error("must not write");
         },
         toldAt: () => "2026-02-01T10:00:00Z",
-        ask: async () => "",
+        // THIS FLOW MUST REFUSE BEFORE IT ASKS ANYTHING, so the honest answer is the one
+        // no question can use: `UNANSWERED` (#388).
+        ask: async () => UNANSWERED,
         out: () => {},
         err: () => {},
       });
@@ -241,7 +244,9 @@ const SHELLS: Shell[] = [
             plans: [],
             skipped: [],
           }),
-          ask: async () => "",
+          // THIS FLOW MUST REFUSE BEFORE IT ASKS ANYTHING, so the honest answer is the one
+          // no question can use: `UNANSWERED` (#388).
+          ask: async () => UNANSWERED,
           out: () => {},
           err: () => {},
         },
