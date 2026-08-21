@@ -77,7 +77,8 @@
   it there. You may ALSO set a PATH here in EnvironmentVariables as an extra
   safeguard, but the wrapper is self-sufficient.
 
-  Install (edit the two __PLACEHOLDERS__ first):
+  Install (render the three __PLACEHOLDERS__ first — __REPO_DIR__, __HOME__,
+  __DATA_DIR__; see ops/price-feed/launchagent-reinstall.md for the `sed` that does it):
     cp ops/price-feed/com.numisma.pricefeed.daily.plist \
        ~/Library/LaunchAgents/com.numisma.pricefeed.daily.plist
     launchctl load  ~/Library/LaunchAgents/com.numisma.pricefeed.daily.plist
@@ -111,12 +112,29 @@
   <dict>
     <key>NUMISMA_REPO_DIR</key>
     <string>__REPO_DIR__</string>
-    <!-- Durable-data home: the sibling private `accumulus` repo. launchd cannot
-         expand `~`, so this ops file uses an absolute machine-specific path (unlike
-         the code default, which derives it from os.homedir()). The wrapper forwards
-         this to `pnpm prices:fetch`/`pnpm spine`. -->
+    <!-- Durable-data home: the sibling private `accumulus` repo. The wrapper forwards
+         this to `pnpm prices:fetch`/`pnpm spine`.
+
+         RENDERED, NOT LITERAL (#399). launchd cannot expand `~`, so the INSTALLED plist
+         must carry an absolute machine-specific path — and that argument, which an
+         earlier version of this comment used to defend a committed home-directory
+         literal, covers the rendered copy only. This TEMPLATE is public. The rule
+         packages/engine/src/data-dir.ts states for the engine ("a committed one would
+         leak the operator's real directory layout into a public repo") is scoped to the
+         engine, so this file was never in breach as written, but the leak is the same
+         leak and this file is just as public.
+
+         Substituted by the render step in launchagent-reinstall.md, like the other two
+         placeholders. AN UNRENDERED PLACEHOLDER IS NOT BENIGN, and the honest cost of
+         moving off the literal is that this failure mode now exists at all: the wrapper
+         reads `${NUMISMA_DATA_DIR-...}` UNSET-ONLY, so a literal `__DATA_DIR__` is a
+         SET, non-blank value and survives verbatim as a CWD-RELATIVE path — the
+         split-brain arm ADR-006 forbids. Two things catch it, and the run never reaches
+         the durable log either way: the wrapper now refuses a non-absolute data dir up
+         front (exit 78, EX_CONFIG), and trap 2 of the reinstall runbook diffs the parsed
+         plists, where an unsubstituted value is visible on sight. -->
     <key>NUMISMA_DATA_DIR</key>
-    <string>/Users/amet/Dev/accumulus/data</string>
+    <string>__DATA_DIR__</string>
   </dict>
 
   <!-- Hourly 18:00-23:00 local, EVERY day (7-day schedule; see the header note on

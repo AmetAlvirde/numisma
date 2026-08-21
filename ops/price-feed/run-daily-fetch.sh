@@ -73,9 +73,14 @@ PATH_PREPEND="${NUMISMA_PATH_PREPEND:-$HOME/.asdf/shims:$HOME/Library/pnpm:/opt/
 #
 # So: `${VAR-default}` (no colon) substitutes for UNSET ONLY, and blank in either
 # spelling is refused outright below. Unset → the default, deliberately. Set-but-blank
-# → a loud non-zero exit. Anything else → verbatim. Byte-identical to what
-# `resolveDataDir` does in TS, which is the only way this wrapper and the code it
-# drives can be said to agree.
+# → a loud non-zero exit.
+#
+# Every other value walks the SAME four rows `normalizeDataDirOverride` walks in TS
+# (packages/engine/src/data-dir.ts), in the same order: strip the surrounding
+# whitespace, expand a leading `~`, accept an absolute path, refuse the rest. That
+# ordering is the whole parity claim, and it is checked one row at a time below rather
+# than asserted here. A row that drifts on one plane and not the other is the defect
+# #369 filed, so each step names the arm of the TS table it mirrors.
 DATA_DIR="${NUMISMA_DATA_DIR-$HOME/Dev/accumulus/data}"
 # A blank `DATA_DIR` can ONLY mean a set-but-blank env var: the default above is never
 # blank. Stripping every space/tab/newline and testing what is left catches `""` and
@@ -113,6 +118,61 @@ if [[ -z "${DATA_DIR//[[:space:]]/}" ]]; then
   echo "heartbeat and git commit either to the REAL default ledger or to whatever" >&2
   echo "directory the scheduler happened to start in. Unset NUMISMA_DATA_DIR to choose" >&2
   echo "the default deliberately, or give it an absolute path." >&2
+  echo "No heartbeat was written: it lives under NUMISMA_DATA_DIR, which is what is broken." >&2
+  exit 78
+fi
+# ROW 1: SURROUNDING WHITESPACE IS STRIPPED, NOT REFUSED. `normalizeDataDirOverride`
+# trims before it resolves, so ` /Users/x/data ` names the same directory there that a
+# bare `/Users/x/data` does. Without these two expansions the wrapper refused that value
+# as non-absolute while the engine accepted it: one leading space, two verdicts. Interior
+# whitespace is left alone, because `/tmp/a b` is a real macOS path.
+#
+# The two `${var#...}` / `${var%...}` forms below are bash's trim: the inner expansion
+# builds the run of leading (then trailing) whitespace, and the outer one deletes exactly
+# that run.
+DATA_DIR="${DATA_DIR#"${DATA_DIR%%[![:space:]]*}"}"
+DATA_DIR="${DATA_DIR%"${DATA_DIR##*[![:space:]]}"}"
+# ROW 2: A LEADING `~` IS EXPANDED. Bash expands a tilde it PARSES, never one that
+# arrives inside a variable's value, so `NUMISMA_DATA_DIR=~/Dev/accumulus/data` in a
+# launchd plist reaches this line as the four literal characters `~/De…`. The engine
+# expands it (the `~` arm of `normalizeDataDirOverride`), and the comment on that arm
+# names this exact input as the reason it exists: a value that originated in a plist,
+# which cannot expand `~` itself. So the wrapper expands it here, before the absolute
+# test, or it would refuse the one input the engine added a row for.
+#
+# `$HOME` is the wrapper's `homedir()`. launchd sets it for every job, and `HEARTBEAT_FILE`
+# and the `git -C "$DATA_DIR"` at the commit step both need a path bash can use verbatim.
+if [[ "$DATA_DIR" == "~" ]]; then
+  DATA_DIR="$HOME"
+elif [[ "$DATA_DIR" == "~/"* ]]; then
+  DATA_DIR="$HOME/${DATA_DIR#\~/}"
+fi
+# ROWS 3 AND 4: ABSOLUTE IS ACCEPTED, EVERYTHING LEFT IS REFUSED, and for the same reason
+# the blank check above gives: a CWD-dependent data dir resolves against whatever
+# directory the scheduler started in, which is the split-brain arm ADR-006 forbids.
+# `normalizeDataDirOverride` (packages/engine/src/data-dir.ts) has THROWN on a relative
+# override since #369, so until now the wrapper's parity claim was true for blank and
+# false for relative — the wrapper let a relative value through and the first `pnpm` step
+# threw on it a minute later, after the heartbeat path had already been built from it.
+#
+# It stopped being theoretical with #399: the plist template now carries `__DATA_DIR__`
+# rather than a committed home path, and an unrendered placeholder is exactly this case —
+# set, non-blank, not absolute. Refusing here means a missed render dies before any side
+# effect rather than midway through step 1.
+#
+# The message says "absolute path or start with `~/`" because that is what the engine's
+# throw at the same row says. An operator who reads one plane's refusal and then the
+# other's must not be told two different rules for one value.
+#
+# Same exit 78 (EX_CONFIG) and the same no-heartbeat reasoning as above: the breadcrumb
+# lives under the directory we have just refused to trust.
+if [[ "$DATA_DIR" != /* ]]; then
+  echo "FATAL: NUMISMA_DATA_DIR must be an absolute path or start with '~/' (got '$DATA_DIR')." >&2
+  echo "A relative value resolves against whatever directory the scheduler happened to" >&2
+  echo "start in, so this run's marks, heartbeat and git commit would land beside it" >&2
+  echo "instead of in the durable log. If this reads like an unsubstituted placeholder," >&2
+  echo "the plist was installed without its render step (ops/price-feed/launchagent-reinstall.md)." >&2
+  echo "Unset NUMISMA_DATA_DIR to choose the default deliberately, or give it an absolute path." >&2
   echo "No heartbeat was written: it lives under NUMISMA_DATA_DIR, which is what is broken." >&2
   exit 78
 fi
