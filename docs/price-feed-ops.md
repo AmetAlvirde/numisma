@@ -58,11 +58,14 @@ heartbeat reading `exit 1` at step `startup` with `markWindow: false`, so a
 typo that kills every fire of an evening shows up as a failed run rather than
 as `job-heartbeat.json` still describing the last good one.
 
-**A set-but-blank `NUMISMA_DATA_DIR` kills the run before anything else, and it
-is the one failure with no heartbeat.** The wrapper reads
-`${NUMISMA_DATA_DIR-…}` without the colon, so *unset* takes the default while
-`""` or `"   "` is a knob the operator got wrong: the run prints a named `FATAL`
-and exits **78** (`EX_CONFIG`, chosen not to collide with 1, 124, 127 or 143).
+**A bad `NUMISMA_DATA_DIR` kills the run before anything else, and these are the
+two failures with no heartbeat.** The wrapper reads `${NUMISMA_DATA_DIR-…}`
+without the colon, so *unset* takes the default while `""` or `"   "` is a knob
+the operator got wrong. The second refusal is a value that is still not absolute
+after the wrapper trims the surrounding whitespace and expands a leading `~`;
+an unrendered `__DATA_DIR__` from a plist installed without its render step is
+how that one usually arrives. Either way the run prints a named `FATAL` and
+exits **78** (`EX_CONFIG`, chosen not to collide with 1, 124, 127 or 143).
 No heartbeat is written, deliberately: the heartbeat lives *inside*
 `NUMISMA_DATA_DIR`, which is the broken thing, and guessing a fallback location
 is the defect the refusal exists to prevent. The message lands on inherited
@@ -890,12 +893,12 @@ The same default is now written down in four places, in four languages:
 | Reader | Where | Form |
 | --- | --- | --- |
 | The engine (authority) | `packages/engine/src/data-dir.ts` — ADR-006's rule, reached from `resolveDataDirDefault` | `NUMISMA_DATA_DIR` else `homedir()/Dev/accumulus/data`, absolute and homedir-derived |
-| The wrapper | `DATA_DIR=` in `ops/price-feed/run-daily-fetch.sh` | `${NUMISMA_DATA_DIR:-$HOME/Dev/accumulus/data}` |
+| The wrapper | `DATA_DIR=` in `ops/price-feed/run-daily-fetch.sh` | `${NUMISMA_DATA_DIR-$HOME/Dev/accumulus/data}`, no colon, then trimmed, `~` expanded, and refused with exit 78 if it is still not absolute |
 | **This snippet** | your shell profile | the same expansion again |
 | The LaunchAgent | `EnvironmentVariables` in `ops/price-feed/com.numisma.pricefeed.daily.plist` | a literal absolute path, or absent — launchd cannot expand `~` and inherits nothing from your profile |
 
 (Four places, then — the plist is the environment the wrapper's expansion actually
-runs in, so it decides which branch of `${NUMISMA_DATA_DIR:-…}` the writer takes.)
+runs in, so it decides which branch of `${NUMISMA_DATA_DIR-…}` the writer takes.)
 
 The writer (the wrapper, through the engine) and the reader (your profile) resolve
 that path **independently**. If they ever disagree, the notice is written to
@@ -929,16 +932,22 @@ other two are divergences of *value format*.
   provider tokens; the data dir belongs in the plist.
 - **A `~/`-prefixed value.** The engine expands a leading `~/` itself
   (the tilde arm of `normalizeDataDirOverride` in
-  `packages/engine/src/data-dir.ts`). Bash does **not** expand a tilde that arrives inside a
-  variable's value, so the snippet reads a directory literally named `~`. The
+  `packages/engine/src/data-dir.ts`), and the wrapper now expands it the same way
+  before it tests for absoluteness, so writer and engine agree on the directory.
+  The snippet does not: bash does **not** expand a tilde that arrives inside a
+  variable's value, so your profile reads a directory literally named `~`. The
   wrapper writes the real notice; your shell reads an empty path and prints
   nothing, forever.
-- **A relative value.** The engine *refuses* it outright with a named error — "a
-  relative value resolves differently depending on the working directory, so it is
-  rejected to prevent a split-brain ledger" (the relative arm of the same
-  function). The snippet has
-  no such guard: it resolves the value against whatever directory the shell
-  happened to start in, which differs between terminals.
+- **A relative value.** Both the wrapper and the engine *refuse* it. The wrapper
+  gets there first, at startup: it prints a named `FATAL`, says the value must be
+  an absolute path or start with `~/`, and exits **78** without writing a
+  heartbeat, so the whole evening dies before step 1 rather than midway through
+  it. The engine's throw one layer down says the same thing in the same words
+  ("a relative value resolves differently depending on the working directory, so
+  it is rejected to prevent a split-brain ledger"), and a run only reaches it when
+  something other than the wrapper supplied the value. The snippet has no such
+  guard: it resolves the value against whatever directory the shell happened to
+  start in, which differs between terminals.
 
 **The mitigation is one rule, and it has both halves:** either leave
 `NUMISMA_DATA_DIR` unset **everywhere** and take the default all four readers agree

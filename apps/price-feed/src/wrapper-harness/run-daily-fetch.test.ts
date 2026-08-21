@@ -2929,7 +2929,7 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
 // so even the paths the wrapper merely NAMES cannot be the real ones, and the environment
 // is built from an explicit allowlist rather than spread from `process.env` — a developer
 // running this with a live `NUMISMA_DATA_DIR` exported must not change the result.
-describe("wrapper config — a blank or relative NUMISMA_DATA_DIR is REFUSED (always runs)", () => {
+describe("wrapper config — NUMISMA_DATA_DIR walks the engine's table (always runs)", () => {
   /** sysexits.h EX_CONFIG. Distinct from the wrapper's 1 / 124 / 127 / 143. */
   const EX_CONFIG = 78;
 
@@ -3005,7 +3005,9 @@ describe("wrapper config — a blank or relative NUMISMA_DATA_DIR is REFUSED (al
     expect(run.status, "a relative data dir must be a configuration refusal, not a run").toBe(
       EX_CONFIG,
     );
-    expect(run.stderr).toMatch(/FATAL: NUMISMA_DATA_DIR is not an absolute path \(got 'data'\)/);
+    expect(run.stderr).toMatch(
+      /FATAL: NUMISMA_DATA_DIR must be an absolute path or start with '~\/' \(got 'data'\)/,
+    );
     // The consequence, in the same voice the blank arm uses.
     expect(run.stderr).toMatch(/resolves against whatever directory the scheduler/);
     // Nothing on disk: the refusal precedes HEARTBEAT_FILE= and the `exec … tee` redirect.
@@ -3023,8 +3025,77 @@ describe("wrapper config — a blank or relative NUMISMA_DATA_DIR is REFUSED (al
     const run = runWrapperConfig({ NUMISMA_DATA_DIR: "__DATA_DIR__" });
 
     expect(run.status).toBe(EX_CONFIG);
-    expect(run.stderr).toMatch(/is not an absolute path \(got '__DATA_DIR__'\)/);
+    expect(run.stderr).toMatch(/must be an absolute path or start with '~\/' \(got '__DATA_DIR__'\)/);
     expect(run.stderr).toMatch(/launchagent-reinstall\.md/);
+  });
+
+  // THE TILDE ARM. `normalizeDataDirOverride` expands a leading `~`, and the comment on
+  // that arm names the reason: a value that originated as `NUMISMA_DATA_DIR` in a launchd
+  // plist, which cannot expand `~` itself. An absolute-only wrapper refusal would kill
+  // that value at startup, so the run would never reach the engine row written for it.
+  // Nothing covered this input on either plane, which is how the two rules diverged
+  // unnoticed; these three cases pin the wrapper's half.
+  it("EXPANDS a `~/`-prefixed NUMISMA_DATA_DIR instead of refusing it", () => {
+    // Driven to the mark-timezone guard, the same named early exit the unset case uses:
+    // reaching it proves the value survived the data-dir block. Exit 1 is NOT 78.
+    const run = runWrapperConfig({
+      NUMISMA_DATA_DIR: "~/Dev/accumulus/data",
+      NUMISMA_MARK_TZ: "Not/AZone",
+      NUMISMA_PRICEFEED_LOG_DIR: join(mkdtempSync(join(tmpdir(), "numisma-wrapper-logs-")), "logs"),
+    });
+
+    expect(run.status, "a tilde path is what the engine expands, not a misconfiguration").not.toBe(
+      EX_CONFIG,
+    );
+    expect(run.status).toBe(1);
+    expect(run.stdout).toMatch(/mark timezone 'Not\/AZone' is not a resolvable IANA zone/);
+  });
+
+  it("EXPANDS a bare `~`, the other half of the engine's tilde row", () => {
+    const run = runWrapperConfig({
+      NUMISMA_DATA_DIR: "~",
+      NUMISMA_MARK_TZ: "Not/AZone",
+      NUMISMA_PRICEFEED_LOG_DIR: join(mkdtempSync(join(tmpdir(), "numisma-wrapper-logs-")), "logs"),
+    });
+
+    expect(run.status).not.toBe(EX_CONFIG);
+    expect(run.status).toBe(1);
+  });
+
+  it("still refuses `~foo`, which the engine does not expand either", () => {
+    // The boundary of the row: only `~` and `~/…` expand. `~username` is a shell
+    // affordance neither plane implements, so it stays relative and stays refused.
+    const run = runWrapperConfig({ NUMISMA_DATA_DIR: "~foo" });
+
+    expect(run.status).toBe(EX_CONFIG);
+    expect(run.stderr).toMatch(/must be an absolute path or start with '~\/' \(got '~foo'\)/);
+  });
+
+  // SURROUNDING WHITESPACE IS TRIMMED, NOT REFUSED. The engine trims before it tests, so
+  // a leading space in front of an absolute path names the same directory there. Before
+  // this, the wrapper tested the untrimmed value and refused it: one space, two verdicts.
+  it("TRIMS surrounding whitespace around an absolute path rather than refusing it", () => {
+    const run = runWrapperConfig({
+      NUMISMA_DATA_DIR: `  ${mkdtempSync(join(tmpdir(), "numisma-wrapper-trim-"))}  `,
+      NUMISMA_MARK_TZ: "Not/AZone",
+      NUMISMA_PRICEFEED_LOG_DIR: join(mkdtempSync(join(tmpdir(), "numisma-wrapper-logs-")), "logs"),
+    });
+
+    expect(run.status, "the engine accepts this value, so the wrapper must too").not.toBe(
+      EX_CONFIG,
+    );
+    expect(run.status).toBe(1);
+    expect(run.stdout).toMatch(/mark timezone 'Not\/AZone' is not a resolvable IANA zone/);
+  });
+
+  it("reports the TRIMMED value when a padded relative path is refused", () => {
+    // Trim runs before the absolute test on both planes, so the value the operator is
+    // shown is the value that was judged. A refusal quoting ' data ' would send them
+    // hunting for a whitespace bug that is not the finding.
+    const run = runWrapperConfig({ NUMISMA_DATA_DIR: "  data  " });
+
+    expect(run.status).toBe(EX_CONFIG);
+    expect(run.stderr).toMatch(/must be an absolute path or start with '~\/' \(got 'data'\)/);
   });
 
   it("an UNSET NUMISMA_DATA_DIR still takes the default — the refusal must not swallow unset", () => {

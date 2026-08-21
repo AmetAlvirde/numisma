@@ -569,11 +569,30 @@ describe("the launchd template carries placeholders, not the operator's paths", 
       fileURLToPath(new URL("ops/price-feed/launchagent-reinstall.md", REPO_ROOT)),
       "utf8",
     );
-    const placeholders = [...new Set(template.match(/__[A-Z_]+__/g) ?? [])].filter(
-      (name) => name !== "__PLACEHOLDERS__",
-    );
+    // Comments are stripped first, the same scoping the literal guard above uses and for
+    // the same reason: a placeholder only needs rendering if launchd will READ it. The
+    // header's prose about `__PLACEHOLDERS__` is placeholder-SHAPED and gets installed
+    // verbatim as a comment, so scanning the raw template forced a hardcoded exemption
+    // for it, and the next header note that names an optional placeholder would have
+    // needed another one. Strip the comments and the exemption is not needed at all.
+    const values = template.replace(/<!--[\s\S]*?-->/g, "");
+    const placeholders = [...new Set(values.match(/__[A-Z_]+__/g) ?? [])];
+
+    // And the search is scoped to the `sed` invocation itself, not to the whole runbook.
+    // `runbook.includes("s|__X__|")` matched the token in prose or in a commented-out
+    // sample line, so a placeholder that the runbook merely MENTIONS passed a test whose
+    // subject is whether the render step substitutes it.
+    const lines = runbook.split("\n");
+    const sedStart = lines.findIndex((line) => /^sed\s/.test(line));
+    expect(sedStart, "the reinstall runbook has no `sed` render step to check").toBeGreaterThan(-1);
+    const renderStep: string[] = [];
+    for (const line of lines.slice(sedStart)) {
+      renderStep.push(line);
+      if (!line.endsWith("\\")) break;
+    }
+    const sedBlock = renderStep.join("\n");
 
     expect(placeholders.length).toBeGreaterThan(0);
-    expect(placeholders.filter((name) => !runbook.includes(`s|${name}|`))).toEqual([]);
+    expect(placeholders.filter((name) => !sedBlock.includes(`s|${name}|`))).toEqual([]);
   });
 });
