@@ -6,7 +6,7 @@
 //   - `spine:reset` REFUSES to delete the log when the dataDir resolves to the
 //     default accumulus ledger, and only proceeds against an explicit, non-default
 //     `NUMISMA_DATA_DIR` throwaway dir.
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -151,6 +151,108 @@ function gitIgnores(dataDir: string, file: string): boolean {
   return spawnSync("git", ["-C", dataDir, "check-ignore", "-q", "--no-index", "--", file])
     .status === 0;
 }
+
+/**
+ * The forensic breadcrumb, which is the ONE durable file the wrapper must NOT stage.
+ *
+ * It may be intentionally ignored (the #132 shape keeps it out of history), `git add`
+ * of an ignored path aborts the wrapper under `set -e`, and step 4 covers it in a
+ * separate lenient `--ignored` arm that warns rather than fails. So the shell's strict
+ * set is `TRACKED_FILES` MINUS this one — an exclusion the guard below asserts on
+ * purpose, rather than leaving it to look like an oversight that someone later "fixes".
+ */
+const WRAPPER_EXCLUDED_FILE = "head-digest.json";
+
+/**
+ * The `DURABLE_STRICT_FILES=(...)` literal from the daily wrapper.
+ *
+ * THROWS rather than returning `[]` when it cannot find the array. Failing closed is
+ * the whole point: a silent empty list would make the comparison below vacuously pass
+ * on a wrapper that had stopped staging anything at all, which is a louder version of
+ * the bug (#398) this guard exists to prevent.
+ */
+function wrapperPath(): string {
+  return join(repoRoot(), "ops", "price-feed", "run-daily-fetch.sh");
+}
+
+function wrapperStrictFiles(): string[] {
+  const wrapper = wrapperPath();
+  const source = readFileSync(wrapper, "utf8");
+  const literal = /^DURABLE_STRICT_FILES=\(([^)\n]*)\)/m.exec(source)?.[1];
+  if (literal === undefined) {
+    throw new Error(
+      `no line-start single-line DURABLE_STRICT_FILES=(...) literal in ${wrapper}`,
+    );
+  }
+  return literal.trim().split(/\s+/);
+}
+
+/** The two wrapper sites that must read `DURABLE_STRICT_FILES` rather than a literal. */
+type StrictFilesConsumer = "step-3 add loop" | "step-4 strict post-check";
+
+/**
+ * The consumer sites that actually expand `DURABLE_STRICT_FILES`.
+ *
+ * The declaration alone is NOT the invariant. #398 was two hand-kept literals that
+ * drifted, and a wrapper that declares this array while re-inlining either consumer
+ * reproduces that bug byte for byte with the list guard still green: the add loop
+ * stages one set, the post-check inspects another, and the difference goes uncommitted
+ * under `post-check OK`. So this reads the CONSUMERS — the `for` loop that stages each
+ * name and the strict `git status --porcelain` arm that inspects them — and each match
+ * is classified by what the site does, not by where it sits, so reordering the steps or
+ * rewording their comments leaves the guard alone while re-inlining either one turns it
+ * red.
+ */
+function wrapperStrictFilesConsumers(): StrictFilesConsumer[] {
+  const lines = readFileSync(wrapperPath(), "utf8").split("\n");
+  const consumers: StrictFilesConsumer[] = [];
+  lines.forEach((line, index) => {
+    if (!line.includes('"${DURABLE_STRICT_FILES[@]}"')) {
+      return;
+    }
+    const loopVar = /^\s*for\s+(\w+)\s+in\s+"\$\{DURABLE_STRICT_FILES\[@\]\}"/.exec(line)?.[1];
+    if (loopVar !== undefined) {
+      // A loop only counts when its body stages the name it binds.
+      const body = lines.slice(index + 1, index + 6).join("\n");
+      if (new RegExp(`git\\b.*\\badd\\b.*"\\$${loopVar}"`).test(body)) {
+        consumers.push("step-3 add loop");
+      }
+      return;
+    }
+    if (line.includes("status --porcelain") && !line.includes("--ignored")) {
+      consumers.push("step-4 strict post-check");
+    }
+  });
+  return consumers;
+}
+
+// End 3: THE SHELL END. `TRACKED_FILES` and the accumulus allowlist are the two ends
+// the guard above pins, and pinning only those is what let #398 happen: the wrapper is
+// a THIRD statement of the same list, and it silently kept staging five files against a
+// seven-file contract. The daily run is the BACKSTOP — it exists for the runs where the
+// in-process capture did not happen — so a file missing from it is uncommitted exactly
+// when nothing else was going to commit it, and step 4 then reports the tree clean.
+//
+// Collapsing the wrapper's two literals into one array (#398) is what makes the list
+// assertion single instead of double. The list is only half the invariant, so the third
+// case below pins the two consumers that have to read it.
+describe("durable-file floor — the wrapper stages the same list it checks", () => {
+  it("end 3: both wrapper consumers read DURABLE_STRICT_FILES instead of a literal", () => {
+    expect(wrapperStrictFilesConsumers()).toEqual([
+      "step-3 add loop",
+      "step-4 strict post-check",
+    ]);
+  });
+
+  it("end 3: DURABLE_STRICT_FILES is TRACKED_FILES minus the forensic breadcrumb", () => {
+    const expected = TRACKED_FILES.filter((file) => file !== WRAPPER_EXCLUDED_FILE).sort();
+    expect([...wrapperStrictFiles()].sort()).toEqual(expected);
+  });
+
+  it("end 3: the wrapper never stages head-digest.json (`git add` of an ignored path aborts)", () => {
+    expect(wrapperStrictFiles()).not.toContain(WRAPPER_EXCLUDED_FILE);
+  });
+});
 
 describe("durable-file floor — both ends of the allowlist/TRACKED_FILES contract", () => {
   const dataDir = accumulusDataDir();

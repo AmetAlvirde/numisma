@@ -922,6 +922,31 @@ LAST_STEP="spine"
 echo "[$STAMP] prices:fetch clean — ingesting marks via pnpm spine"
 pnpm spine
 
+# THE STRICT DURABLE SET — ONE LIST, TWO CONSUMERS (#398). Step 3's explicit-add loop
+# and step 4's strict post-check must name the same files, and both must agree with
+# `TRACKED_FILES` (apps/tui/src/ingest-commit.ts). They were two hand-kept literals and
+# they drifted: `reconciliations.jsonl` reached `TRACKED_FILES` and the accumulus
+# allowlist but neither list here, so a fill recorded without the in-process capture
+# left the trail uncommitted while step 4 printed `post-check OK` beside it — a green
+# check over a file `git add -u` cannot even see, which is the precise failure ADR-006's
+# amendment orders its edit sequence to prevent. That sequence named FOUR sites; this
+# array collapses the last two, so the eighth durable file now costs THREE edits: the
+# accumulus allowlist, `TRACKED_FILES`, and this line.
+#
+# `apps/tui/src/durable-log-guards.test.ts` PARSES THIS ARRAY and fails when it and
+# `TRACKED_FILES` disagree. It also reads the two consumers below and fails if either
+# one goes back to naming files itself, because a re-inlined literal reproduces #398
+# with the list assertion still green. That guard is why fixing the two lists is worth
+# doing here rather than in place: without it the eighth durable file repeats #398
+# exactly. The parser takes a single-line `(...)` literal of bare filenames at the start
+# of a line and refuses anything else, so keep it on one line.
+#
+# head-digest.json is deliberately ABSENT and the guard asserts that absence rather
+# than tolerating it: it is a forensic breadcrumb that may be intentionally ignored,
+# `git add` of an ignored path aborts under `set -e`, and step 4 handles it in the
+# separate lenient `--ignored` arm that warns instead of failing.
+DURABLE_STRICT_FILES=(events.jsonl genesis.json preferences.jsonl orders.jsonl plans.jsonl reconciliations.jsonl)
+
 # 3) Persist the appended marks to the private data repo. `pnpm spine` appends the
 #    day's marks to events.jsonl but leaves that change UNCOMMITTED — a stray
 #    reset/checkout would silently lose real fund data (exactly how a multi-day
@@ -940,18 +965,17 @@ pnpm spine
 #
 #    `git add -u` restages tracked modifications only, so a FIRST-TIME untracked
 #    source-of-truth file (e.g. an initial genesis.json) would slip past this
-#    backstop and then FATAL the post-check. The source-of-truth files
-#    (events.jsonl, genesis.json, preferences.jsonl, orders.jsonl, plans.jsonl) are NEVER
-#    ignored — the accumulus allowlist names each one — so also add them
-#    explicitly. head-digest.json is deliberately NOT added here — it may be intentionally ignored, and `git add` of an ignored
-#    path aborts under `set -e`. Each explicit add is guarded on file existence so a
-#    missing optional file doesn't trip `set -e`.
+#    backstop and then FATAL the post-check. The source-of-truth files are NEVER
+#    ignored — the accumulus allowlist names each one — so also add them explicitly,
+#    from `DURABLE_STRICT_FILES`, declared just above this step. Each explicit add
+#    is guarded on file existence so a missing optional file doesn't trip `set -e`.
+
 LAST_STEP="commit"
 if ! git -C "$DATA_DIR" rev-parse --git-dir >/dev/null 2>&1; then
   echo "[$STAMP] WARNING: $DATA_DIR is not inside a git repo — skipping commit (durable log left uncommitted)."
 else
   git -C "$DATA_DIR" add -u -- .
-  for f in events.jsonl genesis.json preferences.jsonl orders.jsonl plans.jsonl; do
+  for f in "${DURABLE_STRICT_FILES[@]}"; do
     if [[ -e "$DATA_DIR/$f" ]]; then
       git -C "$DATA_DIR" add -- "$f"
     fi
@@ -995,11 +1019,13 @@ if git -C "$DATA_DIR" rev-parse --git-dir >/dev/null 2>&1; then
     echo "[$STAMP] WARNING: head-digest.json uncaptured after ingest (forensic breadcrumb lagging, not fatal):"
     echo "$DIGEST_DIRTY"
   fi
-  # orders.jsonl and plans.jsonl belong in THIS (strict, no --ignored) arm: they are
-  # TRACKED durable files per the accumulus allowlist, not only-ignored breadcrumbs
+  # Everything in DURABLE_STRICT_FILES belongs in THIS (strict, no --ignored) arm: each
+  # is a TRACKED durable file per the accumulus allowlist, not an only-ignored breadcrumb
   # like head-digest.json. Naming them here is only honest because the allowlist landed
-  # first — over an ignored path this arm would report clean while git discards it.
-  LOG_DIRTY="$(git -C "$DATA_DIR" status --porcelain -- events.jsonl genesis.json preferences.jsonl orders.jsonl plans.jsonl)"
+  # first — over an ignored path this arm would report clean while git discards it. It
+  # reads the SAME array step 3 stages from, so the two can no longer disagree about what
+  # "the durable log" means; before #398 they did, and this arm was the half that lied.
+  LOG_DIRTY="$(git -C "$DATA_DIR" status --porcelain -- "${DURABLE_STRICT_FILES[@]}")"
   if [[ -n "$LOG_DIRTY" ]]; then
     echo "[$STAMP] FATAL: durable LOG uncaptured after ingest + backstop — real fund data at risk:"
     echo "$LOG_DIRTY"
@@ -1031,10 +1057,12 @@ fi
 #    log. It writes into $DATA_DIR, the accumulus tree step 3 just committed, but
 #    cannot dirty it: accumulus uses an allowlist .gitignore under which
 #    gap-report.json falls through to /data/* (ignored, untracked), and step 4's
-#    strict arm runs `git status --porcelain` WITHOUT `--ignored` over the FIVE
-#    durable files it names, so the sidecar is invisible to it either way. (Five,
-#    not six: the allowlist versions six files, but head-digest.json is handled
-#    by the lenient `--ignored` arm above, and that arm reports rather than fails.)
+#    strict arm runs `git status --porcelain` WITHOUT `--ignored` over the SIX
+#    durable files in DURABLE_STRICT_FILES, so the sidecar is invisible to it either
+#    way. (Six, not seven: the allowlist versions seven files, but head-digest.json is
+#    handled by the lenient `--ignored` arm above, and that arm reports rather than
+#    fails. Both counts move together with that array — the guard in
+#    apps/tui/src/durable-log-guards.test.ts is the thing that catches it if they don't.)
 #
 #    ZERO-ARGUMENT, and it stays that way even as the log ages: the command floors
 #    its own window at `boundedEraFloor` — the launchd era start, or 400 days back,
@@ -1112,7 +1140,7 @@ pnpm gap-report -- --write
 #     step 5 through ADR-006's one rule, so the notice cannot land in a different
 #     directory from the report it agrees with. Like gap-report.json it falls through
 #     accumulus's allowlist .gitignore to /data/* (ignored, untracked) and is invisible
-#     to step 4's strict arm, which names five durable files and does not pass
+#     to step 4's strict arm, which names the six DURABLE_STRICT_FILES and does not pass
 #     `--ignored`.
 LAST_STEP="operator-notice"
 pnpm operator-notice
