@@ -16,7 +16,7 @@ asymmetry is the single most confusing thing about it:
 | Half | How it installs | Live after `git pull`? |
 | --- | --- | --- |
 | `run-daily-fetch.sh` | The plist's `ProgramArguments` points at the **repo path**, so launchd executes the wrapper **in place**. `git pull` *is* its install. | **Yes** |
-| `com.numisma.pricefeed.daily.plist` | The installed file at `~/Library/LaunchAgents/` is a hand-resolved **copy** (`__REPO_DIR__` / `__HOME__` expanded). No automation reconciles it. | **No** |
+| `com.numisma.pricefeed.daily.plist` | The installed file at `~/Library/LaunchAgents/` is a hand-resolved **copy** (`__REPO_DIR__`, `__HOME__` and `__DATA_DIR__` expanded). No automation reconciles it. | **No** |
 
 So the normal post-merge state is a **new wrapper on an old schedule**. That is
 benign — the wrapper is correct standalone — but it means the schedule silently
@@ -57,9 +57,13 @@ launchctl unload ~/Library/LaunchAgents/com.numisma.pricefeed.daily.plist
 #    modern equivalent if it refuses:
 #    launchctl bootout gui/$(id -u)/com.numisma.pricefeed.daily
 
-# 4. Render the template over the installed copy.
+# 4. Render the template over the installed copy. Every __PLACEHOLDER__ in the
+#    template needs a line here — `apps/price-feed/src/schedule-window.test.ts`
+#    fails when one is missing, because an install that looks rendered and is not
+#    is the failure this step exists to avoid.
 sed -e "s|__REPO_DIR__|/Users/amet/Dev/numisma|g" \
     -e "s|__HOME__|/Users/amet|g" \
+    -e "s|__DATA_DIR__|/Users/amet/Dev/accumulus/data|g" \
     /Users/amet/Dev/numisma/ops/price-feed/com.numisma.pricefeed.daily.plist \
     > ~/Library/LaunchAgents/com.numisma.pricefeed.daily.plist
 
@@ -114,6 +118,12 @@ Two specific things to hunt for:
 
 Anything appearing beyond those two hunks — `ProgramArguments`, `NUMISMA_DATA_DIR`,
 the log paths — means step 4 or 5 went wrong. Stop and restore the `.bak`.
+
+A left-over `__DATA_DIR__` is the one to look hardest for since #399 moved that
+value off a committed literal and onto a placeholder. It is not silent: the
+wrapper refuses a non-absolute data dir at startup with exit 78 and says which
+runbook to open. But it refuses on the LOAD RUN that step 7 fires, so the cost of
+missing it here is an evening, and `plutil -p` shows it on sight.
 
 ## Verification
 

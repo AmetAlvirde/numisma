@@ -116,6 +116,32 @@ if [[ -z "${DATA_DIR//[[:space:]]/}" ]]; then
   echo "No heartbeat was written: it lives under NUMISMA_DATA_DIR, which is what is broken." >&2
   exit 78
 fi
+# RELATIVE IS REFUSED TOO, and for the same reason the blank check above gives: a
+# CWD-dependent data dir resolves against whatever directory the scheduler started in,
+# which is the split-brain arm ADR-006 forbids. `normalizeDataDirOverride`
+# (packages/engine/src/data-dir.ts) has THROWN on a relative override since #369, so
+# until now the claim above that this block is "byte-identical to what `resolveDataDir`
+# does in TS" was true for blank and false for relative — the wrapper let a relative
+# value through and the first `pnpm` step threw on it a minute later, after the
+# heartbeat path had already been built from it.
+#
+# It stopped being theoretical with #399: the plist template now carries `__DATA_DIR__`
+# rather than a committed home path, and an unrendered placeholder is exactly this case —
+# set, non-blank, not absolute. Refusing here means a missed render dies before any side
+# effect rather than midway through step 1.
+#
+# Same exit 78 (EX_CONFIG) and the same no-heartbeat reasoning as above: the breadcrumb
+# lives under the directory we have just refused to trust.
+if [[ "$DATA_DIR" != /* ]]; then
+  echo "FATAL: NUMISMA_DATA_DIR is not an absolute path (got '$DATA_DIR')." >&2
+  echo "A relative value resolves against whatever directory the scheduler happened to" >&2
+  echo "start in, so this run's marks, heartbeat and git commit would land beside it" >&2
+  echo "instead of in the durable log. If this reads like an unsubstituted placeholder," >&2
+  echo "the plist was installed without its render step (ops/price-feed/launchagent-reinstall.md)." >&2
+  echo "Unset NUMISMA_DATA_DIR to choose the default deliberately, or give it an absolute path." >&2
+  echo "No heartbeat was written: it lives under NUMISMA_DATA_DIR, which is what is broken." >&2
+  exit 78
+fi
 # Wall-clock ceiling on the WHOLE run, enforced by the watchdog below. Must stay
 # comfortably under the 3600s gap between scheduled fires; the reasoning and the
 # guard are at the watchdog itself. 0 disables it (manual debugging only).

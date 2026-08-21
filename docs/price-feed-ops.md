@@ -22,10 +22,12 @@ any command below.
 | `ops/price-feed/com.numisma.pricefeed.daily.plist` | launchd definition firing the wrapper **hourly from 18:00 to 23:00 local** (six intervals; 18:00 is the default mark time), **every day** — plus `RunAtLoad` true. The first fire on an awake machine marks the day; later fires add 0 new marks (though they still spend credits and time). See "Why the window is hourly, not a single 18:00 fire" and "Why the schedule fires 7 days/week" below. |
 | `ops/price-feed/launchagent-reinstall.md` | Runbook for pushing a plist change into the job launchd actually runs. Not executed by anything — it exists because the wrapper installs via `git pull` (launchd runs it in place) while the plist is a resolved copy, so merging a plist change does nothing on its own. |
 
-Both `.plist` / `.sh` files are templates: replace `__REPO_DIR__` / `__HOME__`
-before installing. The plist's `NUMISMA_DATA_DIR` is **not** a placeholder. It
-ships as a literal absolute path (launchd cannot expand `~`), so repoint it at
-your own `<fund>` checkout when you install.
+Both `.plist` / `.sh` files are templates: replace `__REPO_DIR__`, `__HOME__` and
+`__DATA_DIR__` before installing. `__DATA_DIR__` used to be a committed absolute
+path rather than a placeholder (#399), on the argument that launchd cannot expand
+`~`. That is true of the *installed* file and says nothing about the template, so
+it renders like the other two now. The rendered value must still be absolute: the
+wrapper refuses a relative one at startup with exit 78.
 
 The wrapper reads nine `NUMISMA_*` variables in all. Three are lower-traffic
 overrides, each with a sensible default so most installs never need them:
@@ -192,18 +194,21 @@ threat model does not need.
 1. Set the Mac's timezone to America/Mexico_City (or shift **all six** of the plist's
    `Hour` entries to the local clock equal to 18:00–23:00 CDMX — they must stay
    at/after the mark time and inside the same CDMX day).
-2. Edit both placeholders in `run-daily-fetch.sh` (`REPO_DIR`) and the plist
-   (`__REPO_DIR__`, `__HOME__`).
-3. Set the durable-data home in the plist. The wrapper forwards `NUMISMA_DATA_DIR`
-   to every `pnpm` invocation; it is the **single machine-specific override** that
-   points the ledger at the sibling private `<fund>` repo. launchd **cannot expand
-   `~`**, so the plist's `NUMISMA_DATA_DIR` must be an **absolute** path (e.g.
-   `/Users/you/Dev/<fund>/data`) — unlike the code default, which derives
-   `~/Dev/<fund>/data` from `os.homedir()`. If left unset the wrapper's step-3
-   auto-commit and step-4 post-check both fall back to that **same** `~/Dev/<fund>/data`
-   default — the exact tree the in-process capture writes to — so an unset var is still
-   committed and still post-checked (no silent "log left uncommitted" gap). Setting it
-   explicitly is only required when your `<fund>` checkout lives somewhere else.
+2. Edit the placeholders in `run-daily-fetch.sh` (`REPO_DIR`) and the plist
+   (`__REPO_DIR__`, `__HOME__`, `__DATA_DIR__`).
+3. Set the durable-data home in the plist by rendering `__DATA_DIR__`. The wrapper
+   forwards `NUMISMA_DATA_DIR` to every `pnpm` invocation; it is the **single
+   machine-specific override** that points the ledger at the sibling private
+   `<fund>` repo. launchd **cannot expand `~`**, so the rendered value must be an
+   **absolute** path (e.g. `/Users/you/Dev/<fund>/data`) — unlike the code default,
+   which derives `~/Dev/<fund>/data` from `os.homedir()`. A value that is not
+   absolute, an unrendered `__DATA_DIR__` included, is refused at startup with exit
+   78 rather than resolved against the scheduler's working directory. If left unset
+   the wrapper's step-3 auto-commit and step-4 post-check both fall back to that
+   **same** `~/Dev/<fund>/data` default — the exact tree the in-process capture writes
+   to — so an unset var is still committed and still post-checked (no silent "log left
+   uncommitted" gap). Setting it explicitly is only required when your `<fund>`
+   checkout lives somewhere else.
    (On a fresh box with no `<fund>` checkout at all, the default path is not a git
    repo, so step 3 degrades gracefully — a logged warning and skip, never a FATAL.)
 4. Install and load:
@@ -215,8 +220,8 @@ threat model does not need.
    ```
 
    **The installed copy is a RESOLVED COPY, so a change to the template in this repo
-   does nothing until you reinstall by hand.** `cp` expands nothing — you edit
-   `__REPO_DIR__` / `__HOME__` in the installed file, so the two files diverge by
+   does nothing until you reinstall by hand.** `cp` expands nothing — you render
+   the placeholders in the installed file, so the two files diverge by
    design and no automation reconciles them. After pulling a change to the plist
    (e.g. the hourly window), redo the copy, re-edit the placeholders, then:
 

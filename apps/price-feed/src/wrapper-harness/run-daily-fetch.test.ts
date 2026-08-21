@@ -2929,7 +2929,7 @@ describe.runIf(decision.run)("wrapper harness — the real wrapper, armed", () =
 // so even the paths the wrapper merely NAMES cannot be the real ones, and the environment
 // is built from an explicit allowlist rather than spread from `process.env` — a developer
 // running this with a live `NUMISMA_DATA_DIR` exported must not change the result.
-describe("wrapper config — a blank NUMISMA_DATA_DIR is REFUSED (always runs)", () => {
+describe("wrapper config — a blank or relative NUMISMA_DATA_DIR is REFUSED (always runs)", () => {
   /** sysexits.h EX_CONFIG. Distinct from the wrapper's 1 / 124 / 127 / 143. */
   const EX_CONFIG = 78;
 
@@ -2990,6 +2990,41 @@ describe("wrapper config — a blank NUMISMA_DATA_DIR is REFUSED (always runs)",
     // no `Dev/accumulus`, no `Library/Logs`.
     expect(existsSync(join(run.home, "Dev"))).toBe(false);
     expect(existsSync(join(run.home, "Library"))).toBe(false);
+  });
+
+  // THE RELATIVE ARM (#399). The blank cases above already describe arm 1 — a value that
+  // resolves against the process CWD — but they only ever reached it through whitespace.
+  // A plainly relative value took the OTHER path: `${VAR-default}` substitutes for unset
+  // only, so `data` survived verbatim, `HEARTBEAT_FILE` was built from it, and the run
+  // died a minute later inside `pnpm prices:fetch` when `normalizeDataDirOverride` threw.
+  // Loud, eventually, but after the wrapper had already named a directory it should have
+  // refused — and out of step with the TS resolver the wrapper claims parity with.
+  it("refuses a RELATIVE NUMISMA_DATA_DIR with EX_CONFIG, before any side effect", () => {
+    const run = runWrapperConfig({ NUMISMA_DATA_DIR: "data" });
+
+    expect(run.status, "a relative data dir must be a configuration refusal, not a run").toBe(
+      EX_CONFIG,
+    );
+    expect(run.stderr).toMatch(/FATAL: NUMISMA_DATA_DIR is not an absolute path \(got 'data'\)/);
+    // The consequence, in the same voice the blank arm uses.
+    expect(run.stderr).toMatch(/resolves against whatever directory the scheduler/);
+    // Nothing on disk: the refusal precedes HEARTBEAT_FILE= and the `exec … tee` redirect.
+    expect(existsSync(join(run.home, "Dev"))).toBe(false);
+    expect(existsSync(join(run.home, "Library"))).toBe(false);
+  });
+
+  // The case that made the relative arm worth closing rather than documenting. The plist
+  // template carries `__DATA_DIR__` instead of a committed home path (#399), so an install
+  // that skips the render step hands the job a set, non-blank, non-absolute value — and
+  // this is the only place that can tell the operator what actually went wrong, because
+  // by the time anything else notices, the message is about a data dir rather than about
+  // a plist.
+  it("refuses an UNRENDERED __DATA_DIR__ placeholder and names the render step", () => {
+    const run = runWrapperConfig({ NUMISMA_DATA_DIR: "__DATA_DIR__" });
+
+    expect(run.status).toBe(EX_CONFIG);
+    expect(run.stderr).toMatch(/is not an absolute path \(got '__DATA_DIR__'\)/);
+    expect(run.stderr).toMatch(/launchagent-reinstall\.md/);
   });
 
   it("an UNSET NUMISMA_DATA_DIR still takes the default — the refusal must not swallow unset", () => {

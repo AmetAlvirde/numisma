@@ -519,3 +519,61 @@ describe("the launchd fetch window", () => {
     expect(ceiling).toBeGreaterThan(20 * 60);
   });
 });
+// The template is a TEMPLATE, and this is the assertion that keeps it one (#399).
+//
+// It sits in this file for the reason stated in the header: it has an ORACLE SOMEWHERE
+// ELSE. `packages/engine/src/data-dir.ts` states the rule — "Never a `/Users/...`
+// literal, in this file or in any test that pins it, ADR-006 forbids the literal, and a
+// committed one would leak the operator's real directory layout into a public repo" —
+// and scopes it to the engine. The plist was outside that scope and carried
+// `/Users/amet/Dev/accumulus/data` for exactly as long as nothing looked. The leak is
+// the same leak; this file is just as public.
+//
+// The plist's own defence of the literal was right about launchd and wrong about which
+// file it was defending: launchd does not expand `~`, so the RENDERED copy must be
+// absolute — which says nothing about the committed template, and is what the other two
+// placeholders already exist to handle.
+//
+// SCOPED TO THE PLIST, deliberately. `ops/price-feed/launchagent-reinstall.md` is full of
+// `/Users/amet` and stays that way: it is an operator runbook whose `sed` and `launchctl`
+// lines are meant to be pasted, and scrubbing them would leave commands nobody can run.
+// The template is the artifact that gets installed; the runbook is the one that gets read.
+describe("the launchd template carries placeholders, not the operator's paths", () => {
+  const template = readFileSync(PLIST_PATH, "utf8");
+
+  it("commits no home-directory literal in any value launchd will read", () => {
+    // XML comments are stripped first, and that scoping is the claim: the hazard is a
+    // VALUE, which is what gets installed and what a reader of a public repo learns the
+    // operator's layout from. The header's illustrative
+    // `<string>/Users/you/.asdf/shims:…</string>` inside a comment is a worked example of
+    // an OPTIONAL key, names nobody, and is the kind of thing this guard must not forbid.
+    const values = template.replace(/<!--[\s\S]*?-->/g, "");
+    const literals = values.split("\n").filter((line) => /\/Users\//.test(line));
+
+    expect(literals).toEqual([]);
+  });
+
+  it("renders the data dir through __DATA_DIR__, like the repo dir and the log paths", () => {
+    // Control on the assertion above: a template that had simply DROPPED the key would
+    // also carry no literal, and the job would then fall back to the wrapper's default
+    // silently rather than by decision.
+    expect(template).toMatch(/<key>NUMISMA_DATA_DIR<\/key>\s*<string>__DATA_DIR__<\/string>/);
+  });
+
+  it("names every placeholder it uses in the render step of the reinstall runbook", () => {
+    // The four-edits-in-order failure (#398) in its other form: adding a placeholder to
+    // the template without adding its substitution to the runbook produces an install
+    // that looks rendered and is not. The wrapper refuses such a value at startup, but
+    // this catches it a step earlier, at the edit.
+    const runbook = readFileSync(
+      fileURLToPath(new URL("ops/price-feed/launchagent-reinstall.md", REPO_ROOT)),
+      "utf8",
+    );
+    const placeholders = [...new Set(template.match(/__[A-Z_]+__/g) ?? [])].filter(
+      (name) => name !== "__PLACEHOLDERS__",
+    );
+
+    expect(placeholders.length).toBeGreaterThan(0);
+    expect(placeholders.filter((name) => !runbook.includes(`s|${name}|`))).toEqual([]);
+  });
+});
