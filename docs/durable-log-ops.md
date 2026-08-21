@@ -10,10 +10,12 @@ and **reversible** (`git revert` + re-fold). This is the reliable conversion of 
 #114 (ADR-006 sibling-repo substrate; ADR-003 amendment for the derived Head Digest).
 
 Those seven names are the **durable-file floor**, and it is a tested list, not a
-prose one. `apps/tui/src/durable-log-guards.test.ts` asserts both ends of it: that
-`<fund>`'s allowlist does not `check-ignore` any of them, and that `TRACKED_FILES`
-in `apps/tui/src/ingest-commit.ts` names exactly those seven. A new durable file is
-silently ephemeral until both ends know it, which is the precondition
+prose one. `apps/tui/src/durable-log-guards.test.ts` asserts three ends of it: that
+`<fund>`'s allowlist does not `check-ignore` any of them, that `TRACKED_FILES`
+in `apps/tui/src/ingest-commit.ts` names exactly those seven, and that the daily
+wrapper's `DURABLE_STRICT_FILES` names the same set minus `head-digest.json` and is
+read by both wrapper consumers. A new durable file is
+silently ephemeral until all three ends know it, which is the precondition
 [`plans-authoring-runbook.md`](./plans-authoring-runbook.md) §0 walks through.
 
 Throughout this page, `<fund>` stands for your own private data repository — the same

@@ -929,12 +929,17 @@ pnpm spine
 # allowlist but neither list here, so a fill recorded without the in-process capture
 # left the trail uncommitted while step 4 printed `post-check OK` beside it — a green
 # check over a file `git add -u` cannot even see, which is the precise failure ADR-006's
-# amendment orders these four edits to prevent.
+# amendment orders its edit sequence to prevent. That sequence named FOUR sites; this
+# array collapses the last two, so the eighth durable file now costs THREE edits: the
+# accumulus allowlist, `TRACKED_FILES`, and this line.
 #
 # `apps/tui/src/durable-log-guards.test.ts` PARSES THIS ARRAY and fails when it and
-# `TRACKED_FILES` disagree. That guard is why fixing the two lists is worth doing here
-# rather than in place: without it the eighth durable file repeats #398 exactly. The
-# parser wants a single-line `(...)` literal of bare filenames — keep it on one line.
+# `TRACKED_FILES` disagree. It also reads the two consumers below and fails if either
+# one goes back to naming files itself, because a re-inlined literal reproduces #398
+# with the list assertion still green. That guard is why fixing the two lists is worth
+# doing here rather than in place: without it the eighth durable file repeats #398
+# exactly. The parser takes a single-line `(...)` literal of bare filenames at the start
+# of a line and refuses anything else, so keep it on one line.
 #
 # head-digest.json is deliberately ABSENT and the guard asserts that absence rather
 # than tolerating it: it is a forensic breadcrumb that may be intentionally ignored,
@@ -962,8 +967,8 @@ DURABLE_STRICT_FILES=(events.jsonl genesis.json preferences.jsonl orders.jsonl p
 #    source-of-truth file (e.g. an initial genesis.json) would slip past this
 #    backstop and then FATAL the post-check. The source-of-truth files are NEVER
 #    ignored — the accumulus allowlist names each one — so also add them explicitly,
-#    from the one list below. Each explicit add is guarded on file existence so a
-#    missing optional file doesn't trip `set -e`.
+#    from `DURABLE_STRICT_FILES`, declared just above this step. Each explicit add
+#    is guarded on file existence so a missing optional file doesn't trip `set -e`.
 
 LAST_STEP="commit"
 if ! git -C "$DATA_DIR" rev-parse --git-dir >/dev/null 2>&1; then

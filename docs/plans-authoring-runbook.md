@@ -54,8 +54,9 @@ with a green check over the loss. Add the `plans.jsonl` allowlist entry beside t
 durable files first, then re-run the check.
 
 The other two links are code and are guarded by test
-(`apps/tui/src/durable-log-guards.test.ts` asserts **both ends**: not `check-ignore`'d,
-and named in `TRACKED_FILES`). Run `pnpm test` and confirm that file is green before you
+(`apps/tui/src/durable-log-guards.test.ts` asserts **three ends**: not `check-ignore`'d,
+named in `TRACKED_FILES`, and named in the daily wrapper's `DURABLE_STRICT_FILES`). Run
+`pnpm test` and confirm that file is green before you
 trust the file to survive.
 
 `data/reconciliations.jsonl` is on the same floor and needs the same allowlist entry.

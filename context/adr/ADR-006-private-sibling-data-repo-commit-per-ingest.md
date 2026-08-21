@@ -188,6 +188,13 @@ clean over a file git is discarding — a **green check over data loss**, strict
 than the silence it replaced, because plain `--porcelain` says nothing about an ignored
 path even when that path is named explicitly.
 
+**[Corrected in place 2026-08-20 (#398): the four sites are now three.]** The two
+daily-fetch sites were two hand-kept literals and they drifted, which is #398: the
+explicit-add loop and the strict post-check both now read one `DURABLE_STRICT_FILES`
+array declared above step 3 of `ops/price-feed/run-daily-fetch.sh`. The order above
+still holds and still matters, with its last two entries collapsed into that one edit:
+allowlist, `TRACKED_FILES`, array.
+
 **The membership test is general, and it is stated here once so the list can grow without
 a further amendment:**
 
@@ -195,8 +202,8 @@ a further amendment:**
 
 Durable: losing it loses fund history that cannot be reconstructed. Non-re-derivable:
 nothing can recompute it from something else that is tracked. Both must hold. A file that
-answers yes belongs in the allowlist, in `TRACKED_FILES`, in the explicit-add loop and in
-the strict post-check — as one line in each. (`plans.jsonl` — the operator-authored,
+answers yes belongs in the allowlist, in `TRACKED_FILES`, and in the wrapper's
+`DURABLE_STRICT_FILES` array (the correction above), as one line in each. (`plans.jsonl` — the operator-authored,
 append-only per-position plan sidecar — is exactly such a one-line extension, taken
 without a second amendment: it is durable, non-re-derivable truth, and as-of replay
 depends on its history. `reconciliations.jsonl` — the trail of what a reader showed the
@@ -227,11 +234,14 @@ half of the test and would fail it if it were the most secret file in the tree. 
 reconstructible. The allowlist polarity is what makes the exclusion structural rather
 than disciplinary; the membership test is what makes each inclusion arguable.
 
-**The floor is guarded by a test asserting BOTH ends**
+**The floor is guarded by a test asserting THREE ends**
 (`apps/tui/src/durable-log-guards.test.ts`): that git does **not** ignore each durable
-file in the <fund> checkout, **and** that `TRACKED_FILES` names exactly that list.
-Either end alone is false assurance — an allowlisted file nothing stages is never
-committed, and a staged file the allowlist omits is discarded. The guard is written over
+file in the <fund> checkout, that `TRACKED_FILES` names exactly that list, **and** that
+the wrapper's `DURABLE_STRICT_FILES` names the same list minus `head-digest.json` and is
+read by both wrapper consumers rather than re-inlined.
+Any end alone is false assurance — an allowlisted file nothing stages is never
+committed, a staged file the allowlist omits is discarded, and a file the wrapper omits
+survives only on the runs the in-process capture already handled. The guard is written over
 the **list**, so each further member costs one line there too. It runs against the real
 <fund> repo's checkout when present and skips the allowlist half (never the `TRACKED_FILES`
 half) where that private repo is absent.

@@ -36,9 +36,11 @@ import {
 /**
  * The durable files we stage each ingest, when present in the dataDir.
  *
- * This list and the accumulus `.gitignore` allowlist are TWO ENDS OF ONE CONTRACT:
- * a file staged here but not allowlisted there is written and silently discarded.
- * `durable-log-guards.test.ts` asserts both ends over this exact array — which is
+ * This list, the accumulus `.gitignore` allowlist, and the daily wrapper's
+ * `DURABLE_STRICT_FILES` are THREE ENDS OF ONE CONTRACT: a file staged here but not
+ * allowlisted there is written and silently discarded, and a file the wrapper omits
+ * goes uncommitted on exactly the runs this list never ran (#398).
+ * `durable-log-guards.test.ts` asserts all three ends over this exact array, which is
  * why it is exported. Membership test (ADR-006, amended): "is this durable,
  * non-re-derivable truth?"
  */

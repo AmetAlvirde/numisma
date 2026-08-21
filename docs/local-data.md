@@ -106,12 +106,13 @@ lock files, and the derived `gap-report.json` / `job-heartbeat.json` /
 cache can never enter history.
 
 A file joins that list by ADR-006's membership test — *is this durable,
-non-re-derivable truth?* — and joining it means one line in each of four
+non-re-derivable truth?* — and joining it means one line in each of three
 places, in this order: the `<fund>` allowlist, `TRACKED_FILES`
-(`apps/tui/src/ingest-commit.ts`), the daily wrapper's explicit-add loop, and
-the wrapper's strict `git status --porcelain` post-check. Reversed, the
+(`apps/tui/src/ingest-commit.ts`), and the daily wrapper's
+`DURABLE_STRICT_FILES` array, which its explicit-add loop and its strict
+`git status --porcelain` post-check both read. Reversed, the
 post-check reports clean over a file git is discarding.
-`apps/tui/src/durable-log-guards.test.ts` asserts both ends of the first two.
+`apps/tui/src/durable-log-guards.test.ts` asserts all three ends.
 
 ## Reversibility
 
