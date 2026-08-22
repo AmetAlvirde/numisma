@@ -25,7 +25,15 @@ export default defineConfig({
     port: 3000,
   },
   plugins: [
-    tanstackStart(),
+    // Two source-scan tests live in `src/routes/` because they read the route
+    // files from beside them: `route-move.test.ts` and
+    // `snapshot-guard-wiring.test.ts`. The generator scans that directory, finds
+    // no `Route` export in either, and warns on every dev start. It was already
+    // skipping them, which is correct — this states it, so the skip is a
+    // decision instead of two warnings the operator learns to read past. Vitest
+    // discovery is unaffected: that is `vitest.config.ts`'s derived `exclude`,
+    // and nothing here touches it.
+    tanstackStart({ router: { routeFileIgnorePattern: "\\.test\\.tsx?$" } }),
     nitro({ preset: "vercel" }),
     viteReact(),
   ],
