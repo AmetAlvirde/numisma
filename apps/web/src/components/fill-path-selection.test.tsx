@@ -23,6 +23,29 @@
  *      not merely on first paint. `fill-path-chart-a11y.test.tsx` pins the mounted state;
  *      what this adds is that selection does not open a hole in it.
  *
+ * AND THE TWO HALVES OF SPEC #403 §1'S QUESTION, which the contract above does not reach.
+ * The spec states the motivating question as "does selecting a rung still move the panel
+ * AND THE CHART together". The panel half is the three cases above. The chart half is
+ * `aria-hidden` by construction, so no accessibility assertion can see it — it is asserted
+ * here by reading the mark the adapter draws for the selected rung, which is the only
+ * observable the picture has. Without it, handing the chart a constant key leaves this
+ * whole file green, which was measured.
+ *
+ * THE INSPECT SLIDER IS THE OTHER DIRECTION. `select(key)` is covered by the click and by
+ * the Tab walk; `selectIndex(index)` is spelled in exactly one place — the provider — and
+ * is what the slider drives, so it is asserted here too. The slider is reached by a real
+ * Tab walk, because it is a keyboard surface and its reachability is part of the same
+ * contract the rows carry.
+ *
+ * IT IS DRIVEN WITH `fireEvent`, AND THAT IS THE ONE PLACE IN THIS FILE THAT IS NOT
+ * `user-event`. Measured on jsdom 30: a range input implements no arrow-key stepping, so
+ * `user.keyboard("{ArrowDown}")` on a focused slider leaves `value` untouched and an
+ * assertion built on it would pass against a component with no slider behavior at all.
+ * `fireEvent.change` dispatches the same `change` a browser dispatches when the thumb
+ * moves, which is exactly the event the component listens for. The keyboard claim that CAN
+ * be made honestly here — that the control is in the tab order — is made with a real Tab
+ * walk, separately.
+ *
  * AND EACH PART MOUNTS ALONE. D4's export shape exists so a test can render one card
  * without its four siblings — needed here, needed again by the workbench. A part that only
  * works inside `FillPathCards` has not been decoupled, it has been renamed, so every part
@@ -33,11 +56,12 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { render, userEvent, within } from "../render.testkit.tsx";
+import { fireEvent, render, userEvent, within } from "../render.testkit.tsx";
 import {
   FillPath,
   FillPathCards,
   FillPathProvider,
+  useFillPathSelection,
 } from "./FillPath.tsx";
 import { composeFillPathPage } from "../ladder/fill-path-view.ts";
 import { ladderFixture } from "../ladder/started-ladder.fixtures.ts";
@@ -84,6 +108,44 @@ function rungRows(container: Element): HTMLButtonElement[] {
   return [...container.querySelectorAll<HTMLButtonElement>("button.fp-row")];
 }
 
+/**
+ * WHICH RUNG THE CHART IS MARKING, read off the drawn picture rather than off the prop
+ * that was handed to it — a test that re-read `selectedKey` would be asserting the
+ * expression it is supposed to be checking.
+ *
+ * The selection mark is the only `circle` on the chart filled with `--text`: every rung
+ * ring is hollow (`--card`) and the halo beneath the disc is the page background
+ * (`--bg`). `PriceDropPathChart` says why those three fills are what they are. The
+ * adapter carries the datum's own `key` at the end of the element's `data-ts-key`, which
+ * is what lets this name a RUNG rather than a coordinate — a pixel assertion would be
+ * meaningless anyway, since jsdom lays every element out at zero.
+ *
+ * It throws rather than returning undefined on a miss: no disc at all, or two, is a
+ * broken picture and not a rung this can report on.
+ */
+function chartSelectionKey(container: Element): string {
+  const discs = [
+    ...container.querySelectorAll('.fp-chart circle[fill="var(--text)"]'),
+  ];
+  if (discs.length !== 1) {
+    throw new Error(`the chart drew ${discs.length} selection discs, not exactly one`);
+  }
+  const key = discs[0]?.getAttribute("data-ts-key")?.split(":").at(-1);
+  if (key === undefined || key === "") {
+    throw new Error("the chart's selection disc carries no datum key");
+  }
+  return key;
+}
+
+/** The inspect slider, or a loud failure — an absent one is a lost keyboard surface. */
+function inspectSlider(container: Element): HTMLInputElement {
+  const slider = container.querySelector<HTMLInputElement>(
+    '.fp-inspect input[type="range"]',
+  );
+  if (slider === null) throw new Error("the inspect slider is not rendered");
+  return slider;
+}
+
 describe("the fill path's selection, coordinated through the provider", () => {
   it("opens on the rung price reaches next", () => {
     const view = partlyWalkedView();
@@ -120,6 +182,77 @@ describe("the fill path's selection, coordinated through the provider", () => {
     // MOVED, not added: the old row must have given the attribute up, which is the half a
     // "the new row is current" assertion alone would miss.
     expect(currentRows(rows)).toEqual([target]);
+  });
+
+  it("moves the chart's mark with the panel — spec #403 §1's question, both halves", async () => {
+    const user = userEvent.setup();
+    const view = partlyWalkedView();
+    const { container } = render(<FillPathCards view={view} />);
+    const rows = rungRows(container);
+
+    const opensOn = view.rungs.find((rung) => rung.isNext);
+    expect(opensOn).toBeDefined();
+    // The chart opens on the SAME rung the panel opens on. A chart handed a constant —
+    // `view.rungs[0]?.key`, the mutation this case was written against — passes the panel
+    // assertions above and fails here, because the ladder opens on the next rung.
+    expect(chartSelectionKey(container)).toBe(opensOn?.key);
+
+    const target = view.rungs.findIndex((rung) => rung.key !== opensOn?.key);
+    expect(target).toBeGreaterThanOrEqual(0);
+    await user.click(rows[target]!);
+
+    // TOGETHER is the claim, so both are read after the same click.
+    expect(chartSelectionKey(container)).toBe(view.rungs[target]?.key);
+    expect(panelHeading(container)).toContain(
+      `Rung ${view.rungs[target]?.ladderIndex} of ${view.rungs.length}`,
+    );
+  });
+
+  it("keeps the inspect slider on the selection, and selects the rung it is dragged to", async () => {
+    const user = userEvent.setup();
+    const view = partlyWalkedView();
+    const { container } = render(<FillPathCards view={view} />);
+    const slider = inspectSlider(container);
+
+    // The range spans the ladder: an index the slider can reach but the list cannot is a
+    // rung the operator can select twice and a rung they cannot select at all.
+    expect(slider.min).toBe("0");
+    expect(slider.max).toBe(String(view.rungs.length - 1));
+
+    // IT REFLECTS THE SELECTION, and the fixture opens on a rung that is not index 0, so
+    // `value={0}` is red here rather than accidentally right.
+    const opensAt = view.rungs.findIndex((rung) => rung.isNext);
+    expect(opensAt).toBeGreaterThan(0);
+    expect(slider.value).toBe(String(opensAt));
+
+    // A REAL TAB WALK, because the slider is a keyboard surface and this is the half of
+    // that claim jsdom can honour. See the header for why the drag below is not one.
+    for (let step = 0; step < 30 && document.activeElement !== slider; step += 1) {
+      await user.tab();
+    }
+    expect(document.activeElement).toBe(slider);
+
+    // THE OTHER HALF OF THE TRANSLATION, driven end to end: an index goes in, and a rung
+    // comes out everywhere the selection is visible. An off-by-one in the provider's
+    // `selectIndex` — the mutation this case was written against — lands the panel, the
+    // row and the chart one rung down.
+    const dragTo = view.rungs.length - 1;
+    fireEvent.change(slider, { target: { value: String(dragTo) } });
+
+    expect(slider.value).toBe(String(dragTo));
+    expect(panelHeading(container)).toContain(
+      `Rung ${view.rungs[dragTo]?.ladderIndex} of ${view.rungs.length}`,
+    );
+    expect(currentRows(rungRows(container))).toEqual([dragTo]);
+    expect(chartSelectionKey(container)).toBe(view.rungs[dragTo]?.key);
+
+    // And back up, so the assertion is about the index it was handed rather than about
+    // the slider having been moved at all.
+    fireEvent.change(slider, { target: { value: "0" } });
+    expect(panelHeading(container)).toContain(
+      `Rung ${view.rungs[0]?.ladderIndex} of ${view.rungs.length}`,
+    );
+    expect(chartSelectionKey(container)).toBe(view.rungs[0]?.key);
   });
 
   it("moves the selection with focus as a Tab walk goes down the list", async () => {
@@ -233,5 +366,92 @@ describe("every fill-path part mounts on its own", () => {
     // selects when the panel happens to be mounted beside it is still coupled.
     await user.click(rows[rows.length - 1]!);
     expect(currentRows(rows)).toEqual([rows.length - 1]);
+  });
+});
+
+/**
+ * SEAM E'S PUBLISHED HOOK, EXERCISED AS THE PUBLISHED SURFACE.
+ *
+ * `useFillPathSelection` is the narrow shape spec #403 Seam E names by name, and the four
+ * parts do not read it — they read the internal `useFillPath`, because every one of them
+ * also needs `view` and two of them need `selectIndex`, neither of which the published
+ * shape carries or should. See the comment above the hook for why that stays true rather
+ * than being resolved by widening it.
+ *
+ * The consequence is that the hook's only consumer is here, so this is where its contract
+ * is held: the exact three fields, in the terms a part outside this file would read them,
+ * against the same provider the parts sit under. A published surface asserted by nobody
+ * can return the wrong three fields and ship.
+ */
+describe("useFillPathSelection, the shape a part outside this file reads", () => {
+  /** A consumer written the way the workbench would write one: hook in, DOM out. */
+  function SelectionProbe({ selects }: { selects?: string }) {
+    const selection = useFillPathSelection();
+    return (
+      <div>
+        <p data-testid="probe-keys">{Object.keys(selection).sort().join(",")}</p>
+        <p data-testid="probe-key">{selection.selected?.key ?? "none"}</p>
+        <p data-testid="probe-index">{String(selection.selectedIndex)}</p>
+        <button
+          type="button"
+          data-testid="probe-select"
+          onClick={() => selection.select(selects ?? "")}
+        >
+          select
+        </button>
+      </div>
+    );
+  }
+
+  function probeText(container: Element, id: string): string {
+    return container.querySelector(`[data-testid="${id}"]`)?.textContent ?? "";
+  }
+
+  it("returns exactly `selected`, `selectedIndex` and `select`", () => {
+    const view = partlyWalkedView();
+    const { container } = render(
+      <FillPathProvider view={view}>
+        <SelectionProbe />
+      </FillPathProvider>,
+    );
+
+    // The whole shape, not a subset: an extra field is a widened seam, and a missing one
+    // is a consumer that breaks on a surface nothing else was reading.
+    expect(probeText(container, "probe-keys")).toBe(
+      "select,selected,selectedIndex",
+    );
+
+    const opensOn = view.rungs.find((rung) => rung.isNext);
+    expect(probeText(container, "probe-key")).toBe(opensOn?.key);
+    // The index and the rung are the same fact twice, which is the pairing the seam
+    // exists to keep honest.
+    expect(probeText(container, "probe-index")).toBe(
+      String(view.rungs.findIndex((rung) => rung.key === opensOn?.key)),
+    );
+  });
+
+  it("selects by key, and the parts beside it see the same selection", async () => {
+    const user = userEvent.setup();
+    const view = partlyWalkedView();
+    const last = view.rungs.length - 1;
+    const target = view.rungs[last]?.key ?? "";
+    expect(target).not.toBe("");
+
+    const { container } = render(
+      <FillPathProvider view={view}>
+        <SelectionProbe selects={target} />
+        <FillPath.SelectedRung />
+      </FillPathProvider>,
+    );
+
+    await user.click(container.querySelector('[data-testid="probe-select"]')!);
+
+    expect(probeText(container, "probe-key")).toBe(target);
+    expect(probeText(container, "probe-index")).toBe(String(last));
+    // ONE selection, not the hook's own copy of one: the panel mounted beside the probe
+    // moved because they read the same provider.
+    expect(panelHeading(container)).toContain(
+      `Rung ${view.rungs[last]?.ladderIndex} of ${view.rungs.length}`,
+    );
   });
 });

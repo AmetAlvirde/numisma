@@ -214,6 +214,25 @@ export function FillPathProvider({
  * WHAT A PART KNOWS ABOUT THE SELECTION (spec #403 Seam E). The chart reads
  * `selectedIndex`, the list reads `selected` and calls `select`, and neither one asks a
  * parent to convert between them.
+ *
+ * ── ITS ONLY CONSUMER TODAY IS ITS TEST, AND THAT IS THE CHOICE, NOT AN OVERSIGHT ────
+ * The four parts below read `useFillPath` instead. Not because this shape is wrong for
+ * them, but because it is deliberately NARROWER than any of them needs: every part also
+ * reads `view` — the card that is the page's title, the panel that counts rungs, the list
+ * that renders them — and `Chart` needs `selectIndex` as well. A part consuming this hook
+ * would call the internal one beside it for the rest, which is two reads of one context
+ * to satisfy a signature.
+ *
+ * The alternative was to delete it and let Seam E be `useFillPath` until the workbench
+ * needs the narrow shape. It stays because the shape is the seam's stated contract: what
+ * a component outside this module is allowed to know about the selection is these three
+ * fields and NOT `view`, which is exactly the boundary the workbench's fixtures will
+ * mount against. Publishing the narrow surface is what keeps `view` from leaking into the
+ * next consumer's props by default.
+ *
+ * What that costs — a published surface with no in-tree caller — is paid off in
+ * `fill-path-selection.test.tsx`, which exercises it as a consumer would: the exact three
+ * fields, and a selection made through `select` that the parts mounted beside it see.
  */
 export function useFillPathSelection(): {
   selected: FillPathRungView | undefined;

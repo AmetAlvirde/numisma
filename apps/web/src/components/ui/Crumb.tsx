@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 
 /**
@@ -22,7 +22,13 @@ import { Link } from "@tanstack/react-router";
  * This is a `<p className="crumb">` because that is what all four call sites render
  * today. No new class name is introduced and `styles.css` is byte-identical.
  */
-export function Crumb({ to, children }: { to: string; children: ReactNode }) {
+export function Crumb({
+  to,
+  children,
+}: {
+  to: string;
+  children: ReactNode;
+}): ReactElement {
   return (
     <p className="crumb">
       <Link to={to}>{children}</Link>

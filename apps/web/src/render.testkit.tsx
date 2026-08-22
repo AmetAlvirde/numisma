@@ -31,6 +31,7 @@ import type { ReactElement } from "react";
 import { afterEach } from "vitest";
 import {
   cleanup,
+  fireEvent,
   render as rtlRender,
   screen,
   within,
@@ -101,13 +102,31 @@ export function render(ui: ReactElement) {
  * Whole `class` ATTRIBUTES, not individual tokens: `"muted absent-why"` and `"muted"` are
  * different facts about different elements, and splitting them would let one turn into
  * the other silently.
+ *
+ * READ OFF THE ATTRIBUTE, NEVER OFF `element.className`. On an HTML element the property
+ * is a string; on an SVG element it is an `SVGAnimatedString` object, and the static type
+ * here is `Element`, so TypeScript accepts the object and the declared `string[]` becomes
+ * a lie the moment a subtree contains a chart. Measured: a census over
+ * `<div class="card"><svg class="chart-surface"/></div>` returned `[{}, "card"]`, the
+ * `Set` stopped deduping (every SVG element contributes a distinct object) and a failing
+ * diff printed `{}` instead of the class that broke. `getAttribute` answers the same
+ * question for both namespaces. `render.testkit.test.tsx` pins it.
  */
 export function classCensus(root: Element): string[] {
   const attributes = [root, ...root.querySelectorAll("[class]")].map(
-    (element) => element.className,
+    (element) => element.getAttribute("class") ?? "",
   );
   return [...new Set(attributes)].sort();
 }
 
-/** Everything a render test is allowed to reach for, re-exported from one place. */
-export { screen, within, userEvent };
+/**
+ * Everything a render test is allowed to reach for, re-exported from one place.
+ *
+ * `fireEvent` RIDES ALONGSIDE `userEvent`, NOT INSTEAD OF IT. Spec #403 §3.4 bought
+ * `user-event` because a Tab walk is the only honest way to assert a keyboard path, and
+ * that remains the default for every interaction. `fireEvent` is here for the controls
+ * jsdom does not implement the keyboard behavior of — a range input steps for no arrow
+ * key — where dispatching the event the browser would dispatch is the accurate stand-in
+ * and driving it through `user-event` would assert nothing at all.
+ */
+export { screen, within, userEvent, fireEvent };
