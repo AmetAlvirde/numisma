@@ -18,13 +18,18 @@
  * from `/`, and the card is on `/` and NOT duplicated onto `/big-picture`. A
  * one-directional assertion would have called the reversal a regression.
  *
- * WHY A SOURCE-LEVEL TEST AND NOT A RENDER TEST. This repo has no RTL toolchain and
- * this increment deliberately does not add one (see docs/coverage-rationale.md §6 —
- * the `.tsx` render surfaces are outside instrumentation by decision). What is
- * asserted here is the part that can regress SILENTLY: a duplicated dashboard left
- * behind on `/`, a login redirect quietly re-pointed at `/big-picture`, or two
- * divergent copies of `Shell`. The reader must open the phone to judge the layout;
- * nothing below pretends otherwise.
+ * WHY A SOURCE-LEVEL TEST AND NOT A RENDER TEST. This passage used to say the repo
+ * had no RTL toolchain and that its increment deliberately did not add one. It has one
+ * now (ADR-022), and that changes nothing here: what these regexes assert is WHERE a
+ * piece of content lives across several route files at once, which is a claim about the
+ * repo's shape rather than about any one rendered tree. A render test mounts one route
+ * and cannot see the second copy on another. So the instrument is right for the claim,
+ * not a stand-in for a missing one — and its regexes are not up for retirement until a
+ * render test makes the same claim, which is spec #403's own rule. What is asserted
+ * here is the part that can regress SILENTLY: a duplicated dashboard left behind on
+ * `/`, a login redirect quietly re-pointed at `/big-picture`, or two divergent copies
+ * of `Shell`. The reader must open the phone to judge the layout; nothing below
+ * pretends otherwise.
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -88,8 +93,9 @@ describe("D11: the route move", () => {
  * The Fill Path lives at `/ladder/$planId` and NOWHERE ELSE — not inlined on `/`, not
  * duplicated onto `/big-picture` — and `DcaCard` stays the one thing that links to it.
  *
- * STRUCTURAL, for the reason this file's header already gives: there is no RTL
- * toolchain and this increment deliberately does not add one. What is asserted here is
+ * STRUCTURAL, for the reason this file's header already gives: a claim about which
+ * files a surface appears in is not a claim a single mounted tree can answer, harness
+ * or no harness. What is asserted here is
  * what can regress SILENTLY — a second copy of the Fill Path, a link that stops
  * pointing at the route, an engine value-import creeping into a browser surface. The
  * operator judges the layout by opening the phone.

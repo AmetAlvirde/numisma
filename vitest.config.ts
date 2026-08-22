@@ -170,9 +170,15 @@ export default defineConfig({
         // `*.ts`, so the `.tsx` render components (SummaryCard, SectionTable, and the
         // ladder's FillPath + PriceDropPathChart) and
         // the route/router `.tsx` files are already outside instrumentation — a
-        // deliberate decision, not an accident: they are RTL-shaped render surfaces,
-        // not Node-unit-testable, and this increment does not add an RTL toolchain
-        // (see docs/coverage-rationale.md). What remains excluded below is the
+        // deliberate decision, not an accident, and one that OUTLIVED the reason first
+        // given for it. There is now a render-test harness (ADR-022, spec #403 slice 1:
+        // jsdom at the root, RTL under apps/web, attached per file by a
+        // `// @vitest-environment jsdom` docblock), so `.tsx` is no longer excluded for
+        // want of a toolchain. It stays excluded because pinning a seam and measuring
+        // lines are different purchases: the render tests hold named contracts — the
+        // chart's a11y invariant, the seams spec #403 moves — and a percentage over JSX
+        // would buy a number instead. No quota came with the harness; the include glob
+        // below is unchanged. See docs/coverage-rationale.md §6. What follows is the
         // apps/web `.ts` dead weight — framework wiring, a generated file, and a
         // self-executing script — that would otherwise report dishonest 0%.
         // `contract.ts` IS measured (contract.test.ts); `lib/dashboard.ts` stays

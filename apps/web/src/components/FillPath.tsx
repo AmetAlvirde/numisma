@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { createContext, useContext, useState } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { formatUsd } from "@numisma/engine/format";
 import type {
   FillPathRungView,
@@ -7,6 +8,8 @@ import type {
 } from "../ladder/fill-path-view.ts";
 import { COMPACT_USD } from "../ladder/price-drop-path.ts";
 import { PriceDropPathChart } from "./PriceDropPathChart.tsx";
+import { Absent } from "./ui/Absent.tsx";
+import { Card } from "./ui/Card.tsx";
 
 /**
  * THE FILL PATH, ON THE PHONE (spec #285 §5.6–5.13 / G-D10b, slice #289) — the declared
@@ -66,16 +69,6 @@ import { PriceDropPathChart } from "./PriceDropPathChart.tsx";
  * reachable without the chart being involved at all.
  */
 
-/** An em dash is not a zero — and the cause says which absence this is. */
-function Absent({ why }: { why: string }) {
-  return (
-    <span className="absent">
-      <span aria-hidden="true">—</span>
-      <span className="muted absent-why">{why}</span>
-    </span>
-  );
-}
-
 /** One measured tile: the figure, or the named reason there is none. Never a `$0`. */
 function Figure({
   label,
@@ -130,12 +123,69 @@ function formatUnits(value: number): string {
   return `${value.toFixed(8).replace(/0+$/, "").replace(/\.$/, "")} BTC`;
 }
 
-export function FillPathCards({ view }: { view: FillPathView }) {
-  // The inspected rung. Defaults to the one price will reach next, because that is the
-  // rung the operator opened the page about; with no live spot it falls back to the top
-  // of the ladder rather than to nothing.
-  const fallback = view.rungs.find((rung) => rung.isNext) ?? view.rungs[0];
+/**
+ * ── SEAM E: ONE SELECTION, FOUR CARDS, AND THE PROVIDER THAT OWNS BOTH ITS SHAPES ────
+ *
+ * Everything the four parts share. `view` rides along with the selection because a part
+ * that reads its selection from context and its data from a prop is still a part its
+ * parent has to assemble, and assembling it was the coupling this seam deleted.
+ *
+ * THE PROVIDER OWNS THE KEY↔INDEX TRANSLATION, WHICH IS THE WHOLE POINT (grill D3). The
+ * chart is a `<input type="range">` and a range is an INDEX — that is not a modelling
+ * choice, it is what the element is. The rung list is a list of keyed rungs. Selection
+ * therefore has two natural spellings and something has to reconcile them; before this
+ * slice it was `FillPathCards`' JSX, translating index to key on the way down and key to
+ * index on the way back, which is why the two cards took two different prop pairs. Now
+ * exactly one module converts, both directions are next to each other, and each part asks
+ * in the only terms it has.
+ *
+ * `selectIndex` IS INTERNAL AND `select` IS NOT. `useFillPathSelection` — the published
+ * hook, spec #403 Seam E — hands out `select(key)` and nothing else, because a key is the
+ * stable identity of a rung and an index is an artifact of the slider. The index setter
+ * stays inside this file, used by the one part that has an index to give.
+ */
+type FillPathSelection = {
+  view: FillPathView;
+  selected: FillPathRungView | undefined;
+  selectedIndex: number;
+  select: (key: string) => void;
+  selectIndex: (index: number) => void;
+};
+
+const SelectionContext = createContext<FillPathSelection | undefined>(undefined);
+
+/** The context, or a loud failure. Read by the parts; never exported. */
+function useFillPath(): FillPathSelection {
+  const selection = useContext(SelectionContext);
+  if (selection === undefined) {
+    // A part mounted outside the provider would otherwise render an empty card and look
+    // like a data problem. It is a composition problem, and it says so.
+    throw new Error("a fill-path part was rendered outside `FillPathProvider`");
+  }
+  return selection;
+}
+
+/**
+ * THE ONE PIECE OF STATE ON THIS PAGE: which rung the operator is inspecting. It is a UI
+ * affordance and not a fact about the fund, which is why it lives here and every other
+ * value on the page arrives already decided from `ladder/fill-path-view.ts`.
+ *
+ * STATE AND DERIVATION, AND NO EFFECT. The default — the rung price will reach next,
+ * falling back to the top of the ladder when there is no live spot — is derived on every
+ * render from the view rather than written into state when the view arrives. An effect
+ * that seeded state from a prop would render one frame with the wrong rung selected and
+ * would need a second effect to notice the view changing underneath it.
+ */
+export function FillPathProvider({
+  view,
+  children,
+}: {
+  view: FillPathView;
+  children?: ReactNode;
+}): ReactElement {
   const [selectedKey, setSelectedKey] = useState<string | undefined>(undefined);
+
+  const fallback = view.rungs.find((rung) => rung.isNext) ?? view.rungs[0];
   const selected =
     view.rungs.find((rung) => rung.key === selectedKey) ?? fallback;
   const selectedIndex = selected
@@ -143,18 +193,73 @@ export function FillPathCards({ view }: { view: FillPathView }) {
     : 0;
 
   return (
-    <>
+    <SelectionContext.Provider
+      value={{
+        view,
+        selected,
+        selectedIndex,
+        select: setSelectedKey,
+        // THE OTHER HALF OF THE TRANSLATION, and the only place it is spelled. An index
+        // past the end selects nothing rather than throwing: a range whose `max` and
+        // whose rung count disagree is a bug, but not one worth crashing the page over.
+        selectIndex: (index) => setSelectedKey(view.rungs[index]?.key),
+      }}
+    >
+      {children}
+    </SelectionContext.Provider>
+  );
+}
+
+/**
+ * WHAT A PART KNOWS ABOUT THE SELECTION (spec #403 Seam E). The chart reads
+ * `selectedIndex`, the list reads `selected` and calls `select`, and neither one asks a
+ * parent to convert between them.
+ */
+export function useFillPathSelection(): {
+  selected: FillPathRungView | undefined;
+  selectedIndex: number;
+  select: (key: string) => void;
+} {
+  const { selected, selectedIndex, select } = useFillPath();
+  return { selected, selectedIndex, select };
+}
+
+/**
+ * THE PARTS, ATTACHED AS PLAIN PROPERTIES AND NAMED-EXPORTED (grill D4, the same shape
+ * `Card` uses). `FillPath.RungList` is the call-site vocabulary; the named exports are
+ * what a per-part test mounts on its own, which is how each card's half of the
+ * accessibility contract is asserted without its three siblings standing in for it.
+ *
+ * There is no `FillPath` component: the fill path is a composition, and the composition
+ * with the house arrangement already has a name — `FillPathCards`, below.
+ */
+export const FillPath = {
+  Header,
+  Chart,
+  SelectedRung,
+  RungList,
+} as const;
+
+/**
+ * THE HOUSE ARRANGEMENT, and the only thing the ladder route mounts. Its name and its
+ * single `view` prop are unchanged across this conversion, which is what keeps
+ * `routes/ladder.$planId.tsx` out of the diff (grill D2).
+ *
+ * SIX CHILDREN, FOUR OF THEM PARTS. The torn-act banner and the unrecorded warnings are
+ * not cards and coordinate nothing — they read the view and render or return null — so
+ * they stay internal to this composition rather than being published as parts nobody
+ * would arrange differently.
+ */
+export function FillPathCards({ view }: { view: FillPathView }): ReactElement {
+  return (
+    <FillPathProvider view={view}>
       <TornActBanner view={view} />
-      <HeaderCard view={view} />
+      <FillPath.Header />
       <UnrecordedWarnings view={view} />
-      <ChartCard
-        view={view}
-        selectedIndex={selectedIndex}
-        onSelectIndex={(index) => setSelectedKey(view.rungs[index]?.key)}
-      />
-      <SelectedRungCard rung={selected} view={view} />
-      <RungListCard view={view} selected={selected} onSelect={setSelectedKey} />
-    </>
+      <FillPath.Chart />
+      <FillPath.SelectedRung />
+      <FillPath.RungList />
+    </FillPathProvider>
   );
 }
 
@@ -210,7 +315,8 @@ function TornActBanner({ view }: { view: FillPathView }) {
  * it has not started. Projecting onto that row would print a confident number beside the
  * sentence saying nothing could be checked.
  */
-function HeaderCard({ view }: { view: FillPathView }) {
+function Header() {
+  const { view } = useFillPath();
   // `expected` is only ever set on a reconciled row, so `figures` is present with it;
   // pairing them here is what lets the row below take both non-optional.
   const projection =
@@ -219,14 +325,18 @@ function HeaderCard({ view }: { view: FillPathView }) {
       : undefined;
 
   return (
-    <section className="card fp-header">
+    <Card className="fp-header">
       {/* WHAT THIS IS, AND WHERE PRICE IS — the two things the operator reads before
           anything else, on one row. Spot used to sit in the provenance footer, four
           cards down, which put the only number that moves while you look at it below
           every number that does not. */}
       <div className="fp-header-head">
         <div className="fp-header-id">
-          <h1>{view.title}</h1>
+          {/* `level={1}` IS NOT DECORATION. This card's heading is the PAGE's heading,
+              which only the call site knows; `Card.Title` defaults to 2, and a page
+              whose deepest heading is an `h2` reads as a document with no title to
+              everything that navigates by headings. */}
+          <Card.Title level={1}>{view.title}</Card.Title>
           {/* THE STATE IS A BADGE, NOT A SENTENCE. It used to ride a `Price ladder ·
               pending · all figures in USD` sub-line, which spent two rows of a 320px
               card on one word the operator actually reads. The kind is already told by
@@ -274,7 +384,7 @@ function HeaderCard({ view }: { view: FillPathView }) {
       ) : null}
 
       {projection ? null : <Waiting figures={view.figures} />}
-    </section>
+    </Card>
   );
 }
 
@@ -448,29 +558,26 @@ function priceSpan(rungs: readonly FillPathRungView[]): string | undefined {
 }
 
 /** Card 2 — the chart, its generated caption, and the inspect slider. */
-function ChartCard({
-  view,
-  selectedIndex,
-  onSelectIndex,
-}: {
-  view: FillPathView;
-  selectedIndex: number;
-  onSelectIndex: (index: number) => void;
-}) {
+function Chart() {
+  // THE CHART ASKS IN INDEXES, because its inspect control is a range input and a range
+  // is an index. Nothing here converts: the slider reads and writes the index, the
+  // adapter is handed the selected rung's own key, and the provider is the one module
+  // that turns one into the other.
+  const { view, selected, selectedIndex, selectIndex } = useFillPath();
   const span = priceSpan(view.rungs);
   return (
-    <section className="card fp-chart-card">
+    <Card className="fp-chart-card">
       {/* THE SPAN SITS OPPOSITE THE TITLE, not in the chart. It is the one number the
           picture cannot state exactly — an axis tick is a rounded gridline, and the
           reader who wants "how deep does this ladder go" should not have to measure. */}
       <div className="fp-chart-head">
-        <h2>Price Drop Path</h2>
+        <Card.Title>Price Drop Path</Card.Title>
         {span === undefined ? null : <span className="fp-chart-range">{span}</span>}
       </div>
       {view.chart ? (
         <PriceDropPathChart
           rungs={view.rungs}
-          selectedKey={view.rungs[selectedIndex]?.key}
+          selectedKey={selected?.key}
           // A LAST CLOSE IS NOT "NOW". `chart.nowX` is present only when the view
           // module saw a LIVE reading, so it — not `spotUsd`, which may be a close —
           // is what decides whether a now-rule is drawn at all.
@@ -523,33 +630,36 @@ function ChartCard({
             max={view.rungs.length - 1}
             step={1}
             value={selectedIndex}
-            onChange={(event) => onSelectIndex(Number(event.target.value))}
+            onChange={(event) => selectIndex(Number(event.target.value))}
           />
         </label>
       ) : null}
-    </section>
+    </Card>
   );
 }
 
 /** Card 3 — everything known about the one rung under inspection. */
-function SelectedRungCard({
-  rung,
-  view,
-}: {
-  rung: FillPathRungView | undefined;
-  view: FillPathView;
-}) {
+function SelectedRung() {
+  const { view, selected: rung } = useFillPath();
   if (rung === undefined) {
     return (
-      <section className="card">
-        <h2>Selected rung</h2>
+      <Card>
+        <Card.Title>Selected rung</Card.Title>
         <p>
           <Absent why="this ladder declares no rungs" />
         </p>
-      </section>
+      </Card>
     );
   }
   return (
+    // THE ONE CARD THAT IS STILL SPELLED OUT, and the reason is on the element rather
+    // than in it. `Card` emits a `<section>` carrying a class string and nothing else —
+    // spec #403's Seam C fixes that signature, and this panel needs `aria-live="polite"`
+    // ON THE SECTION, because a live region is announced from the element that carries
+    // it and moving it to a child changes what a screen reader says when selection
+    // changes. Widening the primitive to pass one attribute through for one caller is a
+    // knob bought for a single site; the panel keeps its own element instead, exactly as
+    // the two `fp-warn` paragraphs and the `role="alert"` banner below do.
     <section className="card fp-selected" aria-live="polite">
       {/* THE BADGE RIDES THE HEADING, because "next" answers WHICH RUNG THIS IS — the
           same question the heading asks — and not what state it is in. Down among the
@@ -738,18 +848,11 @@ function Pills({ rung }: { rung: FillPathRungView }) {
  * things about the same rung. The `next` pill was `--pos`-bordered before this, which
  * borrowed the colour that means FILLED for the one rung that has not.
  */
-function RungListCard({
-  view,
-  selected,
-  onSelect,
-}: {
-  view: FillPathView;
-  selected: FillPathRungView | undefined;
-  onSelect: (key: string) => void;
-}) {
+function RungList() {
+  const { view, selected, select } = useFillPath();
   return (
-    <section className="card fp-list">
-      <h2>Rungs</h2>
+    <Card className="fp-list">
+      <Card.Title>Rungs</Card.Title>
       <ul>
         {view.rungs.map((rung) => (
           <li key={rung.key}>
@@ -763,8 +866,8 @@ function RungListCard({
                 (rung.notPlaced ? " is-unplaced" : "")
               }
               aria-current={rung.key === selected?.key ? "true" : undefined}
-              onClick={() => onSelect(rung.key)}
-              onFocus={() => onSelect(rung.key)}
+              onClick={() => select(rung.key)}
+              onFocus={() => select(rung.key)}
             >
               <span className="fp-row-index">R{rung.ladderIndex}</span>
               {/* ONE LINE, THE SAME SENTENCE THE INSPECT CARD LEADS WITH — see
@@ -807,7 +910,7 @@ function RungListCard({
           declared rung explains.
         </p>
       ) : null}
-    </section>
+    </Card>
   );
 }
 

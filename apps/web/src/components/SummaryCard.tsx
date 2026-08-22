@@ -1,5 +1,16 @@
 import type { DashboardSummary } from "@numisma/engine";
 import { formatUsd, formatSignedPercent } from "@numisma/engine/format";
+import { Absent } from "./ui/Absent.tsx";
+import { Card } from "./ui/Card.tsx";
+
+/**
+ * The one cause that can reach this card, stated rather than passed. `Absent` takes the
+ * words and never a reason enum, and there is exactly one absence here to name: the fund
+ * value is withheld exactly when the marks it is summed from did not arrive. The badge
+ * below spells the same cause from the same constant, because one cause named two ways
+ * would read as two.
+ */
+const NO_MARK = "no current mark";
 
 /**
  * Read-only summary card. `usdMxn` comes from `totals` (the authoritative
@@ -39,10 +50,13 @@ export function SummaryCard({
     summary.fundValueUsd > 0 ? (pnl / summary.fundValueUsd) * 100 : 0;
 
   return (
-    <section className="card summary">
+    <Card className="summary">
       <header className="summary-head">
         <div>
-          <h1>{summary.fundName}</h1>
+          {/* THE PAGE'S ONE `<h1>`, and the reason `Card.Title` takes a level at all:
+              only this call site knows that this card's heading IS `/big-picture`'s
+              title rather than a section heading beneath one. */}
+          <Card.Title level={1}>{summary.fundName}</Card.Title>
           <p className="muted">as of {summary.asOf}</p>
         </div>
         <DataSafetyBadge
@@ -55,7 +69,13 @@ export function SummaryCard({
       <dl className="metrics">
         <div>
           <dt>Fund value</dt>
-          <dd>{fundValueRendered ? formatUsd(summary.fundValueUsd) : <Absent />}</dd>
+          <dd>
+            {fundValueRendered ? (
+              formatUsd(summary.fundValueUsd)
+            ) : (
+              <Absent why={NO_MARK} />
+            )}
+          </dd>
         </div>
         <div>
           {/* NOT gated: the FX rate comes from `totals` and does not descend from a
@@ -73,27 +93,12 @@ export function SummaryCard({
             </dd>
           ) : (
             <dd>
-              <Absent />
+              <Absent why={NO_MARK} />
             </dd>
           )}
         </div>
       </dl>
-    </section>
-  );
-}
-
-/**
- * An em dash is not a zero — and the cause says which absence this is, the same
- * shape and the same words `GlanceCard` and `SectionTable` use. There is only ONE
- * cause that can reach this card, so it is stated rather than passed: the fund value
- * is withheld exactly when the marks it is summed from did not arrive.
- */
-function Absent() {
-  return (
-    <span className="absent">
-      <span aria-hidden="true">—</span>
-      <span className="muted absent-why">no current mark</span>
-    </span>
+    </Card>
   );
 }
 
@@ -138,10 +143,10 @@ function DataSafetyBadge({
   }
   // Last, so the `hasWarnings` fallback above is still judged on the exclusion
   // counts alone — and first in the text, because this is the cause that explains
-  // the em dashes directly beneath. The words are `Absent`'s, deliberately: one
-  // cause named two ways would read as two.
+  // the em dashes directly beneath. The words are the em dashes' own, deliberately:
+  // one cause named two ways would read as two.
   if (!fundValueRendered) {
-    parts.unshift("no current mark");
+    parts.unshift(NO_MARK);
   }
   return (
     <span className="badge badge-warn" title="Withheld or excluded data">

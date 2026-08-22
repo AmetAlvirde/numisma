@@ -565,29 +565,50 @@ is not catchable here. Two things stand in: the **fixture surface** added by spe
 #302 slice B (`/ladder-fixture/{day-zero,partly-walked,out-of-order,overfilled}`
 under `pnpm --filter @numisma/web dev`), which is the first time any started-ladder
 branch could be rendered by a person at all — a reviewer can open every state
-without touching real data — and the **a11y invariant, which remains unasserted**
-(the chart subtree is `aria-hidden`, nothing in it is focusable, a substitute node
-exists). That last one is the audit's T7, blocked on the deferred component-test
-harness (D1) and held meanwhile by
+without touching real data — and the **a11y invariant, which is now asserted** (the
+chart subtree is `aria-hidden`, nothing in it is reachable by keyboard, a substitute
+node exists). That last one is the audit's T7, and spec #403 slice 1 closed it:
+`components/fill-path-chart-a11y.test.tsx` mounts `FillPathCards` under jsdom with a
+synthesized fixture and pins all three clauses, the third against the value
+`ladder/convexity-caption.ts` generates for that fixture rather than against a
+literal. Deleting the `.sr-only` element turns it red, which was the named silent
+failure. Note what the assertion does and does not reach: it pins the subtree as it
+actually mounts, so a library upgrade that starts mounting a focusable surface fires
+it, but under `@tanstack/charts` 0.11.0 the adapter renders `tabindex="-1"` whatever
+the definition's `focus`/`keyboard` flags say — so those four neutralization props are
+still held by
 [ADR-019](../context/adr/ADR-019-the-chart-is-presentation-its-accessible-substitute-is-generated.md)
-rather than by a test. It is a real, open gap — recorded, not closed by analogy.
+and by `PriceDropPathChart`'s own header, not by this test. The harness itself is
+[ADR-022](../context/adr/ADR-022-a-render-test-harness-for-the-web-component-layer.md).
 The generated caption that substitute consists of measures 100% lines and
 95.65% branch (`ladder/convexity-caption.test.ts`) — NOT "fully measured", which
 this sentence used to claim while §7's own row for the file named the one open
 arm, `:135`'s empty caption. A prose adjective and a figure in the same document
 now agree.
 
-This increment still does **not** add a React Testing Library toolchain (jsdom +
-RTL + the react vite plugin in the test path) — the reliability payoff does not
-yet justify the toolchain weight and maintenance surface, and the decisions worth
-asserting were extractable to `.ts` instead. But the honest trigger below has
-moved closer: a third component gating on suppression, or any branch that cannot
-be lifted into a pure module, should buy the toolchain rather than widen this
-exemption again. Mirrors the
-`apps/tui/src/app.ts` Bun-only split: instrument what Node's `vitest run` actually
-executes, and account for the rest here rather than reporting dead 0%. If a later
-slice adds interactive `.tsx` behavior (sort/filter/drill-down — all D4 non-goals
-today), it revisits this and adds RTL for that component.
+**The React Testing Library toolchain now exists, and this paragraph used to say it
+did not.** The exemption's own exit clause is what fired: "any branch that cannot be
+lifted into a pure module should buy the toolchain rather than widen this exemption
+again." The chart's a11y invariant is such a branch — it is a fact about mounted DOM,
+liftable into no pure module — and spec #403's structural pass is about to move
+markup that only a rendered assertion can hold still. So slice 1 bought `jsdom` at the
+repo root and `@testing-library/react` + `@testing-library/user-event` under
+`apps/web`. No `@testing-library/jest-dom` (the assertions read attributes and
+`document.activeElement` directly) and **no react plugin in the test path** — measured
+rather than assumed: vitest's esbuild honours `apps/web/tsconfig.json`'s `"jsx":
+"react-jsx"`, so a `.tsx` test is collected and run by the unmodified root config.
+[ADR-022](../context/adr/ADR-022-a-render-test-harness-for-the-web-component-layer.md)
+records the buy, and ADR-019 required it to be its own decision.
+
+**What the buy did NOT change is instrumentation.** `.tsx` stays outside the coverage
+`include` glob deliberately, and no quota came with the harness. Pinning a seam and
+measuring lines are different purchases: these tests exist to hold specific
+contracts — the a11y invariant now, the moved seams in the slices after this one — and
+a percentage over JSX would buy a number rather than a claim. The exclusion continues
+to mirror the `apps/tui/src/app.ts` Bun-only split: instrument what Node's `vitest
+run` actually executes, and account for the rest here rather than reporting dead 0%.
+The files named above are still uninstrumented, and everything this section says about
+what compensates for that still holds.
 
 ## 7. Every other measured module below 100% — the honesty ledger (audit finding 3)
 
@@ -647,7 +668,7 @@ excluded in `vitest.config.ts` alongside their sibling CLI shells; they now
 appear in §1 and are no longer measured, so §7 is not the place for them.
 `binance-spot.ts` stays here because an exclude is the WRONG fix for it: it is
 a browser hook caught by the `*.ts`-only include glob where §6's excused
-components are `.tsx`, so it needs the RTL toolchain §6 anticipates, or a
+components are `.tsx`, so it needs a render test on the harness §6 bought, or a
 logic extraction — not a line in the exclude list.
 
 **`apps/tui/src`**
@@ -683,7 +704,7 @@ logic extraction — not a line in the exclude list.
 | --- | --- | --- | --- |
 | `glance/row-view.ts` | 98.57% | `:141` | One rendering branch. |
 | `glance/verdict.ts` | 99.08% | `:621-622` | `referenceLabel`'s invalid-calendar-date throw — defensive, every caller passes an already-validated `asOf`. The precedence-sort branch this row used to cite is covered now. |
-| `lib/binance-spot.ts` | 0% | `:33-95` | Added at `d5fe02c` — no row existed before #377, and this one does not fit the defensive/unreached-fixture/real-branch taxonomy cleanly. `useBinanceSpotUsd` is a browser-only React hook (`useEffect`/`useState`) — the live-spot fetch, its success/failure/abort paths, and the last-close fallback are real, reachable browser behavior, not a script that runs on import (importing this file is inert; nothing executes until a mounted component calls the hook). It is uninstrumented for the same underlying reason §6 names for `SummaryCard`/`SectionTable`/`FillPath.tsx`/`PriceDropPathChart.tsx` — no RTL/jsdom toolchain to mount a component and drive the hook — except those are `.tsx` and excluded by the `*.ts`-only include glob, while this file is a `.ts` hook that IS in the glob and so reports a genuine, uninstrumented-in-practice 0% rather than being named as excluded. Flagged rather than forced into a label; closing it means either the RTL toolchain §6 already anticipates buying, or extracting the fetch/state-transition logic into a plain `.ts` function the way `price-drop-path.ts` did for the chart math. |
+| `lib/binance-spot.ts` | 0% | `:33-95` | Added at `d5fe02c` — no row existed before #377, and this one does not fit the defensive/unreached-fixture/real-branch taxonomy cleanly. `useBinanceSpotUsd` is a browser-only React hook (`useEffect`/`useState`) — the live-spot fetch, its success/failure/abort paths, and the last-close fallback are real, reachable browser behavior, not a script that runs on import (importing this file is inert; nothing executes until a mounted component calls the hook). It is uninstrumented for the same underlying reason §6 names for `SummaryCard`/`SectionTable`/`FillPath.tsx`/`PriceDropPathChart.tsx` — written before the RTL/jsdom harness existed, and nothing has yet mounted a component to drive the hook — except those are `.tsx` and excluded by the `*.ts`-only include glob, while this file is a `.ts` hook that IS in the glob and so reports a genuine, uninstrumented-in-practice 0% rather than being named as excluded. Flagged rather than forced into a label; closing it means either a render test on the harness §6 bought, or extracting the fetch/state-transition logic into a plain `.ts` function the way `price-drop-path.ts` did for the chart math. |
 | `push/dca-block.ts` | 98.41% | `:278,283` | `:278` and `:283` are the `placedQuantity`/`venueFilledFraction` omit-when-undefined spread guards' omission arms — real, reachable: every current fixture supplies both fields, so the arm that would drop them from the view never fires. The file also carries four branch-only gaps this column does not cite (per the derivation rule above, a file below 100% lines cites only its line gaps): `:161` is `torn ?? []`'s default-array arm (every fixture supplies a torn-acts array); `:232` is `position?.lots ?? []`'s equivalent; `:236-237` are the `currency`/`reviewFx` field-presence spread guards, one arm each unexercised — same default-value shape, not a rejection path. |
 | `push/unattended-report.ts` | 100% lines, 94.44% branch | `:78` | One branch-only gap: `linesFor`'s `this.#byKind.get(kind) ?? []` default-array arm — a real, reachable case (querying a `kind` nothing has been filed under yet), just not one any current fixture drives. |
 | `ladder/convexity-caption.ts` | 100% lines, 95.65% branch | `:135` | One branch-only gap: the `clauses.length === 0` empty-caption arm — real, reachable (a ladder with nothing left to say), just not one any current fixture produces. |
