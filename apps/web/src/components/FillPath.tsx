@@ -8,6 +8,7 @@ import type {
 import { COMPACT_USD } from "../ladder/price-drop-path.ts";
 import { PriceDropPathChart } from "./PriceDropPathChart.tsx";
 import { Absent } from "./ui/Absent.tsx";
+import { Card } from "./ui/Card.tsx";
 
 /**
  * THE FILL PATH, ON THE PHONE (spec #285 §5.6–5.13 / G-D10b, slice #289) — the declared
@@ -210,14 +211,18 @@ function HeaderCard({ view }: { view: FillPathView }) {
       : undefined;
 
   return (
-    <section className="card fp-header">
+    <Card className="fp-header">
       {/* WHAT THIS IS, AND WHERE PRICE IS — the two things the operator reads before
           anything else, on one row. Spot used to sit in the provenance footer, four
           cards down, which put the only number that moves while you look at it below
           every number that does not. */}
       <div className="fp-header-head">
         <div className="fp-header-id">
-          <h1>{view.title}</h1>
+          {/* `level={1}` IS NOT DECORATION. This card's heading is the PAGE's heading,
+              which only the call site knows; `Card.Title` defaults to 2, and a page
+              whose deepest heading is an `h2` reads as a document with no title to
+              everything that navigates by headings. */}
+          <Card.Title level={1}>{view.title}</Card.Title>
           {/* THE STATE IS A BADGE, NOT A SENTENCE. It used to ride a `Price ladder ·
               pending · all figures in USD` sub-line, which spent two rows of a 320px
               card on one word the operator actually reads. The kind is already told by
@@ -265,7 +270,7 @@ function HeaderCard({ view }: { view: FillPathView }) {
       ) : null}
 
       {projection ? null : <Waiting figures={view.figures} />}
-    </section>
+    </Card>
   );
 }
 
@@ -450,12 +455,12 @@ function ChartCard({
 }) {
   const span = priceSpan(view.rungs);
   return (
-    <section className="card fp-chart-card">
+    <Card className="fp-chart-card">
       {/* THE SPAN SITS OPPOSITE THE TITLE, not in the chart. It is the one number the
           picture cannot state exactly — an axis tick is a rounded gridline, and the
           reader who wants "how deep does this ladder go" should not have to measure. */}
       <div className="fp-chart-head">
-        <h2>Price Drop Path</h2>
+        <Card.Title>Price Drop Path</Card.Title>
         {span === undefined ? null : <span className="fp-chart-range">{span}</span>}
       </div>
       {view.chart ? (
@@ -518,7 +523,7 @@ function ChartCard({
           />
         </label>
       ) : null}
-    </section>
+    </Card>
   );
 }
 
@@ -532,15 +537,23 @@ function SelectedRungCard({
 }) {
   if (rung === undefined) {
     return (
-      <section className="card">
-        <h2>Selected rung</h2>
+      <Card>
+        <Card.Title>Selected rung</Card.Title>
         <p>
           <Absent why="this ladder declares no rungs" />
         </p>
-      </section>
+      </Card>
     );
   }
   return (
+    // THE ONE CARD THAT IS STILL SPELLED OUT, and the reason is on the element rather
+    // than in it. `Card` emits a `<section>` carrying a class string and nothing else —
+    // spec #403's Seam C fixes that signature, and this panel needs `aria-live="polite"`
+    // ON THE SECTION, because a live region is announced from the element that carries
+    // it and moving it to a child changes what a screen reader says when selection
+    // changes. Widening the primitive to pass one attribute through for one caller is a
+    // knob bought for a single site; the panel keeps its own element instead, exactly as
+    // the two `fp-warn` paragraphs and the `role="alert"` banner below do.
     <section className="card fp-selected" aria-live="polite">
       {/* THE BADGE RIDES THE HEADING, because "next" answers WHICH RUNG THIS IS — the
           same question the heading asks — and not what state it is in. Down among the
@@ -739,8 +752,8 @@ function RungListCard({
   onSelect: (key: string) => void;
 }) {
   return (
-    <section className="card fp-list">
-      <h2>Rungs</h2>
+    <Card className="fp-list">
+      <Card.Title>Rungs</Card.Title>
       <ul>
         {view.rungs.map((rung) => (
           <li key={rung.key}>
@@ -798,7 +811,7 @@ function RungListCard({
           declared rung explains.
         </p>
       ) : null}
-    </section>
+    </Card>
   );
 }
 
