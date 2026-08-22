@@ -1,3 +1,4 @@
+import { Absent } from "./ui/Absent.tsx";
 import type { CompositionRow, DashboardSection } from "@numisma/engine";
 import { formatUsd, formatPercent } from "@numisma/engine/format";
 import type {
@@ -72,16 +73,13 @@ const REASON_COPY: Record<RowAbsenceReason, string> = {
   "no-fund-value": "fund value unavailable",
 };
 
-/** An em dash is not a zero — and the cause says which absence this is. */
-function Absent({ reason }: { reason: RowAbsenceReason | undefined }) {
-  return (
-    <span className="absent">
-      <span aria-hidden="true">—</span>
-      <span className="muted absent-why">
-        {reason ? REASON_COPY[reason] : "suppressed"}
-      </span>
-    </span>
-  );
+/**
+ * The translation `Absent` deliberately does not do. The shared primitive takes words,
+ * not this module's enum, so the row vocabulary stays here beside the table that owns it.
+ * `undefined` falls through to the primitive's own default, which reads `suppressed`.
+ */
+function whyAbsent(reason: RowAbsenceReason | undefined): string | undefined {
+  return reason ? REASON_COPY[reason] : undefined;
 }
 
 function Row({ row, view }: { row: CompositionRow; view: BigPictureView }) {
@@ -95,16 +93,16 @@ function Row({ row, view }: { row: CompositionRow; view: BigPictureView }) {
       <tr className="row-suppressed">
         <td>{row.label}</td>
         <td className="num">
-          <Absent reason={rowView?.suppressedBy} />
+          <Absent why={whyAbsent(rowView?.suppressedBy)} />
         </td>
         <td className="num">
-          <Absent reason={rowView?.suppressedBy} />
+          <Absent why={whyAbsent(rowView?.suppressedBy)} />
         </td>
         <td className="num">
-          <Absent reason={rowView?.vsAnchor.suppressedBy} />
+          <Absent why={whyAbsent(rowView?.vsAnchor.suppressedBy)} />
         </td>
         <td className="num">
-          <Absent reason={rowView?.vsCostBasis.suppressedBy} />
+          <Absent why={whyAbsent(rowView?.vsCostBasis.suppressedBy)} />
         </td>
       </tr>
     );
@@ -124,7 +122,7 @@ function Row({ row, view }: { row: CompositionRow; view: BigPictureView }) {
         {view.percentOfFundRendered ? (
           formatPercent(row.percentOfFund)
         ) : (
-          <Absent reason="no-fund-value" />
+          <Absent why={whyAbsent("no-fund-value")} />
         )}
       </td>
       <td className="num">
@@ -139,7 +137,7 @@ function Row({ row, view }: { row: CompositionRow; view: BigPictureView }) {
 
 /** A delta, signed and directional — or its named absence. */
 function Delta({ delta }: { delta: RowDelta }) {
-  if (!delta.rendered) return <Absent reason={delta.suppressedBy} />;
+  if (!delta.rendered) return <Absent why={whyAbsent(delta.suppressedBy)} />;
   const usd = delta.usdValue!;
   return (
     <span className={usd >= 0 ? "pos" : "neg"}>

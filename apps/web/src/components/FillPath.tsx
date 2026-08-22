@@ -7,6 +7,7 @@ import type {
 } from "../ladder/fill-path-view.ts";
 import { COMPACT_USD } from "../ladder/price-drop-path.ts";
 import { PriceDropPathChart } from "./PriceDropPathChart.tsx";
+import { Absent } from "./ui/Absent.tsx";
 
 /**
  * THE FILL PATH, ON THE PHONE (spec #285 §5.6–5.13 / G-D10b, slice #289) — the declared
@@ -65,16 +66,6 @@ import { PriceDropPathChart } from "./PriceDropPathChart.tsx";
  * inspect panel with it. That is what makes inspection keyboard- and screen-reader-
  * reachable without the chart being involved at all.
  */
-
-/** An em dash is not a zero — and the cause says which absence this is. */
-function Absent({ why }: { why: string }) {
-  return (
-    <span className="absent">
-      <span aria-hidden="true">—</span>
-      <span className="muted absent-why">{why}</span>
-    </span>
-  );
-}
 
 /** One measured tile: the figure, or the named reason there is none. Never a `$0`. */
 function Figure({

@@ -7,6 +7,7 @@ import type {
   Verdict,
 } from "../glance/verdict.ts";
 import { referenceLabel } from "../glance/verdict.ts";
+import { Absent } from "./ui/Absent.tsx";
 
 /**
  * THE GLANCE (D1/D3) — a verdict sentence and a CLOSED SET of exactly three standing
@@ -72,20 +73,18 @@ const REASON_COPY: Record<SuppressionReason, string> = {
   "reference-withheld": "reference withheld",
 };
 
-/** An em dash is not a zero — and the cause says which absence this is. */
-function Absent({ reason }: { reason: SuppressionReason | undefined }) {
-  return (
-    <span className="absent">
-      <span aria-hidden="true">—</span>
-      <span className="muted absent-why">
-        {reason ? REASON_COPY[reason] : "suppressed"}
-      </span>
-    </span>
-  );
+/**
+ * The translation `Absent` deliberately does not do. The shared primitive takes words,
+ * not this module's enum, so the vocabulary stays here with the view that owns it.
+ * `undefined` falls through to the primitive's own default, which reads `suppressed` —
+ * the arm this card rendered before the extraction, unchanged.
+ */
+function whyAbsent(reason: SuppressionReason | undefined): string | undefined {
+  return reason ? REASON_COPY[reason] : undefined;
 }
 
 function FundValue({ slot }: { slot: FundValueSlot }) {
-  if (!slot.rendered) return <Absent reason={slot.suppressedBy} />;
+  if (!slot.rendered) return <Absent why={whyAbsent(slot.suppressedBy)} />;
   return <>{formatUsd(slot.usdValue!)}</>;
 }
 
@@ -93,7 +92,7 @@ function Change({ slot }: { slot: ChangeSlot }) {
   if (!slot.rendered) {
     return (
       <>
-        <Absent reason={slot.suppressedBy} />
+        <Absent why={whyAbsent(slot.suppressedBy)} />
         {/* V3: never claim a date you don't have — but when a reference WAS
             resolved, name it even though the number is withheld. */}
         {slot.referenceLabel ? (
@@ -117,7 +116,7 @@ function Change({ slot }: { slot: ChangeSlot }) {
 }
 
 function Reserve({ slot }: { slot: ReserveSlot }) {
-  if (!slot.rendered) return <Absent reason={slot.suppressedBy} />;
+  if (!slot.rendered) return <Absent why={whyAbsent(slot.suppressedBy)} />;
   return (
     <>
       {slot.percentOfFund!.toFixed(1)}%
