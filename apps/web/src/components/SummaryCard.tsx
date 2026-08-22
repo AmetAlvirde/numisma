@@ -1,6 +1,7 @@
 import type { DashboardSummary } from "@numisma/engine";
 import { formatUsd, formatSignedPercent } from "@numisma/engine/format";
 import { Absent } from "./ui/Absent.tsx";
+import { Card } from "./ui/Card.tsx";
 
 /**
  * The one cause that can reach this card, stated rather than passed. `Absent` takes the
@@ -49,10 +50,13 @@ export function SummaryCard({
     summary.fundValueUsd > 0 ? (pnl / summary.fundValueUsd) * 100 : 0;
 
   return (
-    <section className="card summary">
+    <Card className="summary">
       <header className="summary-head">
         <div>
-          <h1>{summary.fundName}</h1>
+          {/* THE PAGE'S ONE `<h1>`, and the reason `Card.Title` takes a level at all:
+              only this call site knows that this card's heading IS `/big-picture`'s
+              title rather than a section heading beneath one. */}
+          <Card.Title level={1}>{summary.fundName}</Card.Title>
           <p className="muted">as of {summary.asOf}</p>
         </div>
         <DataSafetyBadge
@@ -94,7 +98,7 @@ export function SummaryCard({
           )}
         </div>
       </dl>
-    </section>
+    </Card>
   );
 }
 

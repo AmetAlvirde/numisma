@@ -88,5 +88,26 @@ export function render(ui: ReactElement) {
   return rtlRender(ui);
 }
 
+/**
+ * EVERY CLASS STRING IN A SUBTREE, DEDUPED AND SORTED — the instrument that makes "this
+ * card still emits the classes it emitted before" an assertion instead of an inspection.
+ *
+ * Spec #403 requires `styles.css` to be byte-identical and forbids a new class name
+ * anywhere, while moving five cards onto a shared primitive that builds their root class
+ * string for them. A census over the rendered subtree is what catches the one failure a
+ * reviewer cannot see: a primitive that drops, reorders or invents a token, on a page
+ * that still looks plausible in a diff.
+ *
+ * Whole `class` ATTRIBUTES, not individual tokens: `"muted absent-why"` and `"muted"` are
+ * different facts about different elements, and splitting them would let one turn into
+ * the other silently.
+ */
+export function classCensus(root: Element): string[] {
+  const attributes = [root, ...root.querySelectorAll("[class]")].map(
+    (element) => element.className,
+  );
+  return [...new Set(attributes)].sort();
+}
+
 /** Everything a render test is allowed to reach for, re-exported from one place. */
 export { screen, within, userEvent };

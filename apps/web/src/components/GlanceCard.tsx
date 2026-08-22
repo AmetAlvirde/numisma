@@ -8,6 +8,7 @@ import type {
 } from "../glance/verdict.ts";
 import { referenceLabel } from "../glance/verdict.ts";
 import { Absent } from "./ui/Absent.tsx";
+import { Card } from "./ui/Card.tsx";
 
 /**
  * THE GLANCE (D1/D3) — a verdict sentence and a CLOSED SET of exactly three standing
@@ -30,7 +31,7 @@ import { Absent } from "./ui/Absent.tsx";
  */
 export function GlanceCard({ verdict }: { verdict: Verdict }) {
   return (
-    <section className="card glance">
+    <Card className="glance">
       <p className={verdict.needsYou ? "verdict verdict-yes" : "verdict verdict-no"}>
         {verdict.sentence}
       </p>
@@ -56,7 +57,7 @@ export function GlanceCard({ verdict }: { verdict: Verdict }) {
           </dd>
         </div>
       </dl>
-    </section>
+    </Card>
   );
 }
 
