@@ -1,6 +1,11 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { getDashboard } from "../lib/dashboard.ts";
 import { Shell } from "../components/Shell.tsx";
+import { Crumb } from "../components/ui/Crumb.tsx";
+import {
+  SnapshotEmptyNotice,
+  SnapshotStaleNotice,
+} from "../components/ui/SnapshotNotice.tsx";
 import { GlanceCard } from "../components/GlanceCard.tsx";
 import { DcaCard } from "../components/DcaCard.tsx";
 import { computeVerdict } from "../glance/verdict.ts";
@@ -47,13 +52,7 @@ function GlancePage() {
   if (result.status === "empty") {
     return (
       <Shell>
-        <div className="card notice">
-          <h1>No snapshot yet</h1>
-          <p>
-            The projection is empty. Run <code>pnpm push</code> to publish the
-            latest composition report.
-          </p>
-        </div>
+        <SnapshotEmptyNotice />
       </Shell>
     );
   }
@@ -61,18 +60,11 @@ function GlancePage() {
   if (result.status === "stale") {
     return (
       <Shell>
-        <div className="card notice error">
-          <h1>Schema version mismatch — refusing to render</h1>
-          <p>
-            The stored snapshot is schema version{" "}
-            <strong>{result.storedVersion}</strong>, which is outside the versions
-            this app supports (
-            <strong>
-              {result.expectedVersions.min}–{result.expectedVersions.max}
-            </strong>
-            ). Re-run the push shell with a matching engine build before viewing.
-          </p>
-        </div>
+        <SnapshotStaleNotice
+          storedVersion={result.storedVersion}
+          min={result.expectedVersions.min}
+          max={result.expectedVersions.max}
+        />
       </Shell>
     );
   }
@@ -99,9 +91,7 @@ function GlanceView({
   return (
     <Shell>
       <GlanceCard verdict={verdict} />
-      <p className="crumb">
-        <Link to="/big-picture">Big picture →</Link>
-      </p>
+      <Crumb to="/big-picture">Big picture →</Crumb>
       <DcaCard view={dca} />
     </Shell>
   );
