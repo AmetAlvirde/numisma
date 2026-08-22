@@ -1,4 +1,5 @@
 import { Absent } from "./ui/Absent.tsx";
+import { Card } from "./ui/Card.tsx";
 import type { CompositionRow, DashboardSection } from "@numisma/engine";
 import { formatUsd, formatPercent } from "@numisma/engine/format";
 import type {
@@ -31,8 +32,8 @@ export function SectionTable({
   view: BigPictureView;
 }) {
   return (
-    <section className="card">
-      <h2>{section.title}</h2>
+    <Card>
+      <Card.Title>{section.title}</Card.Title>
       <div className="table-scroll">
         <table>
           <thead>
@@ -55,7 +56,7 @@ export function SectionTable({
           </tbody>
         </table>
       </div>
-    </section>
+    </Card>
   );
 }
 

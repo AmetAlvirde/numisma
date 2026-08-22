@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { formatUsd } from "@numisma/engine/format";
 import type { DcaPositionView, DcaView } from "../glance/dca-view.ts";
 import { Absent } from "./ui/Absent.tsx";
+import { Card } from "./ui/Card.tsx";
 
 /**
  * THE DCA CARD (spec #277, D4/D6) — the declared accumulation plan, on the phone.
@@ -51,8 +52,8 @@ import { Absent } from "./ui/Absent.tsx";
  */
 export function DcaCard({ view }: { view: DcaView }) {
   return (
-    <section className="card dca">
-      <h2>DCA</h2>
+    <Card className="dca">
+      <Card.Title>DCA</Card.Title>
 
       {view.unreadable ? (
         <p className="muted">
@@ -74,7 +75,7 @@ export function DcaCard({ view }: { view: DcaView }) {
           <Plan key={position.positionId} position={position} />
         ))
       )}
-    </section>
+    </Card>
   );
 }
 
