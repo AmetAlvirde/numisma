@@ -87,19 +87,19 @@ export const THEMED_TOKENS: Readonly<Record<string, string>> = {
  * alias chain to meet these literals, rather than comparing alias text that
  * would keep matching while the palette moved underneath it.
  *
- * FOURTEEN NAMES, WHERE THE PACKAGE DECLARES TWELVE. `--nms-card` and
- * `--nms-muted-foreground` are in spec §4.2 and in `styles.css`, and nothing in
- * the package reads them yet. They are carried anyway: the drift test mirrors
- * the app's block name-for-name, so these two are held honest from today rather
- * than from the day a component starts reading them. See that test's header for
- * the full argument and the cost.
+ * TWELVE NAMES, MATCHING THE PACKAGE EXACTLY — and it took a deletion to get
+ * here. This table carried fourteen while `styles.css` defined `--nms-card` and
+ * `--nms-muted-foreground`, two aliases spec #412 §4.2 minted for components
+ * that had not arrived. Spec #420 S0 deleted both on the rule `tokens.ts`
+ * already keeps: a token nothing reads is a token nothing can verify, and app
+ * mode was carrying two values no fixture could ever show. The mirror is what
+ * makes that a two-sided edit — the drift test below reads `styles.css` off disk
+ * and reds if either side moves alone.
  */
 export const APP_TOKENS: Readonly<Record<string, string>> = {
   "--nms-background": "#0f1115",
   "--nms-foreground": "#e7e9ee",
-  "--nms-card": "#181b22",
   "--nms-muted": "#14161c",
-  "--nms-muted-foreground": "#9aa1ad",
   "--nms-border": "#262a33",
   "--nms-input": "#262a33",
   "--nms-primary": "#3b6cf0",

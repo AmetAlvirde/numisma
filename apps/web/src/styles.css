@@ -69,9 +69,7 @@
 
   --nms-background: var(--bg);
   --nms-foreground: var(--text);
-  --nms-card: var(--card);
   --nms-muted: var(--recess);
-  --nms-muted-foreground: var(--muted);
   --nms-border: var(--line);
   --nms-input: var(--line);
   --nms-primary: var(--accent);

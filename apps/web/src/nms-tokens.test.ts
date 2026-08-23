@@ -72,6 +72,23 @@ describe("the app defines every token the package declares", () => {
     // to nothing would pass an empty `it.each`.
     expect(NMS_TOKEN_NAMES.length).toBeGreaterThanOrEqual(12);
   });
+
+  it("defines no --nms-* name the package never declared", () => {
+    // THE SURPLUS DIRECTION (spec #420 §5 S0.2, D4), and with it the block
+    // becomes an exact mirror: the cases above forbid a hole, this forbids a
+    // growth, so it can no longer drift by addition either.
+    //
+    // WHY A SURPLUS ALIAS IS A DEFECT AND NOT MERELY SPARE. It reads, in a
+    // diff and in the workbench's app mode, as a value the app paints — and
+    // nothing paints it. Spec #412 carried `--nms-card` and
+    // `--nms-muted-foreground` on the argument that a future component would
+    // want them ready; this migration deletes them on the stronger one, that a
+    // token no component reads is a token no test can verify, which is the
+    // rule `tokens.ts` already keeps on the package's own side. When a
+    // component starts reading a name, the name lands in `NMS_TOKEN_NAMES`
+    // first and this case goes green with it.
+    expect([...defined].sort()).toEqual([...NMS_TOKEN_NAMES].sort());
+  });
 });
 
 /**
@@ -88,11 +105,14 @@ describe("the app defines every token the package declares", () => {
  * package's components would keep painting last season's grey while every
  * hand-written rule moved on.
  *
- * THE DIRECTION ON `--nms-muted-foreground` IS THE POINT. The app's `--muted` is
- * READ, never redefined. Redefining it would repaint 25 call sites in
- * `styles.css` and 2 in `PriceDropPathChart.tsx` — the capture the spike
- * suffered by accident, which is the whole reason this increment namespaces
- * rather than renames.
+ * THE APP'S `--muted` IS READ, NEVER REDEFINED, and that has not changed.
+ * Redefining it would repaint 25 call sites in `styles.css` and 2 in
+ * `PriceDropPathChart.tsx` — the capture the spike suffered by accident, which
+ * is the whole reason this increment namespaces rather than renames. What went
+ * away is the alias that carried it into the package's namespace: spec #420 S0
+ * deleted `--nms-muted-foreground` along with `--nms-card`, because no
+ * component in the package reads either name and the block is now an exact
+ * mirror of `NMS_TOKEN_NAMES` in both directions.
  *
  * `--nms-muted` IS NOT `--muted`, and the collision of English words is exactly
  * why the prefix exists. shadcn reads `--nms-muted` as a recessed SURFACE
@@ -123,10 +143,8 @@ describe("the app's --nms-* overrides in styles.css", () => {
   it.each([
     ["--nms-background", "var(--bg)"],
     ["--nms-foreground", "var(--text)"],
-    ["--nms-card", "var(--card)"],
     ["--nms-border", "var(--line)"],
     ["--nms-input", "var(--line)"],
-    ["--nms-muted-foreground", "var(--muted)"],
     ["--nms-destructive", "var(--neg)"],
   ])("aliases %s onto %s rather than copying its value", (name, alias) => {
     expect(overrides.get(name)).toBe(alias);
@@ -148,7 +166,13 @@ describe("the app's --nms-* overrides in styles.css", () => {
   it("mints a recessed surface for --nms-muted, distinct from the app's --muted text", () => {
     expect(stylesCss).toMatch(/^\s*--recess:\s*#[0-9a-f]{6};/m);
     expect(overrides.get("--nms-muted")).toBe("var(--recess)");
-    expect(overrides.get("--nms-muted-foreground")).toBe("var(--muted)");
+    // And the app's own `--muted` is READ by hand-written rules, never aliased
+    // into the package's namespace. `--nms-muted-foreground` used to carry it
+    // across; spec #420 S0 deleted that alias because nothing in the package
+    // reads the name. The two greys stay separate either way — that is what the
+    // prefix is for — and this line is what stops the collision being "fixed"
+    // by pointing one at the other.
+    expect(overrides.has("--nms-muted-foreground")).toBe(false);
   });
 
   it("leaves --ok, --warn and --pos app-only", () => {
