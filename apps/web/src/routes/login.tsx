@@ -4,6 +4,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Button } from "@numisma/components";
 
 import { authClient } from "../lib/auth-client.ts";
+import { CARD_SURFACE } from "../components/ui/Card.tsx";
 
 export const Route = createFileRoute("/login")({
   component: LoginPage,
@@ -46,7 +47,7 @@ function LoginPage() {
     // so only `mx-auto` would leave the UA free on the other two.
     <main className="mx-auto my-0 flex min-h-dvh max-w-[760px] flex-col justify-center gap-4 p-4">
       <form
-        className="card flex flex-col gap-3"
+        className={`${CARD_SURFACE} flex flex-col gap-3`}
         onSubmit={(event) => {
           event.preventDefault();
           signIn.mutate();

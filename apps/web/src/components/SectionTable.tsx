@@ -44,7 +44,7 @@ export function SectionTable({
               {/* D4: the reference is RENDERED. When there is no earlier anchor the
                   column says so rather than falling back to an unnamed "change". */}
               <th className="num">
-                vs {view.reference?.label ?? <span className="muted">no earlier anchor</span>}
+                vs {view.reference?.label ?? <span className="m-0 mt-1 text-[var(--muted)]">no earlier anchor</span>}
               </th>
               <th className="num">vs {view.costBasisLabel}</th>
             </tr>
@@ -145,7 +145,7 @@ function Delta({ delta }: { delta: RowDelta }) {
       {usd >= 0 ? "▲" : "▼"}
       {formatUsd(Math.abs(usd))}
       {delta.percent === undefined ? null : (
-        <span className="muted"> {Math.abs(delta.percent).toFixed(2)}%</span>
+        <span className="m-0 mt-1 text-[var(--muted)]"> {Math.abs(delta.percent).toFixed(2)}%</span>
       )}
     </span>
   );

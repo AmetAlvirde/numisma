@@ -24,7 +24,14 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { classCensus, render, screen } from "../render.testkit.tsx";
+import {
+  classTokens as tokens,
+  DELETED_IN_SLICE_2,
+  render,
+  renderedClassNames,
+  screen,
+} from "../render.testkit.tsx";
+import { CARD_SURFACE } from "./ui/Card.tsx";
 import { SectionTable } from "./SectionTable.tsx";
 import type { DashboardSection } from "@numisma/engine";
 import type { BigPictureView } from "../glance/row-view.ts";
@@ -97,41 +104,44 @@ describe("SectionTable on the shared Card", () => {
     expect(headings[0]?.textContent).toBe("Portfolios");
   });
 
-  it("emits the same class strings it emitted before the conversion", () => {
+  it("carries the bare card surface, with no class of its own beside it", () => {
     const { container } = render(
       <SectionTable section={section()} view={anchoredView()} />,
     );
     const root = container.firstElementChild;
 
     expect(root?.tagName).toBe("SECTION");
-    expect(classCensus(root!)).toEqual([
-      "absent",
-      "card",
-      "muted",
-      "muted absent-why",
-      "neg",
-      "num",
-      "pos",
-      "row-suppressed",
-      "table-scroll",
-    ]);
+    expect(root?.className).toBe(CARD_SURFACE);
   });
 
-  it("emits the same class strings on the genesis arm, with no anchor to name", () => {
-    const { container } = render(
+  it("converts the delta suffix, all four margin edges included", () => {
+    render(<SectionTable section={section()} view={anchoredView()} />);
+
+    // A `<span>`, so the vertical margins do not paint — and they are written anyway,
+    // because `.muted` set all four and the next element to carry this string may be a
+    // block. Preflight is off; a missing edge is a UA margin, not a zero.
+    const suffix = screen
+      .getAllByText(/%$/)
+      .find((element) => element.tagName === "SPAN")!;
+    for (const utility of ["text-[var(--muted)]", "m-0", "mt-1"]) {
+      expect(tokens(suffix)).toContain(utility);
+    }
+  });
+
+  it("writes none of slice 2's deleted class names, on either arm", () => {
+    const anchored = render(
+      <SectionTable section={section()} view={anchoredView()} />,
+    );
+    const genesis = render(
       <SectionTable section={section()} view={anchorlessView()} />,
     );
 
-    expect(classCensus(container.firstElementChild!)).toEqual([
-      "absent",
-      "card",
-      "muted",
-      "muted absent-why",
-      "neg",
-      "num",
-      "pos",
-      "row-suppressed",
-      "table-scroll",
-    ]);
+    for (const { container } of [anchored, genesis]) {
+      const rendered = renderedClassNames(container.firstElementChild!);
+      for (const deleted of DELETED_IN_SLICE_2) {
+        expect([...rendered]).not.toContain(deleted);
+      }
+      expect([...rendered]).toContain("absent");
+    }
   });
 });

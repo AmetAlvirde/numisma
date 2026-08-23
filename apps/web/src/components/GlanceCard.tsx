@@ -35,7 +35,7 @@ export function GlanceCard({ verdict }: { verdict: Verdict }) {
       <p className={verdict.needsYou ? "verdict verdict-yes" : "verdict verdict-no"}>
         {verdict.sentence}
       </p>
-      <p className="muted">as of {referenceLabel(verdict.asOf)}</p>
+      <p className="m-0 mt-1 text-[var(--muted)]">as of {referenceLabel(verdict.asOf)}</p>
 
       <dl className="metrics">
         <div>
@@ -97,7 +97,7 @@ function Change({ slot }: { slot: ChangeSlot }) {
         {/* V3: never claim a date you don't have — but when a reference WAS
             resolved, name it even though the number is withheld. */}
         {slot.referenceLabel ? (
-          <span className="muted"> vs {slot.referenceLabel}</span>
+          <span className="m-0 text-[0.75rem] font-medium text-[var(--muted)]"> vs {slot.referenceLabel}</span>
         ) : null}
       </>
     );
@@ -111,7 +111,7 @@ function Change({ slot }: { slot: ChangeSlot }) {
       </span>
       {/* D4: always against a NAMED reference, always rendered — never a bare
           "today", and always the anchor actually landed on (V3). */}
-      <span className="muted"> vs {slot.referenceLabel}</span>
+      <span className="m-0 text-[0.75rem] font-medium text-[var(--muted)]"> vs {slot.referenceLabel}</span>
     </>
   );
 }
@@ -123,7 +123,7 @@ function Reserve({ slot }: { slot: ReserveSlot }) {
       {slot.percentOfFund!.toFixed(1)}%
       {/* C4: the wire says `target`, the UI says FLOOR. The divergence is
           deliberate — renaming would mean migrating an append-only sidecar. */}
-      <span className="muted"> floor {slot.floorPct}%</span>
+      <span className="m-0 text-[0.75rem] font-medium text-[var(--muted)]"> floor {slot.floorPct}%</span>
     </>
   );
 }

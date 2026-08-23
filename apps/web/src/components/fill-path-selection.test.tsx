@@ -65,6 +65,7 @@ import {
 } from "./FillPath.tsx";
 import { composeFillPathPage } from "../ladder/fill-path-view.ts";
 import { ladderFixture } from "../ladder/started-ladder.fixtures.ts";
+import { CARD_SURFACE } from "./ui/Card.tsx";
 
 /** The widest fixture: filled rungs, waiting rungs and a live spot, so every card draws. */
 function partlyWalkedView() {
@@ -318,7 +319,7 @@ describe("every fill-path part mounts on its own", () => {
     );
 
     expect([...container.querySelectorAll("section")].map((s) => s.className)).toEqual([
-      "card fp-header",
+      `${CARD_SURFACE} fp-header`,
     ]);
     expect(container.querySelector("h1")?.textContent).toBe(view.title);
   });
@@ -331,7 +332,7 @@ describe("every fill-path part mounts on its own", () => {
     );
 
     expect([...container.querySelectorAll("section")].map((s) => s.className)).toEqual([
-      "card fp-chart-card",
+      `${CARD_SURFACE} fp-chart-card`,
     ]);
     expect(container.querySelector(".fp-chart")?.getAttribute("aria-hidden")).toBe("true");
     expect(container.querySelector(".sr-only")?.textContent ?? "").not.toBe("");

@@ -43,6 +43,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { classCensus, render, screen, userEvent } from "../render.testkit.tsx";
 import { Route } from "./login.tsx";
+import { CARD_SURFACE } from "../components/ui/Card.tsx";
 
 /**
  * Never settles by default, so the pending arm cannot race the assertions below. The
@@ -104,15 +105,19 @@ describe("the auth surface's utilities", () => {
     }
   });
 
-  it("puts `.auth-card`'s column on the form, and keeps it a `card`", async () => {
+  it("puts `.auth-card`'s column on the form, on the card surface", async () => {
     const { container } = await renderLoginPage();
     const form = container.querySelector("form")!;
 
     for (const utility of ["flex", "flex-col", "gap-3"]) {
       expect(classes(form)).toContain(utility);
     }
-    // `.card` is slice 2's to delete; the form still carries it.
-    expect(classes(form)).toContain("card");
+    // Slice 2 deleted `.card`. The form is one of the four surfaces that are NOT a
+    // `Card` — it keeps its own element and imports the class string instead.
+    for (const utility of CARD_SURFACE.split(" ")) {
+      expect(classes(form)).toContain(utility);
+    }
+    expect(classes(form)).not.toContain("card");
   });
 
   it("puts `.auth-card label`'s stacked, muted label on both labels", async () => {

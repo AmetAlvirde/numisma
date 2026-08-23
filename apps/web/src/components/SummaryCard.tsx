@@ -57,7 +57,7 @@ export function SummaryCard({
               only this call site knows that this card's heading IS `/big-picture`'s
               title rather than a section heading beneath one. */}
           <Card.Title level={1}>{summary.fundName}</Card.Title>
-          <p className="muted">as of {summary.asOf}</p>
+          <p className="m-0 mt-1 text-[var(--muted)]">as of {summary.asOf}</p>
         </div>
         <DataSafetyBadge
           clean={clean}

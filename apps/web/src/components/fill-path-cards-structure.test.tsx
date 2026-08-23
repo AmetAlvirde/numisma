@@ -32,6 +32,7 @@ import { render, screen } from "../render.testkit.tsx";
 import { FillPathCards } from "./FillPath.tsx";
 import { composeFillPathPage } from "../ladder/fill-path-view.ts";
 import { ladderFixture } from "../ladder/started-ladder.fixtures.ts";
+import { CARD_SURFACE } from "./ui/Card.tsx";
 
 /** The widest fixture: filled rungs, waiting rungs and a live spot, so every card draws. */
 function partlyWalkedView() {
@@ -71,15 +72,19 @@ describe("the fill path's card shell", () => {
   it("emits the same four card class strings, once each, on `section` elements", () => {
     const { container } = render(<FillPathCards view={partlyWalkedView()} />);
 
+    // The four names are still asserted in order and once each; what each section
+    // carries beside its name is now the shared surface, by reference rather than as a
+    // pinned string (spec #420 Seam E).
     const sections = [...container.querySelectorAll("section")].map(
       (section) => section.className,
     );
     expect(sections).toEqual([
-      "card fp-header",
-      "card fp-chart-card",
-      "card fp-selected",
-      "card fp-list",
+      `${CARD_SURFACE} fp-header`,
+      `${CARD_SURFACE} fp-chart-card`,
+      `fp-selected ${CARD_SURFACE}`,
+      `${CARD_SURFACE} fp-list`,
     ]);
+    expect(sections.join(" ").split(/\s+/)).not.toContain("card");
   });
 
   it("keeps the selected-rung panel's live region on the card element itself", () => {

@@ -120,6 +120,69 @@ export function classCensus(root: Element): string[] {
 }
 
 /**
+ * ONE ELEMENT'S CLASS NAMES, SPLIT — half of the census successor's instrument
+ * (spec #420 Seam E).
+ *
+ * The census above asserts whole attributes and that is exactly right while a surface
+ * is UNCONVERTED: `"muted absent-why"` and `"muted"` are different facts and full-string
+ * equality catches a primitive that drops or invents a token. It is exactly wrong once
+ * the surface carries utilities. A converted element's class attribute is a dozen
+ * ordered utilities, and pinning the whole string makes every test in this repo depend
+ * on Prettier's class sort order — a formatter upgrade would then read as a regression
+ * on nine surfaces at once.
+ *
+ * So the successor asserts PER CLASS, with `toContain`, over these tokens: the
+ * load-bearing utilities are present, the deleted class names are not, and a utility
+ * added later for a reason this test has no opinion about does not fail it.
+ *
+ * Read off the attribute for the same reason `classCensus` is — an SVG element's
+ * `className` is an object, not a string.
+ */
+export function classTokens(element: Element): string[] {
+  return (element.getAttribute("class") ?? "").split(/\s+/).filter(Boolean);
+}
+
+/**
+ * EVERY CLASS NAME IN A SUBTREE, as a set — the other half.
+ *
+ * "None of the slice's deleted class names is present anywhere in this render" is a
+ * claim about the whole subtree rather than about one element, and it is the assertion
+ * that catches the carrier nobody remembered: a `muted` span three components down that
+ * the conversion missed and that no per-element assertion is looking at.
+ */
+export function renderedClassNames(root: Element): Set<string> {
+  return new Set(
+    classCensus(root).flatMap((attribute) => attribute.split(/\s+/).filter(Boolean)),
+  );
+}
+
+/**
+ * THE CLASS NAMES SLICE 2 DELETED, spelled once for the five structure tests and the
+ * `ui/` contracts that all assert their absence.
+ *
+ * One list rather than five copies, because the failure this guards against is a carrier
+ * nobody remembered, and five copies drift into five different ideas of what was
+ * deleted. Each of these had a rule in `styles.css` and has none now; every declaration
+ * they carried is a utility on the elements that used to reference them.
+ *
+ * `absent` IS NOT ON THE LIST AND MUST NOT BE. Its own rule is deleted, but three
+ * contextual rules still select through it — `.metrics dd .absent` (slice 3),
+ * `.fp-tile .absent` (slice 7), `.fp-detail .absent` (slice 8), two with `@container`
+ * arms. It is a bare hook until the last of those goes. `sr-only` is not on the list
+ * either, for the opposite reason: the name stays and Tailwind's own utility took it
+ * over.
+ */
+export const DELETED_IN_SLICE_2 = [
+  "card",
+  "dashboard",
+  "muted",
+  "absent-why",
+  "crumb",
+  "notice",
+  "error",
+];
+
+/**
  * Everything a render test is allowed to reach for, re-exported from one place.
  *
  * `fireEvent` RIDES ALONGSIDE `userEvent`, NOT INSTEAD OF IT. Spec #403 §3.4 bought

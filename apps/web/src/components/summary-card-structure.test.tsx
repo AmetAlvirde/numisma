@@ -20,7 +20,14 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { classCensus, render, screen } from "../render.testkit.tsx";
+import {
+  classTokens as tokens,
+  DELETED_IN_SLICE_2,
+  render,
+  renderedClassNames,
+  screen,
+} from "../render.testkit.tsx";
+import { CARD_SURFACE } from "./ui/Card.tsx";
 import { SummaryCard } from "./SummaryCard.tsx";
 import type { DashboardSummary } from "@numisma/engine";
 
@@ -51,25 +58,29 @@ describe("SummaryCard on the shared Card", () => {
     expect(headings[0]?.textContent).toBe("Test Fund");
   });
 
-  it("emits the same class strings it emitted before the conversion", () => {
+  it("carries the card surface and the converted `as of` line", () => {
     const { container } = render(
       <SummaryCard summary={cleanSummary()} usdMxn={18.5} fundValueRendered />,
     );
     const root = container.firstElementChild;
 
     expect(root?.tagName).toBe("SECTION");
-    expect(classCensus(root!)).toEqual([
-      "badge badge-ok",
-      "card summary",
-      "metrics",
-      "muted",
-      "pos",
-      "summary-head",
-    ]);
+    expect(root?.className).toBe(`${CARD_SURFACE} summary`);
+
+    // This one sits in the card header rather than in a metrics `<dd>`, so it takes
+    // `.muted` plain — colour and all four margin edges, preflight being off.
+    const asOf = screen.getByText(/^as of/);
+    expect(asOf.tagName).toBe("P");
+    for (const utility of ["text-[var(--muted)]", "m-0", "mt-1"]) {
+      expect(tokens(asOf)).toContain(utility);
+    }
   });
 
-  it("emits the same class strings on the suppressed arm too", () => {
-    const { container } = render(
+  it("writes none of slice 2's deleted class names, on either arm", () => {
+    const clean = render(
+      <SummaryCard summary={cleanSummary()} usdMxn={18.5} fundValueRendered />,
+    );
+    const suppressed = render(
       <SummaryCard
         summary={cleanSummary()}
         usdMxn={18.5}
@@ -77,14 +88,16 @@ describe("SummaryCard on the shared Card", () => {
       />,
     );
 
-    expect(classCensus(container.firstElementChild!)).toEqual([
-      "absent",
-      "badge badge-warn",
-      "card summary",
-      "metrics",
-      "muted",
-      "muted absent-why",
-      "summary-head",
-    ]);
+    for (const { container } of [clean, suppressed]) {
+      for (const deleted of DELETED_IN_SLICE_2) {
+        expect([...renderedClassNames(container.firstElementChild!)]).not.toContain(
+          deleted,
+        );
+      }
+    }
+    // The suppressed arm is the one that renders an `Absent`, and its hook stays.
+    expect([
+      ...renderedClassNames(suppressed.container.firstElementChild!),
+    ]).toContain("absent");
   });
 });

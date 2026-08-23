@@ -26,16 +26,38 @@ import type { ReactElement } from "react";
  * because `exactOptionalPropertyTypes` is on: the call sites resolve a reason that may be
  * absent and pass the result straight through, which is the whole point of the default.
  *
- * ── NO CSS IS AUTHORED ───────────────────────────────────────────────────────────────
- * `absent` and `muted absent-why` already exist in `styles.css`, which spec #403 requires
- * to be byte-identical when the increment lands. The class family is translated once, at
- * this file, when the Tailwind migration comes.
+ * ── THE STYLING IS HERE NOW, AND ONE CLASS NAME SURVIVES ON PURPOSE ──────────────────
+ * Spec #420 slice 2 deletes `.absent` (`display: inline-flex; align-items: baseline;
+ * gap: 6px; color: var(--muted)`), `.absent-why` and `.muted`, and those declarations are
+ * the utilities below.
+ *
+ * `absent` ITSELF STAYS AS A BARE HOOK, exactly as slice 1 kept `error` while a later
+ * slice's rule still selected through it. THREE CONTEXTUAL RULES STILL DO:
+ * `.metrics dd .absent` (slice 3), `.fp-tile .absent` (slice 7) and `.fp-detail .absent`
+ * (slice 8), two of them with `@container` arms. Reproducing those here would drag three
+ * later slices' container conversions into this one, and this slice's own brief puts
+ * every `.metrics*` rule out of scope. The hook carries nothing itself; it is a join, and
+ * it goes when the last of those three rules does.
+ *
+ * ── `[dd_&]` IS THE METRICS CONTEXT, NAMED BY ITS ELEMENT ────────────────────────────
+ * `.metrics .muted` (slice 3's) beat `.absent-why` on specificity and sized the reason
+ * 0.75rem with no margin wherever a metrics `<dd>` holds one, against 0.72rem and the
+ * `.muted` top margin everywhere else. Losing the `muted` class name loses that
+ * selector's grip, so the two declarations are reproduced here.
+ *
+ * They key off `dd` rather than `.metrics` because the CLASS is going and the ELEMENT is
+ * not: slice 3 rewrites `.metrics` as utilities on the `<dl>` and this variant keeps
+ * meaning the same thing through it. Measured before it was written: the only `<dd>` in
+ * the app that holds an `Absent` is a metrics one — `.fp-detail`'s single `<dd>` renders
+ * a price and never this — so the proxy is exact today, not merely close.
  */
 export function Absent({ why }: { why?: string | undefined }): ReactElement {
   return (
-    <span className="absent">
+    <span className="absent inline-flex items-baseline gap-1.5 text-[var(--muted)]">
       <span aria-hidden="true">—</span>
-      <span className="muted absent-why">{why ?? "suppressed"}</span>
+      <span className="m-0 mt-1 text-[0.72rem] font-medium text-[var(--muted)] [dd_&]:mt-0 [dd_&]:text-[0.75rem]">
+        {why ?? "suppressed"}
+      </span>
     </span>
   );
 }

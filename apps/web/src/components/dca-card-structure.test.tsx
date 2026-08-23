@@ -26,7 +26,14 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { classCensus, render, screen } from "../render.testkit.tsx";
+import {
+  classTokens as tokens,
+  DELETED_IN_SLICE_2,
+  render,
+  renderedClassNames,
+  screen,
+} from "../render.testkit.tsx";
+import { CARD_SURFACE } from "./ui/Card.tsx";
 import { DcaCard } from "./DcaCard.tsx";
 import type { DcaView } from "../glance/dca-view.ts";
 
@@ -72,44 +79,34 @@ describe("DcaCard on the shared Card", () => {
     expect(headings[0]?.textContent).toBe("DCA");
   });
 
-  it("emits the same class strings it emitted before the conversion", () => {
+  it("carries the card surface beside its own class", () => {
     const { container } = render(<DcaCard view={ladderView()} />);
     const root = container.firstElementChild;
 
     expect(root?.tagName).toBe("SECTION");
-    expect(classCensus(root!)).toEqual([
-      "card dca",
-      "dca-alert",
-      "dca-alert-warn",
-      "dca-head",
-      "dca-plan",
-      "dca-state dca-state-active",
-      "muted",
-      "num",
-      "table-scroll",
-    ]);
+    expect(root?.className).toBe(`${CARD_SURFACE} dca`);
   });
 
-  it("emits the same class strings on the rungless arm too", () => {
-    const { container } = render(<DcaCard view={cadenceView()} />);
-
-    expect(classCensus(container.firstElementChild!)).toEqual([
-      "absent",
-      "card dca",
-      "dca-head",
-      "dca-plan",
-      "dca-state dca-state-pending",
-      "muted",
-      "muted absent-why",
-    ]);
-  });
-
-  it("emits the same class strings when the plans file is unreadable", () => {
+  it("converts every `muted` paragraph, all four margin edges included", () => {
     const { container } = render(<DcaCard view={unreadableView()} />);
 
-    expect(classCensus(container.firstElementChild!)).toEqual([
-      "card dca",
-      "muted",
-    ]);
+    // The unreadable arm is the narrowest: one paragraph, and the whole of what this
+    // card had to convert. `.muted` was `color: var(--muted); margin: 4px 0 0`, and
+    // preflight is off, so `mt-1` alone would leave the UA's `p` margin on three edges.
+    const paragraph = container.querySelector("p")!;
+    for (const utility of ["text-[var(--muted)]", "m-0", "mt-1"]) {
+      expect(tokens(paragraph)).toContain(utility);
+    }
+  });
+
+  it("writes none of slice 2's deleted class names, on any of its three arms", () => {
+    for (const view of [ladderView(), cadenceView(), unreadableView()]) {
+      const { container } = render(<DcaCard view={view} />);
+      for (const deleted of DELETED_IN_SLICE_2) {
+        expect([...renderedClassNames(container.firstElementChild!)]).not.toContain(
+          deleted,
+        );
+      }
+    }
   });
 });

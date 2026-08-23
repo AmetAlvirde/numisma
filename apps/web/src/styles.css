@@ -108,18 +108,6 @@
   gap: 16px;
 }
 
-.card {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 16px;
-}
-
-.muted {
-  color: var(--muted);
-  margin: 4px 0 0;
-}
-
 /* Fund name left, the data-safety badge hard right. `wrap` and a shrinkable title block
    are what keep the pair on the card at 320px: the warn badge's text is a joined list of
    causes (`⚠ no current mark · 3 non-live`) and there is no width at which that is a
@@ -304,16 +292,6 @@ thead th {
   letter-spacing: 0.04em;
 }
 
-.notice code {
-  background: #000;
-  padding: 2px 6px;
-  border-radius: 6px;
-}
-
-.notice.error h1 {
-  color: var(--neg);
-}
-
 /* ── the glance (PRD #146 D1/D3) ────────────────────────────────────────────
    The verdict is the only thing above 20px and it lands before the eye reaches
    the numbers: the surface is judged on how fast the *no* reads, on a phone, in
@@ -353,38 +331,15 @@ thead th {
   color: var(--neg);
 }
 
-/* An absent number is NOT a zero (V1/D7): an em dash plus its cause, so the
-   absence is readable as a diagnosis rather than as a value. */
-.absent {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  color: var(--muted);
-}
-
-.absent-why {
-  font-size: 0.72rem;
-  font-weight: 500;
-}
-
+/* DEAD SINCE SLICE 2 AND KEPT FOR SLICE 3, WHICH OWNS IT. No element carries `muted`
+   any more — the class and its rule went with the shared vocabulary — so this selects
+   nothing. Its two declarations were not dropped: they are utilities on the three
+   `GlanceCard` spans that sit in a metrics `<dd>`, and a `dd`-scoped variant inside
+   `ui/Absent.tsx` for the reason it renders in both contexts. */
 .metrics .muted {
   font-size: 0.75rem;
   font-weight: 500;
   margin: 0;
-}
-
-.crumb {
-  margin: 0;
-  font-size: 0.9rem;
-}
-
-.crumb a {
-  color: var(--muted);
-  text-decoration: none;
-}
-
-.crumb a:hover {
-  color: var(--text);
 }
 
 /* ── the DCA card (spec #277 D4/D6) ─────────────────────────────────────────

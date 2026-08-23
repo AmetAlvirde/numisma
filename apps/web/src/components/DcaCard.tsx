@@ -56,20 +56,20 @@ export function DcaCard({ view }: { view: DcaView }) {
       <Card.Title>DCA</Card.Title>
 
       {view.unreadable ? (
-        <p className="muted">
+        <p className="m-0 mt-1 text-[var(--muted)]">
           The plans file could not be read — this is NOT "no plans declared".
         </p>
       ) : null}
 
       {view.unattributable > 0 ? (
-        <p className="muted">
+        <p className="m-0 mt-1 text-[var(--muted)]">
           {view.unattributable} unreadable{" "}
           {view.unattributable === 1 ? "line names" : "lines name"} no position.
         </p>
       ) : null}
 
       {view.positions.length === 0 && !view.unreadable ? (
-        <p className="muted">No plan declared.</p>
+        <p className="m-0 mt-1 text-[var(--muted)]">No plan declared.</p>
       ) : (
         view.positions.map((position) => (
           <Plan key={position.positionId} position={position} />
@@ -107,7 +107,7 @@ function Plan({ position }: { position: DcaPositionView }) {
           {STATE_COPY[position.state]}
         </span>
         {position.kind ? (
-          <span className="muted">{KIND_COPY[position.kind]}</span>
+          <span className="m-0 mt-1 text-[var(--muted)]">{KIND_COPY[position.kind]}</span>
         ) : null}
       </p>
       <Alert position={position} />

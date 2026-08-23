@@ -22,7 +22,14 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { classCensus, render, screen } from "../render.testkit.tsx";
+import {
+  classTokens as tokens,
+  DELETED_IN_SLICE_2,
+  render,
+  renderedClassNames,
+  screen,
+} from "../render.testkit.tsx";
+import { CARD_SURFACE } from "./ui/Card.tsx";
 import { GlanceCard } from "./GlanceCard.tsx";
 import type { Verdict } from "../glance/verdict.ts";
 
@@ -53,18 +60,43 @@ describe("GlanceCard on the shared Card", () => {
     expect(screen.getByText("Nothing needs you.")).not.toBe(null);
   });
 
-  it("emits the same class strings it emitted before the conversion", () => {
+  it("carries the card surface and the converted shared vocabulary", () => {
     const { container } = render(<GlanceCard verdict={standingVerdict()} />);
     const root = container.firstElementChild;
 
     expect(root?.tagName).toBe("SECTION");
-    expect(classCensus(root!)).toEqual([
-      "absent",
-      "card glance",
-      "metrics",
-      "muted",
-      "muted absent-why",
-      "verdict verdict-no",
-    ]);
+    expect(root?.className).toBe(`${CARD_SURFACE} glance`);
+
+    // `.muted` was `color: var(--muted); margin: 4px 0 0`. Preflight is off, so the
+    // three zeroed edges are as load-bearing as the one that is not.
+    const asOf = screen.getByText(/^as of/);
+    expect(asOf.tagName).toBe("P");
+    for (const utility of ["text-[var(--muted)]", "m-0", "mt-1"]) {
+      expect(tokens(asOf)).toContain(utility);
+    }
+
+    // The three trailing references sit in a metrics `<dd>`, where `.metrics .muted`
+    // (slice 3's, and now dead) beat `.muted` on size, weight and margin. Those three
+    // declarations are on the spans themselves, since the context is static here.
+    const reference = screen.getByText(/floor/);
+    for (const utility of [
+      "text-[var(--muted)]",
+      "text-[0.75rem]",
+      "font-medium",
+      "m-0",
+    ]) {
+      expect(tokens(reference)).toContain(utility);
+    }
+  });
+
+  it("writes none of slice 2's deleted class names", () => {
+    const { container } = render(<GlanceCard verdict={standingVerdict()} />);
+    const rendered = renderedClassNames(container.firstElementChild!);
+
+    for (const deleted of DELETED_IN_SLICE_2) {
+      expect([...rendered]).not.toContain(deleted);
+    }
+    // `absent` is the one hook that stays, for three later slices' contextual rules.
+    expect([...rendered]).toContain("absent");
   });
 });

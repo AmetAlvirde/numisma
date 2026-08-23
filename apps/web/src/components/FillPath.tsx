@@ -9,7 +9,7 @@ import type {
 import { COMPACT_USD } from "../ladder/price-drop-path.ts";
 import { PriceDropPathChart } from "./PriceDropPathChart.tsx";
 import { Absent } from "./ui/Absent.tsx";
-import { Card } from "./ui/Card.tsx";
+import { Card, CARD_SURFACE } from "./ui/Card.tsx";
 
 /**
  * THE FILL PATH, ON THE PHONE (spec #285 §5.6–5.13 / G-D10b, slice #289) — the declared
@@ -294,7 +294,7 @@ export function FillPathCards({ view }: { view: FillPathView }): ReactElement {
 function TornActBanner({ view }: { view: FillPathView }) {
   if (view.tornActs.status === "outstanding") {
     return (
-      <div className="card notice fp-torn" role="alert">
+      <div className={`fp-torn ${CARD_SURFACE}`} role="alert">
         <strong>
           {view.tornActs.count} torn fill{" "}
           {view.tornActs.count === 1 ? "act" : "acts"} outstanding
@@ -308,7 +308,7 @@ function TornActBanner({ view }: { view: FillPathView }) {
   }
   if (view.tornActs.status === "unchecked") {
     return (
-      <p className="muted fp-unchecked">
+      <p className="fp-unchecked m-0 mt-1 text-[var(--muted)]">
         Torn fill acts were not checked for this snapshot — this is NOT "none
         outstanding".
       </p>
@@ -396,7 +396,7 @@ function Header() {
               style={{ width: `${view.progress.percent}%` }}
             />
           </div>
-          <p className="muted">
+          <p className="m-0 mt-1 text-[var(--muted)]">
             {view.progress.filledRungs} of {view.progress.totalRungs} rungs walked
           </p>
         </div>
@@ -435,7 +435,7 @@ function SpotReadout({ view }: { view: FillPathView }) {
       ) : (
         <>
           <strong className="fp-spot-value">{formatUsd(view.spotUsd)}</strong>
-          <span className="muted fp-spot-note">
+          <span className="fp-spot-note m-0 mt-1 text-[var(--muted)]">
             {view.spotUnavailable ? "last close · live price unavailable" : "live"}
           </span>
         </>
@@ -500,7 +500,7 @@ function Waiting({ figures }: { figures: FillPathView["figures"] }) {
       <div className="fp-waiting">
         <span className="fp-tile-label">Waiting</span>
         <strong className="fp-tile-value">—</strong>
-        <p className="muted fp-waiting-sub">
+        <p className="fp-waiting-sub m-0 mt-1 text-[var(--muted)]">
           The orders sidecar could not be read for this ladder, so nothing here is a
           measurement — this is NOT "nothing is waiting".
         </p>
@@ -526,7 +526,7 @@ function UnrecordedWarnings({ view }: { view: FillPathView }) {
   return (
     <>
       {view.warnings.filledNotRecorded > 0 ? (
-        <p className="card fp-warn fp-warn-certain">
+        <p className={`fp-warn fp-warn-certain ${CARD_SURFACE}`}>
           <span aria-hidden="true">⚠ </span>
           {view.warnings.filledNotRecorded} filled at the venue —{" "}
           {view.warnings.filledNotRecorded === 1 ? "it is" : "they are"} not recorded.
@@ -534,7 +534,7 @@ function UnrecordedWarnings({ view }: { view: FillPathView }) {
         </p>
       ) : null}
       {view.warnings.pricePassedNoFill > 0 ? (
-        <p className="card fp-warn fp-warn-inferred">
+        <p className={`fp-warn fp-warn-inferred ${CARD_SURFACE}`}>
           <span aria-hidden="true">⚠ </span>
           {view.warnings.pricePassedNoFill} resting{" "}
           {view.warnings.pricePassedNoFill === 1 ? "rung has" : "rungs have"} had price
@@ -679,7 +679,7 @@ function SelectedRung() {
     // changes. Widening the primitive to pass one attribute through for one caller is a
     // knob bought for a single site; the panel keeps its own element instead, exactly as
     // the two `fp-warn` paragraphs and the `role="alert"` banner below do.
-    <section className="card fp-selected" aria-live="polite">
+    <section className={`fp-selected ${CARD_SURFACE}`} aria-live="polite">
       {/* THE BADGE RIDES THE HEADING, because "next" answers WHICH RUNG THIS IS — the
           same question the heading asks — and not what state it is in. Down among the
           pills it read as one status among several; up here it qualifies the identity
@@ -704,7 +704,7 @@ function SelectedRung() {
               operator said these belong together, and they do — at a different price. */}
           <dd>
             {formatUsd(rung.placedAtUsd)}{" "}
-            <span className="muted">differs from the declared rung</span>
+            <span className="m-0 mt-1 text-[var(--muted)]">differs from the declared rung</span>
           </dd>
         </dl>
       )}
@@ -776,8 +776,9 @@ function RungHeadline({ rung }: { rung: FillPathRungView }) {
  */
 function RecordedThrough({ view }: { view: FillPathView }) {
   return (
-    <p className="muted fp-recorded">
-      {/* NO `<strong>` ON THE DATE. The paragraph is `.muted` because the whole sentence
+    <p className="fp-recorded m-0 mt-1 text-[var(--muted)]">
+      {/* NO `<strong>` ON THE DATE. The paragraph is painted in the secondary
+          colour because the whole sentence
           is a provenance footnote, and bolding the date inside it pulled the loudest
           thing on the card down to its quietest line — the reader's eye landed on a
           cutoff before it landed on the rung. It is a boundary, not a headline. */}
@@ -924,7 +925,7 @@ function RungList() {
       {/* THE ORPHAN BUCKET — recorded lots no declared rung explains. A count, never
           the lots: the conclusion crosses the wire and the position data does not. */}
       {view.orphanLots !== undefined && view.orphanLots > 0 ? (
-        <p className="muted fp-orphans">
+        <p className="fp-orphans m-0 mt-1 text-[var(--muted)]">
           {view.orphanLots} recorded {view.orphanLots === 1 ? "lot" : "lots"} that no
           declared rung explains.
         </p>

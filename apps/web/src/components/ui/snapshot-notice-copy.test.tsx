@@ -25,8 +25,18 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { classCensus, render, screen } from "../../render.testkit.tsx";
-import { SnapshotEmptyNotice, SnapshotStaleNotice } from "./SnapshotNotice.tsx";
+import {
+  classTokens as tokens,
+  render,
+  renderedClassNames,
+  screen,
+} from "../../render.testkit.tsx";
+import { CARD_SURFACE } from "./Card.tsx";
+import {
+  NOTICE_CODE,
+  SnapshotEmptyNotice,
+  SnapshotStaleNotice,
+} from "./SnapshotNotice.tsx";
 
 /** JSX collapses its own newlines; the DOM keeps them. Compare on words. */
 function text(node: Element): string {
@@ -48,12 +58,26 @@ describe("SnapshotEmptyNotice", () => {
     expect(container.querySelector("code")?.textContent).toBe("pnpm push");
   });
 
-  it("emits the class strings the three routes emitted before the extraction", () => {
+  it("paints the card surface and the code chip, and writes neither class name", () => {
     const { container } = render(<SnapshotEmptyNotice />);
     const root = container.firstElementChild;
 
     expect(root?.tagName).toBe("DIV");
-    expect(classCensus(root!)).toEqual(["card notice"]);
+    expect(root?.className).toBe(CARD_SURFACE);
+    // `.notice code` painted the inline command chip. `rounded-[6px]` and not
+    // `rounded-md`: the theme remaps `--radius-md` to the package's 8px control radius,
+    // so the default-scale class compiles and paints the wrong corner.
+    expect(container.querySelector("code")?.className).toBe(NOTICE_CODE);
+    expect(NOTICE_CODE.split(" ")).toEqual([
+      "rounded-[6px]",
+      "bg-black",
+      "px-1.5",
+      "py-0.5",
+    ]);
+
+    for (const deleted of ["card", "notice"]) {
+      expect([...renderedClassNames(root!)]).not.toContain(deleted);
+    }
   });
 });
 
@@ -86,24 +110,26 @@ describe("SnapshotStaleNotice", () => {
     ]);
   });
 
-  it("carries `error` alongside the class set the empty notice shares, plus the utilities that replaced its rule", () => {
+  it("paints the refusal in the negative colour, on the heading as well as the box", () => {
     const { container } = render(
       <SnapshotStaleNotice storedVersion={2} min={4} max={6} />,
     );
     const root = container.firstElementChild;
 
     expect(root?.tagName).toBe("DIV");
-    // Per class, `toContain`, never full-string equality (spec #420 Seam E). The old
-    // census pinned the whole attribute, which made slice 1's two added utilities read
-    // as a regression rather than as the conversion they are.
-    const names = (root?.getAttribute("class") ?? "").split(/\s+/).filter(Boolean);
-    for (const name of ["card", "notice", "error"]) {
-      expect(names).toContain(name);
+    // Per class, `toContain`, never full-string equality (spec #420 Seam E).
+    for (const utility of [...CARD_SURFACE.split(" "), "text-[var(--neg)]", "m-0"]) {
+      expect(tokens(root!)).toContain(utility);
     }
-    // `.error` is deleted; the name above survives ONLY because `.notice.error h1` still
-    // selects through it (slice 2's rule). Its own two declarations are utilities now.
-    for (const utility of ["text-[var(--neg)]", "m-0"]) {
-      expect(names).toContain(utility);
+    // `.notice.error h1` is deleted and this is where it went. The heading would inherit
+    // the colour from the box anyway; it is written because the rule painted the heading
+    // and an element that leans on its parent reads as an omission next time.
+    expect(tokens(screen.getByRole("heading"))).toContain("text-[var(--neg)]");
+
+    // The last two hooks in this file go with the rules that needed them: slice 1 kept
+    // `error` alive only because `.notice.error h1` still selected through it.
+    for (const deleted of ["card", "notice", "error"]) {
+      expect([...renderedClassNames(root!)]).not.toContain(deleted);
     }
   });
 });
