@@ -47,7 +47,21 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
       <head>
         <HeadContent />
       </head>
-      <body>
+      {/*
+        THE SCAN SENTINEL (spec #420 §4 Seam D). This class is the app-side twin
+        of the package's scan guard: `app-scan-sentinel.test.ts` builds the
+        stylesheet and fails if the selector is missing, which is the only thing
+        in the suite that watches `@source "./"` in `tailwind.css`. Deleting that
+        line silently drops every utility `apps/web` authors and the build still
+        exits 0.
+
+        IT MOVES NO PIXEL TODAY, ON PURPOSE. `styles.css`'s `body` rule declares
+        the same 320px floor and that file is unlayered, so it beats this
+        utility's `layer(utilities)` output on the shared property. Slice 2
+        deletes that rule and this becomes the real floor. It is written exactly
+        once in non-test app source; the guard asserts that too.
+      */}
+      <body className="min-w-[320px]">
         {children}
         <Scripts />
       </body>
