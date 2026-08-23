@@ -1,3 +1,4 @@
+import { customPropertyNames } from "./css-custom-properties.ts";
 import type { ParsedToken } from "./tokens-file.ts";
 
 /**
@@ -50,6 +51,14 @@ export const TOKEN_CONSUMERS: readonly TokenConsumer[] = [
   // `styles.css`'s `:root` in Slice 5 even though they are declared earlier in
   // document order. Unlayered here would make the defaults beat the app.
   { label: "apps/web", tokensFile: "apps/web/src/nms-tokens.generated.css" },
+
+  // Imported by `apps/workbench/src/tailwind.css`, the workbench's own Tailwind
+  // entry. THE SECOND CONSUMER, and Seam D: react-cosmos, no SSR, and no import
+  // from `apps/web`. The layering story is simpler here than above — the
+  // workbench has no hand-written stylesheet to lose to — but the import still
+  // carries `layer(theme)`, because the three-mode decorator overrides these
+  // names as INLINE style on the root element and inline beats every layer.
+  { label: "apps/workbench", tokensFile: "apps/workbench/src/nms-tokens.generated.css" },
 ];
 
 /** The banner every generated tokens file carries. */
@@ -69,9 +78,15 @@ const HEADER = [
   " */",
 ].join("\n");
 
-/** A `--nms-*` name defined in a CSS text, in source order. */
+/**
+ * A `--nms-*` name defined in a CSS text, in source order.
+ *
+ * The syntax parse lives in `./css-custom-properties.ts` and is shared with the
+ * consumer-side guards, which ask the same question of the same files. Three
+ * regexes over one syntax is three chances to disagree about it.
+ */
 export function parseDefinedTokenNames(css: string): string[] {
-  return [...css.matchAll(/^\s*(--nms-[\w-]+)\s*:/gm)].map((match) => match[1]!);
+  return customPropertyNames(css).filter((name) => name.startsWith("--nms-"));
 }
 
 /** The full text of a consumer's generated tokens stylesheet. */

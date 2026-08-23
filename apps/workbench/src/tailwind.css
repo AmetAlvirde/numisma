@@ -1,0 +1,96 @@
+/*
+ * THE WORKBENCH'S OWN TAILWIND ENTRY (spec #412 §5 Seam D).
+ *
+ * Its own, not the app's. `apps/web/src/tailwind.css` is a sibling and never an
+ * import: the whole point of the second consumer is that it compiles its own
+ * stylesheet from the same package source, so a class that renders here and
+ * fails there isolates the fault to the client/SSR split. Sharing the entry
+ * would collapse the two builds into one and delete the diagnostic.
+ *
+ * FOUR LINES, THREE OF WHICH FAIL SILENTLY IF WRONG:
+ *
+ * - `source(none)` ON THE BARREL IMPORT disables Tailwind 4's automatic source
+ *   detection. Without it, detection walks up to the git root and scans the
+ *   whole monorepo — `apps/web` included — so the workbench would emit
+ *   utilities for classes only the app writes and a missing `@source` below
+ *   would be invisible. The modifier binds to the `@tailwind utilities` half of
+ *   the barrel; on a bare `theme.css` import it is silently ignored.
+ * - `@source` PATHS RESOLVE RELATIVE TO THIS FILE, not to the project root, and
+ *   the bare package-name form (`@source "@numisma/components"`) SILENTLY
+ *   PRODUCES NOTHING and does not error. The path below goes through the
+ *   workspace symlink at `apps/workbench/node_modules/@numisma/components`.
+ * - WITHOUT THE SECOND `@source`, `node_modules` is outside detection anyway
+ *   and the package is not scanned at all — every `bg-primary` and every
+ *   arbitrary-value class in `button.tsx` vanishes from the output AND THE
+ *   BUILD STILL EXITS 0. `apps/web/src/tailwind-scan.test.ts` is the standing
+ *   proof of that failure on the app's side.
+ *
+ * PREFLIGHT IS INCLUDED HERE, AND OMITTED IN `apps/web` — the one deliberate
+ * divergence between the two entries. The app omits it because `styles.css`
+ * styles bare elements on purpose and a reset would flatten them. The workbench
+ * has no hand-written stylesheet and wants the reset: a component reviewed on a
+ * browser-default backdrop is being reviewed partly on the browser.
+ */
+@import "tailwindcss" source(none);
+@import "./nms-tokens.generated.css" layer(theme);
+@source "./";
+@source "../node_modules/@numisma/components/src";
+
+/*
+ * ── THE TOKEN LAYER ────────────────────────────────────────────────────────
+ *
+ * SCANNING AND THEMING ARE TWO DIFFERENT PROOFS and the block above is only
+ * about scanning. Without what follows the package's components are scanned
+ * perfectly and still render colourless: `bg-primary` and friends are not
+ * default-theme utilities, so with no token behind them Tailwind emits NO RULE
+ * AT ALL — silently, exit code 0.
+ *
+ * `@numisma/components` ships no CSS by design, so supplying values is the
+ * CONSUMER's job, and every consumer owes its own copy of this mapping. The
+ * generated import above carries the package's grayscale defaults; the
+ * three-mode decorator overrides them per mode.
+ *
+ * WHY THE DECORATOR CAN OVERRIDE THESE AT ALL, and why it writes to the ROOT
+ * ELEMENT rather than a wrapper: `--color-primary: var(--nms-primary)` is
+ * substituted where it is DECLARED, on `:root`. A wrapper div redefining
+ * `--nms-primary` would change bare reads inside arbitrary values and leave
+ * every theme utility on the inherited `:root` value — half the tokens
+ * switching and half not, with nothing to say which half. Writing the override
+ * onto the same element that carries this block makes both halves move
+ * together. See `cosmos.decorator.tsx`.
+ *
+ * `--nms-radius-md` IS NOT A COLOUR. It lands in Tailwind's `--radius-*`
+ * namespace and is the one mapping here that overrides a built-in utility
+ * (`rounded-md`) rather than creating one.
+ */
+@theme {
+  --color-background: var(--nms-background);
+  --color-foreground: var(--nms-foreground);
+
+  --color-muted: var(--nms-muted);
+  --color-border: var(--nms-border);
+  --color-input: var(--nms-input);
+  --color-ring: var(--nms-ring);
+
+  --color-primary: var(--nms-primary);
+  --color-primary-foreground: var(--nms-primary-foreground);
+
+  --color-secondary: var(--nms-secondary);
+  --color-secondary-foreground: var(--nms-secondary-foreground);
+
+  --color-destructive: var(--nms-destructive);
+
+  --radius-md: var(--nms-radius-md);
+}
+
+/*
+ * THE WORKBENCH'S OWN CHROME — the only hand-written CSS here, and deliberately
+ * tiny. It paints the surface a fixture sits on from the SAME tokens the
+ * components read, so switching mode moves the backdrop with the component
+ * rather than leaving a white page under a dark button.
+ */
+html {
+  background: var(--nms-background);
+  color: var(--nms-foreground);
+  color-scheme: light dark;
+}

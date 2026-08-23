@@ -1,0 +1,28 @@
+/*
+ * GENERATED FILE — do not edit.
+ *
+ * Written by ops/components/shadcn-add.ts from the token spec in
+ * packages/components/src/tokens.ts. Every hand edit here is lost, silently,
+ * on the next component add.
+ *
+ * These are the package's grayscale defaults, its base mode. To override one,
+ * define the same --nms-* name at your own :root in your own stylesheet, and
+ * make sure that stylesheet WINS THE CASCADE against this one — it loads after
+ * this file, or this file is imported into a cascade layer and yours is not.
+ * Do not change a value below.
+ */
+
+:root {
+  --nms-background: oklch(1 0 0);
+  --nms-foreground: oklch(0.145 0 0);
+  --nms-muted: oklch(0.97 0 0);
+  --nms-border: oklch(0.922 0 0);
+  --nms-input: oklch(0.922 0 0);
+  --nms-primary: oklch(0.205 0 0);
+  --nms-primary-foreground: oklch(0.985 0 0);
+  --nms-secondary: oklch(0.97 0 0);
+  --nms-secondary-foreground: oklch(0.205 0 0);
+  --nms-destructive: oklch(0.45 0 0);
+  --nms-ring: oklch(0.708 0 0);
+  --nms-radius-md: 0.375rem;
+}
