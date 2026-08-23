@@ -27,6 +27,7 @@ import { describe, expect, it } from "vitest";
 import {
   classTokens as tokens,
   DELETED_IN_SLICE_2,
+  DELETED_IN_SLICE_3,
   render,
   renderedClassNames,
   screen,
@@ -128,7 +129,21 @@ describe("SectionTable on the shared Card", () => {
     }
   });
 
-  it("writes none of slice 2's deleted class names, on either arm", () => {
+  it("paints its two deltas with the sign colours, as slice 3's carrier", () => {
+    render(<SectionTable section={section()} view={anchoredView()} />);
+
+    // `.pos`/`.neg` are a shared rule and the summary card is the first surface in the
+    // spec's order that carries them, so slice 3 deletes the rule and converts every
+    // carrier — including this one, in a component that slice otherwise does not own
+    // (spec #420 Seam B). `row-a` renders one of each, which is why the fixture gives
+    // it a positive anchor delta and a negative cost-basis one.
+    const up = screen.getByText(/▲/);
+    const down = screen.getByText(/▼/);
+    expect(tokens(up)).toContain("text-[var(--pos)]");
+    expect(tokens(down)).toContain("text-[var(--neg)]");
+  });
+
+  it("writes none of the deleted class names, on either arm", () => {
     const anchored = render(
       <SectionTable section={section()} view={anchoredView()} />,
     );
@@ -138,7 +153,7 @@ describe("SectionTable on the shared Card", () => {
 
     for (const { container } of [anchored, genesis]) {
       const rendered = renderedClassNames(container.firstElementChild!);
-      for (const deleted of DELETED_IN_SLICE_2) {
+      for (const deleted of [...DELETED_IN_SLICE_2, ...DELETED_IN_SLICE_3]) {
         expect([...rendered]).not.toContain(deleted);
       }
       expect([...rendered]).toContain("absent");

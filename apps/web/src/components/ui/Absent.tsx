@@ -32,12 +32,11 @@ import type { ReactElement } from "react";
  * the utilities below.
  *
  * `absent` ITSELF STAYS AS A BARE HOOK, exactly as slice 1 kept `error` while a later
- * slice's rule still selected through it. THREE CONTEXTUAL RULES STILL DO:
- * `.metrics dd .absent` (slice 3), `.fp-tile .absent` (slice 7) and `.fp-detail .absent`
- * (slice 8), two of them with `@container` arms. Reproducing those here would drag three
- * later slices' container conversions into this one, and this slice's own brief puts
- * every `.metrics*` rule out of scope. The hook carries nothing itself; it is a join, and
- * it goes when the last of those three rules does.
+ * slice's rule still selected through it. THREE CONTEXTUAL RULES DID: `.metrics dd
+ * .absent` (slice 3), `.fp-tile .absent` (slice 7) and `.fp-detail .absent` (slice 8),
+ * two of them with `@container` arms. THE FIRST IS NOW THE `[dd_&]` PAIR BELOW; two
+ * remain, so the hook stays until slice 8 takes the last of them. It carries nothing
+ * itself; it is a join.
  *
  * ── `[dd_&]` IS THE METRICS CONTEXT, NAMED BY ITS ELEMENT ────────────────────────────
  * `.metrics .muted` (slice 3's) beat `.absent-why` on specificity and sized the reason
@@ -50,10 +49,17 @@ import type { ReactElement } from "react";
  * meaning the same thing through it. Measured before it was written: the only `<dd>` in
  * the app that holds an `Absent` is a metrics one — `.fp-detail`'s single `<dd>` renders
  * a price and never this — so the proxy is exact today, not merely close.
+ *
+ * SLICE 3'S OWN RULE JOINS THEM, on the same `dd` proxy and for the same reason.
+ * `.metrics dd .absent` wrapped the cause under the em dash at the right rail rather
+ * than widening the row, and its `@container` arm returned it to the left edge once the
+ * card reflowed. Both edges are here, and the container variant names the breakpoint the
+ * card still declares — this element is inside a `metrics-card` container whenever the
+ * `dd` proxy is true, which is the same measurement.
  */
 export function Absent({ why }: { why?: string | undefined }): ReactElement {
   return (
-    <span className="absent inline-flex items-baseline gap-1.5 text-[var(--muted)]">
+    <span className="absent inline-flex items-baseline gap-1.5 text-[var(--muted)] [dd_&]:flex-wrap [dd_&]:justify-end [dd_&]:@[380px]/metrics-card:justify-start">
       <span aria-hidden="true">—</span>
       <span className="m-0 mt-1 text-[0.72rem] font-medium text-[var(--muted)] [dd_&]:mt-0 [dd_&]:text-[0.75rem]">
         {why ?? "suppressed"}

@@ -183,6 +183,34 @@ export const DELETED_IN_SLICE_2 = [
 ];
 
 /**
+ * THE CLASS NAMES SLICE 3 DELETED — the summary card, the badges, the shared metrics
+ * grid and the two sign colours.
+ *
+ * Kept beside slice 2's list rather than folded into it, because the two answer
+ * different questions on a red: a `muted` that reappears is a shell regression, a
+ * `metrics` that reappears is a summary one, and a single merged list would make the
+ * failure message name the wrong slice's contract.
+ *
+ * Three surfaces assert this one: the summary card owns the rules, and the glance card
+ * and the section table carry `metrics` and `pos`/`neg` respectively (spec #420 Seam B —
+ * the slice that deletes a shared rule converts every carrier of it).
+ *
+ * `absent` IS STILL NOT ON THE LIST. `.metrics dd .absent` — one of the three contextual
+ * rules named in slice 2's note — goes here, and the other two (`.fp-tile .absent`,
+ * `.fp-detail .absent`) do not. The hook stays until slice 8 takes the last of them.
+ */
+export const DELETED_IN_SLICE_3 = [
+  "summary",
+  "summary-head",
+  "badge",
+  "badge-ok",
+  "badge-warn",
+  "metrics",
+  "pos",
+  "neg",
+];
+
+/**
  * Everything a render test is allowed to reach for, re-exported from one place.
  *
  * `fireEvent` RIDES ALONGSIDE `userEvent`, NOT INSTEAD OF IT. Spec #403 §3.4 bought

@@ -9,6 +9,14 @@ import type {
 import { referenceLabel } from "../glance/verdict.ts";
 import { Absent } from "./ui/Absent.tsx";
 import { Card } from "./ui/Card.tsx";
+import {
+  METRICS_FIGURE,
+  METRICS_LIST,
+  METRICS_ROW,
+  METRICS_TERM,
+  NEGATIVE,
+  POSITIVE,
+} from "./SummaryCard.tsx";
 
 /**
  * THE GLANCE (D1/D3) — a verdict sentence and a CLOSED SET of exactly three standing
@@ -37,22 +45,28 @@ export function GlanceCard({ verdict }: { verdict: Verdict }) {
       </p>
       <p className="m-0 mt-1 text-[var(--muted)]">as of {referenceLabel(verdict.asOf)}</p>
 
-      <dl className="metrics">
-        <div>
-          <dt>Fund value</dt>
-          <dd>
+      {/* THE SHARED LIST, AND THE SHARED BREAKPOINT WITH IT (spec #420 Seam B). These
+          six strings come from `SummaryCard` because `.metrics` was one rule serving
+          both cards and the migration keeps it one thing: the glance and the big
+          picture stay one visual system, and they reflow at the same card width
+          because they answer to the same container name. The container itself is
+          still declared by `.glance` in `styles.css`, which is slice 5's to move. */}
+      <dl className={METRICS_LIST}>
+        <div className={METRICS_ROW}>
+          <dt className={METRICS_TERM}>Fund value</dt>
+          <dd className={METRICS_FIGURE}>
             <FundValue slot={verdict.slots.fundValue} />
           </dd>
         </div>
-        <div>
-          <dt>Change</dt>
-          <dd>
+        <div className={METRICS_ROW}>
+          <dt className={METRICS_TERM}>Change</dt>
+          <dd className={METRICS_FIGURE}>
             <Change slot={verdict.slots.change} />
           </dd>
         </div>
-        <div>
-          <dt>Reserve</dt>
-          <dd>
+        <div className={METRICS_ROW}>
+          <dt className={METRICS_TERM}>Reserve</dt>
+          <dd className={METRICS_FIGURE}>
             <Reserve slot={verdict.slots.reserve} />
           </dd>
         </div>
@@ -105,7 +119,7 @@ function Change({ slot }: { slot: ChangeSlot }) {
   const pct = slot.percent!;
   return (
     <>
-      <span className={pct >= 0 ? "pos" : "neg"}>
+      <span className={pct >= 0 ? POSITIVE : NEGATIVE}>
         {pct >= 0 ? "▲" : "▼"}
         {Math.abs(pct).toFixed(2)}%
       </span>

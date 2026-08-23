@@ -99,129 +99,16 @@
    solving narrower, and why this and `.table-scroll` are the only sanctioned sideways
    scrolls — moved with them. */
 
-/* Fund name left, the data-safety badge hard right. `wrap` and a shrinkable title block
-   are what keep the pair on the card at 320px: the warn badge's text is a joined list of
-   causes (`⚠ no current mark · 3 non-live`) and there is no width at which that is a
-   pill-shaped word. `.badge`'s `nowrap` is overridden for exactly this one placement,
-   and stays the default everywhere else: a badge is a word, and a word that breaks
-   stops reading as a chip. */
-.summary-head {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-}
+/* THE SUMMARY CARD LEFT THIS FILE (spec #420 slice 3). `.summary*`, `.badge*`, the
+   shared `.metrics*` grid with its `@container metrics-card` arm, and `.pos`/`.neg` are
+   utilities on the elements that referenced them — `SummaryCard.tsx` holds the six
+   shared strings and `GlanceCard` and `SectionTable` import them, because a rule written
+   once for two surfaces stays one thing. The breakpoint kept its NAME: both cards still
+   reflow at a 380px CARD width, now through `@[380px]/metrics-card:` variants.
 
-.summary-head > div {
-  flex: 1 1 0;
-  min-width: 0;
-}
-
-.summary-head .badge {
-  flex: 0 1 auto;
-  white-space: normal;
-}
-
-/* ── THE STANDING NUMBERS, PHONE FIRST ──────────────────────────────────────
-   ONE COLUMN OF DATA ROWS AT 320px — label left, figure hard right, one line each —
-   and a real grid of tiles once the card is wide enough. This is the same shape and
-   the same reasoning as `.fp-tiles` on the Fill Path header: `auto-fit` already
-   collapsed to a single column at this width, but it collapsed to STACKED tiles,
-   which spends two lines per number and leaves the figures on a ragged left edge.
-   The right rail plus `tabular-nums` puts all three on one axis the eye runs down.
-
-   THE CARD IS THE QUERY CONTAINER, not the viewport — see `.glance` and `.summary`.
-   Both carry the shared container name `metrics-card` precisely so this pair of rules
-   is written once; two copies of it would be two things to keep in step. */
-.metrics {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 8px;
-  margin: 16px 0 0;
-}
-
-/* A GRID, NOT A FLEX ROW, AND THE VALUE IS THE HALF THAT GIVES. Every figure here
-   carries a trailing reference in the same `<dd>` — `vs Sun 9 Aug`, `floor 10%`, or an
-   absence cause — so a value is a phrase, not a number, and sizing it to content (the
-   Fill Path header's rule, where the values genuinely are numbers) crushed `Change`
-   to 30px and printed its own label through it. Terms sized to content, values take
-   the remainder and wrap inside it, still against the right rail. Same mechanism and
-   same reasoning as `.fp-detail`. */
-.metrics > div {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: baseline;
-  column-gap: 10px;
-}
-
-.metrics dt {
-  color: var(--muted);
-  font-size: 0.8rem;
-}
-
-.metrics dd {
-  margin: 0;
-  font-size: 1.15rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-/* A figure here carries a trailing reference (`vs Sun 9 Aug`, `floor 10%`) or, absent,
-   its cause. Both are longer than the number and both wrap under it at the rail rather
-   than widening the row. */
-.metrics dd .absent {
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-@container metrics-card (min-width: 380px) {
-  .metrics {
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    gap: 12px;
-  }
-
-  .metrics > div {
-    display: block;
-  }
-
-  .metrics dd {
-    margin: 2px 0 0;
-    text-align: left;
-  }
-
-  .metrics dd .absent {
-    justify-content: flex-start;
-  }
-}
-
-.pos {
-  color: var(--pos);
-}
-
-.neg {
-  color: var(--neg);
-}
-
-.badge {
-  display: inline-block;
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 0.78rem;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.badge-ok {
-  background: var(--ok);
-  color: #fff;
-}
-
-.badge-warn {
-  background: var(--warn);
-  color: #fff;
-}
+   THE FILE'S LAST COLOUR LITERALS WENT WITH THE BADGES. `.badge-ok` and `.badge-warn`
+   each painted `color: #fff`; nothing outside the two `:root` blocks spells a colour
+   any more, and `summary-section-deleted.test.ts` is what keeps that true. */
 
 /* THE ESCAPE HATCH, AND THE ONE PLACE A SURFACE IS ALLOWED TO SCROLL SIDEWAYS. A five-
    column composition row is not reflowable at 320px: `Label · USD value · % of fund`
@@ -286,24 +173,18 @@ thead th {
 /* ── the glance (PRD #146 D1/D3) ────────────────────────────────────────────
    The verdict is the only thing above 20px and it lands before the eye reaches
    the numbers: the surface is judged on how fast the *no* reads, on a phone, in
-   a queue. The three standing numbers reuse `.metrics`, so the glance and the
-   big picture stay one visual system.
+   a queue. The three standing numbers render the metrics grid `SummaryCard.tsx` now
+   owns, so the glance and the big picture stay one visual system.
 
    THE CARD IS THE QUERY CONTAINER, not the viewport, so the glance lays itself out the
    same whether the narrowness comes from a 320px phone or from a column it is dropped
-   into later. The second name is deliberate: `metrics-card` is the name the shared
-   `.metrics` breakpoint queries, and `glance` is here for anything only this card wants. */
-.glance,
-.summary {
-  container-type: inline-size;
-}
-
+   into later. THE SECOND NAME IS WHAT SLICE 3 QUERIES: `metrics-card` is the name both
+   cards' shared `@[380px]/metrics-card:` variants answer to, and this declaration is
+   the only thing still supplying it here. Moving it is slice 5's, and moving it means
+   keeping both names — `glance` is here for anything only this card wants. */
 .glance {
+  container-type: inline-size;
   container-name: glance metrics-card;
-}
-
-.summary {
-  container-name: summary metrics-card;
 }
 
 .verdict {

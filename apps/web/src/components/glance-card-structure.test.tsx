@@ -25,6 +25,7 @@ import { describe, expect, it } from "vitest";
 import {
   classTokens as tokens,
   DELETED_IN_SLICE_2,
+  DELETED_IN_SLICE_3,
   render,
   renderedClassNames,
   screen,
@@ -89,11 +90,79 @@ describe("GlanceCard on the shared Card", () => {
     }
   });
 
-  it("writes none of slice 2's deleted class names", () => {
+  it("carries the shared metrics grid, as slice 3's carrier", () => {
+    render(<GlanceCard verdict={standingVerdict()} />);
+
+    // `.metrics` and its `@container metrics-card` arm are a shared rule; the summary
+    // card is the first surface in the spec's order that carries them, so slice 3
+    // deletes the rule and converts this list too (spec #420 Seam B). The breakpoint
+    // keeps its NAME precisely so both cards still reflow at the same card width, and
+    // the container itself is still declared by `.glance`, which is slice 5's to move.
+    const list = screen.getByText("Fund value").closest("dl")!;
+    for (const utility of [
+      "grid",
+      "grid-cols-1",
+      "gap-2",
+      "m-0",
+      "mt-4",
+      "@[380px]/metrics-card:grid-cols-[repeat(auto-fit,minmax(140px,1fr))]",
+      "@[380px]/metrics-card:gap-3",
+    ]) {
+      expect(tokens(list)).toContain(utility);
+    }
+
+    const row = screen.getByText("Fund value").closest("div")!;
+    for (const utility of [
+      "grid",
+      "grid-cols-[auto_minmax(0,1fr)]",
+      "items-baseline",
+      "gap-x-[10px]",
+      "@[380px]/metrics-card:block",
+    ]) {
+      expect(tokens(row)).toContain(utility);
+    }
+
+    for (const utility of ["text-[var(--muted)]", "text-[0.8rem]"]) {
+      expect(tokens(screen.getByText("Fund value"))).toContain(utility);
+    }
+    for (const utility of [
+      "m-0",
+      "text-[1.15rem]",
+      "font-semibold",
+      "tabular-nums",
+      "text-right",
+      "@[380px]/metrics-card:mt-[2px]",
+      "@[380px]/metrics-card:text-left",
+    ]) {
+      expect(tokens(screen.getByText(/1,234/).closest("dd")!)).toContain(utility);
+    }
+  });
+
+  it("paints a rendered change with the sign colour it earned", () => {
+    const rising = standingVerdict();
+    rising.slots.change = {
+      rendered: true,
+      percent: 1.83,
+      referenceLabel: "Mon 5 Jan",
+    };
+    render(<GlanceCard verdict={rising} />);
+    expect(tokens(screen.getByText(/▲/))).toContain("text-[var(--pos)]");
+
+    const falling = standingVerdict();
+    falling.slots.change = {
+      rendered: true,
+      percent: -1.83,
+      referenceLabel: "Mon 5 Jan",
+    };
+    render(<GlanceCard verdict={falling} />);
+    expect(tokens(screen.getByText(/▼/))).toContain("text-[var(--neg)]");
+  });
+
+  it("writes none of the deleted class names", () => {
     const { container } = render(<GlanceCard verdict={standingVerdict()} />);
     const rendered = renderedClassNames(container.firstElementChild!);
 
-    for (const deleted of DELETED_IN_SLICE_2) {
+    for (const deleted of [...DELETED_IN_SLICE_2, ...DELETED_IN_SLICE_3]) {
       expect([...rendered]).not.toContain(deleted);
     }
     // `absent` is the one hook that stays, for three later slices' contextual rules.

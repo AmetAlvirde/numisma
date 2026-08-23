@@ -1,5 +1,9 @@
 import { Absent } from "./ui/Absent.tsx";
 import { Card } from "./ui/Card.tsx";
+// The two sign colours, from the card that owns their deleted rule (spec #420 Seam B —
+// a shared rule is converted by the first surface in the migration's order that carries
+// it, wherever its other carriers render).
+import { NEGATIVE, POSITIVE } from "./SummaryCard.tsx";
 import type { CompositionRow, DashboardSection } from "@numisma/engine";
 import { formatUsd, formatPercent } from "@numisma/engine/format";
 import type {
@@ -141,7 +145,7 @@ function Delta({ delta }: { delta: RowDelta }) {
   if (!delta.rendered) return <Absent why={whyAbsent(delta.suppressedBy)} />;
   const usd = delta.usdValue!;
   return (
-    <span className={usd >= 0 ? "pos" : "neg"}>
+    <span className={usd >= 0 ? POSITIVE : NEGATIVE}>
       {usd >= 0 ? "▲" : "▼"}
       {formatUsd(Math.abs(usd))}
       {delta.percent === undefined ? null : (
