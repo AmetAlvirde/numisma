@@ -73,7 +73,7 @@ export default {
   sizes: (
     <Row
       title="Sizes"
-      note="The height and radius scale. `xs` and `sm` clamp their corners against --nms-radius-md, so a radius change moves them and not `default` or `lg`."
+      note="The height and radius scale. `default` and `lg` carry a plain `rounded-md`, so a radius change moves them by the full token value; `xs` and `sm` clamp against --nms-radius-md and stop moving once it passes 8px/10px."
     >
       {SIZES.map((size) => (
         <Button key={size} size={size}>
