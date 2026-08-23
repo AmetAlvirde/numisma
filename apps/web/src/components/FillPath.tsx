@@ -625,7 +625,12 @@ function Chart() {
           design and this paragraph is the ONLY form in which its content reaches the
           accessibility tree; removing the node rather than hiding it visually would take
           the whole picture away from a screen-reader user to tidy a sighted one's card.
-          `.sr-only` is therefore load-bearing here — see the rule in `styles.css`.
+          `sr-only` is therefore load-bearing here, and it is TAILWIND'S now: spec #420
+          slice 2 deleted the house rule, which said the same thing in the same clip-rect
+          idiom. `display: none` and `visibility: hidden` would remove the node from the
+          tree along with the layout, which is exactly what must not happen to this
+          paragraph. The class is emitted because this line writes it and `@source "./"`
+          scans this file — nothing else in the repo asks for it.
 
           THE ABSENT ARM IS HIDDEN WITH IT. It stands in the same slot and speaks to the
           same reader: a sighted user needs no note that a caption they cannot see is
