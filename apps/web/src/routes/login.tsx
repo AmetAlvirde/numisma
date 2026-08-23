@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useMutation } from "@tanstack/react-query";
+import { Button } from "@numisma/components";
+
 import { authClient } from "../lib/auth-client.ts";
 
 export const Route = createFileRoute("/login")({
@@ -69,9 +71,21 @@ function LoginPage() {
         {signIn.isError ? (
           <p className="error">{signIn.error.message}</p>
         ) : null}
-        <button type="submit" disabled={signIn.isPending}>
+        {/* THE PACKAGE `Button`, and `type="submit"` IS LOAD-BEARING. Base UI's
+            button hands the element `type: "button"` by default and merges
+            external props last, so the attribute below is what keeps this a
+            submit control — drop it and the form still renders, still looks
+            right, and no click ever submits it. `login-submit-button.test.tsx`
+            holds that, along with the pending arm.
+
+            SHARED PROPERTIES STILL COME FROM `styles.css`. `.auth-card button`
+            is unlayered and Tailwind's output sits in `layer(utilities)`, so the
+            fill, radius and padding below are the hand-written file's, by
+            design (spec #412 Seam C). What the package's tokens govern here is
+            everything that rule does not set — the focus ring above all. */}
+        <Button type="submit" disabled={signIn.isPending}>
           {signIn.isPending ? "Signing in…" : "Sign in"}
-        </button>
+        </Button>
         {/* Single-tenant (ADR-007): no self-service signup. The one account is
             established by `pnpm --filter @numisma/web auth:seed`, so there is no
             "Create one" link and no /signup route. */}
