@@ -49,6 +49,21 @@ render current state. An `--as-of` earlier than the genesis date fails loud.
 | `pnpm db:init`     | Apply only the `composition_snapshot` DDL — no fold, no upsert.                                                                                                 |
 | `pnpm db:provision`| Idempotent DDL plus the ADR-007 two-role grants, via `PROJECTION_ADMIN_DATABASE_URL`.                                                                           |
 
+## The component package
+
+| Script                          | What it does                                                                                                                                                          |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm components:add <name...>` | The only sanctioned way to add a shadcn component to `@numisma/components`. Injects the tsconfig `paths` mapping the CLI needs, runs `shadcn add` against the package's hand-written `components.json`, strips the mapping again, rewrites `@/…` imports to relative extensionless specifiers, rewrites bare custom-property reads into the `--nms-` namespace, folds newly discovered names into `src/tokens.ts` with grayscale defaults, and regenerates every registered consumer's tokens file. Idempotent — re-adding a component changes nothing. Exits non-zero on a stray `@` directory, on a radix dependency (the package is `base-vega`), and on a token it has no default for. With no argument it skips the CLI and re-runs the rewrites and the generators in place, which is how a newly registered consumer gets its tokens file. |
+
+A consumer registers itself by adding one entry to `TOKEN_CONSUMERS` in
+[`ops/components/consumers.ts`](../ops/components/consumers.ts) and running
+`pnpm components:add` with no argument. The generated file is overwritten in
+full on every run; a consumer overrides a token by defining the same `--nms-*`
+name at its own `:root`, never by editing the generated defaults.
+
+The script does **not** touch `packages/components/src/index.ts`. That surface
+is curated by hand, one export at a time.
+
 ## Quality gates
 
 | Script               | What it does                                                                                                                                                        |
