@@ -6,6 +6,11 @@ import { describe, expect, it } from "vitest";
 
 import { NMS_TOKEN_NAMES } from "@numisma/components/tokens.ts";
 
+import {
+  customPropertyDeclarations,
+  customPropertyNames,
+} from "../../../ops/components/css-custom-properties.ts";
+
 /**
  * THE CONSUMER SIDE OF THE TOKEN CONTRACT (spec #412 §4.3, assertion 2).
  *
@@ -40,9 +45,15 @@ const generatedCss = read("nms-tokens.generated.css");
 const stylesCss = read("styles.css");
 const rootRoute = read(join("routes", "__root.tsx"));
 
-/** Every `--nms-*` custom property this text DEFINES (declares), in order. */
+/**
+ * Every `--nms-*` custom property this text DEFINES (declares), in order.
+ *
+ * The syntax parse is shared with `ops/components` and with the workbench's
+ * drift test — one regex over one syntax, so the three guards that read these
+ * files cannot disagree about what a declaration is.
+ */
 function definedTokenNames(css: string): string[] {
-  return [...css.matchAll(/^\s*(--nms-[\w-]+)\s*:/gm)].map((match) => match[1]!);
+  return customPropertyNames(css).filter((name) => name.startsWith("--nms-"));
 }
 
 describe("the app defines every token the package declares", () => {
@@ -90,10 +101,14 @@ describe("the app defines every token the package declares", () => {
  * type-colour behind a hovered button.
  */
 describe("the app's --nms-* overrides in styles.css", () => {
+  // The same parse `apps/workbench/src/app-token-drift.test.ts` runs over this
+  // file. That test resolves these aliases and pins the VALUES; this one asks
+  // only whether the app took a position on each name. Two questions, one
+  // parse.
   const overrides = new Map(
-    [...stylesCss.matchAll(/^\s*(--nms-[\w-]+)\s*:\s*([^;]+);/gm)].map(
-      (match) => [match[1]!, match[2]!.trim()] as const,
-    ),
+    customPropertyDeclarations(stylesCss)
+      .filter(({ name }) => name.startsWith("--nms-"))
+      .map(({ name, value }) => [name, value] as const),
   );
 
   it.each(NMS_TOKEN_NAMES)("overrides the package default for %s", (name) => {
