@@ -8,12 +8,23 @@
  * line the surface exists to say. `Card` makes headings easy to add, so this is now the
  * kind of thing a well-meaning diff adds. It renders no heading, asserted.
  *
- * The class census is the other half. Spec #403 moves this card's root element onto a
- * primitive that builds the class string for it, while forbidding any new class name and
- * requiring `styles.css` to be byte-identical. A dropped, reordered or invented token is
- * invisible in a diff and this is what sees it. Spec #412 Slice 5 spends that file's one
- * sanctioned edit on a `:root` block of `--nms-*` overrides; it adds custom properties
- * and touches no selector, so this census is the same instrument it was.
+ * The class census is the other half. Spec #403 moved this card's root element onto a
+ * primitive that builds the class string for it, while forbidding any new class name; a
+ * dropped, reordered or invented token is invisible in a diff and this is what saw it.
+ * Spec #420 slice 5 converts the card and the census becomes its SUCCESSOR (Seam E): the
+ * load-bearing utilities are asserted per class with `toContain`, and the four deleted
+ * class names are asserted absent from the whole render. Full-string equality is gone on
+ * purpose — a converted element's class attribute is a dozen ordered utilities, and
+ * pinning the string would make this test depend on Prettier's class sort order.
+ *
+ * THE ROOT'S TWO CONTAINER CLASSES ARE THE ONE ASSERTION HERE THAT IS NOT ROUTINE.
+ * `.glance` declared `container-name: glance metrics-card`, and `metrics-card` is what
+ * slice 3's `@[380px]/metrics-card:` variants on the list below answer to. Tailwind's
+ * named container utility emits the `container` shorthand and can therefore carry only
+ * ONE name, so the pair is written as the bare container type plus an arbitrary
+ * `container-name`. This file asserts that both classes are on the element. It cannot
+ * assert that both names RESOLVE — jsdom lays nothing out and answers no container query
+ * — so the value half is Chrome's, by binary-searching the reflow width.
  *
  * THE VERDICT IS AUTHORED, not composed through `verdict.ts`. This file asserts markup,
  * and `verdict.test.ts` is the oracle for what the fields should contain; a fixture that
@@ -26,6 +37,7 @@ import {
   classTokens as tokens,
   DELETED_IN_SLICE_2,
   DELETED_IN_SLICE_3,
+  DELETED_IN_SLICE_5,
   render,
   renderedClassNames,
   screen,
@@ -63,10 +75,12 @@ describe("GlanceCard on the shared Card", () => {
 
   it("carries the card surface and the converted shared vocabulary", () => {
     const { container } = render(<GlanceCard verdict={standingVerdict()} />);
-    const root = container.firstElementChild;
+    const root = container.firstElementChild!;
 
-    expect(root?.tagName).toBe("SECTION");
-    expect(root?.className).toBe(`${CARD_SURFACE} glance`);
+    expect(root.tagName).toBe("SECTION");
+    for (const utility of CARD_SURFACE.split(" ")) {
+      expect(tokens(root)).toContain(utility);
+    }
 
     // `.muted` was `color: var(--muted); margin: 4px 0 0`. Preflight is off, so the
     // three zeroed edges are as load-bearing as the one that is not.
@@ -88,6 +102,49 @@ describe("GlanceCard on the shared Card", () => {
     ]) {
       expect(tokens(reference)).toContain(utility);
     }
+  });
+
+  it("declares the query container with BOTH of the names the rule carried", () => {
+    const { container } = render(<GlanceCard verdict={standingVerdict()} />);
+    const root = container.firstElementChild!;
+
+    // Two classes, not one, and the pair is the whole contract. The bare utility is the
+    // containment; the arbitrary property is the name pair, underscore for space. Writing
+    // the named utility instead would emit `container: glance / inline-size` and take
+    // `metrics-card` away from the list below without failing anything here.
+    expect(tokens(root)).toContain("@container");
+    expect(tokens(root)).toContain("[container-name:glance_metrics-card]");
+  });
+
+  it("paints the verdict line, and paints the two arms opposite colours", () => {
+    // `.verdict` was `margin: 0; font-size: 1.5rem; line-height: 1.25; font-weight: 650;
+    // letter-spacing: -0.01em`. Preflight is off, so the `<p>`'s four UA margin edges are
+    // live and `m-0` is a declaration rather than a formality.
+    const standing = render(<GlanceCard verdict={standingVerdict()} />);
+    const settled = standing.getByText("Nothing needs you.");
+    expect(settled.tagName).toBe("P");
+    for (const utility of [
+      "m-0",
+      "text-[1.5rem]",
+      "leading-tight",
+      "font-[650]",
+      "tracking-[-0.01em]",
+    ]) {
+      expect(tokens(settled)).toContain(utility);
+    }
+
+    // INVERTED AGAINST THE CLASS NAMES THAT ARE GONE, and unchanged: `.verdict-no` — the
+    // settled arm — was `var(--pos)`, and `.verdict-yes`, the arm that needs the operator,
+    // was `var(--neg)`. The alarming answer gets the alarming colour.
+    expect(tokens(settled)).toContain("text-[var(--pos)]");
+
+    const alarming = standingVerdict();
+    alarming.needsYou = true;
+    alarming.sentence = "Reserve is under its floor.";
+    render(<GlanceCard verdict={alarming} />);
+    expect(tokens(screen.getByText("Reserve is under its floor."))).toContain(
+      "text-[var(--neg)]",
+    );
   });
 
   it("carries the shared metrics grid, as slice 3's carrier", () => {
@@ -162,7 +219,11 @@ describe("GlanceCard on the shared Card", () => {
     const { container } = render(<GlanceCard verdict={standingVerdict()} />);
     const rendered = renderedClassNames(container.firstElementChild!);
 
-    for (const deleted of [...DELETED_IN_SLICE_2, ...DELETED_IN_SLICE_3]) {
+    for (const deleted of [
+      ...DELETED_IN_SLICE_2,
+      ...DELETED_IN_SLICE_3,
+      ...DELETED_IN_SLICE_5,
+    ]) {
       expect([...rendered]).not.toContain(deleted);
     }
     // `absent` is the one hook that stays, for three later slices' contextual rules.

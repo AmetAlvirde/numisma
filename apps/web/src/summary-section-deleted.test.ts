@@ -124,10 +124,15 @@ describe("the summary section's deletion", () => {
     expect(uncommented(STYLES_CSS)).not.toMatch(/@container\s+metrics-card/);
   });
 
-  it("leaves the glance card its own container declaration, for slice 5", () => {
-    // `.summary` left the shared `container-type` selector list; `.glance` is not
-    // this slice's to move and its metrics list reflows through it until slice 5.
-    expect(uncommented(STYLES_CSS)).toMatch(/^\.glance[\s,{]/m);
+  it("no longer needs the glance card to hold the shared name — slice 5 took it", () => {
+    // This assertion used to read the other way round. `.summary` left the shared
+    // `container-type` selector list in slice 3 and `.glance` stayed, because it was the
+    // only thing still supplying `metrics-card` to the variants slice 3 had just written;
+    // pinning it here is what stopped slice 3 from deleting it by tidiness. Slice 5 has
+    // now moved that declaration onto the element as TWO classes that keep BOTH names, so
+    // the pin is inverted rather than dropped: the rule is gone, and
+    // `glance-section-deleted.test.ts` owns the deletion from here.
+    expect(uncommented(STYLES_CSS)).not.toMatch(/^\.glance[\s,{]/m);
   });
 
   it("spells no colour literal outside the two :root blocks", () => {

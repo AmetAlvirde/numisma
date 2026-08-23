@@ -229,6 +229,26 @@ export const DELETED_IN_SLICE_3 = [
 export const DELETED_IN_SLICE_4 = ["table-scroll", "num"];
 
 /**
+ * THE CLASS NAMES SLICE 5 DELETED — the glance card's own four, and only its own.
+ *
+ * One surface asserts this one. Nothing outside `GlanceCard` ever carried these, which is
+ * why the list is short: slices 2 and 3 had already taken every class that card shares
+ * with anything else (spec #420 Seam B).
+ *
+ * `glance` IS ON THE LIST AND THAT IS THE POINT. Its rule was the card's query container,
+ * and the name it carried on this element is now spelled by two utilities instead — the
+ * bare container type and an arbitrary `container-name` holding BOTH names. A `glance`
+ * reappearing on the section would mean someone reached for the class again; Tailwind's
+ * NAMED container utility appearing instead of the pair is the failure no assertion in
+ * this repo can see, because it is a live container with one name too few. Chrome holds
+ * that one, by binary-searching the width the metrics list reflows at.
+ *
+ * Kept beside slices 2, 3 and 4 rather than folded in, for the reason those are kept
+ * apart: a merged list makes a failure name the wrong slice's contract.
+ */
+export const DELETED_IN_SLICE_5 = ["glance", "verdict", "verdict-no", "verdict-yes"];
+
+/**
  * Everything a render test is allowed to reach for, re-exported from one place.
  *
  * `fireEvent` RIDES ALONGSIDE `userEvent`, NOT INSTEAD OF IT. Spec #403 §3.4 bought

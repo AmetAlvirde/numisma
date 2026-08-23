@@ -126,39 +126,6 @@
    deletion; the reasoning for each half is in `SectionTable.tsx` beside the string that
    carries it. */
 
-/* ── the glance (PRD #146 D1/D3) ────────────────────────────────────────────
-   The verdict is the only thing above 20px and it lands before the eye reaches
-   the numbers: the surface is judged on how fast the *no* reads, on a phone, in
-   a queue. The three standing numbers render the metrics grid `SummaryCard.tsx` now
-   owns, so the glance and the big picture stay one visual system.
-
-   THE CARD IS THE QUERY CONTAINER, not the viewport, so the glance lays itself out the
-   same whether the narrowness comes from a 320px phone or from a column it is dropped
-   into later. THE SECOND NAME IS WHAT SLICE 3 QUERIES: `metrics-card` is the name both
-   cards' shared `@[380px]/metrics-card:` variants answer to, and this declaration is
-   the only thing still supplying it here. Moving it is slice 5's, and moving it means
-   keeping both names — `glance` is here for anything only this card wants. */
-.glance {
-  container-type: inline-size;
-  container-name: glance metrics-card;
-}
-
-.verdict {
-  margin: 0;
-  font-size: 1.5rem;
-  line-height: 1.25;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-}
-
-.verdict-no {
-  color: var(--pos);
-}
-
-.verdict-yes {
-  color: var(--neg);
-}
-
 /* ── the DCA card (spec #277 D4/D6) ─────────────────────────────────────────
    ONE BLOCK, APPENDED, when it landed. The card is built out of classes that
    already exist (`.card`, `.table-scroll`, `table`, `th.num`, `.absent`,
