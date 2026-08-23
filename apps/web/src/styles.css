@@ -126,6 +126,19 @@
    deletion; the reasoning for each half is in `SectionTable.tsx` beside the string that
    carries it. */
 
+/* THE GLANCE CARD LEFT THIS FILE (spec #420 slice 5). The verdict line and its two sign
+   colours are utilities on the `<p>` `GlanceCard.tsx` renders, and the card's query
+   container is two classes on the section: the bare container-type utility, and an
+   arbitrary `container-name` carrying BOTH of the names this rule carried.
+
+   KEEPING THE SECOND NAME IS THE WHOLE OF THAT SLICE. `container-name: glance
+   metrics-card` was the last declaration in the repo supplying `metrics-card`, the name
+   slice 3 moved this card's metrics list onto; Tailwind's named container utility emits
+   the `container` shorthand and can carry only one name, so reaching for it would have
+   stranded the list at its narrow layout at every width — with no rule missing and
+   nothing red. The reasoning is in `GlanceCard.tsx` beside the two classes that carry it,
+   and `glance-section-deleted.test.ts` holds the deletion. */
+
 /* ── the DCA card (spec #277 D4/D6) ─────────────────────────────────────────
    ONE BLOCK, APPENDED, when it landed. The card is built out of classes that
    already exist (`.card`, `.table-scroll`, `table`, `th.num`, `.absent`,
