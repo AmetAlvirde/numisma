@@ -23,13 +23,15 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
  * THE SENTINEL IS THE ARBITRARY-VALUE 320px MIN-WIDTH UTILITY ON `<body>` IN
  * `__root.tsx` — assembled below rather than spelled out here, and THAT
  * INCLUDES THIS PROSE, because Tailwind extracts candidates from comment text
- * as readily as from JSX. IT IS PARITY-NEUTRAL BY CONSTRUCTION. While `styles.css`'s own `body` rule still
- * stands, that file is unlayered and Tailwind's output sits in
- * `layer(utilities)`, so the hand-written 320px floor wins and this declaration
- * is a duplicate that moves no pixel. Slice 2 deletes that rule and the sentinel
- * becomes the real floor — the most load-bearing declaration in the file.
- * Choosing it now means the guard watches something that will matter rather than
- * a decoration nobody would miss.
+ * as readily as from JSX. IT IS NOW THE FLOOR ITSELF. It was chosen while it was
+ * still parity-neutral — `styles.css`'s unlayered `body` rule declared the same
+ * 320px and beat this utility's `layer(utilities)` output, so it moved no pixel —
+ * precisely so that slice 2 could delete that rule and leave the sentinel
+ * holding the app's most load-bearing declaration. Slice 2 has: the rehomed
+ * `body` rule in `tailwind.css`'s `@layer base` carries margin, background,
+ * colour and font and DELIBERATELY NOT `min-width`. If `@source "./"` ever stops
+ * scanning, the page no longer stops responding at 320px — it goes on reflowing
+ * into damage, and this test is what says so.
  *
  * WHAT THIS TEST DOES NOT PROVE, and must not be read as proving: that any token
  * resolves. A PASSING BUILD IS NOT EVIDENCE OF SCANNING — that is what this

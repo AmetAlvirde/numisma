@@ -90,30 +90,14 @@
   --nms-radius-md: 8px;
 }
 
-* {
-  box-sizing: border-box;
-}
-
-/* 320px IS THE FLOOR, NOT THE SMALLEST CASE TO KEEP SOLVING. Every layout in this file
-   is designed against a 320px viewport — a 288px card, 254px of content — and below that
-   the reflow stops being a layout and starts being damage: rails collapse, labels break
-   mid-word, figures wrap away from the labels that name them.
-
-   So the page STOPS RESPONDING at 320px and the viewport scrolls sideways instead. One
-   declaration on `body` does it: the body can never be narrower than 320px, so `html`'s
-   scroll area outgrows the viewport and the browser offers the pan. Every card inherits
-   the floor through it, which is also what makes the `@container` rules honest — no card
-   is ever asked a width its base case was not written for.
-
-   This is the ONE place a horizontal scrollbar is allowed at the page level. The other
-   deliberate sideways scroll is `.table-scroll`, and that one is scoped to a table. */
-body {
-  margin: 0;
-  min-width: 320px;
-  background: var(--bg);
-  color: var(--text);
-  font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-}
+/* THE FOUR BARE-ELEMENT RULES LEFT THIS FILE (spec #420 Seam C, slice 2). `*`, `body`,
+   `h1` and `h2` are now an `@layer base` block in `tailwind.css`, which is the only place
+   an element selector can live under Tailwind's cascade order, and the 320px floor the
+   `body` rule declared is now the min-width sentinel utility on `<body>` in `__root.tsx`
+   (spelled out in that file and, deliberately, in no other). The
+   reasoning that stood here — why the page stops responding at 320px rather than going on
+   solving narrower, and why this and `.table-scroll` are the only sanctioned sideways
+   scrolls — moved with them. */
 
 .dashboard {
   max-width: 760px;
@@ -129,16 +113,6 @@ body {
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 16px;
-}
-
-h1 {
-  font-size: 1.3rem;
-  margin: 0;
-}
-
-h2 {
-  font-size: 1.05rem;
-  margin: 0 0 12px;
 }
 
 .muted {

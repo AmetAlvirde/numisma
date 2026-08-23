@@ -18,11 +18,11 @@ export const Route = createRootRoute({
       { title: "Numisma — Fund Composition" },
     ],
     // TWO STYLESHEETS, IN THIS ORDER, AND THE ORDER IS LOAD-BEARING.
-    // `styles.css` is the app's 1,396 hand-written lines and stays untouched —
-    // several `*-structure.test.tsx` files assert it byte-for-byte. Tailwind
-    // mounts BESIDE it from `tailwind.css`, whose output is assigned to
-    // `layer(utilities)` while this file stays unlayered, so the hand-written
-    // rules keep winning on any shared property. See `tailwind.css`'s header.
+    // `styles.css` is the app's hand-written stylesheet, which spec #420 is
+    // emptying one surface at a time. Tailwind mounts BESIDE it from
+    // `tailwind.css`, whose output is assigned to `layer(utilities)` while this
+    // file stays unlayered, so the rules not yet converted keep winning on any
+    // shared property. See `tailwind.css`'s header.
     links: [
       { rel: "stylesheet", href: appCss },
       { rel: "stylesheet", href: tailwindCss },
@@ -55,11 +55,13 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
         line silently drops every utility `apps/web` authors and the build still
         exits 0.
 
-        IT MOVES NO PIXEL TODAY, ON PURPOSE. `styles.css`'s `body` rule declares
-        the same 320px floor and that file is unlayered, so it beats this
-        utility's `layer(utilities)` output on the shared property. Slice 2
-        deletes that rule and this becomes the real floor. It is written exactly
-        once in non-test app source; the guard asserts that too.
+        IT IS THE FLOOR NOW. It was chosen while `styles.css`'s unlayered `body`
+        rule still declared the same 320px and beat this utility, so it moved no
+        pixel; slice 2 deleted that rule and rehomed the rest of it into
+        `tailwind.css`'s `@layer base` WITHOUT `min-width`. Below 320px the page
+        stops responding and the viewport pans sideways instead — this class is
+        the whole of that behaviour. It is written exactly once in non-test app
+        source; the guard asserts that too.
       */}
       <body className="min-w-[320px]">
         {children}

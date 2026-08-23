@@ -1,19 +1,22 @@
 /*
  * TAILWIND 4, MOUNTED BESIDE `styles.css` AND NEVER INSIDE IT.
  *
- * `styles.css` is 1,400-odd hand-written lines that several `*-structure.test.tsx`
- * files census class-for-class, so the Tailwind block lives here and `__root.tsx`
- * links this file as a SECOND stylesheet after `appCss`. Keeping that file
- * untouched is what keeps those tests meaningful through the whole migration.
- * It has taken exactly one edit — spec #412 Slice 5's `:root` block of `--nms-*`
- * overrides — and that block is where the app's palette reaches this package.
+ * `styles.css` is the app's hand-written stylesheet, and spec #420 is emptying it
+ * one surface at a time down to its two `:root` blocks. The Tailwind block lives
+ * here and `__root.tsx` links this file as a SECOND stylesheet after `appCss`,
+ * which is what lets a converted surface's utilities and the rules not yet
+ * converted coexist without either winning by accident.
+ * It also carries the app's palette: spec #412 Slice 5's `:root` block of
+ * `--nms-*` overrides is where that reaches this package.
  *
  * Every line below is load-bearing, and three of them fail SILENTLY if wrong:
  *
  * - PREFLIGHT IS OMITTED ON PURPOSE. Importing `theme.css` + `utilities.css`
  *   and not `preflight.css` is the only supported way to skip preflight in v4
  *   (`corePlugins: { preflight: false }` is gone with no replacement).
- *   Preflight would reset the bare elements `styles.css` styles deliberately.
+ *   Preflight would reset the bare elements this app styles deliberately — the
+ *   four in `@layer base` below, and the UA margins on `p`, `h3`–`h6`, `dl`,
+ *   `dd`, `ul` and `figure` that every converted surface now reproduces by hand.
  * - THE `@layer` LINE MUST COME FIRST, or the layers order by first appearance.
  * - THE `layer()` PARAMS ARE NOT COSMETIC. Tailwind's shipped `theme.css` and
  *   `utilities.css` contain no `@layer` rules of their own, so the layer
@@ -39,6 +42,55 @@
 @import "./nms-tokens.generated.css" layer(theme);
 @source "./";
 @source "../node_modules/@numisma/components/src";
+
+/*
+ * ── THE FOUR BARE-ELEMENT RULES (spec #420 Seam C, slice 2) ────────────────
+ *
+ * Four rules in `styles.css` had no class to hang a utility on. Preflight would
+ * have owned them and preflight is off permanently, so they live here, in the
+ * layer that exists for exactly this and is the only place an element selector
+ * can sit inside Tailwind's cascade order. `base-layer.test.ts` asserts the
+ * membership of this block exactly — four selectors, no more — because the move
+ * INVERTS WHO WINS: unlayered in `styles.css` these beat every utility on a
+ * shared property; here they lose to `layer(utilities)`, which is the direction
+ * the migration wants and also the direction in which a fifth selector smuggled
+ * in later would be invisible.
+ *
+ * `body { min-width: 320px }` DELIBERATELY DID NOT COME ACROSS. 320px is the
+ * floor, not the smallest case to keep solving: every layout in this app is
+ * designed against a 320px viewport — a 288px card, 254px of content — and
+ * below that the reflow stops being a layout and starts being damage. The page
+ * stops responding there and the viewport scrolls sideways instead, which is
+ * the one place a horizontal scrollbar is allowed at the page level. That
+ * declaration is now the arbitrary-value min-width sentinel on `<body>` in
+ * `__root.tsx` (Seam D). The class is NOT SPELLED OUT ANYWHERE BUT THAT FILE,
+ * here included: Tailwind extracts candidates from comment text as readily as
+ * from JSX, and a docblock that names it would emit the utility on behalf of the
+ * guard that is supposed to prove `__root.tsx` emitted it. Re-declaring the
+ * property here would re-cover that guard the same way.
+ */
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+
+  h1 {
+    font-size: 1.3rem;
+    margin: 0;
+  }
+
+  h2 {
+    font-size: 1.05rem;
+    margin: 0 0 12px;
+  }
+}
 
 /*
  * ── THE TOKEN LAYER, AND WHY IT IS SEPARATE FROM THE BLOCK ABOVE ───────────
