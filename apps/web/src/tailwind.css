@@ -1,10 +1,12 @@
 /*
  * TAILWIND 4, MOUNTED BESIDE `styles.css` AND NEVER INSIDE IT.
  *
- * `styles.css` is 1,396 hand-written lines that several `*-structure.test.tsx`
- * files assert byte-for-byte, so the Tailwind block lives here and `__root.tsx`
+ * `styles.css` is 1,400-odd hand-written lines that several `*-structure.test.tsx`
+ * files census class-for-class, so the Tailwind block lives here and `__root.tsx`
  * links this file as a SECOND stylesheet after `appCss`. Keeping that file
  * untouched is what keeps those tests meaningful through the whole migration.
+ * It has taken exactly one edit — spec #412 Slice 5's `:root` block of `--nms-*`
+ * overrides — and that block is where the app's palette reaches this package.
  *
  * Every line below is load-bearing, and three of them fail SILENTLY if wrong:
  *
@@ -58,8 +60,8 @@
  * generated defaults come last and would beat anything `styles.css` declares.
  * Inside `layer(theme)` they lose to unlayered CSS instead, which is what lets
  * `apps/web` override a token from its own `:root` in `styles.css` — the one
- * sanctioned edit to that file, and it is Slice 5's, not this slice's. THIS APP
- * RUNS ON PACKAGE DEFAULTS: grayscale, deliberately, until then.
+ * sanctioned edit to that file, and Slice 5 has now made it. THE APP RUNS ON ITS
+ * OWN PALETTE; the grayscale below is the fallback nothing should reach.
  *
  * ── THE `@theme` MAPPING, AND THE INDIRECTION IT RESTS ON ──────────────────
  *

@@ -11,6 +11,11 @@
  * and spec #403 forbids a new class name while requiring `styles.css` to be
  * byte-identical. Three arms, because the states emit disjoint sets.
  *
+ * THAT BYTE-IDENTITY HAS SINCE SPENT ITS ONE EXCEPTION. Spec #412 Slice 5 added a
+ * `:root` block of `--nms-*` overrides to `styles.css` and changed nothing else: no rule
+ * rewritten, no declaration moved, no class name touched. The census below is unaffected
+ * by construction, which is the point of confining the edit to custom properties.
+ *
  * NO ROUTER HERE, DELIBERATELY. The tap-through renders only where the wire supplies a
  * `planId`, so a plan without one exercises the whole card outside a router context.
  * The link's `to` and `params` are pinned by `route-move.test.ts`'s regexes, which this

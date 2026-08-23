@@ -12,7 +12,9 @@
  * The class census pins the other risk of the conversion: this card's root class string
  * is now built by a primitive, and spec #403 forbids a new class name and requires
  * `styles.css` to be byte-identical. Both suppression arms are censused, because the warn
- * badge and the em dashes only exist on one of them.
+ * badge and the em dashes only exist on one of them. That file has since taken spec #412
+ * Slice 5's `--nms-*` override block, which adds custom properties and no selector, so
+ * every class name censused here still means what it meant.
  *
  * THE SUMMARY IS AUTHORED. No ledger output has been near this file.
  */

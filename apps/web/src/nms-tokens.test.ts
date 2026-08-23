@@ -63,6 +63,115 @@ describe("the app defines every token the package declares", () => {
   });
 });
 
+/**
+ * THE APP'S OVERRIDES — `styles.css`'s ONE SANCTIONED EDIT (spec #412 §4.2, §5).
+ *
+ * Slices 1 to 4 left that file byte-identical and the app ran on the package's
+ * grayscale defaults. This slice mints an accent, aliases the rest onto the app
+ * palette, and everything below is what stops that block from rotting quietly.
+ *
+ * ALIASES, NOT COPIES. `--nms-background: var(--bg)` keeps `styles.css` the one
+ * place that defines colour, which is what that file's own comments demand. A
+ * hex pasted in here instead would look right on the day it landed and drift the
+ * first time the palette moved, in the one direction no test can see: the
+ * package's components would keep painting last season's grey while every
+ * hand-written rule moved on.
+ *
+ * THE DIRECTION ON `--nms-muted-foreground` IS THE POINT. The app's `--muted` is
+ * READ, never redefined. Redefining it would repaint 25 call sites in
+ * `styles.css` and 2 in `PriceDropPathChart.tsx` — the capture the spike
+ * suffered by accident, which is the whole reason this increment namespaces
+ * rather than renames.
+ *
+ * `--nms-muted` IS NOT `--muted`, and the collision of English words is exactly
+ * why the prefix exists. shadcn reads `--nms-muted` as a recessed SURFACE
+ * (Button's `ghost` and `outline` hover); the app's `--muted` is secondary TEXT.
+ * Same word, different roles, and aliasing one onto the other would put grey
+ * type-colour behind a hovered button.
+ */
+describe("the app's --nms-* overrides in styles.css", () => {
+  const overrides = new Map(
+    [...stylesCss.matchAll(/^\s*(--nms-[\w-]+)\s*:\s*([^;]+);/gm)].map(
+      (match) => [match[1]!, match[2]!.trim()] as const,
+    ),
+  );
+
+  it.each(NMS_TOKEN_NAMES)("overrides the package default for %s", (name) => {
+    // Not "is defined somewhere" — the sibling suite above already allows the
+    // generated grayscale file to answer that. This asks the narrower question:
+    // did the APP take a position on this token, in the one file that owns
+    // colour. A token left to the package default is a grayscale hole in a
+    // themed app, and it looks deliberate in a diff.
+    expect(overrides.has(name)).toBe(true);
+  });
+
+  it.each([
+    ["--nms-background", "var(--bg)"],
+    ["--nms-foreground", "var(--text)"],
+    ["--nms-card", "var(--card)"],
+    ["--nms-border", "var(--line)"],
+    ["--nms-input", "var(--line)"],
+    ["--nms-muted-foreground", "var(--muted)"],
+    ["--nms-destructive", "var(--neg)"],
+  ])("aliases %s onto %s rather than copying its value", (name, alias) => {
+    expect(overrides.get(name)).toBe(alias);
+  });
+
+  it("mints the accent rather than repurposing --now", () => {
+    // `--now` is the spot colour chosen to collide with nothing else on the
+    // Price Drop Path. Painting every call to action with it would put "where
+    // price is now" on every button in the app, so the accent is its own
+    // palette entry and nothing in the override block may reach for `--now`.
+    expect(stylesCss).toMatch(/^\s*--accent:\s*#[0-9a-f]{6};/m);
+    expect(overrides.get("--nms-primary")).toBe("var(--accent)");
+    expect(overrides.get("--nms-ring")).toBe("var(--accent)");
+    for (const value of overrides.values()) {
+      expect(value).not.toContain("--now");
+    }
+  });
+
+  it("mints a recessed surface for --nms-muted, distinct from the app's --muted text", () => {
+    expect(stylesCss).toMatch(/^\s*--recess:\s*#[0-9a-f]{6};/m);
+    expect(overrides.get("--nms-muted")).toBe("var(--recess)");
+    expect(overrides.get("--nms-muted-foreground")).toBe("var(--muted)");
+  });
+
+  it("leaves --ok, --warn and --pos app-only", () => {
+    // They have no package counterpart. An alias invented for one of them would
+    // hand the package a token nothing in it reads — the mirror image of the
+    // rule `tokens.ts` keeps on its own side.
+    for (const appOnly of ["--ok", "--warn", "--pos"]) {
+      for (const value of overrides.values()) {
+        expect(value).not.toContain(appOnly);
+      }
+    }
+  });
+
+  it("redefines no existing app palette token — the edit is purely additive", () => {
+    // The whole risk of touching this file. Each of these names is declared
+    // exactly once, in the palette block at the top, and a second declaration
+    // added down here would repaint the app from a block whose stated job is
+    // wiring the package.
+    for (const appToken of [
+      "--bg",
+      "--card",
+      "--line",
+      "--text",
+      "--muted",
+      "--ok",
+      "--warn",
+      "--pos",
+      "--neg",
+      "--now",
+    ]) {
+      const declarations = stylesCss.match(
+        new RegExp(`^\\s*${appToken}\\s*:`, "gm"),
+      );
+      expect([appToken, declarations?.length]).toEqual([appToken, 1]);
+    }
+  });
+});
+
 describe("the generated defaults actually reach the browser", () => {
   it("is imported by the Tailwind entry", () => {
     // The generator writes the file whether or not anything loads it. An import
