@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { NMS_TOKEN_NAMES } from "@numisma/components/tokens.ts";
+import { NMS_TOKENS, NMS_TOKEN_NAMES } from "@numisma/components/tokens.ts";
 
 import {
   customPropertyDeclarations,
@@ -152,8 +152,12 @@ describe("the three modes", () => {
   it("gives grayscale exactly the package's own defaults", () => {
     // Not "some greys" — the package's base mode, read off the package. A hand
     // copy here would be a second source of truth for the one thing the package
-    // unambiguously owns.
+    // unambiguously owns, so the VALUES are what this compares. Key presence
+    // alone would pass a hand-written table that had every name and the wrong
+    // colour behind each one, which is the substitution this case exists for.
     const grayscale = modes.get("grayscale")!.tokens;
-    expect([...NMS_TOKEN_NAMES].every((name) => name in grayscale)).toBe(true);
+    expect(NMS_TOKENS.map((token) => [token.name, grayscale[token.name]])).toEqual(
+      NMS_TOKENS.map((token) => [token.name, token.value]),
+    );
   });
 });
