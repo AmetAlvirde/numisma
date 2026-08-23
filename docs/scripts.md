@@ -64,11 +64,15 @@ name at its own `:root`, never by editing the generated defaults.
 The script does **not** touch `packages/components/src/index.ts`. That surface
 is curated by hand, one export at a time.
 
+| Script | What it does |
+| --- | --- |
+| `pnpm --filter @numisma/workbench dev` | Serve the react-cosmos workbench at http://localhost:5100: every state of every package component, under the grayscale, themed and app theme modes. It opens in grayscale. [`component-package.md`](./component-package.md) §5 is the manual theming pass this command exists for. |
+
 ## Quality gates
 
 | Script               | What it does                                                                                                                                                        |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm typecheck`     | Typecheck all six workspace members, then the repo tooling (`ops/**` and `vitest.config.ts`) through `tsconfig.ops.json` — the guard for each package's public surface, the no-deep-import boundary, and the test-discovery config nothing else typechecks. |
+| `pnpm typecheck`     | Typecheck all eight workspace members, then the repo tooling (`ops/**` and `vitest.config.ts`) through `tsconfig.ops.json` — the guard for each package's public surface, the no-deep-import boundary, and the test-discovery config nothing else typechecks. |
 | `pnpm test`          | Run the full Vitest suite, including characterization snapshots and the engine↔TUI formatter contract test.                                                          |
 | `pnpm test:wrapper`  | Run the price-feed wrapper harness on demand, with `NUMISMA_WRAPPER_TEST=always` bypassing the arming trigger (the platform gate still applies). Under `pnpm test` the same suite arms itself only when the trigger says the wrapper is in play; `NUMISMA_WRAPPER_TEST=never` mutes it and says so. |
 | `pnpm verify`        | The full gate: `typecheck` → `test` → `smoke:startup`.                                                                                                              |
