@@ -1,0 +1,29 @@
+diff --git a/dist/devServer/expressApp.js b/dist/devServer/expressApp.js
+index 20cc7ad64ed6a930dcde2bdddf0a06534e1c8a3b..af80117dcec677ae272dc6625898c68edd17bd68 100644
+--- a/dist/devServer/expressApp.js
++++ b/dist/devServer/expressApp.js
+@@ -7,14 +7,21 @@ export async function createExpressApp(platform, config, pluginConfigs) {
+     app.get('/', async (_, res) => {
+         res.send(await getDevPlaygroundHtml(platform, config, pluginConfigs));
+     });
++    // PATCHED (numisma, spec #412 Slice 6). express 5's res.sendFile refuses any
++    // path containing a dot-directory: send@1 defaults `dotfiles: 'ignore'` and
++    // answers 404. Under pnpm every real dependency path runs through
++    // `node_modules/.pnpm/...`, so react-cosmos's own UI bundle is unreachable and
++    // the Playground loads a blank page with `mountPlayground is not defined`.
++    // The files are the package's own; serving them is not a dotfile decision.
++    const sendPackageFile = (res, filePath) => res.sendFile(filePath, { dotfiles: 'allow' });
+     app.get('/playground.bundle.js', (_, res) => {
+-        res.sendFile(resolve('react-cosmos-ui/dist/playground.bundle.js'));
++        sendPackageFile(res, resolve('react-cosmos-ui/dist/playground.bundle.js'));
+     });
+     app.get('/playground.bundle.js.map', (_, res) => {
+-        res.sendFile(resolve('react-cosmos-ui/dist/playground.bundle.js.map'));
++        sendPackageFile(res, resolve('react-cosmos-ui/dist/playground.bundle.js.map'));
+     });
+     app.get('/_cosmos.ico', (_, res) => {
+-        res.sendFile(getStaticPath('favicon.ico'));
++        sendPackageFile(res, getStaticPath('favicon.ico'));
+     });
+     return app;
+ }

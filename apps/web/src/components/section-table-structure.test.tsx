@@ -10,7 +10,9 @@
  *
  * The class census is the other half. Spec #403 moves this table's root onto a
  * primitive that builds the class string for it, forbids any new class name, and
- * requires `styles.css` to be byte-identical. Both arms are censused, and they emit
+ * requires `styles.css` to be byte-identical — a rule spec #412 Slice 5 has since broken
+ * exactly once, adding a `:root` block of `--nms-*` overrides and no selector at all.
+ * Both arms are censused, and they emit
  * the SAME set from different elements: `muted` is the percentage suffix on the
  * anchored arm and the "no earlier anchor" header on the genesis one. That is not a
  * redundant assertion — the genesis path renders a different header cell and a

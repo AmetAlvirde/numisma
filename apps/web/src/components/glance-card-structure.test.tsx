@@ -11,7 +11,9 @@
  * The class census is the other half. Spec #403 moves this card's root element onto a
  * primitive that builds the class string for it, while forbidding any new class name and
  * requiring `styles.css` to be byte-identical. A dropped, reordered or invented token is
- * invisible in a diff and this is what sees it.
+ * invisible in a diff and this is what sees it. Spec #412 Slice 5 spends that file's one
+ * sanctioned edit on a `:root` block of `--nms-*` overrides; it adds custom properties
+ * and touches no selector, so this census is the same instrument it was.
  *
  * THE VERDICT IS AUTHORED, not composed through `verdict.ts`. This file asserts markup,
  * and `verdict.test.ts` is the oracle for what the fields should contain; a fixture that

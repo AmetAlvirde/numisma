@@ -1,0 +1,7 @@
+{
+  "$schema": "./node_modules/react-cosmos/config.schema.json",
+  "plugins": ["react-cosmos-plugin-vite"],
+  "watchDirs": ["src"],
+  "ignore": ["**/*.test.*", "**/node_modules/**"],
+  "port": 5100
+}

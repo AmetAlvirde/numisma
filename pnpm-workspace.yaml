@@ -14,3 +14,23 @@ allowBuilds:
 # is vulnerable. Patch bump satisfies vite@7's and tsx@4's esbuild ranges.
 overrides:
   esbuild: ">=0.28.1"
+
+# react-cosmos 7.4.0 CANNOT SERVE ITS OWN UI UNDER pnpm, and fails silently at it.
+# Its dev server hands the Playground bundle to express 5's `res.sendFile` with no
+# options; send@1 defaults `dotfiles: "ignore"` and answers 404 for ANY path with a
+# dot-directory in it. Every real dependency path under pnpm runs through
+# `node_modules/.pnpm/`, so the bundle is unreachable and http://localhost:5100
+# loads a blank page whose only symptom is `mountPlayground is not defined` in the
+# console. The patch passes `{ dotfiles: "allow" }` on the three routes that serve
+# react-cosmos's OWN packaged files — its UI bundle, that bundle's source map, and
+# its favicon. It grants nothing about user content.
+#
+# The alternative was `virtualStoreDir` — renaming the whole virtual store to a
+# non-dot directory. It works, and it costs a full relink of every package in the
+# repo for every developer and every CI run, to fix one dev server. This is the
+# smaller change and it names its own reason.
+#
+# ON A react-cosmos BUMP: re-cut this patch. `pnpm install` FAILS LOUDLY when a
+# patch no longer applies, so this cannot rot into a blank page again unnoticed.
+patchedDependencies:
+  react-cosmos@7.4.0: patches/react-cosmos@7.4.0.patch

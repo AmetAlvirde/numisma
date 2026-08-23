@@ -27,12 +27,14 @@ placeholder convention itself, are documented in
 
 | Path | Package | Runtime | What it owns | Read first |
 | --- | --- | --- | --- | --- |
+| `packages/components` | `@numisma/components` | Any TSX-transforming bundler | The shared React component layer, shipped as **unbuilt TSX** with no `dist`, no build script and no CSS of its own, plus the `--nms-*` token specification whose values each consumer supplies ([ADR-023](../context/adr/ADR-023-unbuilt-tsx-and-a-namespaced-token-spec-the-consumer-supplies.md)). Components enter only through `pnpm components:add`. | [`component-package.md`](./component-package.md), then `src/tokens.ts` (the spec, with the argument in its header) |
 | `packages/engine` | `@numisma/engine` | Node, IO-free | The pure fund domain: parse → validate → fold → compose → format, plus the pure half of the price model, the whole Orders model, the pure halves of the plans and reconciliations sidecars, and the one data-dir predicate (`normalizeDataDirOverride`) every runtime plane routes through. No file, network, or terminal IO. | `src/index.ts` (curated barrel, no `export *`), `src/events/types.ts` |
 | `packages/event-store` | `@numisma/event-store` | Node | The durable log's **read** path — path resolution, genesis load, log load with quarantine, `loadFoldedReview` — plus the gap-report, heartbeat, and operator-notice sidecars. | `README.md`, then `src/` |
 | `packages/preferences` | `@numisma/preferences` | Node | Sidecar file IO for `preferences.jsonl`, `orders.jsonl`, `plans.jsonl`, and `reconciliations.jsonl`. Append-only, validated on load; the orders, plans, and reconciliations appends share one cross-process lock + temp + rename shell (`src/sidecar-io.ts`), while the one-line preferences seed appends inline. | `README.md` |
 | `apps/tui` | `@numisma/tui` | Bun (dashboard) + Node (CLIs) | The local access surface: the log's **write/ingest** half, startup orchestration, the openTUI dashboard, the three Orders CLIs, the `pnpm plans` desk report, and the smokes. | `README.md` §Entry points, `src/event-store.ts` |
 | `apps/price-feed` | `@numisma/price-feed` | Node, headless | The market-data runtime shell: three provider adapters, the disposable price store, the atomic inbox emit, the fetch-time spine-guard pre-check, and the `operator-notice` CLI the daily wrapper runs. Its `src/wrapper-harness/` drives the real `ops/price-feed/run-daily-fetch.sh` against a fake bin. | `README.md`, `src/cli.ts` (wiring only — the report and exit contract are in `src/cli-main.ts`, the argv parser in `src/cli-args.ts`) |
 | `apps/web` | `@numisma/web` | TanStack Start (Vite + Nitro), React 19 | The hosted read-projection dashboard, its Better Auth server, and the push/provisioning scripts. | `README.md`, `src/push/push.ts` |
+| `apps/workbench` | `@numisma/workbench` | Vite + react-cosmos, no SSR | The component workbench ([ADR-024](../context/adr/ADR-024-react-cosmos-as-the-workbench-standalone.md)): every state of every package component under three theme modes, and the second token consumer. Imports no module from `apps/web`, which is what makes a client/SSR fault separable. | [`component-package.md`](./component-package.md) §5, then `src/theme-modes.ts` |
 
 **The dependency rule:** apps depend on packages, never the reverse; packages
 depend on `@numisma/engine` and never on each other beyond that. Every consumer
@@ -103,10 +105,11 @@ These are the seams most likely to be misread from the tree alone:
 | [`plans-authoring-runbook.md`](./plans-authoring-runbook.md) | How to write a `plans.jsonl` line by hand, what the allowlist edit costs, and how to read `pnpm plans` back. |
 | [`scripts.md`](./scripts.md) | The full `pnpm` script reference across all workspace members. |
 | [`local-data.md`](./local-data.md) | The durable-store rule, the `<dataDir>` layout, the write allowlist, and the `<fund>`/`<exchange>` placeholder convention. |
+| [`component-package.md`](./component-package.md) | What `@numisma/components` ships, the five things a consumer owes it, the two silent styling failures and the two instruments that separate them, and the manual theming pass in the workbench. |
 
 ## Decisions
 
-Twenty-one ADRs, indexed with current status in
+Twenty-four ADRs, indexed with current status in
 [`context/adr/INDEX.md`](../context/adr/INDEX.md). The ones that explain the
 most structure:
 
@@ -123,6 +126,9 @@ most structure:
   input returns that discard as part of its own result rather than refusing the
   run, and every `FoldSkipReason` means the same thing about what the fold
   applied (nothing at all).
+- **ADR-023** / **ADR-024** cover the component layer: a package that ships unbuilt
+  TSX and owns a `--nms-*` token spec whose values each consumer supplies, and a
+  standalone react-cosmos workbench that is the second such consumer.
 
 ADR bodies are **historical records**: they are not rewritten when a decision
 later changes. Status changes are recorded in the header and in dated status-update
@@ -132,7 +138,7 @@ is newer — ADR-012's Consequences section is a live example.
 ## Verifying the tree
 
 ```
-pnpm typecheck    # all six members, then ops/ + vitest.config.ts via tsconfig.ops.json
+pnpm typecheck    # all eight members, then ops/ + vitest.config.ts via tsconfig.ops.json
 pnpm test         # full Vitest suite
 pnpm test:wrapper # the price-feed wrapper harness, trigger bypassed
 pnpm verify       # typecheck → test → smoke:startup, the full gate

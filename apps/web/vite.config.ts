@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import { nitro } from "nitro/vite";
 import viteReact from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 // Vercel deployment target is configured HERE via the Nitro Vite plugin's
 // `preset: "vercel"`, per the current TanStack Start + Vercel docs. On
@@ -36,5 +37,22 @@ export default defineConfig({
     tanstackStart({ router: { routeFileIgnorePattern: "\\.test\\.tsx?$" } }),
     nitro({ preset: "vercel" }),
     viteReact(),
+
+    // Tailwind 4's VITE-NATIVE path, not PostCSS. It compiles
+    // `src/tailwind.css` — the entry, and the only file that mounts Tailwind;
+    // `src/styles.css` is hand-written and Tailwind never touches it.
+    //
+    // PLUGIN ORDER IS NOT CONSTRAINED here, and the position is not a finding:
+    // TanStack's docs and Tailwind's docs publish OPPOSITE orders and both
+    // build. Do not move this line to fix an unrelated problem.
+    //
+    // NOTHING ELSE IS NEEDED TO CONSUME `@numisma/components`. The package ships
+    // unbuilt TSX with `exports` at `src/`, and the pnpm workspace symlink makes
+    // Vite classify it as a LINKED dependency, which is what gets its source
+    // transformed and scanned with no `optimizeDeps` entry, no `resolve.alias`
+    // and no `ssr.noExternal`. `resolve.preserveSymlinks` stays at its default
+    // `false` — that default is what makes the classification happen at all, so
+    // turning it on would break the mount rather than harden it.
+    tailwindcss(),
   ],
 });

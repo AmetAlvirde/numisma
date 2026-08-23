@@ -14,7 +14,9 @@
  *      that passes `card fp-header` emits `card card fp-header` and a caller that drops
  *      a word emits a card the stylesheet does not recognise. `styles.css` is required
  *      to be byte-identical across this whole increment, which makes the class strings
- *      the contract rather than an implementation detail.
+ *      the contract rather than an implementation detail. Spec #412 Slice 5 later spent
+ *      that file's one sanctioned edit on a `:root` block of `--nms-*` overrides — custom
+ *      properties only, so not one selector below changed meaning.
  *
  * This is a CHARACTERIZATION test: it was written green against the pre-swap markup, and
  * its job is to still be green afterwards. That is the whole oracle for a

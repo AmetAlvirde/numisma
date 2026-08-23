@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Numisma component workbench</title>
+  </head>
+  <body>
+    <!--
+      AUTHORED, NOT GENERATED. react-cosmos writes a default index.html here on
+      first run when one is missing; committing this keeps the renderer shell a
+      file in the repo rather than an untracked artifact that appears on
+      whoever starts the workbench first.
+
+      `/src/main.tsx` IS A VIRTUAL MODULE AND THAT FILE DOES NOT EXIST.
+      react-cosmos-plugin-vite resolves this exact URL to its generated renderer
+      entry, which imports every fixture and decorator it discovered. Writing a
+      real main.tsx here would be shadowed by the plugin, not used.
+
+      NO STYLESHEET LINK ON PURPOSE. `src/tailwind.css` is imported by
+      `src/cosmos.decorator.tsx`, so it enters through the module graph and
+      arrives with every fixture the decorator wraps — which is all of them. A
+      link here would style the shell whether or not the decorator loaded, and
+      hide a broken decorator behind a page that still looked right.
+    -->
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

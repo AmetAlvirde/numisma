@@ -49,11 +49,30 @@ render current state. An `--as-of` earlier than the genesis date fails loud.
 | `pnpm db:init`     | Apply only the `composition_snapshot` DDL — no fold, no upsert.                                                                                                 |
 | `pnpm db:provision`| Idempotent DDL plus the ADR-007 two-role grants, via `PROJECTION_ADMIN_DATABASE_URL`.                                                                           |
 
+## The component package
+
+| Script                          | What it does                                                                                                                                                          |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm components:add <name...>` | The only sanctioned way to add a shadcn component to `@numisma/components`. Injects the tsconfig `paths` mapping the CLI needs, runs `shadcn add` against the package's hand-written `components.json`, strips the mapping again, rewrites `@/…` imports to relative extensionless specifiers, rewrites bare custom-property reads into the `--nms-` namespace, folds newly discovered names into `src/tokens.ts` with grayscale defaults, and regenerates every registered consumer's tokens file. Idempotent — re-adding a component changes nothing. Exits non-zero on a stray `@` directory, on a radix dependency (the package is `base-vega`), and on a token it has no default for. With no argument it skips the CLI and re-runs the rewrites and the generators in place, which is how a newly registered consumer gets its tokens file. |
+
+A consumer registers itself by adding one entry to `TOKEN_CONSUMERS` in
+[`ops/components/consumers.ts`](../ops/components/consumers.ts) and running
+`pnpm components:add` with no argument. The generated file is overwritten in
+full on every run; a consumer overrides a token by defining the same `--nms-*`
+name at its own `:root`, never by editing the generated defaults.
+
+The script does **not** touch `packages/components/src/index.ts`. That surface
+is curated by hand, one export at a time.
+
+| Script | What it does |
+| --- | --- |
+| `pnpm --filter @numisma/workbench dev` | Serve the react-cosmos workbench at http://localhost:5100: every state of every package component, under the grayscale, themed and app theme modes. It opens in grayscale. [`component-package.md`](./component-package.md) §5 is the manual theming pass this command exists for. |
+
 ## Quality gates
 
 | Script               | What it does                                                                                                                                                        |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm typecheck`     | Typecheck all six workspace members, then the repo tooling (`ops/**` and `vitest.config.ts`) through `tsconfig.ops.json` — the guard for each package's public surface, the no-deep-import boundary, and the test-discovery config nothing else typechecks. |
+| `pnpm typecheck`     | Typecheck all eight workspace members, then the repo tooling (`ops/**` and `vitest.config.ts`) through `tsconfig.ops.json` — the guard for each package's public surface, the no-deep-import boundary, and the test-discovery config nothing else typechecks. |
 | `pnpm test`          | Run the full Vitest suite, including characterization snapshots and the engine↔TUI formatter contract test.                                                          |
 | `pnpm test:wrapper`  | Run the price-feed wrapper harness on demand, with `NUMISMA_WRAPPER_TEST=always` bypassing the arming trigger (the platform gate still applies). Under `pnpm test` the same suite arms itself only when the trigger says the wrapper is in play; `NUMISMA_WRAPPER_TEST=never` mutes it and says so. |
 | `pnpm verify`        | The full gate: `typecheck` → `test` → `smoke:startup`.                                                                                                              |
