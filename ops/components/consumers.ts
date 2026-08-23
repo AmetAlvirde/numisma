@@ -20,15 +20,17 @@ import type { ParsedToken } from "./tokens-file.ts";
  * writes, import it from the consumer's own stylesheet, and never edit it.
  *
  * A CONSUMER OVERRIDES BY DEFINING `--nms-*` AT ITS OWN `:root`, in its own
- * hand-written CSS, loaded after this file. It never edits the generated
+ * hand-written CSS, which must WIN THE CASCADE against this file — either by
+ * loading after it, or by staying unlayered while this file is imported into a
+ * cascade layer, which is how `apps/web` does it. It never edits the generated
  * defaults — an override is meant to be an intentional, greppable act in the
  * consumer's own source, and an edit here disappears on the next add with no
  * error.
  *
- * THE LIST IS LEGITIMATELY EMPTY. Nothing consumes the package yet; `apps/web`
- * mounts Tailwind in Slice 3 and `apps/workbench` does not exist until Slice 6.
- * The generator writes nothing and exits 0, because "no consumers" is the
- * project's real state rather than a fault.
+ * AN EMPTY LIST IS STILL A LEGAL STATE. The generator writes nothing and exits
+ * 0 rather than treating "no consumers" as a fault — that was the project's
+ * real state until `apps/web` mounted Tailwind, and `apps/workbench` does not
+ * exist until Slice 6.
  */
 
 /** One consumer of the token spec, and the file the generator owns inside it. */
@@ -40,7 +42,15 @@ export interface TokenConsumer {
 }
 
 /** Every consumer of `@numisma/components`. See the header to add one. */
-export const TOKEN_CONSUMERS: readonly TokenConsumer[] = [];
+export const TOKEN_CONSUMERS: readonly TokenConsumer[] = [
+  // Imported by `apps/web/src/tailwind.css`, the app's Tailwind entry, which
+  // `__root.tsx` links as a SECOND stylesheet AFTER `styles.css`. That order is
+  // why the import carries `layer(theme)`: `styles.css` is unlayered, unlayered
+  // beats every cascade layer, and so the app's own `--nms-*` aliases win from
+  // `styles.css`'s `:root` in Slice 5 even though they are declared earlier in
+  // document order. Unlayered here would make the defaults beat the app.
+  { label: "apps/web", tokensFile: "apps/web/src/nms-tokens.generated.css" },
+];
 
 /** The banner every generated tokens file carries. */
 const HEADER = [
@@ -52,8 +62,10 @@ const HEADER = [
   " * on the next component add.",
   " *",
   " * These are the package's grayscale defaults, its base mode. To override one,",
-  " * define the same --nms-* name at your own :root in your own stylesheet,",
-  " * loaded after this file. Do not change a value below.",
+  " * define the same --nms-* name at your own :root in your own stylesheet, and",
+  " * make sure that stylesheet WINS THE CASCADE against this one — it loads after",
+  " * this file, or this file is imported into a cascade layer and yours is not.",
+  " * Do not change a value below.",
   " */",
 ].join("\n");
 
