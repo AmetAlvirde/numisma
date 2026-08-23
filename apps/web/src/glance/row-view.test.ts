@@ -284,8 +284,11 @@ describe("the /big-picture wiring", () => {
     // their value perfectly — so "no current mark" would be false of exactly the
     // rows most likely to be read. An absence earns its place by carrying diagnostic
     // information; one carrying WRONG information is worse than a bare em dash.
-    expect(table).toMatch(/<Absent reason="no-fund-value" \/>/);
-    expect(table).not.toMatch(/<Absent reason="unexpected-absence" \/>/);
+    // Re-spelled, not retired, when `Absent` moved to `components/ui/` (spec #403 S2):
+    // the primitive takes resolved WORDS, so the cause is named through the module's own
+    // `whyAbsent` table instead of as a prop. Same claim, same two arms, new spelling.
+    expect(table).toMatch(/<Absent why=\{whyAbsent\("no-fund-value"\)\} \/>/);
+    expect(table).not.toMatch(/<Absent why=\{whyAbsent\("unexpected-absence"\)\} \/>/);
   });
 
   it("withholds the NAV, and the P&L that divides by it, on the card above", () => {

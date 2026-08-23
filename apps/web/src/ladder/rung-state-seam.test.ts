@@ -9,10 +9,14 @@
  * the engine's own tests move with the string, `tsc` is green, every test is green, and
  * the rung list resumes printing the default word down all eight rows.
  *
- * NOTHING ELSE WOULD HAVE CAUGHT IT. There is no component-test toolchain (D1, deferred —
- * `docs/coverage-rationale.md` §6), so the components' branches are only reachable through
- * the view they are handed. So the invariant is asserted here, at the crossing, in the two
- * forms that together close it:
+ * NOTHING ELSE WOULD HAVE CAUGHT IT WHEN THIS WAS WRITTEN. There was no component-test
+ * toolchain then (D1, deferred), so the components' branches were only reachable through
+ * the view they are handed. There is one now (ADR-022), and the structural half below
+ * stays anyway: it asserts that NO file in `apps/web` compares state copy, which is a
+ * census over source and not a property of any one mounted tree. A regex here retires
+ * only in the commit where a render test makes the same claim — spec #403's own rule —
+ * and none has yet. The invariant is asserted at the crossing, in the two forms that
+ * together close it:
  *
  *  1. BEHAVIORALLY — reword every `label` on the wire and the composed view is unchanged,
  *     field for field. The web's answer does not depend on the engine's words.
@@ -55,8 +59,9 @@
  * WHAT A SOURCE SCAN STILL CANNOT SEE, stated rather than left implied: a value handed out
  * of the file (`hide(cond ? rung.stateCopy : "")`) — the read is legitimate in shape and no
  * regex follows it. It is covered only in the sense that the branch at the far end has to
- * compare against a phrase, which the second half of the scan finds. A component-test
- * toolchain (D1) is what would close it outright.
+ * compare against a phrase, which the second half of the scan finds. A render test of
+ * the far-end branch is what would close it outright; the harness to write one exists
+ * now (ADR-022), and this particular hole is not yet closed.
  *
  * EVERY VALUE BELOW IS AUTHORED, or is one of the hand-authored fixtures; nothing here is
  * seeded from real output (`docs/local-data.md`).

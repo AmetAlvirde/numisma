@@ -1,6 +1,11 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { getDashboard } from "../lib/dashboard.ts";
 import { Shell } from "../components/Shell.tsx";
+import { Crumb } from "../components/ui/Crumb.tsx";
+import {
+  SnapshotEmptyNotice,
+  SnapshotStaleNotice,
+} from "../components/ui/SnapshotNotice.tsx";
 import { FillPathCards } from "../components/FillPath.tsx";
 import { composeFillPathPage } from "../ladder/fill-path-view.ts";
 import { useBinanceSpotUsd } from "../lib/binance-spot.ts";
@@ -51,13 +56,7 @@ function LadderPage() {
   if (result.status === "empty") {
     return (
       <Shell>
-        <div className="card notice">
-          <h1>No snapshot yet</h1>
-          <p>
-            The projection is empty. Run <code>pnpm push</code> to publish the latest
-            composition report.
-          </p>
-        </div>
+        <SnapshotEmptyNotice />
       </Shell>
     );
   }
@@ -65,18 +64,11 @@ function LadderPage() {
   if (result.status === "stale") {
     return (
       <Shell>
-        <div className="card notice error">
-          <h1>Schema version mismatch — refusing to render</h1>
-          <p>
-            The stored snapshot is schema version{" "}
-            <strong>{result.storedVersion}</strong>, which is outside the versions this
-            app supports (
-            <strong>
-              {result.expectedVersions.min}–{result.expectedVersions.max}
-            </strong>
-            ). Re-run the push shell with a matching engine build before viewing.
-          </p>
-        </div>
+        <SnapshotStaleNotice
+          storedVersion={result.storedVersion}
+          min={result.expectedVersions.min}
+          max={result.expectedVersions.max}
+        />
       </Shell>
     );
   }
@@ -93,7 +85,7 @@ function LadderView({ latest, planId }: { latest: SnapshotAnchor; planId: string
   if (page.status === "not-found") {
     return (
       <Shell>
-        <Crumb />
+        <Crumb to="/">← Glance</Crumb>
         <div className="card notice">
           <h1>No such ladder</h1>
           {/* HONEST, NOT BLANK — and the cause distinguishes an id that no row carries
@@ -108,7 +100,7 @@ function LadderView({ latest, planId }: { latest: SnapshotAnchor; planId: string
   if (page.status === "no-price-axis") {
     return (
       <Shell>
-        <Crumb />
+        <Crumb to="/">← Glance</Crumb>
         <div className="card">
           <h1>{page.positionId}</h1>
           {/* A cadence plan is honestly rungless. An empty ladder would be a picture of
@@ -121,16 +113,8 @@ function LadderView({ latest, planId }: { latest: SnapshotAnchor; planId: string
 
   return (
     <Shell>
-      <Crumb />
+      <Crumb to="/">← Glance</Crumb>
       <FillPathCards view={page.view} />
     </Shell>
-  );
-}
-
-function Crumb() {
-  return (
-    <p className="crumb">
-      <Link to="/">← Glance</Link>
-    </p>
   );
 }

@@ -1,6 +1,8 @@
 import { Link } from "@tanstack/react-router";
 import { formatUsd } from "@numisma/engine/format";
 import type { DcaPositionView, DcaView } from "../glance/dca-view.ts";
+import { Absent } from "./ui/Absent.tsx";
+import { Card } from "./ui/Card.tsx";
 
 /**
  * THE DCA CARD (spec #277, D4/D6) — the declared accumulation plan, on the phone.
@@ -50,8 +52,8 @@ import type { DcaPositionView, DcaView } from "../glance/dca-view.ts";
  */
 export function DcaCard({ view }: { view: DcaView }) {
   return (
-    <section className="card dca">
-      <h2>DCA</h2>
+    <Card className="dca">
+      <Card.Title>DCA</Card.Title>
 
       {view.unreadable ? (
         <p className="muted">
@@ -73,7 +75,7 @@ export function DcaCard({ view }: { view: DcaView }) {
           <Plan key={position.positionId} position={position} />
         ))
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -95,16 +97,6 @@ const KIND_COPY: Record<"dcaLadder" | "dcaTime", string> = {
   dcaLadder: "price ladder",
   dcaTime: "time-based",
 };
-
-/** An em dash is not a zero — and the cause says which absence this is. */
-function Absent({ why }: { why: string }) {
-  return (
-    <span className="absent">
-      <span aria-hidden="true">—</span>
-      <span className="muted absent-why">{why}</span>
-    </span>
-  );
-}
 
 function Plan({ position }: { position: DcaPositionView }) {
   return (

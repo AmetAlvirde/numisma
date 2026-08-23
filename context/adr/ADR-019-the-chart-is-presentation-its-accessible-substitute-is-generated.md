@@ -57,21 +57,44 @@ and breaks nothing a sighted person can see, while severing the chart's **only
 route into the accessibility tree**. The failure in the other direction is
 graceful (if `.sr-only` stops applying, the caption becomes visible — uglier,
 not less accessible); the deletion is the one-directional, unnoticeable edit.
-**Nothing mechanical can catch it today** — the a11y invariant (chart subtree
-`aria-hidden`, nothing focusable inside it, an accessible substitute node
-present) is unassertable without a component-test harness the repo has
-deliberately not adopted. Until that changes, this paragraph is the guard.
 
-## Named, not decided: the component-test harness
+**Something mechanical catches it now.** This paragraph used to end "nothing
+mechanical can catch it today", and the harness that sentence was waiting on
+arrived with [ADR-022](ADR-022-a-render-test-harness-for-the-web-component-layer.md).
+`apps/web/src/components/fill-path-chart-a11y.test.tsx` mounts `FillPathCards`
+under jsdom against a synthesized fixture and asserts all three clauses: the
+`.fp-chart` wrapper carries `aria-hidden="true"`, nothing under it answers the
+tabbable selector, and the `.sr-only` node's text equals what
+`ladder/convexity-caption.ts` generates for that same fixture — compared against
+the generated value, never a literal, because a literal expectation would be the
+hand-maintained description this ADR forbids, smuggled in as a test. Deleting
+the caption element turns the suite red; that was checked by deleting it.
 
-If the deferred harness question (the audit's D1 — jsdom + a testing library
-for `apps/web`) is ever answered yes, **that is its own ADR** — adding a
-component-test toolchain to a repo that has deliberately tested only pure
-modules is hard to reverse, surprising, and a real trade-off in its own right.
-It must not arrive as a side effect of "add a test for the chart," and it is
-deliberately **not folded into this decision**. The revisit trigger is the
-coverage rationale's own: the second render branch that cannot be lifted into a
-pure module buys the toolchain.
+**What is still held by prose, named precisely.** The test pins the subtree as it
+actually mounts, so a library upgrade that begins mounting a focusable surface
+fires it. It does NOT pin the four neutralization props below: measured on
+`@tanstack/charts` 0.11.0, the adapter renders `tabindex="-1"` on its `<svg>`
+whatever `tabIndex`, `focus` and `keyboard` are set to, so flipping any of them
+leaves the assertion green. Those four remain guarded by this document and by
+`PriceDropPathChart`'s own header. The half that was uncatchable — the deleted
+caption — is the half that is now caught.
+
+## Answered, by its own ADR: the component-test harness
+
+This section used to defer the question. It said that if the harness question
+(the audit's D1 — jsdom + a testing library for `apps/web`) were ever answered
+yes, **that would be its own ADR**, because adding a component-test toolchain to
+a repo that had deliberately tested only pure modules is hard to reverse,
+surprising, and a real trade-off; and that it must not arrive as a side effect of
+"add a test for the chart."
+
+It was answered yes, on those terms.
+[ADR-022](ADR-022-a-render-test-harness-for-the-web-component-layer.md) is the
+decision — written first, deciding what was bought, where jsdom attaches and what
+the harness is deliberately not spent on. The trigger this section named is the
+one that fired: the coverage rationale's own exit clause, a branch that cannot be
+lifted into a pure module. Read ADR-022 for the harness; this document still owns
+the chart's posture.
 
 ## Considered options
 
@@ -103,10 +126,12 @@ pure module buys the toolchain.
   fix for "the chart is not accessible" is the substitute, which already
   exists.
 - **The substitute pair is a hypothetical seam** (spec #302 Seam D): there is
-  no observable joint between the hidden chart and its substitute. This ADR
-  holds that contract in prose through the harness deferral; if the harness
-  lands (by its own ADR), the invariant becomes a test and this section's guard
-  duty ends.
+  no observable joint between the hidden chart and its substitute. This ADR held
+  that contract in prose through the harness deferral. The harness landed by its
+  own ADR (ADR-022) and the invariant is a test now, so this section's guard duty
+  is over for the caption's existence and its generated text. It continues for
+  the four neutralization props, which no test reaches — see the residual-risk
+  section for why.
 
 ### The three SDP tests
 
