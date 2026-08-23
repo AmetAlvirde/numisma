@@ -322,17 +322,6 @@ thead th {
   color: var(--neg);
 }
 
-/* DEAD SINCE SLICE 2 AND KEPT FOR SLICE 3, WHICH OWNS IT. No element carries `muted`
-   any more — the class and its rule went with the shared vocabulary — so this selects
-   nothing. Its two declarations were not dropped: they are utilities on the three
-   `GlanceCard` spans that sit in a metrics `<dd>`, and a `dd`-scoped variant inside
-   `ui/Absent.tsx` for the reason it renders in both contexts. */
-.metrics .muted {
-  font-size: 0.75rem;
-  font-weight: 500;
-  margin: 0;
-}
-
 /* ── the DCA card (spec #277 D4/D6) ─────────────────────────────────────────
    ONE BLOCK, APPENDED, when it landed. The card is built out of classes that
    already exist (`.card`, `.table-scroll`, `table`, `th.num`, `.absent`,
