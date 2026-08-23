@@ -90,6 +90,36 @@
  * --card --line --text --muted --ok --warn --pos --neg --now`; the `--nms-`
  * prefix exists so this file collides with none of them and no rename is owed
  * on either side.
+ *
+ * ── THE CONVENTION: THEME COLOUR UTILITIES ARE PACKAGE-ONLY ────────────────
+ *
+ * EVERY UTILITY THE BLOCK BELOW CREATES BELONGS TO `@numisma/components` AND TO
+ * NOTHING IN `apps/web`. `bg-primary`, `border-border`, `text-muted`,
+ * `text-secondary-foreground` and the rest are the PACKAGE's vocabulary. App
+ * code reads house colours as arbitrary values instead — `text-[var(--muted)]`,
+ * `bg-[var(--card)]` — naming the app's own token directly.
+ *
+ * `text-muted` IS THE TRAP, AND IT COMPILES. That is the whole reason this is a
+ * written rule with a test behind it rather than a habit. `--color-muted` maps
+ * to `--nms-muted`, which in the package's vocabulary is a RECESSED SURFACE: the
+ * well behind a hovered ghost button. The app's `--muted` is SECONDARY TEXT, the
+ * most-used colour it has. One English word, two roles. Write `text-muted` in an
+ * app component and every stage agrees with you — scanned, emitted, resolved,
+ * cascade won — and the app paints the wrong grey. No error, no empty rule, no
+ * red anywhere else in the suite.
+ *
+ * It is a naming mistake rather than a cascade fact, so grep is the instrument
+ * that catches it: `theme-color-utilities.test.ts` scans every non-test `.tsx`
+ * under `apps/web/src` and fails on any hit. Package source is exempt by
+ * construction, being outside that tree, and test files are exempt because
+ * `login-submit-button.test.tsx` asserts `bg-primary` on the package Button on
+ * purpose.
+ *
+ * WHAT THIS COSTS: arbitrary-value verbosity in nine slices of migrated app
+ * code. What it buys: no rename on either side, and the collision class closed
+ * rather than the one name that collides today. Spec #420 D5 declines to mint
+ * prefixed house tokens (`text-app-muted`) to make the read shorter; that
+ * retrofit is parked with its own trigger.
  */
 @theme {
   --color-background: var(--nms-background);
