@@ -68,6 +68,19 @@ describe("discoverTokenNames", () => {
       ["--nms-muted"],
     );
   });
+
+  it("finds a token read through Tailwind 4's shorthand syntax", () => {
+    // The third route to a token, beside `var()` and the theme utility:
+    // `bg-(--nms-muted)` compiles to `background-color: var(--nms-muted)` and
+    // writes no `var(` anywhere in the source. Missed here, a shorthand read of
+    // a real role lands in no consumer's token file and renders nothing.
+    expect(discoverTokenNames("hover:bg-(--nms-muted)")).toEqual([
+      "--nms-muted",
+    ]);
+    expect(discoverTokenNames("w-(length:--nms-sidebar-width)")).toEqual([
+      "--nms-sidebar-width",
+    ]);
+  });
 });
 
 describe("mergeTokenDeclarations", () => {

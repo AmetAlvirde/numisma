@@ -16,7 +16,7 @@ import {
 } from "./package-source.ts";
 import {
   bareCustomPropertyDeclarations,
-  namespaceVarReads,
+  namespaceCustomPropertyReads,
   relativizeAliasImports,
 } from "./rewrites.ts";
 import {
@@ -121,7 +121,7 @@ function applyRewrites(): string[] {
 
   for (const file of packageSourceFiles()) {
     const before = readFileSync(file.absolute, "utf8");
-    const after = namespaceVarReads(
+    const after = namespaceCustomPropertyReads(
       relativizeAliasImports(before, file.dirWithinSrc),
     );
     if (after !== before) {
@@ -136,7 +136,8 @@ function applyRewrites(): string[] {
   if (declaring.length > 0) {
     throw new AddFailure(
       [
-        "A placed component DECLARES a custom property outside the namespace:",
+        "A placed component DECLARES a custom property outside the namespace,",
+        "either as a Tailwind arbitrary property or as a JSX inline style:",
         ...declaring.map((entry) => `  ${entry}`),
         "",
         "A declaration is not a read, so the namespacing rewrite cannot see it,",

@@ -4,7 +4,7 @@ import { relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { PACKAGE_SRC, packageSourceFiles } from "./package-source.ts";
-import { NMS_PREFIX, varReads } from "./rewrites.ts";
+import { NMS_PREFIX, customPropertyReads } from "./rewrites.ts";
 
 /**
  * THE NAMESPACE GUARD (spec #412 §3, second silent failure; Seam B).
@@ -53,9 +53,12 @@ import { NMS_PREFIX, varReads } from "./rewrites.ts";
 /** One offending read, formatted so the failure message is the whole diagnosis. */
 function offences(): string[] {
   return packageSourceFiles().flatMap((file) =>
-    varReads(readFileSync(file.absolute, "utf8"))
+    customPropertyReads(readFileSync(file.absolute, "utf8"))
       .filter((name) => !name.startsWith(NMS_PREFIX))
-      .map((name) => `${relative(PACKAGE_SRC, file.absolute)} reads var(${name})`),
+      // The name, not the syntax it was written in: a read reaches the same
+      // property as `var(--muted)` or as Tailwind 4's `bg-(--muted)`, and a
+      // message that named one would send the fixer looking for the other.
+      .map((name) => `${relative(PACKAGE_SRC, file.absolute)} reads ${name}`),
   );
 }
 

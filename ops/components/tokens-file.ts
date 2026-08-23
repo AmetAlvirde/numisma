@@ -1,15 +1,19 @@
-import { NMS_PREFIX, varReads } from "./rewrites.ts";
+import { NMS_PREFIX, customPropertyReadMatches } from "./rewrites.ts";
 
 /**
  * WHICH TOKENS A PLACED COMPONENT NEEDS, and how they get folded into
  * `packages/components/src/tokens.ts` — a hand-written file with load-bearing
  * prose that this module must edit without disturbing.
  *
- * A COMPONENT REACHES A TOKEN TWO WAYS, and only one of them is visible as a
+ * A COMPONENT REACHES A TOKEN THREE WAYS, and only one of them is visible as a
  * `var()` read:
  *
  *   1. Bare, inside an arbitrary value — `rounded-[min(var(--nms-radius-md),8px)]`.
- *   2. Through a Tailwind theme utility — `bg-primary`, `border-ring`. No
+ *   2. Through Tailwind 4's shorthand for that same read — `bg-(--nms-muted)`,
+ *      `w-(length:--nms-sidebar-width)`. Identical compiled output, and no
+ *      `var(` anywhere in the source. `base-vega`'s sidebar and chart both ship
+ *      it, so `pnpm components:add` reaches it.
+ *   3. Through a Tailwind theme utility — `bg-primary`, `border-ring`. No
  *      `var()` appears anywhere in the source, and the name is every bit as
  *      required: Tailwind 4 emits a utility only when its theme variable
  *      exists, so a missing one emits NO RULE and the build exits 0.
@@ -124,14 +128,20 @@ export interface ParsedToken {
  *
  * Runs AFTER the namespacing rewrite, so a bare `var(--muted)` is already
  * `var(--nms-muted)` by the time it is seen here.
+ *
+ * THREE ROUTES, NOT TWO. The header above names the bare read and the theme
+ * utility; the bare read has two syntaxes of its own, `var(--nms-muted)` and
+ * Tailwind 4's `bg-(--nms-muted)`. `customPropertyReadMatches` knows both, and
+ * this function asks it rather than keeping a fourth copy of the pattern — a
+ * shorthand read missed here is a real role that lands in no consumer's token
+ * file and renders nothing.
  */
 export function discoverTokenNames(text: string): string[] {
   const found: { index: number; name: string }[] = [];
 
-  for (const match of text.matchAll(/var\(\s*(--[\w-]+)/g)) {
-    const name = match[1]!;
-    if (name.startsWith(NMS_PREFIX)) {
-      found.push({ index: match.index, name });
+  for (const read of customPropertyReadMatches(text)) {
+    if (read.name.startsWith(NMS_PREFIX)) {
+      found.push({ index: read.index, name: read.name });
     }
   }
   for (const match of text.matchAll(THEME_UTILITY)) {
