@@ -29,6 +29,7 @@ import { describe, expect, it } from "vitest";
 import {
   classTokens as tokens,
   DELETED_IN_SLICE_2,
+  DELETED_IN_SLICE_4,
   render,
   renderedClassNames,
   screen,
@@ -99,10 +100,49 @@ describe("DcaCard on the shared Card", () => {
     }
   });
 
-  it("writes none of slice 2's deleted class names, on any of its three arms", () => {
+  it("carries the table surface on its rung ladder, as slice 4's carrier", () => {
+    // The scroller, the table element rules and the cell box are a shared rule and
+    // `SectionTable` is the first surface in the spec's order that carries them, so
+    // slice 4 deletes the rules and converts every carrier — including this ladder, in a
+    // component that slice otherwise does not own (spec #420 Seam B). The strings are
+    // imported from there rather than respelled, so this asserts the elements they
+    // landed on, which is the half an import cannot guarantee.
+    const { container } = render(<DcaCard view={ladderView()} />);
+    const table = container.querySelector("table")!;
+
+    for (const utility of [
+      "@container/table-scroll",
+      "overflow-x-auto",
+      "[-webkit-overflow-scrolling:touch]",
+    ]) {
+      expect(tokens(table.parentElement!)).toContain(utility);
+    }
+    // The two-column ladder is exactly why the floor exists: without it this table
+    // huddles at the left of its card instead of spanning it.
+    for (const utility of ["w-max", "min-w-full", "@[380px]/table-scroll:w-full"]) {
+      expect(tokens(table)).toContain(utility);
+    }
+
+    const rung = screen.getByRole("columnheader", { name: "Rung" });
+    const price = screen.getByRole("columnheader", { name: "Limit price" });
+    for (const utility of ["px-[10px]", "py-2", "border-b", "border-[var(--line)]"]) {
+      expect(tokens(rung)).toContain(utility);
+      expect(tokens(price)).toContain(utility);
+    }
+    expect(tokens(rung)).toContain("text-left");
+    expect(tokens(price)).toContain("text-right");
+
+    // The figures pan and align as figures, on the same terms as the composition table.
+    const cells = screen.getAllByRole("cell");
+    expect(tokens(cells[0]!)).toContain("text-left");
+    expect(tokens(cells[1]!)).toContain("text-right");
+    expect(tokens(cells[1]!)).toContain("px-[10px]");
+  });
+
+  it("writes none of the deleted class names, on any of its three arms", () => {
     for (const view of [ladderView(), cadenceView(), unreadableView()]) {
       const { container } = render(<DcaCard view={view} />);
-      for (const deleted of DELETED_IN_SLICE_2) {
+      for (const deleted of [...DELETED_IN_SLICE_2, ...DELETED_IN_SLICE_4]) {
         expect([...renderedClassNames(container.firstElementChild!)]).not.toContain(
           deleted,
         );

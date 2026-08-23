@@ -211,6 +211,24 @@ export const DELETED_IN_SLICE_3 = [
 ];
 
 /**
+ * THE CLASS NAMES SLICE 4 DELETED — the table surface's two, and only two.
+ *
+ * The section this slice deleted was mostly ELEMENT rules (`table`, `th`/`td`,
+ * `thead th`), and an element cannot stop being written; what a render can prove is that
+ * the two CLASS hooks those rules hung off are gone. `table-scroll` was the scroller and
+ * the query container; `num` was the right-alignment hook on every figure cell in both
+ * tables. Both are utilities on the elements now, so either name reappearing means a
+ * carrier was converted back to a rule that no longer exists.
+ *
+ * Kept beside slices 2 and 3 rather than folded in, for the reason those two are kept
+ * apart: a merged list makes a failure name the wrong slice's contract.
+ *
+ * Two surfaces assert this one. `SectionTable` owns the rules and `DcaCard`'s rung
+ * ladder carries them (spec #420 Seam B).
+ */
+export const DELETED_IN_SLICE_4 = ["table-scroll", "num"];
+
+/**
  * Everything a render test is allowed to reach for, re-exported from one place.
  *
  * `fireEvent` RIDES ALONGSIDE `userEvent`, NOT INSTEAD OF IT. Spec #403 §3.4 bought

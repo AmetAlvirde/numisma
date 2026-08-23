@@ -3,6 +3,17 @@ import { formatUsd } from "@numisma/engine/format";
 import type { DcaPositionView, DcaView } from "../glance/dca-view.ts";
 import { Absent } from "./ui/Absent.tsx";
 import { Card } from "./ui/Card.tsx";
+// The table surface, from the component that owns its deleted element rules (spec #420
+// Seam B — the first surface in the migration's order converts every carrier, wherever
+// it renders). The rung ladder is a table on the same terms as the composition one.
+import {
+  TABLE_CELL,
+  TABLE_CELL_NUM,
+  TABLE_HEAD_CELL,
+  TABLE_HEAD_CELL_NUM,
+  TABLE_SCROLL,
+  TABLE_SURFACE,
+} from "./SectionTable.tsx";
 
 /**
  * THE DCA CARD (spec #277, D4/D6) — the declared accumulation plan, on the phone.
@@ -189,12 +200,12 @@ function Rungs({ position }: { position: DcaPositionView }) {
   }
 
   return (
-    <div className="table-scroll">
-      <table>
+    <div className={TABLE_SCROLL}>
+      <table className={TABLE_SURFACE}>
         <thead>
           <tr>
-            <th>Rung</th>
-            <th className="num">Limit price</th>
+            <th className={TABLE_HEAD_CELL}>Rung</th>
+            <th className={TABLE_HEAD_CELL_NUM}>Limit price</th>
           </tr>
         </thead>
         <tbody>
@@ -203,8 +214,8 @@ function Rungs({ position }: { position: DcaPositionView }) {
               not the plan's own rung id — that never leaves the machine. */}
           {position.rungs.map((rung, index) => (
             <tr key={`${index}:${rung.priceUsd}`}>
-              <td>{index + 1}</td>
-              <td className="num">{formatUsd(rung.priceUsd)}</td>
+              <td className={TABLE_CELL}>{index + 1}</td>
+              <td className={TABLE_CELL_NUM}>{formatUsd(rung.priceUsd)}</td>
             </tr>
           ))}
         </tbody>

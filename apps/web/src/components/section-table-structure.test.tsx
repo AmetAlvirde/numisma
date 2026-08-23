@@ -28,6 +28,7 @@ import {
   classTokens as tokens,
   DELETED_IN_SLICE_2,
   DELETED_IN_SLICE_3,
+  DELETED_IN_SLICE_4,
   render,
   renderedClassNames,
   screen,
@@ -143,6 +144,79 @@ describe("SectionTable on the shared Card", () => {
     expect(tokens(down)).toContain("text-[var(--neg)]");
   });
 
+  it("keeps the escape hatch on the scroller and the table", () => {
+    const { container } = render(
+      <SectionTable section={section()} view={anchoredView()} />,
+    );
+    const table = container.querySelector("table")!;
+    const scroller = table.parentElement!;
+
+    // The scroller is the query container AND the thing that pans; both facts have to be
+    // on the same element or the breakpoint below measures the wrong box.
+    for (const utility of [
+      "@container/table-scroll",
+      "overflow-x-auto",
+      "[-webkit-overflow-scrolling:touch]",
+    ]) {
+      expect(tokens(scroller)).toContain(utility);
+    }
+
+    // Sized to content with a floor, and fitted only above a 380px SCROLLER. jsdom lays
+    // nothing out and resolves no container query, so this asserts that the two arms are
+    // written and on which element — Chrome is what proves the pan actually happens.
+    for (const utility of [
+      "w-max",
+      "min-w-full",
+      "@[380px]/table-scroll:w-full",
+      "border-collapse",
+      "tabular-nums",
+    ]) {
+      expect(tokens(table)).toContain(utility);
+    }
+  });
+
+  it("puts the cell box on every cell and the alignment per column", () => {
+    render(<SectionTable section={section()} view={anchoredView()} />);
+
+    const label = screen.getByRole("columnheader", { name: "Label" });
+    const figure = screen.getByRole("columnheader", { name: "USD value" });
+
+    // The header's own treatment, over the shared box. Preflight is off, so the padding,
+    // the hairline and the alignment are all written rather than inherited from a UA
+    // that centres a `th` and draws no border at all.
+    for (const utility of [
+      "px-[10px]",
+      "py-2",
+      "border-b",
+      "border-[var(--line)]",
+      "text-[var(--muted)]",
+      "text-[0.78rem]",
+      "uppercase",
+      "tracking-[0.04em]",
+    ]) {
+      expect(tokens(label)).toContain(utility);
+      expect(tokens(figure)).toContain(utility);
+    }
+
+    // The one thing that differs by column, and the reason the figure cell does not also
+    // carry the left arm: two unvariant `text-align` utilities are resolved by emitted
+    // order, so only the winning one is written.
+    expect(tokens(label)).toContain("text-left");
+    expect(tokens(label)).not.toContain("text-right");
+    expect(tokens(figure)).toContain("text-right");
+    expect(tokens(figure)).not.toContain("text-left");
+
+    const cells = screen.getAllByRole("cell");
+    const labelCell = cells.find((cell) => cell.textContent === "Alpha")!;
+    const usdCell = labelCell.nextElementSibling!;
+    for (const utility of ["px-[10px]", "py-2", "border-b", "border-[var(--line)]"]) {
+      expect(tokens(labelCell)).toContain(utility);
+      expect(tokens(usdCell)).toContain(utility);
+    }
+    expect(tokens(labelCell)).toContain("text-left");
+    expect(tokens(usdCell)).toContain("text-right");
+  });
+
   it("writes none of the deleted class names, on either arm", () => {
     const anchored = render(
       <SectionTable section={section()} view={anchoredView()} />,
@@ -153,7 +227,11 @@ describe("SectionTable on the shared Card", () => {
 
     for (const { container } of [anchored, genesis]) {
       const rendered = renderedClassNames(container.firstElementChild!);
-      for (const deleted of [...DELETED_IN_SLICE_2, ...DELETED_IN_SLICE_3]) {
+      for (const deleted of [
+        ...DELETED_IN_SLICE_2,
+        ...DELETED_IN_SLICE_3,
+        ...DELETED_IN_SLICE_4,
+      ]) {
         expect([...rendered]).not.toContain(deleted);
       }
       expect([...rendered]).toContain("absent");

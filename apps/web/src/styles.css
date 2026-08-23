@@ -110,65 +110,21 @@
    each painted `color: #fff`; nothing outside the two `:root` blocks spells a colour
    any more, and `summary-section-deleted.test.ts` is what keeps that true. */
 
-/* THE ESCAPE HATCH, AND THE ONE PLACE A SURFACE IS ALLOWED TO SCROLL SIDEWAYS. A five-
-   column composition row is not reflowable at 320px: `Label · USD value · % of fund`
-   and two deltas each named against a reference are five figures that mean nothing
-   apart, and stacking them per row would turn one table into thirty-one blocks. So the
-   table keeps its shape and the reader pans it.
+/* THE TABLE SURFACE LEFT THIS FILE (spec #420 slice 4). The scroller, the table element
+   rules, the cell box and the header treatment are utilities on the elements two
+   components render: `SectionTable.tsx` holds the seven shared strings and `DcaCard`
+   imports them for its rung ladder, because a rule written once for two surfaces stays
+   one thing.
 
-   THE SCROLLER IS THE QUERY CONTAINER, not the card and not the viewport — the only
-   place in this file where that is true, and for a reason: the judgement below is about
-   whether THIS TABLE has room, and the scroller is the box that knows. It also means
-   the rule needs no class of its own on either card that uses it. */
-.table-scroll {
-  container: table-scroll / inline-size;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-}
-
-table {
-  border-collapse: collapse;
-  font-variant-numeric: tabular-nums;
-}
-
-/* AT 320px THE TABLE IS SIZED TO ITS CONTENT AND PANNED. Under a bare `width: 100%` it
-   fits itself to the card first and overflows only once even min-content will not go in,
-   so the narrow reader got the worst of both: `% OF / FUND` broken across two lines,
-   every cell wrapped to its tightest, AND a scrollbar anyway. Sized to content, the
-   cells are whole and the panning is the only cost. `min-width` keeps a two-column
-   table (the DCA card's) spanning its card rather than huddling at the left. */
-.table-scroll table {
-  width: max-content;
-  min-width: 100%;
-}
-
-/* Above the phone, FITTING THE CARD WINS. There is enough width for the browser's own
-   squeeze to land on wrapped LABELS rather than on wrapped headers and figures, and a
-   table the eye takes in whole beats one it has to pan. Same 380px the cards use. */
-@container table-scroll (min-width: 380px) {
-  .table-scroll table {
-    width: 100%;
-  }
-}
-
-th,
-td {
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--line);
-  text-align: left;
-}
-
-th.num,
-td.num {
-  text-align: right;
-}
-
-thead th {
-  color: var(--muted);
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
+   THE ESCAPE HATCH MOVED WITH THEM, INTACT. A five-column composition row is not
+   reflowable at 320px: `Label · USD value · % of fund` and two deltas each named
+   against a reference are five figures that mean nothing apart, and stacking them per
+   row would turn one table into thirty-one blocks. So the table keeps its shape and the
+   reader pans it, below a 380px SCROLLER — which is still the query container, and
+   still the only sanctioned sideways scroll on any surface this app draws. Above that
+   width the table fits the card again. `table-section-deleted.test.ts` holds the
+   deletion; the reasoning for each half is in `SectionTable.tsx` beside the string that
+   carries it. */
 
 /* ── the glance (PRD #146 D1/D3) ────────────────────────────────────────────
    The verdict is the only thing above 20px and it lands before the eye reaches
