@@ -112,7 +112,9 @@ function LadderFixturePage() {
     // composing must not render as a blank page.
     return (
       <Shell>
-        <div className="card notice error">
+        {/* `error` is the hook `.notice.error h1` still needs; the colour and the
+            zeroed margins are utilities now (spec #420 slice 1). */}
+        <div className="card notice error m-0 text-[var(--neg)]">
           <h1>{load.name} no longer composes</h1>
           <p>{load.page.why}</p>
         </div>

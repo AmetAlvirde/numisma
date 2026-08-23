@@ -14,8 +14,10 @@
  * sentence.
  *
  * The class census covers the rest: `card notice` on both, plus `error` on the stale
- * variant and nowhere else. Spec #403 forbids a new class name and requires
- * `styles.css` to be byte-identical.
+ * variant and nowhere else. Spec #403 forbade a new class name and required
+ * `styles.css` to be byte-identical; spec #420 is the migration that unmakes the second
+ * half of that, so the stale variant's census is now the successor shape (Seam E) —
+ * per class, `toContain` — and carries the two utilities that replaced `.error`.
  *
  * The version numbers here are authored, and deliberately not the real schema window —
  * the primitive renders whatever the route hands it, and pinning today's numbers would
@@ -84,13 +86,24 @@ describe("SnapshotStaleNotice", () => {
     ]);
   });
 
-  it("carries `error` alongside the class set the empty notice shares", () => {
+  it("carries `error` alongside the class set the empty notice shares, plus the utilities that replaced its rule", () => {
     const { container } = render(
       <SnapshotStaleNotice storedVersion={2} min={4} max={6} />,
     );
     const root = container.firstElementChild;
 
     expect(root?.tagName).toBe("DIV");
-    expect(classCensus(root!)).toEqual(["card notice error"]);
+    // Per class, `toContain`, never full-string equality (spec #420 Seam E). The old
+    // census pinned the whole attribute, which made slice 1's two added utilities read
+    // as a regression rather than as the conversion they are.
+    const names = (root?.getAttribute("class") ?? "").split(/\s+/).filter(Boolean);
+    for (const name of ["card", "notice", "error"]) {
+      expect(names).toContain(name);
+    }
+    // `.error` is deleted; the name above survives ONLY because `.notice.error h1` still
+    // selects through it (slice 2's rule). Its own two declarations are utilities now.
+    for (const utility of ["text-[var(--neg)]", "m-0"]) {
+      expect(names).toContain(utility);
+    }
   });
 });

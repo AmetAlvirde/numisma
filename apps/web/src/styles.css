@@ -53,12 +53,12 @@
    `--nms-primary` would put "where price is now" on every button in the app. */
 :root {
   /* MINTED, because the app had no such colours. `--accent` is not a new decision so
-     much as an existing one promoted: `.auth-card button` below has been painting this
-     exact blue from a literal hex since the login page was written, which is the single
-     place this file breaks its own rule about where colour is defined. Naming it here
-     changes no pixel today and gives the next adopted component something to read.
-     (The literal in that rule stays until the `styles.css` migration; a rule rewrite is
-     out of this slice's scope.) White on it measures 4.6:1, which clears AA for body
+     much as an existing one promoted: `.auth-card button` painted this exact blue from
+     a literal hex from the day the login page was written, the single place this file
+     broke its own rule about where colour is defined. THAT RULE IS GONE (spec #420
+     slice 1): it had been overriding the package `Button` the sign-in form renders, and
+     deleting it lets the package's geometry through while `--accent` keeps the colour
+     exactly where it was. White on it measures 4.6:1, which clears AA for body
      text — a darker blue would clear it further and would no longer be the blue the app
      already ships. */
   --accent: #3b6cf0;
@@ -83,7 +83,8 @@
   --nms-ring: var(--accent);
   /* GEOMETRY, NOT PALETTE, and the one override here that changes a built-in Tailwind
      utility (`rounded-md`) rather than creating one. The package default is 6px; every
-     control this app draws — the auth inputs and the auth button below — is 8px, so a
+     control this app draws — the auth inputs, now `rounded-lg` on the elements
+     themselves, and the sign-in button through this very token — is 8px, so a
      package component left on the default would be the one square-ish corner on the
      page. Cards stay 12px and are not this token. */
   --nms-radius-md: 8px;
@@ -114,19 +115,13 @@ body {
   font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
 }
 
-.dashboard,
-.auth {
+.dashboard {
   max-width: 760px;
   margin: 0 auto;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 16px;
-}
-
-.auth {
-  min-height: 100dvh;
-  justify-content: center;
 }
 
 .card {
@@ -343,50 +338,6 @@ thead th {
 
 .notice.error h1 {
   color: var(--neg);
-}
-
-.auth-card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.auth-card label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 0.85rem;
-  color: var(--muted);
-}
-
-.auth-card input {
-  padding: 10px;
-  border-radius: 8px;
-  border: 1px solid var(--line);
-  background: var(--bg);
-  color: var(--text);
-  font-size: 1rem;
-}
-
-.auth-card button {
-  padding: 11px;
-  border: 0;
-  border-radius: 8px;
-  background: #3b6cf0;
-  color: #fff;
-  font-size: 1rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.auth-card button:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.error {
-  color: var(--neg);
-  margin: 0;
 }
 
 /* ── the glance (PRD #146 D1/D3) ────────────────────────────────────────────

@@ -65,7 +65,11 @@ export function SnapshotStaleNotice({
   max: number;
 }): ReactElement {
   return (
-    <div className="card notice error">
+    // `error` STAYS AS A HOOK, its own rule does not. Spec #420 slice 1 deleted
+    // `.error` (`color: var(--neg); margin: 0`) and every carrier took the utilities
+    // instead; the class name survives here because `.notice.error h1` still selects
+    // through it, and that rule is slice 2's to move.
+    <div className="card notice error m-0 text-[var(--neg)]">
       <h1>Schema version mismatch — refusing to render</h1>
       <p>
         The stored snapshot is schema version <strong>{storedVersion}</strong>, which is
