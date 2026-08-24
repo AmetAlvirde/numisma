@@ -182,7 +182,24 @@ const SPOT_NOTE = "m-0 mt-1 text-[0.7rem] text-[var(--muted)]";
 /** Spot's own reflow already right-aligns the block, so this one has no wide arm. */
 const SPOT_ABSENT = "flex-wrap justify-end text-right";
 
-/** One column of rows at 320px; a real grid of tiles once the CARD is wide enough. */
+/**
+ * One column of rows at 320px; a real grid of tiles once the CARD is wide enough.
+ *
+ * `grid-cols-1` IS NOT LITERALLY THE DELETED `grid-template-columns: 1fr`, and here it
+ * cannot differ. `1fr` is `minmax(auto, 1fr)`, whose automatic minimum is the item's
+ * min-content contribution; `grid-cols-1` emits `repeat(1, minmax(0, 1fr))`, which has no
+ * such floor. The two part company only when a tile's min-content exceeds the card
+ * interior — measured in Chrome at 320px, with `min-width: auto` forced onto a tile and a
+ * 363px unbreakable token in it: `1fr` grows the track to 363.008px, `minmax(0,1fr)`
+ * holds 254px.
+ *
+ * Every tile carries `min-w-0`, which is `TILE`'s reproduction of the `min-width: 0` the
+ * deleted `.fp-spot, .fp-tile` rule declared. That zeroes the automatic minimum, so the
+ * `auto` half of `minmax(auto, 1fr)` was already 0 on the pre-slice tree. The
+ * substitution is inert by construction, not merely unobserved: measured at 254px of card
+ * interior the real tiles' widest min-content is 97.82px, and both track definitions
+ * resolve to the same 254px track.
+ */
 const TILES =
   "grid grid-cols-1 gap-2" +
   " @[380px]/fp-header:grid-cols-[repeat(auto-fit,minmax(130px,1fr))] @[380px]/fp-header:gap-3";
