@@ -31,6 +31,7 @@ import {
   DELETED_IN_SLICE_4,
   render,
   renderedClassNames,
+  absentSlots,
   expectNoStyledClassSurvives,
   screen,
 } from "../render.testkit.tsx";
@@ -239,6 +240,38 @@ describe("SectionTable on the shared Card", () => {
       // it; the primitive's own contract test holds that end.
       expect([...rendered]).not.toContain("absent");
     }
+  });
+
+  it("keeps `row-suppressed` on the suppressed `<tr>`, and its four stated causes", () => {
+    // `row-suppressed` NEVER HAD A RULE ON EITHER REF, and it is asserted anyway. `main`
+    // pinned it present in both censuses; the successors dropped it, so deleting it from
+    // the `<tr>` goes unnoticed and anything later keyed on it — a row tint, a scan
+    // guard, a test — misses silently. Drift, not breakage, and cheaper to stop here
+    // than to rediscover.
+    //
+    // THE FOUR CAUSES RIDE ALONG for the reason the three cards' witnesses do:
+    // `not.toContain("absent")` above is satisfied just as well by the row being gone.
+    // They are asserted by their own words because the four are DIFFERENT — the row's
+    // cause reaches two cells, and each delta column names its own — and a `Row` that
+    // collapsed them into one would still print an em dash in every cell.
+    const { container } = render(
+      <SectionTable section={section()} view={anchoredView()} />,
+    );
+    const suppressed = container.querySelector("tr.row-suppressed");
+
+    expect(suppressed).toBeTruthy();
+    expect(suppressed?.querySelector("td")?.textContent).toBe("Beta");
+    expect(absentSlots(suppressed!).map((slot) => slot.textContent)).toEqual([
+      "—no current mark",
+      "—no current mark",
+      "—no earlier anchor",
+      "—no cost basis",
+    ]);
+
+    // One suppressed row out of the two the fixture declares. The rendered row carries
+    // no such class and no em dash, which is what makes the assertions above a
+    // suppression witness rather than a description of every `<tr>` this table draws.
+    expect(container.querySelectorAll("tr.row-suppressed")).toHaveLength(1);
   });
 });
 
