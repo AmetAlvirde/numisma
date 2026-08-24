@@ -161,7 +161,7 @@ increment on purpose, rather than bought as a side effect of a package increment
 
 This is the **package-side** computed-style procedure: it judges a package
 component in the workbench, on each of the three theme modes. Its app-side twin
-is §8, the Chrome checklist, which judges a converted app surface in the real
+is §9, the Chrome checklist, which judges a converted app surface in the real
 app. Both exist for the same reason, given in §3: a text channel cannot answer
 whether a rule won the cascade and computed to the right value.
 
@@ -255,7 +255,55 @@ Two things it refuses on rather than guessing:
 The script never touches `src/index.ts`. That surface is curated by hand, one
 export at a time.
 
-## 7. Two things about the two Tailwind entries
+## 7. Two conventions about package source
+
+Both are house rules with a cost attached, and both are decided here so a file
+crossing in from `apps/web` is not deciding them again under migration pressure.
+
+### How a component reads colour
+
+**shadcn-derived components read Tailwind theme utilities. House components read
+bare `var(--nms-*)` inside arbitrary values.**
+
+`Button` came from the shadcn CLI and writes `bg-primary`, `border-ring`. That
+stays: the utilities are how shadcn writes components, and rewriting them would
+make every future `components:add` diff against upstream by hand. A component
+written in this repo writes `text-[var(--nms-muted-foreground)]` instead, never
+`text-muted-foreground`.
+
+Both forms resolve to the same value, through the `@theme` mapping §2 already
+asks every consumer for, so this is a convention about source form and not a
+second palette.
+
+Why the bare form for house components:
+
+- **A mint stays a three-sided edit.** A new name needs `src/tokens.ts`, the
+  app's `styles.css` alias, and the workbench's `theme-modes.ts` tables. Reading
+  it through a utility would add two more sides: the consumer's `@theme` block,
+  and [`ops/components/consumers.ts`](../ops/components/consumers.ts), which
+  generates the workbench's CSS.
+- **It keeps a guard's list short.**
+  [`apps/web/src/theme-color-utilities.test.ts`](../apps/web/src/theme-color-utilities.test.ts)
+  forbids app code from reaching house colour through a theme utility, and it
+  works off a **literal** list of nine names. Every house name promoted to a
+  utility has to join that list or `text-neg` in app code walks past the guard
+  that exists to catch exactly that.
+- **It makes a migration mechanical.** `[var(--x)]` becomes `[var(--nms-x)]`,
+  one substitution per line, which is a diff a reviewer can count.
+
+### How a component file is named
+
+**Every component file in the package is kebab-case**, generic and domain alike.
+`button.tsx` today; `absent.tsx` and `snapshot-notice.tsx` as the house
+components arrive.
+
+That is the name the shadcn CLI writes and the name `pnpm components:add` keeps
+writing, so the alternative is not "PascalCase files" but a package where the
+scripted path and the hand path disagree about the same file. Components
+arriving from `apps/web` are renamed on the way in, once, rather than landing
+under their old name and being renamed later by a sweep nobody scheduled.
+
+## 8. Two things about the two Tailwind entries
 
 **Preflight is included in the workbench and omitted in `apps/web`, permanently.**
 This is the one deliberate divergence between the two entries, and
@@ -315,7 +363,7 @@ utility on the value `:root` already computed. Half the tokens switch, half do
 not, and nothing on screen says which half. That is failure two wearing a
 different hat, inside the instrument built to catch it.
 
-## 8. The app-side Chrome checklist
+## 9. The app-side Chrome checklist
 
 §5 judges a package component in the workbench. This judges a converted **app
 surface** in the real app, and it is the procedure spec #420 ran once per slice,

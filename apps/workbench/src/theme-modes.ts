@@ -95,6 +95,18 @@ export const THEMED_TOKENS: Readonly<Record<string, string>> = {
  * mode was carrying two values no fixture could ever show. The mirror is what
  * makes that a two-sided edit — the drift test below reads `styles.css` off disk
  * and reds if either side moves alone.
+ *
+ * AND BOTH SPELLINGS COME BACK IN WAVE 1 (spec #432 §4.1), which is not the
+ * deletion being undone. The rule was never "these two names are wrong", it was
+ * "a token nothing reads is a token nothing can verify". `Absent` reads the
+ * app's `--muted` and `Card` reads its `--card`; the day each of them enters the
+ * package is the day that precondition is met, and the alias comes back in the
+ * same slice as the component that reads it, never ahead of it. The argument the
+ * drift test records as "the argument that lost" — carry the alias early so app
+ * mode is already correct on arrival — is still lost. What changed is the
+ * arrival, not the argument. The count moves from twelve to fifteen one
+ * component at a time; the exact spellings are reused on purpose, so the
+ * vocabulary stays one vocabulary rather than growing a second name per role.
  */
 export const APP_TOKENS: Readonly<Record<string, string>> = {
   "--nms-background": "#0f1115",

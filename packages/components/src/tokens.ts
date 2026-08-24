@@ -53,6 +53,48 @@
  * none of them are here, because nothing in this package reads them, and a
  * token a consumer is asked to define but nothing renders is a token nobody can
  * verify. Add a name here when a component starts reading it, not before.
+ *
+ * ── THE HOUSE VOCABULARY: TEN NAMES, DECIDED ONCE (spec #432 §4.2) ────────
+ *
+ * `apps/web` owns ten bare palette names. Each has exactly one counterpart in
+ * this namespace, and the whole mapping is written here so a component crossing
+ * into the package looks the name up rather than choosing it again. Three are
+ * declared below; the other seven are named and not yet declared, each waiting
+ * on the component that first reads it.
+ *
+ *     house      package                  status
+ *     --bg       --nms-background         declared
+ *     --text     --nms-foreground         declared
+ *     --line     --nms-border             declared
+ *     --card     --nms-card               named; declared with `Card`
+ *     --muted    --nms-muted-foreground   named; declared with `Absent`
+ *     --neg      --nms-neg                named; declared with the snapshot notices
+ *     --pos      --nms-pos                named; not yet declared (wave 2)
+ *     --ok       --nms-ok                 named; not yet declared (wave 2)
+ *     --warn     --nms-warn               named; not yet declared (wave 2)
+ *     --now      --nms-now                named; not yet declared (wave 2)
+ *
+ * NAMING WITHOUT DECLARING IS THE POINT, not a half-measure. Declaring all ten
+ * at once would put seven grayscale defaults and seven distinct themed values in
+ * front of a reviewer for roles nothing in this package renders, which is the
+ * state the rule above refuses. Naming them costs nothing and settles the two
+ * mappings that are genuinely hard, below, while the argument is still fresh.
+ *
+ * `--muted` MAPS TO `--nms-muted-foreground`, NEVER TO `--nms-muted`. The
+ * English collides and the roles do not: `--nms-muted` is a recessed SURFACE
+ * (Button's `ghost` and `outline` hover), the app's `--muted` is secondary TEXT.
+ * A mechanical `--muted` → `--nms-muted` rewrite compiles, emits a rule, paints
+ * the app's most-used grey wrong, and leaves every guard green, because the
+ * package-side guard checks only that a read sits inside the namespace and never
+ * that it is the right name in it. This row is the defence against that.
+ *
+ * `--nms-neg` IS DISTINCT FROM `--nms-destructive`, though `apps/web` resolves
+ * both to the same red today. They are different kinds of thing: `--neg` is
+ * data, the sign of a number, and `--nms-destructive` is intent, the affordance
+ * of a button that destroys something. Welding them means the money-red cannot
+ * soften, or pair colourblind-safely with `--nms-pos`, without dragging every
+ * destructive affordance along. Two names at one value now is free; one name at
+ * two meanings later is not.
  */
 
 /**

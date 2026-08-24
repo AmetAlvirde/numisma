@@ -172,6 +172,17 @@ describe("the app's --nms-* overrides in styles.css", () => {
     // reads the name. The two greys stay separate either way — that is what the
     // prefix is for — and this line is what stops the collision being "fixed"
     // by pointing one at the other.
+    //
+    // THE LINE BELOW IS TEMPORARY, AND THE SLICE THAT INVERTS IT IS NAMED.
+    // Spec #432 §4.1 brings `Absent` into the package reading
+    // `var(--nms-muted-foreground)`, and that slice adds the alias back:
+    // `--nms-muted-foreground: var(--muted)`. When it does, this assertion
+    // flips to `toBe("var(--muted)")` and the sentence above loses its last
+    // clause. Deleting it then is not deleting a guard someone meant to keep —
+    // it was always "nothing reads this name yet", never "this name is wrong".
+    // What must survive the flip is the assertion two lines up: `--nms-muted`
+    // stays pointed at `--recess`, because the surface and the text are still
+    // two different roles no matter how many aliases the block carries.
     expect(overrides.has("--nms-muted-foreground")).toBe(false);
   });
 

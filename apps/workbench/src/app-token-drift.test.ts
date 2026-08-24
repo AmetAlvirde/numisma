@@ -61,6 +61,15 @@ import { APP_TOKENS, THEME_MODES } from "./theme-modes.ts";
  * A name lands in `NMS_TOKEN_NAMES` when a component starts reading it, and the
  * app defines it then.
  *
+ * WHICH IS THE DAY WAVE 1 ARRIVES (spec #432 §4.1). `Absent` and `Card` cross
+ * into the package in wave 1, and `--nms-muted-foreground` and `--nms-card`
+ * come back with them, in those slices and not before. Reusing the deleted
+ * spellings is deliberate: same role, same name, one vocabulary. Read it as the
+ * sentence above being satisfied, not withdrawn — the losing argument asked to
+ * carry the aliases while nothing read them, and this carries them because
+ * something does. Both sides move together, so the two numbers keep agreeing
+ * while they climb from twelve to fifteen.
+ *
  * THE MIRROR STILL POINTS BOTH WAYS, and that is what makes the deletion a
  * two-sided edit: dropping the aliases from `styles.css` without dropping them
  * from `APP_TOKENS` reds the first case below, and the reverse reds it too.
