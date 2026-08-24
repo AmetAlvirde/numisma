@@ -22,10 +22,21 @@ import { describe, expect, it } from "vitest";
  * the deleted rule carried.
  *
  * THE ONE DECLARATION THAT DOES NOT COME ACROSS is `body { min-width: 320px }`.
- * Seam D put `min-w-[320px]` on `<body>` in `__root.tsx` in slice 0 precisely so
- * that deleting the `body` rule would make the sentinel the real floor rather
- * than a duplicate of one. Re-declaring it here would re-cover the scan guard
- * with a rule the guard cannot see, so it is asserted ABSENT.
+ * Seam D put the arbitrary-value min-width sentinel on `<body>` in `__root.tsx`
+ * in slice 0 precisely so that deleting the `body` rule would make the sentinel
+ * the real floor rather than a duplicate of one. Re-declaring it here would
+ * re-cover the scan guard with a rule the guard cannot see, so it is asserted
+ * ABSENT.
+ *
+ * THE CLASS IS NOT SPELLED OUT HERE, and `tailwind.css` says why in as many
+ * words: Tailwind extracts candidates from comment text as readily as from JSX,
+ * `@source "./"` scans this directory, and `.test.ts` files are in it. A
+ * docblock naming the utility emits it into the built stylesheet on behalf of
+ * the guard that exists to prove `__root.tsx` emitted it —
+ * `app-scan-sentinel.test.ts` would still red on the `@source` line going, but
+ * it would no longer be proving that `__root.tsx`'s class is the one being
+ * scanned. `app-scan-sentinel.test.ts` writes the class as a split string for
+ * the same reason.
  *
  * Every value below is authored from the deleted rules. Nothing here reads
  * product data.
