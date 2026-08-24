@@ -1187,17 +1187,36 @@ describe("the chart card carries its section as utilities", () => {
     // EACH NAMES ITS OWN COLOUR AND ITS OWN BORDER STYLE. The deleted rules were a base
     // and three modifiers; two unvariant utilities on one property are resolved by
     // Tailwind's emitted order, so an override written here would lose silently.
-    expectClasses(filled, ["w-[18px]", "border-t-2", "border-solid", "border-t-[var(--pos)]"]);
+    expectClasses(filled, [
+      "w-[18px]",
+      "border-t-2",
+      "[border-top-style:solid]",
+      "border-t-[var(--pos)]",
+    ]);
     expectClasses(waiting, [
       "w-[18px]",
       "border-t-2",
-      "border-dashed",
+      "[border-top-style:dashed]",
       "border-t-[var(--muted)]",
     ]);
     // THE NOW SWATCH IS A HORIZONTAL RULE, matching the picture: price is the y axis, so
     // spot is a price LEVEL. It stays distinguishable from `waiting` on colour and on
     // solidity, not on angle.
-    expectClasses(now, ["w-[18px]", "border-t-2", "border-solid", "border-t-[var(--now)]"]);
+    expectClasses(now, [
+      "w-[18px]",
+      "border-t-2",
+      "[border-top-style:solid]",
+      "border-t-[var(--now)]",
+    ]);
+
+    // THE STYLE IS PER EDGE AND MUST STAY THERE. `border-dashed` sets `border-style` on
+    // all four sides, and with preflight off the UA's `border-width: medium` on the other
+    // three is still there waiting for a style to make it visible: Chrome drew each
+    // swatch as an 18x5 box with a 3px grey edge instead of an 18x2 rule.
+    for (const swatch of swatches) {
+      expect(classTokens(swatch)).not.toContain("border-solid");
+      expect(classTokens(swatch)).not.toContain("border-dashed");
+    }
   });
 
   it("sizes the hidden caption as prose and keeps it in the accessibility tree", () => {

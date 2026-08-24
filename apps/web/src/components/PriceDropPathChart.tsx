@@ -164,11 +164,20 @@ const LEGEND_ENTRY = "flex items-center gap-1.5";
  * solidity rather than on angle: the now rule is HORIZONTAL in the picture, because price
  * is the y axis and spot is a price LEVEL the way a trading chart draws last price, and
  * this swatch turned with it.
+ *
+ * THE STYLE IS A LONGHAND, AND `border-dashed` WOULD BE A BUG. `border-solid` and
+ * `border-dashed` set `border-style` on ALL FOUR sides, and with preflight off nothing
+ * has zeroed the UA's `border-width: medium` on the other three — a width that renders
+ * only once a style makes it visible. Measured in Chrome: the shorthand turned each
+ * swatch from an 18×2 rule into an 18×5 box with a 3px grey edge down three sides, in
+ * `currentColor` rather than in the swatch's own colour, at both 320px and desktop. The
+ * per-edge arbitrary property is the same idiom `WARN_INFERRED` in `FillPath.tsx` uses,
+ * and for the same reason.
  */
 const SWATCH = "w-[18px] border-t-2";
-const SWATCH_FILLED = `${SWATCH} border-solid border-t-[var(--pos)]`;
-const SWATCH_WAITING = `${SWATCH} border-dashed border-t-[var(--muted)]`;
-const SWATCH_NOW = `${SWATCH} border-solid border-t-[var(--now)]`;
+const SWATCH_FILLED = `${SWATCH} [border-top-style:solid] border-t-[var(--pos)]`;
+const SWATCH_WAITING = `${SWATCH} [border-top-style:dashed] border-t-[var(--muted)]`;
+const SWATCH_NOW = `${SWATCH} [border-top-style:solid] border-t-[var(--now)]`;
 
 /** The dash the WAITING segment and its legend swatch share. One constant, so the
  *  picture and the key that explains it cannot drift apart. */
