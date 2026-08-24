@@ -234,7 +234,9 @@ describe("SectionTable on the shared Card", () => {
       ]) {
         expect([...rendered]).not.toContain(deleted);
       }
-      expect([...rendered]).toContain("absent");
+      // The hook is gone as of slice 8, which deleted the last rule selecting through
+      // it; the primitive's own contract test holds that end.
+      expect([...rendered]).not.toContain("absent");
     }
   });
 });

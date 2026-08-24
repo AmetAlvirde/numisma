@@ -226,7 +226,9 @@ describe("GlanceCard on the shared Card", () => {
     ]) {
       expect([...rendered]).not.toContain(deleted);
     }
-    // `absent` is the one hook that stays, for three later slices' contextual rules.
-    expect([...rendered]).toContain("absent");
+    // `absent` WAS the one hook that stayed, for three later slices' contextual rules.
+    // Slice 8 deleted the last of them (`.fp-detail .absent`) and the hook with it, so
+    // the claim flips: nothing renders the name, because nothing selects it.
+    expect([...rendered]).not.toContain("absent");
   });
 });

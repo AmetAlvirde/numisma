@@ -89,7 +89,11 @@ const TABBABLE =
 
 /** The live panel's heading — the sentence that has to follow the selection. */
 function panelHeading(container: Element): string {
-  const panel = container.querySelector(".fp-selected");
+  // FOUND BY THE LIVE-REGION ATTRIBUTE, not by a class name: spec #420 slice 8 deleted
+  // `fp-selected`, and `aria-live` is what makes this card the panel anyway. The check
+  // below still earns its place — the query allows any value and the contract is
+  // `polite`, so a card that lost its politeness is found and then rejected.
+  const panel = container.querySelector("section[aria-live]");
   if (panel === null) throw new Error("the selected-rung panel is not rendered");
   if (panel.getAttribute("aria-live") !== "polite") {
     throw new Error("the selected-rung panel stopped being a polite live region");
@@ -106,7 +110,11 @@ function currentRows(rows: readonly Element[]): number[] {
 }
 
 function rungRows(container: Element): HTMLButtonElement[] {
-  return [...container.querySelectorAll<HTMLButtonElement>("button.fp-row")];
+  // The rung list is the only list of buttons the fill path draws, and `fp-row` — the
+  // class this used to key off — left with spec #420 slice 8. Structure rather than a
+  // name: every rung is a button, and that IS the accessibility contract this file is
+  // about, so the query is now made of the same fact as the assertions.
+  return [...container.querySelectorAll<HTMLButtonElement>("li > button")];
 }
 
 /**

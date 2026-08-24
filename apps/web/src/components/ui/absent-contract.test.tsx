@@ -36,10 +36,13 @@ describe("Absent", () => {
     expect(screen.getByText("suppressed")).not.toBe(null);
   });
 
-  it("carries `.absent`'s four declarations as utilities, and keeps the hook", () => {
+  it("carries `.absent`'s four declarations as utilities, and no longer writes the name", () => {
     const { container } = render(<Absent why="no floor set" />);
 
-    const root = container.querySelector(".absent");
+    // FOUND BY THE EM DASH. The class name is gone (spec #420 slice 8) and the glyph is
+    // what identifies this primitive anyway — it is the half of the contract the two
+    // assertions above are about.
+    const root = container.querySelector('span[aria-hidden="true"]')?.parentElement;
     expect(root?.tagName).toBe("SPAN");
     for (const utility of [
       "inline-flex",
@@ -49,11 +52,11 @@ describe("Absent", () => {
     ]) {
       expect(tokens(root!)).toContain(utility);
     }
-    // `absent` SURVIVES AS A BARE HOOK, deliberately: `.metrics dd .absent` (slice 3),
-    // `.fp-tile .absent` (slice 7) and `.fp-detail .absent` (slice 8) still select
-    // through it. It is asserted rather than tolerated so that deleting it reads as the
-    // decision it would be.
-    expect(tokens(root!)).toContain("absent");
+    // `absent` IS GONE (spec #420 slice 8). It survived its own rule for six slices as a
+    // bare hook because three contextual rules selected through it; the last of those,
+    // `.fp-detail .absent`, was deleted with the selected-rung card, so the name has
+    // nothing behind it. Asserted from the other side now — the absence is the decision.
+    expect(tokens(root!)).not.toContain("absent");
   });
 
   it("puts `.absent-why` and `.muted` on the reason, sized for the metrics context", () => {

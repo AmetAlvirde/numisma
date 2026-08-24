@@ -243,10 +243,11 @@ describe("SummaryCard on the shared Card", () => {
         expect(rendered).not.toContain(deleted);
       }
     }
-    // The suppressed arm is the one that renders an `Absent`, and its hook stays —
-    // two of the three contextual rules that select through it are still in the file.
+    // The suppressed arm is the one that renders an `Absent`, and its hook is GONE:
+    // slice 8 took `.fp-detail .absent`, the last contextual rule selecting through it,
+    // so the primitive stopped writing a name with nothing behind it.
     expect([
       ...renderedClassNames(suppressed.container.firstElementChild!),
-    ]).toContain("absent");
+    ]).not.toContain("absent");
   });
 });

@@ -26,17 +26,22 @@ import type { ReactElement } from "react";
  * because `exactOptionalPropertyTypes` is on: the call sites resolve a reason that may be
  * absent and pass the result straight through, which is the whole point of the default.
  *
- * ── THE STYLING IS HERE NOW, AND ONE CLASS NAME SURVIVES ON PURPOSE ──────────────────
+ * ── THE STYLING IS HERE NOW, AND THE CLASS NAME IS FINALLY GONE ──────────────────────
  * Spec #420 slice 2 deletes `.absent` (`display: inline-flex; align-items: baseline;
  * gap: 6px; color: var(--muted)`), `.absent-why` and `.muted`, and those declarations are
  * the utilities below.
  *
- * `absent` ITSELF STAYS AS A BARE HOOK, exactly as slice 1 kept `error` while a later
- * slice's rule still selected through it. THREE CONTEXTUAL RULES DID: `.metrics dd
- * .absent` (slice 3), `.fp-tile .absent` (slice 7) and `.fp-detail .absent` (slice 8),
- * two of them with `@container` arms. THE FIRST IS NOW THE `[dd_&]` PAIR BELOW; two
- * remain, so the hook stays until slice 8 takes the last of them. It carries nothing
- * itself; it is a join.
+ * `absent` OUTLIVED ITS OWN RULE BY SIX SLICES, as a bare hook, because three CONTEXTUAL
+ * rules still selected through it: `.metrics dd .absent` (slice 3), `.fp-tile .absent`
+ * (slice 7) and `.fp-detail .absent` (slice 8), two of them with `@container` arms. The
+ * first became the `[dd_&]` pair below, the second the `className` its call site passes,
+ * and the third was deleted outright by slice 8 with no replacement — the `<dd>` it
+ * reached renders a price and has never held an em dash. Nothing selects the name any
+ * more, so the primitive stopped writing it.
+ *
+ * WHAT FINDS AN `Absent` NOW is the decorative em dash, which is this primitive's real
+ * marker and the thing its contract test pins. A class name kept alive for lookups would
+ * be a hook with no rule behind it, which is the state this one was in.
  *
  * ── `[dd_&]` IS THE METRICS CONTEXT, NAMED BY ITS ELEMENT ────────────────────────────
  * `.metrics .muted` (slice 3's) beat `.absent-why` on specificity and sized the reason
@@ -68,7 +73,7 @@ import type { ReactElement } from "react";
  * the left edge and spot's did not, because spot's own reflow keeps it right-aligned.
  */
 const ABSENT_SURFACE =
-  "absent inline-flex items-baseline gap-1.5 text-[var(--muted)] [dd_&]:flex-wrap [dd_&]:justify-end [dd_&]:@[380px]/metrics-card:justify-start";
+  "inline-flex items-baseline gap-1.5 text-[var(--muted)] [dd_&]:flex-wrap [dd_&]:justify-end [dd_&]:@[380px]/metrics-card:justify-start";
 
 export function Absent({
   why,

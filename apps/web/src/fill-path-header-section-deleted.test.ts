@@ -147,12 +147,12 @@ const OWNED_PREFIXES = [
 /**
  * Still in the file, and still carried by the render — slices 8 and 9 take these.
  *
- * `.fp-torn` LEFT WITH SLICE 8's FIRST COMMIT and is no longer one of them. The list
- * shrinks as slice 8 works down the ladder; what it is asserting is that slice 7's
+ * `.fp-torn` AND `.fp-selected` HAVE LEFT WITH SLICE 8 and are no longer among them. The
+ * list shrinks as slice 8 works down the ladder; what it is asserting is that slice 7's
  * deletion took nothing beyond its own, so a name leaving it is a later slice doing its
  * job rather than this one over-reaching.
  */
-const SURVIVING_SELECTORS = [".fp-selected", ".fp-list", ".fp-row"];
+const SURVIVING_SELECTORS = [".fp-list", ".fp-row"];
 
 describe("the fill path header section's deletion", () => {
   it("has taken every selector slice 7 owns out of styles.css", () => {

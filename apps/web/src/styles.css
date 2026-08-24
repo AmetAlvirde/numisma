@@ -191,9 +191,13 @@
    reading like a GUESS are all utility strings in `FillPath.tsx` now, named beside the
    elements that carry them. */
 
+/* ONE OF THIS RULE'S THREE ARMS HAS LEFT (spec #420 slice 8). The selected-rung card's
+   heading carries these two declarations as utilities now; the rung list's arm goes with
+   the list and the chart card's is slice 9's. Listed member by member on purpose — a
+   grouped rule left standing with one arm removed is still a rule on every element it
+   still reaches, and deleting it whole would strip a heading nothing has converted yet. */
 .fp-chart-card h2,
-.fp-list h2,
-.fp-selected h2 {
+.fp-list h2 {
   margin: 0 0 10px;
   font-size: 0.95rem;
 }
@@ -337,148 +341,21 @@
   margin-inline: 0;
 }
 
-/* THE CARD IS THE QUERY CONTAINER, not the viewport — same rule as `.fp-header`. */
-.fp-selected {
-  container: fp-selected / inline-size;
-}
+/* THE SELECTED-RUNG CARD HAS LEFT THIS FILE (spec #420 slice 8). Its container
+   declaration, the headline and its three demotions, the `Order placed at` rows with
+   their `@container fp-selected` arm, every pill tone and the completeness line are
+   utility strings in `FillPath.tsx` now.
 
-/* THE HEADING CARRIES THE `next` BADGE NOW — see `SelectedRungCard`. Flex so the badge
-   sits on the heading's baseline row rather than wrapping under it, and `gap` rather than
-   a margin on the badge so the heading reads identically on the rungs that have none. */
-.fp-selected h2 {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
+   THE PILLS WENT AS A TOTAL MAP, not as a base and three overrides: two unvariant
+   `border-color` utilities on one element are resolved by Tailwind's emitted order, so
+   the override this file could express is one a class string cannot.
 
-.fp-selected-price {
-  margin: 0 0 8px;
-  font-size: 1.3rem;
-  font-variant-numeric: tabular-nums;
-}
-
-/* THE SIZE TRAILS THE PRICE — see `RungHeadline`. Colour alone does the demoting, at the
-   same type size: the two figures are one sentence and shrinking half of it would break
-   the line's rhythm and its tabular alignment. */
-.fp-selected-size {
-  color: var(--muted);
-}
-
-/* The joining word may recede furthest of all — it is the only thing on the line that is
-   not a number. */
-.fp-selected-at {
-  color: var(--muted);
-  opacity: 0.7;
-}
-
-/* THE UNIT IS NOT PART OF THE FIGURE. `USD` drops a step so the eye lands on the amount
-   and reads the unit second. NO OPACITY OF ITS OWN any more: it now sits inside
-   `.fp-selected-size`, which is already muted, and stacking the two dimmed the currency
-   past legibility. Size alone separates it from the number it belongs to. */
-.fp-selected-price .fp-unit {
-  font-size: 0.75em;
-}
-
-/* THE SAME DATA ROWS THE HEADER CARD USES — term left, value hard right, on a shared
-   rail — because this `<dl>` is the same kind of thing: a short label and a figure.
-
-   HERE IT IS THE VALUE THAT GIVES, not the label, which is the opposite of the header
-   card and for a reason: one value on this list is not a figure at all. `Order placed
-   at` carries a price AND the sentence `differs from the declared rung`, which is
-   longer than every term on the card put together. Sized the header's way — term
-   `minmax(0, 1fr)`, value `auto` — that one row's max-content ate the whole grid and
-   crushed the term column to zero width, taking `Declared size` and `State` with it.
-   So the terms are sized to content and the value column takes the remainder and wraps
-   inside it, still against the right rail. */
-.fp-detail {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 6px 12px;
-  margin: 10px 0 0;
-  font-size: 0.85rem;
-}
-
-.fp-detail dt {
-  color: var(--muted);
-}
-
-.fp-detail dd {
-  margin: 0;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-.fp-detail .absent {
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-/* Wide enough for the value column to sit beside its term rather than against the far
-   edge: at desk width a right rail 690px from the label is not an alignment, it is a
-   gap the eye has to cross. */
-@container fp-selected (min-width: 380px) {
-  .fp-detail {
-    grid-template-columns: auto 1fr;
-    gap: 4px 12px;
-  }
-
-  .fp-detail dd {
-    text-align: left;
-  }
-
-  .fp-detail .absent {
-    justify-content: flex-start;
-  }
-}
-
-.fp-pills {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-}
-
-.fp-pill {
-  font-size: 0.68rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  padding: 2px 7px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  color: var(--muted);
-}
-
-/* Greyed, per G-D12: a declared rung with no order is not a state the ladder is
-   in, it is one it never entered. */
-.fp-pill-unplaced {
-  opacity: 0.55;
-  border-style: dashed;
-}
-
-/* Dashed, matching the inferred warning above — the same certainty, the same
-   visual language. */
-.fp-pill-inferred {
-  border-style: dashed;
-  border-color: var(--warn);
-  color: var(--warn);
-}
-
-/* `--now`, not `--pos`. The next rung is where price is HEADING, which belongs to the
-   same story as where price IS; green would borrow the colour that means FILLED for the
-   one rung on the ladder that has not. */
-.fp-pill-next {
-  border-color: var(--now);
-  color: var(--now);
-}
-
-/* The join caption is not a pill: it is the surface annotating its own
-   confidence about a pill, and it should not read as a state of its own. */
-.fp-pill-caption {
-  font-size: 0.7rem;
-  font-style: italic;
-}
+   `.fp-pill-caption` LEFT WITHOUT A REPLACEMENT. Nothing has rendered it since the join
+   caption was dropped from the card, so it was a rule with no carrier; deleting it is
+   the whole of its conversion. `.fp-detail .absent` went the same way — the `<dd>` under
+   it renders a price and never an em dash — and it was the LAST contextual rule selecting
+   through `absent`, so that bare hook left the primitive in the same commit. No rule in
+   this file selects `.absent` any more. */
 
 /* TILES, NOT TABLE ROWS. A rung is one thing with a state, so it gets one card
    with the state painted across the whole of it — a shared bottom border made the

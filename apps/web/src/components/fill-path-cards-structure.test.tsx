@@ -126,7 +126,7 @@ describe("the fill path's card shell", () => {
     expect(sections).toEqual([
       `${CARD_SURFACE} @container/fp-header`,
       `${CARD_SURFACE} fp-chart-card`,
-      `fp-selected ${CARD_SURFACE}`,
+      `${CARD_SURFACE} @container/fp-selected`,
       `${CARD_SURFACE} fp-list`,
     ]);
     expect(sections.join(" ").split(/\s+/)).not.toContain("card");
@@ -138,7 +138,9 @@ describe("the fill path's card shell", () => {
     // the one card whose element is more than `card` plus a class string.
     const { container } = render(<FillPathCards view={partlyWalkedView()} />);
 
-    const panel = container.querySelector(".fp-selected");
+    // Found by the attribute rather than by a class name, because the class is what
+    // slice 8 deleted and the attribute is the thing being asserted anyway.
+    const panel = container.querySelector("section[aria-live]");
     expect(panel?.tagName).toBe("SECTION");
     expect(panel?.getAttribute("aria-live")).toBe("polite");
   });
@@ -382,18 +384,22 @@ describe("the header card carries its section as utilities", () => {
     // The two arms differ on purpose. A tile's cause follows the tile back to the left
     // edge when the card reflows; spot's does not, because spot's own reflow keeps the
     // whole block right-aligned.
+    //
+    // FOUND BY THE EM DASH, NOT BY A CLASS. `absent` was a bare hook kept alive for the
+    // three contextual rules that selected through it, and slice 8 deleted the last of
+    // them along with the hook. The decorative glyph is the primitive's own marker and
+    // is what `absent-contract.test.tsx` pins, so it is the stable handle.
+    const absentIn = (root: Element) =>
+      [...root.querySelectorAll('span[aria-hidden="true"]')]
+        .filter((dash) => dash.textContent === "—")
+        .map((dash) => dash.parentElement!);
     const spotOut = renderHeader({
       ...without(partlyWalkedView(), ["spotUsd"]),
       spotLoading: false,
     });
-    expectClasses(spotOut.container.querySelector(".absent"), [
-      "flex-wrap",
-      "justify-end",
-      "text-right",
-    ]);
-    expect(classTokens(spotOut.container.querySelector(".absent")!)).not.toContain(
-      "@[380px]/fp-header:text-left",
-    );
+    const spotAbsent = absentIn(spotOut.container)[0];
+    expectClasses(spotAbsent, ["flex-wrap", "justify-end", "text-right"]);
+    expect(classTokens(spotAbsent!)).not.toContain("@[380px]/fp-header:text-left");
     spotOut.unmount();
 
     const base = partlyWalkedView();
@@ -401,7 +407,7 @@ describe("the header card carries its section as utilities", () => {
       ...base,
       deployed: { known: false, why: "the orders sidecar could not be read" },
     });
-    const tileAbsent = [...container.querySelectorAll(".absent")].at(-1);
+    const tileAbsent = absentIn(container).at(-1);
     expectClasses(tileAbsent, [
       "flex-wrap",
       "justify-end",
@@ -420,8 +426,10 @@ describe("the header card carries its section as utilities", () => {
     for (const deleted of DELETED_IN_SLICE_7) expect(rendered).not.toContain(deleted);
 
     // And the ladder and the chart still carry theirs, which is what makes the line
-    // above a claim about slice 7 rather than about the file having been emptied.
-    for (const surviving of ["fp-selected", "fp-list", "fp-chart-card", "fp-row"]) {
+    // above a claim about slice 7 rather than about the file having been emptied. The
+    // list shrinks as slice 8 works down the ladder; the chart's names are slice 9's and
+    // are the last to go.
+    for (const surviving of ["fp-list", "fp-chart-card", "fp-row"]) {
       expect(rendered).toContain(surviving);
     }
   });
@@ -543,7 +551,7 @@ describe("the torn banner and the two warnings carry their rules as utilities", 
     ]);
   });
 
-  it("renders none of the five class names this block carried", () => {
+  it("renders none of the five class names the banner and warnings carried", () => {
     const { container } = render(
       <FillPathCards
         view={{
@@ -562,5 +570,207 @@ describe("the torn banner and the two warnings carry their rules as utilities", 
     ]) {
       expect(rendered).not.toContain(deleted);
     }
+  });
+});
+
+/**
+ * THE CENSUS SUCCESSOR FOR THE SELECTED-RUNG CARD (spec #420 slice 8, Seam E).
+ *
+ * TWO OF THE ARMS BELOW HAVE NO FIXTURE, so the view is patched at the one rung the
+ * panel opens on. `Order placed at` needs a declared join sitting at a different price,
+ * which no `started-ladder` fixture composes to — every one of them reconciles cleanly —
+ * and the four pill tones need four rungs no single fixture happens to hold at once.
+ * Patching the rung is what makes the arms reachable without inventing a fifth fixture
+ * whose only purpose would be to be looked at by this file.
+ */
+describe("the selected-rung card carries its section as utilities", () => {
+  /** The panel opens on the `next` rung, so that is the one a patch has to land on. */
+  function withSelectedRung(
+    view: FillPathView,
+    patch: Partial<FillPathView["rungs"][number]>,
+  ): FillPathView {
+    return {
+      ...view,
+      rungs: view.rungs.map((rung) => (rung.isNext ? { ...rung, ...patch } : rung)),
+    };
+  }
+
+  function panelOf(view: FillPathView) {
+    const { container } = render(<FillPathCards view={view} />);
+    return container.querySelector("section[aria-live]")!;
+  }
+
+  it("makes the card the query container and sizes both ladder headings", () => {
+    const panel = panelOf(partlyWalkedView());
+
+    // `container: fp-selected / inline-size` — one name, which is what Tailwind's named
+    // container utility emits, exactly as the header card's does.
+    expectClasses(panel, [...CARD_SURFACE.split(" "), "@container/fp-selected"]);
+    // The deleted rule sized three cards' headings from one grouped selector; the chart's
+    // arm is slice 9's and stays. `m-0 mb-2.5` is the preflight-off pattern — the UA's own
+    // `h2` margin is live, so three edges are zeroed and one is set.
+    expectClasses(panel.querySelector("h2"), [
+      "m-0",
+      "mb-2.5",
+      "text-[0.95rem]",
+      // The heading carries the `next` badge, so it is a baseline row and not a block.
+      "flex",
+      "items-center",
+      "gap-[10px]",
+    ]);
+  });
+
+  it("demotes the size, the unit and the joining word beneath the price", () => {
+    const panel = panelOf(partlyWalkedView());
+    const price = panel.querySelector("h2 + p");
+
+    expectClasses(price, ["m-0", "mb-2", "text-[1.3rem]", "tabular-nums"]);
+    const size = price?.querySelector("span");
+    expectClasses(size, ["text-[var(--muted)]"]);
+    // `0.75em`, not `0.75rem`: the unit steps down from the FIGURE it belongs to, so it
+    // has to be relative to the price's own size rather than to the root's.
+    expectClasses(size?.querySelector("span"), ["text-[0.75em]"]);
+    expectClasses(
+      [...(price?.children ?? [])].find((child) => child.textContent === "@"),
+      ["text-[var(--muted)]", "opacity-70"],
+    );
+  });
+
+  it("paints each pill from a total map, one tone per exception", () => {
+    // FOUR TONES, NOT A BASE PLUS THREE OVERRIDES. The deleted rules were exactly that,
+    // and as utilities it is a cascade the class string cannot express: two unvariant
+    // `border-color` utilities on one element are resolved by Tailwind's emitted order.
+    // `BADGE_TONE` made the same move one card up, for the same reason.
+    const base = partlyWalkedView();
+    const shape = [
+      "rounded-[10px]",
+      "border",
+      "px-[7px]",
+      "py-[2px]",
+      "text-[0.68rem]",
+      "font-semibold",
+      "uppercase",
+      "tracking-[0.03em]",
+    ];
+
+    const ordinary = panelOf(withSelectedRung(base, { venueResting: false }));
+    expectClasses(ordinary.querySelector("p:nth-of-type(2) span"), [
+      ...shape,
+      "border-[var(--line)]",
+      "text-[var(--muted)]",
+    ]);
+
+    // Greyed AND dashed, per G-D12: a declared rung with no order is not a state the
+    // ladder is in, it is one it never entered.
+    const unplaced = panelOf(withSelectedRung(base, { notPlaced: true }));
+    expectClasses(unplaced.querySelector("p:nth-of-type(2) span"), [
+      ...shape,
+      "border-[var(--line)]",
+      "text-[var(--muted)]",
+      "border-dashed",
+      "opacity-[0.55]",
+    ]);
+
+    // Dashed in `--warn`, matching the inferred warning above the chart — the same
+    // certainty, the same visual language.
+    const inferred = panelOf(withSelectedRung(base, { pricePassedUnconfirmed: true }));
+    const inferredPill = [...inferred.querySelectorAll("p:nth-of-type(2) span")].find(
+      (pill) => pill.textContent?.includes("unconfirmed"),
+    );
+    expectClasses(inferredPill, [
+      ...shape,
+      "border-[var(--warn)]",
+      "text-[var(--warn)]",
+      "border-dashed",
+    ]);
+
+    // `--now`, never `--pos`: the next rung is where price is HEADING, and green is the
+    // colour that means FILLED.
+    expectClasses(panelOf(base).querySelector("h2 span"), [
+      ...shape,
+      "border-[var(--now)]",
+      "text-[var(--now)]",
+    ]);
+  });
+
+  it("rails the detail row's value right at 320px and left once the card reflows", () => {
+    const panel = panelOf(withSelectedRung(partlyWalkedView(), { placedAtUsd: 1 }));
+
+    // The TERMS are sized to content and the value column takes the remainder, which is
+    // the opposite of the header card's `dl` and is in the deleted rule's own comment:
+    // one value on this list is a sentence rather than a figure.
+    expectClasses(panel.querySelector("dl"), [
+      "grid",
+      "grid-cols-[auto_minmax(0,1fr)]",
+      "gap-x-3",
+      "gap-y-1.5",
+      "m-0",
+      "mt-2.5",
+      "text-[0.85rem]",
+      "@[380px]/fp-selected:grid-cols-[auto_1fr]",
+      "@[380px]/fp-selected:gap-y-1",
+    ]);
+    expectClasses(panel.querySelector("dt"), ["text-[var(--muted)]"]);
+    // `m-0` because the UA indents a `dd` by 40px and preflight is off.
+    expectClasses(panel.querySelector("dd"), [
+      "m-0",
+      "text-right",
+      "tabular-nums",
+      "@[380px]/fp-selected:text-left",
+    ]);
+  });
+
+  it("rules the completeness line off from the fact above it", () => {
+    const panel = panelOf(partlyWalkedView());
+    const recorded = [...panel.querySelectorAll("p")].find((paragraph) =>
+      paragraph.textContent?.startsWith("Fills recorded at"),
+    );
+
+    // 12px, not the 4px this paragraph carried from slice 2's `.muted` conversion: the
+    // deleted rule set its own top margin and, being unlayered, won. Both edges of the
+    // hairline are here — a half-reproduced border is a rule that never goes away.
+    expectClasses(recorded, [
+      "m-0",
+      "mt-3",
+      "pt-2.5",
+      "border-t",
+      "border-t-[var(--line)]",
+      "text-[0.75rem]",
+      "leading-[1.5]",
+      "text-[var(--muted)]",
+    ]);
+    expect(classTokens(recorded!)).not.toContain("mt-1");
+  });
+
+  it("renders none of the class names the selected-rung card carried", () => {
+    const view = withSelectedRung(partlyWalkedView(), {
+      placedAtUsd: 1,
+      notPlaced: true,
+      pricePassedUnconfirmed: true,
+    });
+    const { container } = render(<FillPathCards view={view} />);
+    const rendered = renderedClassNames(container);
+
+    for (const deleted of [
+      "fp-selected",
+      "fp-selected-price",
+      "fp-selected-size",
+      "fp-selected-at",
+      "fp-unit",
+      "fp-detail",
+      "fp-pills",
+      "fp-pill",
+      "fp-pill-unplaced",
+      "fp-pill-inferred",
+      "fp-pill-next",
+      "fp-pill-caption",
+      "fp-recorded",
+    ]) {
+      expect(rendered).not.toContain(deleted);
+    }
+    // THE HOOK IS GONE TOO. `.fp-detail .absent` was the last contextual rule selecting
+    // through `absent`, and it left with this card; the primitive stopped writing the
+    // name in the same commit.
+    expect(rendered).not.toContain("absent");
   });
 });

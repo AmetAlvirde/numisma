@@ -874,6 +874,88 @@ function Chart() {
   );
 }
 
+/**
+ * THE SELECTED-RUNG CARD'S SECTION, AS UTILITIES (spec #420 slice 8).
+ *
+ * THE CARD IS THE QUERY CONTAINER, not the viewport — the same rule the header card
+ * follows, and one name, which is exactly what Tailwind's named container utility emits.
+ *
+ * THE HEADING RULE WAS SHARED BY THREE CARDS and is split here: the chart's arm is slice
+ * 9's and stays in the file until then. `m-0 mb-2.5` is the preflight-off pattern — the
+ * UA's own `h2` margin is live, so three edges are zeroed and one is set.
+ */
+const SELECTED_CARD = "@container/fp-selected";
+const LADDER_HEADING = "m-0 mb-2.5 text-[0.95rem]";
+/** The heading carries the `next` badge, so it is a baseline row rather than a block. */
+const SELECTED_HEADING = `${LADDER_HEADING} flex items-center gap-[10px]`;
+
+/**
+ * THE HEADLINE — the money committed, AT the price it buys at.
+ *
+ * COLOUR ALONE DEMOTES THE SIZE, at the same type size: the two figures are one sentence
+ * and shrinking half of it would break the line's rhythm and its tabular alignment. The
+ * joining word recedes one step further, being the only thing on the line that is not a
+ * number, and the UNIT steps down from the FIGURE — `0.75em`, relative to the price's own
+ * size rather than to the root's — so the eye lands on the amount and reads `USD` second.
+ * No opacity on the unit: it sits inside the muted size already, and stacking the two
+ * dimmed the currency past legibility.
+ */
+const SELECTED_PRICE = "m-0 mb-2 text-[1.3rem] tabular-nums";
+const SELECTED_SIZE = "text-[var(--muted)]";
+const SELECTED_UNIT = "text-[0.75em]";
+const SELECTED_AT = "text-[var(--muted)] opacity-70";
+
+/**
+ * THE EXCEPTION SHELF'S ROWS — term left, value against the right rail, until the card is
+ * wide enough for the value to sit beside its term instead. At desk width a right rail
+ * 690px from its label is not an alignment, it is a gap the eye has to cross.
+ *
+ * THE TERMS ARE SIZED TO CONTENT AND THE VALUE COLUMN TAKES THE REMAINDER, which is the
+ * opposite of the header card's `dl`: one value on this list is a sentence rather than a
+ * figure, and sizing it the header's way let that row's max-content eat the whole grid.
+ */
+const DETAIL =
+  "grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 m-0 mt-2.5 text-[0.85rem]" +
+  " @[380px]/fp-selected:grid-cols-[auto_1fr] @[380px]/fp-selected:gap-y-1";
+const DETAIL_TERM = "text-[var(--muted)]";
+/** `m-0` because the UA indents a `dd` by 40px and preflight is off. */
+const DETAIL_VALUE = "m-0 text-right tabular-nums @[380px]/fp-selected:text-left";
+
+/**
+ * THE PILLS, AS A TOTAL MAP — one tone per exception, never a base plus three overrides.
+ *
+ * The deleted rules WERE a base plus three overrides, and as utilities that is a cascade
+ * a class string cannot express: two unvariant `border-color` utilities on one element
+ * are resolved by Tailwind's emitted order rather than by the order they are written in.
+ * `BADGE_TONE` made the same move one card up and for the same reason.
+ *
+ * WHAT EACH TONE MEANS. Unplaced is greyed AND dashed (G-D12): a declared rung with no
+ * order is not a state the ladder is in, it is one it never entered. Inferred is dashed
+ * in `--warn`, matching the inferred warning above the chart — the same certainty, the
+ * same visual language. Next is `--now` and never `--pos`, because the next rung is where
+ * price is HEADING and green is the colour that means FILLED.
+ */
+const PILL =
+  "rounded-[10px] border px-[7px] py-[2px] text-[0.68rem] font-semibold uppercase tracking-[0.03em]";
+const PILL_TONE = {
+  state: "border-[var(--line)] text-[var(--muted)]",
+  unplaced: "border-[var(--line)] text-[var(--muted)] border-dashed opacity-[0.55]",
+  inferred: "border-[var(--warn)] text-[var(--warn)] border-dashed",
+  next: "border-[var(--now)] text-[var(--now)]",
+} as const;
+const PILLS = "flex flex-wrap items-center gap-1.5 m-0";
+
+/**
+ * THE COMPLETENESS LINE — quiet, and ruled off from the `State` row above it, because it
+ * is the caveat ON that row rather than another fact about the rung.
+ *
+ * 12px, not the 4px this paragraph carried from slice 2's shared-vocabulary conversion:
+ * the deleted rule set its own top margin and, being unlayered, won. Both edges of the
+ * hairline are here — a half-reproduced border is a rule that never goes away.
+ */
+const RECORDED =
+  "m-0 mt-3 pt-2.5 border-t border-t-[var(--line)] text-[0.75rem] leading-[1.5] text-[var(--muted)]";
+
 /** Card 3 — everything known about the one rung under inspection. */
 function SelectedRung() {
   const { view, selected: rung } = useFillPath();
@@ -896,14 +978,16 @@ function SelectedRung() {
     // changes. Widening the primitive to pass one attribute through for one caller is a
     // knob bought for a single site; the panel keeps its own element instead, exactly as
     // the two `fp-warn` paragraphs and the `role="alert"` banner below do.
-    <section className={`fp-selected ${CARD_SURFACE}`} aria-live="polite">
+    <section className={`${CARD_SURFACE} ${SELECTED_CARD}`} aria-live="polite">
       {/* THE BADGE RIDES THE HEADING, because "next" answers WHICH RUNG THIS IS — the
           same question the heading asks — and not what state it is in. Down among the
           pills it read as one status among several; up here it qualifies the identity
           it belongs to, and the pill row below is left holding only exceptions. */}
-      <h2>
+      <h2 className={SELECTED_HEADING}>
         Rung {rung.ladderIndex} of {view.rungs.length}
-        {rung.isNext ? <span className="fp-pill fp-pill-next">next</span> : null}
+        {rung.isNext ? (
+          <span className={`${PILL} ${PILL_TONE.next}`}>next</span>
+        ) : null}
       </h2>
       <RungHeadline rung={rung} />
       <Pills rung={rung} />
@@ -915,11 +999,11 @@ function SelectedRung() {
           than empty, since an empty definition list is a labelled box promising detail
           it does not have. */}
       {rung.placedAtUsd === undefined ? null : (
-        <dl className="fp-detail">
-          <dt>Order placed at</dt>
+        <dl className={DETAIL}>
+          <dt className={DETAIL_TERM}>Order placed at</dt>
           {/* A DECLARED join whose order sits elsewhere is honored AND flagged: the
               operator said these belong together, and they do — at a different price. */}
-          <dd>
+          <dd className={DETAIL_VALUE}>
             {formatUsd(rung.placedAtUsd)}{" "}
             <span className="m-0 mt-1 text-[var(--muted)]">differs from the declared rung</span>
           </dd>
@@ -957,18 +1041,18 @@ const PRICE_PLAIN = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 })
 
 function RungHeadline({ rung }: { rung: FillPathRungView }) {
   if (rung.sizeUsd === undefined) {
-    return <p className="fp-selected-price">{formatUsd(rung.priceUsd)}</p>;
+    return <p className={SELECTED_PRICE}>{formatUsd(rung.priceUsd)}</p>;
   }
   return (
-    <p className="fp-selected-price">
+    <p className={SELECTED_PRICE}>
       {/* THE PRICE TAKES THE ACCENT, NOT THE SIZE. This card is one stop on a ladder and
           the ladder's axis is PRICE — it is what the chart above plots vertically, what
           the rung list is ordered by, and the number the operator is deciding against.
           The size is what happens WHEN price gets here; it reads second by design. */}
-      <span className="fp-selected-size">
-        {SIZE_PLAIN.format(rung.sizeUsd)} <span className="fp-unit">USD</span>{" "}
+      <span className={SELECTED_SIZE}>
+        {SIZE_PLAIN.format(rung.sizeUsd)} <span className={SELECTED_UNIT}>USD</span>{" "}
       </span>
-      <span className="fp-selected-at">@</span> {PRICE_PLAIN.format(rung.priceUsd)}
+      <span className={SELECTED_AT}>@</span> {PRICE_PLAIN.format(rung.priceUsd)}
     </p>
   );
 }
@@ -993,7 +1077,7 @@ function RungHeadline({ rung }: { rung: FillPathRungView }) {
  */
 function RecordedThrough({ view }: { view: FillPathView }) {
   return (
-    <p className="fp-recorded m-0 mt-1 text-[var(--muted)]">
+    <p className={RECORDED}>
       {/* NO `<strong>` ON THE DATE. The paragraph is painted in the secondary
           colour because the whole sentence
           is a provenance footnote, and bolding the date inside it pulled the loudest
@@ -1039,21 +1123,21 @@ function Pills({ rung }: { rung: FillPathRungView }) {
   const stateIsRedundant = rung.isNext && rung.venueResting;
   const pills = [
     rung.notPlaced ? (
-      <span key="state" className="fp-pill fp-pill-unplaced">
+      <span key="state" className={`${PILL} ${PILL_TONE.unplaced}`}>
         declared — not placed
       </span>
     ) : stateIsRedundant ? null : (
-      <span key="state" className="fp-pill">
+      <span key="state" className={`${PILL} ${PILL_TONE.state}`}>
         {rung.stateCopy}
       </span>
     ),
     rung.pricePassedUnconfirmed ? (
-      <span key="unconfirmed" className="fp-pill fp-pill-inferred">
+      <span key="unconfirmed" className={`${PILL} ${PILL_TONE.inferred}`}>
         waiting · price passed, unconfirmed
       </span>
     ) : null,
     rung.filledPercent === undefined ? null : (
-      <span key="partial" className="fp-pill">
+      <span key="partial" className={`${PILL} ${PILL_TONE.state}`}>
         partly filled · {rung.filledPercent}%
       </span>
     ),
@@ -1062,7 +1146,7 @@ function Pills({ rung }: { rung: FillPathRungView }) {
   // An empty pill row is still a row: it holds its own margin and opens a gap under the
   // headline that reads as something failing to load. The ordinary rung has no pills.
   if (pills.length === 0) return null;
-  return <p className="fp-pills">{pills}</p>;
+  return <p className={PILLS}>{pills}</p>;
 }
 
 /**
@@ -1214,10 +1298,12 @@ function RowState({ rung }: { rung: FillPathRungView }) {
       {hasQuals ? (
         <span className="fp-row-quals">
           {rung.pricePassedUnconfirmed ? (
-            <span className="fp-pill fp-pill-inferred">price passed, unconfirmed</span>
+            <span className={`${PILL} ${PILL_TONE.inferred}`}>price passed, unconfirmed</span>
           ) : null}
           {rung.filledPercent === undefined ? null : (
-            <span className="fp-pill">partly filled · {rung.filledPercent}%</span>
+            <span className={`${PILL} ${PILL_TONE.state}`}>
+              partly filled · {rung.filledPercent}%
+            </span>
           )}
         </span>
       ) : null}
