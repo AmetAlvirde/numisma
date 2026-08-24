@@ -43,33 +43,29 @@ import { APP_TOKENS, THEME_MODES } from "./theme-modes.ts";
  * pass while the palette moved underneath it, which is the exact rot this test
  * exists to catch.
  *
- * ── FOURTEEN NAMES, NOT TWELVE. A DELIBERATE CHOICE. ───────────────────────
+ * ── NAME-FOR-NAME, WHICH IS NOW TWELVE ON BOTH SIDES ──────────────────────
  *
- * `packages/components/src/tokens.ts` declares TWELVE tokens — the ones a
- * component in the package actually reads. `styles.css` defines FOURTEEN: those
- * twelve plus `--nms-card` and `--nms-muted-foreground`, which spec §4.2 names
- * and which nothing in the package renders yet.
+ * This test mirrors whatever `styles.css` declares, rather than scoping itself
+ * to `NMS_TOKEN_NAMES`, and that is still the contract #418 asked for. What
+ * changed is the app's block. It carried fourteen — the package's twelve plus
+ * `--nms-card` and `--nms-muted-foreground`, minted by spec #412 §4.2 for
+ * components that had not arrived — and spec #420 S0 deleted both, so the two
+ * numbers now agree.
  *
- * THIS TEST MIRRORS ALL FOURTEEN, name-for-name, rather than scoping itself to
- * `NMS_TOKEN_NAMES`. Two reasons, and the second is the one that decides it:
+ * THE ARGUMENT THAT LOST, recorded because it was a real one: carrying an
+ * unexercised alias means the day `Card` enters the package, app mode is
+ * already correct for it, having been held honest all along. What decided
+ * against it is the cost on the other side — until that day, app mode shows two
+ * values no fixture can render, under a label saying it shows what the app
+ * shows, and `tokens.ts` already refuses exactly that on the package's own side.
+ * A name lands in `NMS_TOKEN_NAMES` when a component starts reading it, and the
+ * app defines it then.
  *
- *   1. #418 asks for "the `--nms-*` block in `apps/web/src/styles.css`,
- *      name-for-name". The block is fourteen names. Scoping to twelve would
- *      answer a narrower question than the one asked and read, in a diff, as if
- *      it had answered the wider one.
- *   2. The fourteen are where the next component lands. The day `Card` enters
- *      the package, `--nms-card` becomes a token something renders — and app
- *      mode is already correct for it, having been held honest all along. The
- *      twelve-scoped version would have let those two drift freely for exactly
- *      as long as they were unexercised, then handed the new component a stale
- *      value on its first day.
- *
- * The cost, stated: app mode carries two values no fixture can currently show.
- * That is data the workbench holds and does not render, which is a smaller
- * problem than a value it renders and gets wrong. THEMED MODE MAKES THE
- * OPPOSITE CHOICE — it is scoped to the package's twelve, because its whole job
- * is to make an UNEXERCISED DECLARED token visible, and a token the package
- * never declared is not in that scope.
+ * THE MIRROR STILL POINTS BOTH WAYS, and that is what makes the deletion a
+ * two-sided edit: dropping the aliases from `styles.css` without dropping them
+ * from `APP_TOKENS` reds the first case below, and the reverse reds it too.
+ * THEMED MODE IS SCOPED DIFFERENTLY ON PURPOSE — to the package's declared
+ * tokens, because its job is to make an UNEXERCISED DECLARED token visible.
  */
 
 const WORKBENCH_SRC = dirname(fileURLToPath(import.meta.url));
@@ -102,13 +98,13 @@ describe("app mode mirrors the app's --nms-* block", () => {
     expect(Object.keys(APP_TOKENS)).toContain(name);
   });
 
-  it("declares more names than the package does, and knows why", () => {
-    // The fourteen-vs-twelve gap, pinned rather than assumed. If this ever
-    // reads `toBe` equal, the package caught up and the header's second reason
-    // has been paid off — which is a good day, not a failure.
-    expect(Object.keys(APP_TOKENS).length).toBeGreaterThanOrEqual(
-      NMS_TOKEN_NAMES.length,
-    );
+  it("declares neither more nor fewer names than the package does", () => {
+    // The gap, closed and pinned shut. This read `toBeGreaterThanOrEqual` while
+    // the app carried two aliases nothing rendered; spec #420 S0 deleted them,
+    // and equality is what stops a surplus creeping back in through app mode
+    // rather than through `styles.css`. `nms-tokens.test.ts` holds the same
+    // line on the app's side, so a surplus has nowhere to enter.
+    expect(Object.keys(APP_TOKENS).length).toBe(NMS_TOKEN_NAMES.length);
   });
 
   it.each([...appDeclared.entries()])(

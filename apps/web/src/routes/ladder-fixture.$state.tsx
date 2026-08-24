@@ -1,5 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Shell } from "../components/Shell.tsx";
+import { CARD_SURFACE } from "../components/ui/Card.tsx";
+import { NOTICE_CODE } from "../components/ui/SnapshotNotice.tsx";
 import { FillPathCards } from "../components/FillPath.tsx";
 import type { FillPathPage } from "../ladder/fill-path-view.ts";
 
@@ -84,10 +86,10 @@ function LadderFixturePage() {
   if (load.status === "disabled") {
     return (
       <Shell>
-        <div className="card notice">
+        <div className={CARD_SURFACE}>
           <h1>Fixtures are a development surface</h1>
           <p>
-            The synthesized ladders are only assembled by <code>vite dev</code>. This
+            The synthesized ladders are only assembled by <code className={NOTICE_CODE}>vite dev</code>. This
             build carries none of them.
           </p>
         </div>
@@ -98,7 +100,7 @@ function LadderFixturePage() {
   if (load.status === "unknown") {
     return (
       <Shell>
-        <div className="card notice">
+        <div className={CARD_SURFACE}>
           <h1>No fixture named “{load.requested}”</h1>
           <FixtureNav names={load.names} />
         </div>
@@ -112,8 +114,10 @@ function LadderFixturePage() {
     // composing must not render as a blank page.
     return (
       <Shell>
-        <div className="card notice error">
-          <h1>{load.name} no longer composes</h1>
+        {/* The hook is gone: slice 2 moved `.notice.error h1` onto the heading, so the
+            colour and the zeroed margins are the whole of it. */}
+        <div className={`${CARD_SURFACE} m-0 text-[var(--neg)]`}>
+          <h1 className="text-[var(--neg)]">{load.name} no longer composes</h1>
           <p>{load.page.why}</p>
         </div>
       </Shell>
@@ -124,18 +128,22 @@ function LadderFixturePage() {
     <Shell>
       {/* THE BANNER IS NOT DECORATION. Every figure below is invented, and a screenshot
           of this page will outlive the tab it was taken in. */}
-      <div className="card notice">
+      <div className={CARD_SURFACE}>
         <h1>Fixture — {load.name}</h1>
         <p>{load.renders}</p>
         <p>
-          Synthesized data, authored in <code>ladder/started-ladder.fixtures.ts</code>.
+          Synthesized data, authored in <code className={NOTICE_CODE}>ladder/started-ladder.fixtures.ts</code>.
           No real position, level, size or quantity appears on this page.
         </p>
         <FixtureNav names={load.names} />
       </div>
       <FillPathCards view={load.page.view} />
-      <p className="crumb">
-        <Link to="/">← Glance</Link>
+      {/* The same three rules `Crumb` carries, spelled out: this route stages its own
+          chrome rather than importing the primitive. */}
+      <p className="m-0 text-[0.9rem]">
+        <Link className="text-[var(--muted)] no-underline hover:text-[var(--text)]" to="/">
+          ← Glance
+        </Link>
       </p>
     </Shell>
   );
@@ -144,9 +152,10 @@ function LadderFixturePage() {
 /** Every fixture, one tap apart — the surface is walked, not typed. */
 function FixtureNav({ names }: { names: readonly string[] }) {
   return (
-    <p className="crumb">
+    <p className="m-0 text-[0.9rem]">
       {names.map((name) => (
         <Link
+          className="text-[var(--muted)] no-underline hover:text-[var(--text)]"
           key={name}
           to="/ladder-fixture/$state"
           params={{ state: name }}

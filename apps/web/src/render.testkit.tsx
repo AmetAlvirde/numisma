@@ -27,8 +27,12 @@
  * spell rung-state copy or the venue-axis predicate they census. Keep this module free of
  * domain vocabulary: it knows about the DOM, not about ladders.
  */
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import type { ReactElement } from "react";
-import { afterEach } from "vitest";
+import { afterEach, expect } from "vitest";
 import {
   cleanup,
   fireEvent,
@@ -117,6 +121,404 @@ export function classCensus(root: Element): string[] {
     (element) => element.getAttribute("class") ?? "",
   );
   return [...new Set(attributes)].sort();
+}
+
+/**
+ * ONE ELEMENT'S CLASS NAMES, SPLIT — half of the census successor's instrument
+ * (spec #420 Seam E).
+ *
+ * The census above asserts whole attributes and that is exactly right while a surface
+ * is UNCONVERTED: `"muted absent-why"` and `"muted"` are different facts and full-string
+ * equality catches a primitive that drops or invents a token. It is exactly wrong once
+ * the surface carries utilities. A converted element's class attribute is a dozen
+ * ordered utilities, and pinning the whole string makes every test in this repo depend
+ * on Prettier's class sort order — a formatter upgrade would then read as a regression
+ * on nine surfaces at once.
+ *
+ * So the successor asserts PER CLASS, with `toContain`, over these tokens: the
+ * load-bearing utilities are present, the deleted class names are not, and a utility
+ * added later for a reason this test has no opinion about does not fail it.
+ *
+ * Read off the attribute for the same reason `classCensus` is — an SVG element's
+ * `className` is an object, not a string.
+ */
+export function classTokens(element: Element): string[] {
+  return (element.getAttribute("class") ?? "").split(/\s+/).filter(Boolean);
+}
+
+/**
+ * EVERY CLASS NAME IN A SUBTREE, as a set — the other half.
+ *
+ * "None of the slice's deleted class names is present anywhere in this render" is a
+ * claim about the whole subtree rather than about one element, and it is the assertion
+ * that catches the carrier nobody remembered: a `muted` span three components down that
+ * the conversion missed and that no per-element assertion is looking at.
+ */
+export function renderedClassNames(root: Element): Set<string> {
+  return new Set(
+    classCensus(root).flatMap((attribute) => attribute.split(/\s+/).filter(Boolean)),
+  );
+}
+
+/**
+ * EVERY `Absent` UNDER `root`, FOUND BY ITS EM DASH (spec #403 Seam B, spec #420 slice 8).
+ *
+ * The old censuses pinned `"absent"` and `"muted absent-why"` as PRESENT, and that
+ * incidentally proved the primitive had MOUNTED on each card's suppression path. Slice 8
+ * deleted the name, and `not.toContain("absent")` is satisfied two ways: by a correct
+ * conversion, and by the element being gone. A card that ships printing nothing where an
+ * em dash and a stated cause belong would keep every one of those assertions green.
+ *
+ * So the witness moves to the marker the primitive still writes. `ui/Absent.tsx` renders
+ * a decorative `<span aria-hidden="true">—</span>` beside the cause; that glyph is what
+ * `absent-contract.test.tsx` pins, and it is the stable handle now that the class is
+ * gone. Returns the primitive's outer `<span>`, in document order.
+ *
+ * `aria-hidden` IS PART OF THE QUERY, not incidental. The em dash is decoration the
+ * accessibility tree never hears — an em dash elsewhere in prose would not match, and a
+ * primitive that stopped hiding its glyph should not silently keep passing.
+ */
+export function absentSlots(root: Element): Element[] {
+  return [...root.querySelectorAll('span[aria-hidden="true"]')]
+    .filter((dash) => dash.textContent === "—")
+    .map((dash) => dash.parentElement!);
+}
+
+/**
+ * THE CLASS NAMES SLICE 2 DELETED, spelled once for the five structure tests and the
+ * `ui/` contracts that all assert their absence.
+ *
+ * One list rather than five copies, because the failure this guards against is a carrier
+ * nobody remembered, and five copies drift into five different ideas of what was
+ * deleted. Each of these had a rule in `styles.css` and has none now; every declaration
+ * they carried is a utility on the elements that used to reference them.
+ *
+ * `absent` IS NOT ON THIS LIST, and it is on slice 8's. Its own rule went here, but
+ * three contextual rules still selected through it — `.metrics dd .absent` (slice 3),
+ * `.fp-tile .absent` (slice 7), `.fp-detail .absent` (slice 8), two with `@container`
+ * arms — so it stayed a bare hook until the last of them went. It belongs to the slice
+ * that deleted the name, not to the slice that deleted the rule. `sr-only` is on no list
+ * at all, for the opposite reason: the name stays and Tailwind's own utility took it
+ * over.
+ */
+export const DELETED_IN_SLICE_2 = [
+  "card",
+  "dashboard",
+  "muted",
+  "absent-why",
+  "crumb",
+  "notice",
+  "error",
+];
+
+/**
+ * THE CLASS NAMES SLICE 3 DELETED — the summary card, the badges, the shared metrics
+ * grid and the two sign colours.
+ *
+ * Kept beside slice 2's list rather than folded into it, because the two answer
+ * different questions on a red: a `muted` that reappears is a shell regression, a
+ * `metrics` that reappears is a summary one, and a single merged list would make the
+ * failure message name the wrong slice's contract.
+ *
+ * Three surfaces assert this one: the summary card owns the rules, and the glance card
+ * and the section table carry `metrics` and `pos`/`neg` respectively (spec #420 Seam B —
+ * the slice that deletes a shared rule converts every carrier of it).
+ *
+ * `absent` IS STILL NOT ON THE LIST. `.metrics dd .absent` — one of the three contextual
+ * rules named in slice 2's note — goes here, and the other two (`.fp-tile .absent`,
+ * `.fp-detail .absent`) do not. The hook stays until slice 8 takes the last of them, and
+ * the NAME is on slice 8's list because that is the slice that stopped writing it.
+ */
+export const DELETED_IN_SLICE_3 = [
+  "summary",
+  "summary-head",
+  "badge",
+  "badge-ok",
+  "badge-warn",
+  "metrics",
+  "pos",
+  "neg",
+];
+
+/**
+ * THE CLASS NAMES SLICE 4 DELETED — the table surface's two, and only two.
+ *
+ * The section this slice deleted was mostly ELEMENT rules (`table`, `th`/`td`,
+ * `thead th`), and an element cannot stop being written; what a render can prove is that
+ * the two CLASS hooks those rules hung off are gone. `table-scroll` was the scroller and
+ * the query container; `num` was the right-alignment hook on every figure cell in both
+ * tables. Both are utilities on the elements now, so either name reappearing means a
+ * carrier was converted back to a rule that no longer exists.
+ *
+ * Kept beside slices 2 and 3 rather than folded in, for the reason those two are kept
+ * apart: a merged list makes a failure name the wrong slice's contract.
+ *
+ * Two surfaces assert this one. `SectionTable` owns the rules and `DcaCard`'s rung
+ * ladder carries them (spec #420 Seam B).
+ */
+export const DELETED_IN_SLICE_4 = ["table-scroll", "num"];
+
+/**
+ * THE CLASS NAMES SLICE 5 DELETED — the glance card's own four, and only its own.
+ *
+ * One surface asserts this one. Nothing outside `GlanceCard` ever carried these, which is
+ * why the list is short: slices 2 and 3 had already taken every class that card shares
+ * with anything else (spec #420 Seam B).
+ *
+ * `glance` IS ON THE LIST AND THAT IS THE POINT. Its rule was the card's query container,
+ * and the name it carried on this element is now spelled by two utilities instead — the
+ * bare container type and an arbitrary `container-name` holding BOTH names. A `glance`
+ * reappearing on the section would mean someone reached for the class again; Tailwind's
+ * NAMED container utility appearing instead of the pair is the failure no assertion in
+ * this repo can see, because it is a live container with one name too few. Chrome holds
+ * that one, by binary-searching the width the metrics list reflows at.
+ *
+ * Kept beside slices 2, 3 and 4 rather than folded in, for the reason those are kept
+ * apart: a merged list makes a failure name the wrong slice's contract.
+ */
+export const DELETED_IN_SLICE_5 = ["glance", "verdict", "verdict-no", "verdict-yes"];
+
+/**
+ * THE CLASS NAMES SLICE 6 DELETED — the DCA card's plan block, head, state badge and
+ * alert line.
+ *
+ * One surface asserts this one, for the reason slice 5's list has one: slices 2, 3 and 4
+ * had already taken every class this card shares with anything else (spec #420 Seam B),
+ * so what is left is the card's own and renders nowhere but inside it.
+ *
+ * THE STATE BADGE CONTRIBUTES FOUR NAMES, NOT THREE. Only two of the state suffixes ever
+ * had a rule; the card assembled the class from a template, so `pending` and `ended` were
+ * always emitted and always styled by the base alone. All four are listed because the
+ * template is what is being deleted, and a template rebuilt later would put back the two
+ * that never had a rule first — which is the same mistake arriving in its quietest form.
+ *
+ * `dca` IS NOT ON THE LIST AND MUST NOT BE. It is the card root's hook, it never had a
+ * rule in `styles.css` and this slice does not remove it; asserting its absence would
+ * fail on a card that is behaving exactly as intended.
+ */
+export const DELETED_IN_SLICE_6 = [
+  "dca-plan",
+  "dca-head",
+  "dca-state",
+  "dca-state-pending",
+  "dca-state-active",
+  "dca-state-ended",
+  "dca-state-unreadable",
+  "dca-alert",
+  "dca-alert-warn",
+];
+
+/**
+ * THE CLASS NAMES SLICE 7 DELETED — the fill path's header card, top to bottom.
+ *
+ * The longest list of the seven, because the section it names was the longest in
+ * `styles.css`: an identity row, a state chip, a spot reading, three tiles and their
+ * grid, a progress bar, a waiting block, day zero's hero, and two container blocks
+ * reflowing most of it. One card, thirteen names.
+ *
+ * THE FOUR BADGE SUFFIXES ARE ALL HERE, and only two of them ever had a rule. The chip's
+ * class was assembled from a template, so `pending` and `ended` were always emitted and
+ * always painted by the base alone; the template is what is being deleted, and a template
+ * rebuilt later would put back the two that never had a rule first. Slice 6's list is
+ * shaped the same way for the same reason.
+ *
+ * `absent` IS STILL NOT ON THE LIST. `.fp-tile .absent` and `.fp-spot .absent` — two of
+ * the three contextual rules slice 2's note named — go here, and the hook survives for
+ * the last of them, `.fp-detail .absent`, which is slice 8's. `fp-chart-card` and every
+ * ladder name are likewise absent from this list and had to be: they still had rules
+ * when this list was written, and this same render still carried them.
+ */
+export const DELETED_IN_SLICE_7 = [
+  "fp-header",
+  "fp-header-head",
+  "fp-header-id",
+  "fp-badge",
+  "fp-badge-pending",
+  "fp-badge-active",
+  "fp-badge-ended",
+  "fp-badge-unreadable",
+  "fp-spot",
+  "fp-spot-value",
+  "fp-spot-note",
+  "fp-tile",
+  "fp-tiles",
+  "fp-tiles-quiet",
+  "fp-tile-label",
+  "fp-tile-value",
+  "fp-progress",
+  "fp-progress-track",
+  "fp-progress-fill",
+  "fp-waiting",
+  "fp-waiting-sub",
+  "fp-expected",
+  "fp-expected-value",
+  "fp-hero",
+  "fp-hero-value",
+];
+
+/**
+ * THE CLASS NAMES SLICE 8 DELETED — the ladder, from the banner above the chart to the
+ * completeness line under the last rung.
+ *
+ * THIRTY-FOUR NAMES, AND ONE OF THEM IS SIX SLICES OLD. `absent` is here rather than on
+ * slice 2's list because slice 2 deleted its RULE and this slice deleted the NAME: three
+ * contextual rules selected through the bare hook, and `.fp-detail .absent` was the last
+ * of them. A list is a record of what a render may no longer contain, so the name belongs
+ * to the slice after which the render no longer contains it.
+ *
+ * THREE OF THE ROW'S FOUR STATE SUFFIXES ARE HERE, AND `is-filled` IS NOT. The row
+ * assembled `is-filled`, `is-next`, `is-selected` and `is-unplaced` by concatenation and
+ * all four left with the template that built them — but the CHART's legend swatch still
+ * writes `is-filled`, and `.fp-legend-swatch.is-filled` is still in `styles.css` until
+ * slice 9. Listing it would fail on a render behaving exactly as intended, which is the
+ * same trap `dca` was kept off slice 6's list to avoid.
+ *
+ * `fp-chart-card` AND THE CHART'S NAMES ARE NOT HERE AND MUST NOT BE. They still have
+ * rules in `styles.css` and this same render still carries them; slice 9 takes them.
+ */
+export const DELETED_IN_SLICE_8 = [
+  "fp-torn",
+  "fp-unchecked",
+  "fp-warn",
+  "fp-warn-certain",
+  "fp-warn-inferred",
+  "fp-selected",
+  "fp-selected-price",
+  "fp-selected-size",
+  "fp-selected-at",
+  "fp-unit",
+  "fp-detail",
+  "fp-pills",
+  "fp-pill",
+  "fp-pill-unplaced",
+  "fp-pill-inferred",
+  "fp-pill-next",
+  "fp-pill-caption",
+  "fp-recorded",
+  "fp-list",
+  "fp-row",
+  "fp-row-index",
+  "fp-row-figures",
+  "fp-row-price",
+  "fp-row-size",
+  "fp-row-at",
+  "fp-row-state",
+  "fp-row-status",
+  "fp-row-substatus",
+  "fp-row-quals",
+  "fp-orphans",
+  "is-next",
+  "is-selected",
+  "is-unplaced",
+  "absent",
+];
+
+/**
+ * THE CLASS NAMES SLICE 9 DELETED — the chart's head, its legend and its caption, and the
+ * last list of the nine.
+ *
+ * EIGHT NAMES, AND THREE OF THE CHART'S ARE NOT AMONG THEM. `fp-chart-card`, `fp-chart`
+ * and `fp-inspect` keep their rules' NAMES after losing their rules, because three tests
+ * outside this file query the render by them: `fill-path-chart-a11y.test.tsx` reaches for
+ * `.fp-chart` to prove the wrapper mounts no focusable node, and the selection tests reach
+ * for `.fp-inspect input` and the card. Listing them would fail on a render behaving
+ * exactly as intended — the same trap `dca` was kept off slice 6's list to avoid — and
+ * deleting them from the markup would take a presentation contract's only handle with it.
+ * A hook with no rule is what a converted surface looks like; the terminal assertion below
+ * is what proves the rule is gone.
+ *
+ * `is-filled` IS HERE, SIX SLICES AFTER ITS THREE SIBLINGS. Slice 8 deleted `is-next`,
+ * `is-selected` and `is-unplaced` with the row template that built them and had to leave
+ * this one, because `.fp-legend-swatch.is-filled` was still in `styles.css` and the
+ * legend's swatch still wrote it. A list is a record of what a render may no longer
+ * contain, so the name belongs to the slice after which the render no longer contains it.
+ * `is-waiting` and `is-now` had no such delay and arrive with it.
+ */
+export const DELETED_IN_SLICE_9 = [
+  "fp-chart-head",
+  "fp-chart-range",
+  "fp-legend",
+  "fp-legend-swatch",
+  "fp-caption",
+  "is-filled",
+  "is-waiting",
+  "is-now",
+];
+
+/**
+ * THE CLASS SELECTORS LEFT IN `styles.css` — the terminal assertion's other half
+ * (spec #420 Seam E, slice 9).
+ *
+ * THE CLAIM IT SERVES: the set of class names a component renders, intersected with this
+ * set, is empty. That is the mechanical proof that no house rule survives WITH A CARRIER,
+ * and it is the one assertion in this migration that no single slice could make — every
+ * slice but the last renders a class the file still styles, on purpose.
+ *
+ * IT READS THE FILE RATHER THAN NAMING WHAT IS IN IT. Nine `*-section-deleted.test.ts`
+ * guards already say which names may not return; this says something different and
+ * stronger for the five surfaces that render: whatever is in that file, none of it
+ * reaches them. A rule added back under a name no guard lists is caught here the moment
+ * anything renders its class.
+ *
+ * COMMENTS GO FIRST, for the reason every guard in this suite strips them: the file's
+ * remaining prose quotes selectors and means none of them. DECLARATION BODIES GO SECOND,
+ * so a `.5s` in a transition or a `.25` in a `color-mix` cannot read as a class name.
+ * What is left is selector text, scanned for `.name`.
+ *
+ * IT TAKES THE CSS SO THE PARSE CAN BE PINNED. A reader that silently stopped reading
+ * would return an empty set and report the strongest possible green on all five
+ * surfaces — the exact failure this instrument exists to make impossible. Passing a
+ * sample stylesheet is how `render.testkit.test.tsx` holds the other direction; the five
+ * callers pass nothing and get the real file.
+ */
+export function styleSheetClassSelectors(css: string = appStyleSheet()): Set<string> {
+  const selectors = css.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{[^{}]*\}/g, "{}");
+  return new Set([...selectors.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)].map((match) => match[1]!));
+}
+
+/**
+ * THE TERMINAL ASSERTION ITSELF, WITH ITS OWN NEGATIVE CONTROL (spec #420 Seam E, §8.4).
+ *
+ * THE CLAIM: the set of class names this surface renders, intersected with the set of
+ * class selectors left in `styles.css`, is empty. That is the mechanical proof that no
+ * house rule survives WITH A CARRIER — the failure the nine deletion guards cannot see,
+ * because each knows only the names its own slice took.
+ *
+ * ── WHY THE SECOND HALF EXISTS ───────────────────────────────────────────────────────
+ * At the end state `styles.css` holds no rule, so `styleSheetClassSelectors()` returns
+ * the empty set and the first expectation is `expect([]).toEqual([])` — green against a
+ * blank render, green against a reader that silently stopped reading, green against an
+ * intersection that never intersects. A guard that cannot fail is worse than no guard:
+ * it reports the strongest possible result while measuring nothing, which is the exact
+ * shape of failure the instrument was built to make impossible.
+ *
+ * So the same walk runs a SECOND time against a stylesheet built from this surface's own
+ * render. Every plain class name the surface writes becomes a selector in a probe
+ * sheet, and the intersection must come back holding all of them. That reds when the
+ * render is empty, when the parse returns nothing, and when the intersection is not
+ * really being taken — the three ways the real assertion could pass while asleep.
+ *
+ * PLAIN NAMES ONLY, because the probe sheet is CSS: `text-[0.85rem]` has to be written
+ * `.text-\[0\.85rem\]` to be a selector, and the reader — correctly — does not resolve
+ * escapes. Filtering them out keeps the control honest about what it measures rather
+ * than teaching the reader a syntax the real file will never contain. Every one of the
+ * six surfaces writes plenty of plain names; the assertion below says so out loud, so a
+ * surface that stopped writing any could not quietly empty the control.
+ */
+export function expectNoStyledClassSurvives(container: Element): void {
+  const rendered = [...renderedClassNames(container)];
+
+  expect(rendered.filter((name) => styleSheetClassSelectors().has(name))).toEqual([]);
+
+  const plain = rendered.filter((name) => /^-?[_a-zA-Z][\w-]*$/.test(name)).sort();
+  expect(plain.length).toBeGreaterThan(0);
+  const probe = styleSheetClassSelectors(plain.map((name) => `.${name} { color: red }`).join("\n"));
+  expect(rendered.filter((name) => probe.has(name)).sort()).toEqual(plain);
+}
+
+/** The app's hand-written stylesheet, read from disk. */
+export function appStyleSheet(): string {
+  return readFileSync(join(dirname(fileURLToPath(import.meta.url)), "styles.css"), "utf8");
 }
 
 /**

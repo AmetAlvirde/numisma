@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 /**
- * `SummaryCard` ON THE SHARED `Card` — the with-a-heading half of the primitive's proof.
+ * `SummaryCard` ON THE SHARED `Card` — the with-a-heading half of the primitive's proof,
+ * and, since spec #420 slice 3, the census successor for the summary section.
  *
  * THE FUND NAME IS THE PAGE'S `<h1>`. `/big-picture` has exactly one, this card carries
  * it, and the call site is the only thing that knows that — which is the entire reason
@@ -9,18 +10,37 @@
  * looks identical to a sighted reader while reading as a document with no title to
  * everything that navigates by headings.
  *
- * The class census pins the other risk of the conversion: this card's root class string
- * is now built by a primitive, and spec #403 forbids a new class name and requires
- * `styles.css` to be byte-identical. Both suppression arms are censused, because the warn
- * badge and the em dashes only exist on one of them. That file has since taken spec #412
- * Slice 5's `--nms-*` override block, which adds custom properties and no selector, so
- * every class name censused here still means what it meant.
+ * ── WHY THE CENSUS BECAME PER-CLASS ─────────────────────────────────────────────────
+ * The full-string census this file used to run was right while the card was UNCONVERTED:
+ * its root class string was built by a primitive, and `"card summary"` turning into
+ * `"card"` is exactly the invisible-in-a-diff failure it existed to catch. It is wrong
+ * now. Every element below carries a dozen ordered utilities, and pinning the whole
+ * attribute would make this file assert Prettier's class sort order — a formatter upgrade
+ * would then read as a summary-card regression. Per spec #420 Seam E the census splits in
+ * two: the load-bearing utilities are asserted PER CLASS with `toContain`, and none of the
+ * slice's deleted class names appears anywhere in either render.
+ *
+ * THE VALUES ARE THE DELETED RULES', declaration for declaration, and that is the whole
+ * point of the list: `.metrics dd` was `margin: 0; font-size: 1.15rem; font-weight: 600;
+ * font-variant-numeric: tabular-nums; text-align: right`, and its `@container` arm reset
+ * the top margin and the alignment. Preflight is off, so the UA's `<dd>` margin is live
+ * and `m-0` is as load-bearing as anything beside it.
  *
  * THE SUMMARY IS AUTHORED. No ledger output has been near this file.
  */
 import { describe, expect, it } from "vitest";
 
-import { classCensus, render, screen } from "../render.testkit.tsx";
+import {
+  classTokens as tokens,
+  DELETED_IN_SLICE_2,
+  DELETED_IN_SLICE_3,
+  render,
+  renderedClassNames,
+  absentSlots,
+  expectNoStyledClassSurvives,
+  screen,
+} from "../render.testkit.tsx";
+import { CARD_SURFACE } from "./ui/Card.tsx";
 import { SummaryCard } from "./SummaryCard.tsx";
 import type { DashboardSummary } from "@numisma/engine";
 
@@ -40,6 +60,13 @@ function cleanSummary(): DashboardSummary {
   };
 }
 
+/** Every utility in `expected` is on `element`, one assertion per class. */
+function expectUtilities(element: Element, expected: string[]): void {
+  for (const utility of expected) {
+    expect(tokens(element)).toContain(utility);
+  }
+}
+
 describe("SummaryCard on the shared Card", () => {
   it("renders the fund name as the page's h1", () => {
     render(
@@ -51,25 +78,160 @@ describe("SummaryCard on the shared Card", () => {
     expect(headings[0]?.textContent).toBe("Test Fund");
   });
 
-  it("emits the same class strings it emitted before the conversion", () => {
+  it("carries the card surface and the converted `as of` line", () => {
     const { container } = render(
       <SummaryCard summary={cleanSummary()} usdMxn={18.5} fundValueRendered />,
     );
-    const root = container.firstElementChild;
+    const root = container.firstElementChild!;
 
-    expect(root?.tagName).toBe("SECTION");
-    expect(classCensus(root!)).toEqual([
-      "badge badge-ok",
-      "card summary",
-      "metrics",
-      "muted",
-      "pos",
-      "summary-head",
+    expect(root.tagName).toBe("SECTION");
+    expectUtilities(root, CARD_SURFACE.split(" "));
+
+    // This one sits in the card header rather than in a metrics `<dd>`, so it takes
+    // `.muted` plain — colour and all four margin edges, preflight being off.
+    const asOf = screen.getByText(/^as of/);
+    expect(asOf.tagName).toBe("P");
+    expectUtilities(asOf, ["text-[var(--muted)]", "m-0", "mt-1"]);
+  });
+
+  it("is the query container the shared 380px breakpoint names", () => {
+    const { container } = render(
+      <SummaryCard summary={cleanSummary()} usdMxn={18.5} fundValueRendered />,
+    );
+
+    // `.summary` declared `container-name: summary metrics-card`; only the second
+    // name was ever queried, here and by the glance card, so only it survives the
+    // conversion. Losing it would not fail a render test — it would silently strand
+    // every `@[380px]/metrics-card:` variant below on a card that never reflows.
+    expectUtilities(container.firstElementChild!, ["@container/metrics-card"]);
+  });
+
+  it("keeps the head's title block and badge on one row, wrapping at 320px", () => {
+    render(
+      <SummaryCard summary={cleanSummary()} usdMxn={18.5} fundValueRendered />,
+    );
+
+    const head = screen.getByText("Test Fund").closest("header")!;
+    expectUtilities(head, [
+      "flex",
+      "flex-wrap",
+      "justify-between",
+      "items-start",
+      "gap-3",
+    ]);
+    // `flex: 1 1 0` plus `min-width: 0` is what lets the title block shrink instead
+    // of pushing the badge off the card.
+    expectUtilities(head.firstElementChild!, ["flex-1", "min-w-0"]);
+  });
+
+  it("lays the metrics list out phone-first and reflows it at a 380px card", () => {
+    render(
+      <SummaryCard summary={cleanSummary()} usdMxn={18.5} fundValueRendered />,
+    );
+
+    const list = screen.getByText("Fund value").closest("dl")!;
+    expectUtilities(list, [
+      "grid",
+      "grid-cols-1",
+      "gap-2",
+      "m-0",
+      "mt-4",
+      "@[380px]/metrics-card:grid-cols-[repeat(auto-fit,minmax(140px,1fr))]",
+      "@[380px]/metrics-card:gap-3",
+    ]);
+
+    const row = screen.getByText("Fund value").closest("div")!;
+    expectUtilities(row, [
+      "grid",
+      "grid-cols-[auto_minmax(0,1fr)]",
+      "items-baseline",
+      "gap-x-[10px]",
+      "@[380px]/metrics-card:block",
     ]);
   });
 
-  it("emits the same class strings on the suppressed arm too", () => {
-    const { container } = render(
+  it("sizes the term and the figure, both arms of the reflow", () => {
+    render(
+      <SummaryCard summary={cleanSummary()} usdMxn={18.5} fundValueRendered />,
+    );
+
+    expectUtilities(screen.getByText("Fund value"), [
+      "text-[var(--muted)]",
+      "text-[0.8rem]",
+    ]);
+    expectUtilities(screen.getByText("18.50").closest("dd")!, [
+      "m-0",
+      "text-[1.15rem]",
+      "font-semibold",
+      "tabular-nums",
+      "text-right",
+      "@[380px]/metrics-card:mt-[2px]",
+      "@[380px]/metrics-card:text-left",
+    ]);
+  });
+
+  it("paints the P&L figure with the sign colour it earned", () => {
+    render(
+      <SummaryCard summary={cleanSummary()} usdMxn={18.5} fundValueRendered />,
+    );
+    const pnl = screen.getByText(/^\$100/);
+    expectUtilities(pnl, ["text-[var(--pos)]"]);
+
+    render(
+      <SummaryCard
+        summary={{ ...cleanSummary(), totalUnrealizedPnlUsd: -100 }}
+        usdMxn={18.5}
+        fundValueRendered
+      />,
+    );
+    expectUtilities(screen.getByText(/^-\$100/), ["text-[var(--neg)]"]);
+  });
+
+  it("carries both badge arms, and wraps only inside the head", () => {
+    render(
+      <SummaryCard summary={cleanSummary()} usdMxn={18.5} fundValueRendered />,
+    );
+    const ok = screen.getByText("Data OK");
+    expectUtilities(ok, [
+      "inline-block",
+      "rounded-[999px]",
+      "px-[10px]",
+      "py-1",
+      "text-[0.78rem]",
+      "font-semibold",
+      "whitespace-nowrap",
+      "bg-[var(--ok)]",
+      "text-white",
+    ]);
+    // `.badge`'s `nowrap` was overridden for EXACTLY ONE PLACEMENT and the override is
+    // written as an element-scoped variant rather than a second plain utility, because
+    // two unvariant `white-space` utilities on one element are resolved by Tailwind's
+    // emitted order and not by the order they are written in. `[header_&]` outranks the
+    // base on specificity, which is a fact about the selector rather than about the sort.
+    expectUtilities(ok, ["[header_&]:whitespace-normal", "[header_&]:flex-initial"]);
+
+    render(
+      <SummaryCard
+        summary={cleanSummary()}
+        usdMxn={18.5}
+        fundValueRendered={false}
+      />,
+    );
+    // By title, not by text: the badge and the em dash beneath it spell the SAME cause
+    // from the same constant, deliberately, so the words are not a unique handle.
+    expectUtilities(screen.getByTitle("Withheld or excluded data"), [
+      "bg-[var(--warn)]",
+      "text-white",
+      "whitespace-nowrap",
+      "[header_&]:whitespace-normal",
+    ]);
+  });
+
+  it("writes none of the deleted class names, on either arm", () => {
+    const clean = render(
+      <SummaryCard summary={cleanSummary()} usdMxn={18.5} fundValueRendered />,
+    );
+    const suppressed = render(
       <SummaryCard
         summary={cleanSummary()}
         usdMxn={18.5}
@@ -77,14 +239,77 @@ describe("SummaryCard on the shared Card", () => {
       />,
     );
 
-    expect(classCensus(container.firstElementChild!)).toEqual([
-      "absent",
-      "badge badge-warn",
-      "card summary",
-      "metrics",
-      "muted",
-      "muted absent-why",
-      "summary-head",
-    ]);
+    for (const { container } of [clean, suppressed]) {
+      const rendered = [...renderedClassNames(container.firstElementChild!)];
+      for (const deleted of [...DELETED_IN_SLICE_2, ...DELETED_IN_SLICE_3]) {
+        expect(rendered).not.toContain(deleted);
+      }
+    }
+    // The suppressed arm is the one that renders an `Absent`, and its hook is GONE:
+    // slice 8 took `.fp-detail .absent`, the last contextual rule selecting through it,
+    // so the primitive stopped writing a name with nothing behind it.
+    expect([
+      ...renderedClassNames(suppressed.container.firstElementChild!),
+    ]).not.toContain("absent");
+  });
+
+  it("still mounts both suppressed figures' `Absent`, em dash and stated cause", () => {
+    // THE WITNESS THE DELETED CENSUS USED TO BE. `main` pinned `"absent"` and
+    // `"muted absent-why"` as PRESENT, which incidentally proved this card's suppression
+    // path rendered; the successor asserts the inverse, and `not.toContain` passes just
+    // as well when the element is gone. Two slots, not one — `USD/MXN` is deliberately
+    // NOT gated on the mark, so a card that blacked out all three would be the
+    // whole-page blackout per-key suppression exists to avoid.
+    //
+    // FOUND BY THE EM DASH, the marker the primitive still writes now that the class is
+    // gone, and the one `absent-contract.test.tsx` pins.
+    const { container } = render(
+      <SummaryCard summary={cleanSummary()} usdMxn={18.5} fundValueRendered={false} />,
+    );
+    const slots = absentSlots(container);
+
+    expect(slots).toHaveLength(2);
+    for (const slot of slots) expect(slot.textContent).toBe("—no current mark");
+    // The clean arm renders none, which is what makes the two above a suppression
+    // witness rather than a count of decorative glyphs the card always draws.
+    expect(
+      absentSlots(
+        render(<SummaryCard summary={cleanSummary()} usdMxn={18.5} fundValueRendered />)
+          .container,
+      ),
+    ).toHaveLength(0);
+  });
+});
+
+/**
+ * THE TERMINAL ASSERTION (spec #420 Seam E, slice 9), on all five census successors and
+ * the shell's.
+ *
+ * THE SET OF CLASS NAMES THIS SURFACE RENDERS, INTERSECTED WITH THE SET OF CLASS
+ * SELECTORS LEFT IN `styles.css`, IS EMPTY. That is the mechanical proof that no house
+ * rule survives WITH A CARRIER — the failure mode the nine deletion guards cannot see,
+ * because each of them knows only the names its own slice took.
+ *
+ * IT COULD ONLY LAND HERE. Every slice but the last renders a class the file still
+ * styles, on purpose: that is what a nine-slice migration through a shared stylesheet
+ * looks like from the inside. The assertion is false by design for eight slices and true
+ * for good afterwards.
+ *
+ * IT IS NOT A RESTATEMENT OF "THE FILE HAS NO RULES". `styles-css-end-state.test.ts` says
+ * that about the file; this says something the file cannot know — that nothing RENDERED
+ * reaches whatever is in it. A rule added back under a name no guard lists goes red here
+ * the moment a component writes its class.
+ *
+ * AND AT THE END STATE IT CARRIES ITS OWN NEGATIVE CONTROL, because the file it reads is
+ * now empty of rules and the intersection is therefore empty for free.
+ * `expectNoStyledClassSurvives` re-runs the identical walk against a probe sheet built
+ * from this surface's own render, so a blank render, a reader that stopped reading or an
+ * intersection that never intersects reds here instead of passing green. What the claim
+ * is worth is written in that helper's docblock.
+ */
+describe("no rule left in styles.css reaches this surface", () => {
+  it("renders no class name the stylesheet still selects", () => {
+    const { container } = render(<SummaryCard summary={cleanSummary()} usdMxn={18.5} fundValueRendered />);
+    expectNoStyledClassSurvives(container);
   });
 });

@@ -23,7 +23,12 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { classCensus, render } from "./render.testkit.tsx";
+import {
+  appStyleSheet,
+  classCensus,
+  render,
+  styleSheetClassSelectors,
+} from "./render.testkit.tsx";
 
 describe("classCensus", () => {
   it("reads SVG class attributes as strings, like every other element's", () => {
@@ -87,5 +92,41 @@ describe("classCensus", () => {
     );
 
     expect(classCensus(container.firstElementChild!)).toEqual(["", "absent"]);
+  });
+});
+
+/**
+ * THE PARSE BEHIND THE TERMINAL ASSERTION (spec #420 Seam E, slice 9).
+ *
+ * The five structure tests intersect what they render against what this returns, and an
+ * empty result makes all five pass no matter what is in the stylesheet. So the parse is
+ * pinned against a sample that contains every shape the real file could take back:
+ * a bare class, a compound, a descendant, a class quoted inside a comment, and a
+ * declaration value with a dot in it.
+ */
+describe("styleSheetClassSelectors", () => {
+  const SAMPLE = [
+    "/* a comment naming .commented, which is not a selector */",
+    ":root { --x: 1; }",
+    ".plain { color: red; }",
+    ".compound.state, .head .child { transition: opacity .25s; }",
+    "@media (min-width: 380px) { .nested { margin: 0; } }",
+  ].join("\n");
+
+  it("collects every class a selector names, and nothing a comment or a value does", () => {
+    expect([...styleSheetClassSelectors(SAMPLE)].sort()).toEqual([
+      "child",
+      "compound",
+      "head",
+      "nested",
+      "plain",
+      "state",
+    ]);
+  });
+
+  it("reads the app's own stylesheet by default", () => {
+    // Guards the guard from the other side: the default argument must reach a real file
+    // with real content, or the five intersections below it are green by vacuum.
+    expect(appStyleSheet()).toMatch(/:root\s*\{/);
   });
 });

@@ -1,5 +1,7 @@
 import type { ReactElement } from "react";
 
+import { CARD_SURFACE } from "./Card.tsx";
+
 /**
  * THE TWO SNAPSHOT GUARD NOTICES — Seam D of spec #403.
  *
@@ -16,11 +18,19 @@ import type { ReactElement } from "react";
  * `route-move.test.ts` pins the shell import and the per-route branching, and this
  * extraction is deliberately shaped to keep every one of those assertions true.
  *
- * ── A `<div className="card notice">`, NOT A `Card` ──────────────────────────────────
+ * ── A `<div>` ON THE CARD SURFACE, NOT A `Card` ──────────────────────────────────────
  * Both notices keep the element they render today. `Card` is a `<section>` and only a
  * `<section>`; converting these would change the element and the landmark structure of
- * three pages, which is a visual and accessibility change, and this increment has no
- * visual review gate. The class strings are unchanged and `styles.css` is byte-identical.
+ * three pages, which is a visual and accessibility change. They import the surface's
+ * class string instead, which is exactly the split spec #420 slice 2 drew: a painted
+ * surface is shareable, a landmark is not.
+ *
+ * ── THE `notice` AND `error` CLASS NAMES ARE GONE (spec #420 slice 2) ────────────────
+ * They were never styled on their own. `.notice code` painted the inline code chip and
+ * `.notice.error h1` painted the refusal's heading; both are deleted here and both are
+ * now utilities on the elements themselves, so the two names carry nothing and are not
+ * written. Slice 1 kept `error` alive on purpose while `.notice.error h1` still selected
+ * through it — that was the last rule, and this is the slice that moves it.
  *
  * ── NO GENERIC `Notice` ──────────────────────────────────────────────────────────────
  * A `<Notice variant severity>` would have exactly these two consumers. The ladder
@@ -35,13 +45,26 @@ import type { ReactElement } from "react";
  * for the same reason: a `SnapshotResult` type import here would drag the projection
  * contract into a primitive that only needs three numbers.
  */
+/**
+ * The inline code chip, which was `.notice code`.
+ *
+ * `rounded-[6px]` RATHER THAN `rounded-md`, and this is the trap the migration keeps
+ * meeting: `tailwind.css`'s `@theme` remaps `--radius-md` onto the package's 8px control
+ * radius, so `rounded-md` compiles, resolves, wins its cascade and paints 8px. Only the
+ * arbitrary value is 6px. `bg-black` IS an exact match for the deleted `#000` and is a
+ * Tailwind default rather than a mapped house token, so it is not that collision.
+ *
+ * Exported because the ladder fixture route spells the same chip inside its own notices.
+ */
+export const NOTICE_CODE = "rounded-[6px] bg-black px-1.5 py-0.5";
+
 export function SnapshotEmptyNotice(): ReactElement {
   return (
-    <div className="card notice">
+    <div className={CARD_SURFACE}>
       <h1>No snapshot yet</h1>
       <p>
-        The projection is empty. Run <code>pnpm push</code> to publish the latest
-        composition report.
+        The projection is empty. Run <code className={NOTICE_CODE}>pnpm push</code>{" "}
+        to publish the latest composition report.
       </p>
     </div>
   );
@@ -53,7 +76,8 @@ export function SnapshotEmptyNotice(): ReactElement {
  * the fix is re-running the push against a matching engine build, and which build that is
  * follows from the range.
  *
- * `error` rides alongside `card notice` here and only here.
+ * The refusal is the one notice painted in the negative colour, here and in the ladder
+ * fixture route that stages it.
  */
 export function SnapshotStaleNotice({
   storedVersion,
@@ -65,8 +89,16 @@ export function SnapshotStaleNotice({
   max: number;
 }): ReactElement {
   return (
-    <div className="card notice error">
-      <h1>Schema version mismatch — refusing to render</h1>
+    // THE HOOK IS GONE NOW. Slice 1 deleted `.error` and kept the class name alive
+    // because `.notice.error h1` still selected through it; slice 2 has moved that rule
+    // onto the heading, so the name carries nothing and is not written.
+    <div className={`${CARD_SURFACE} m-0 text-[var(--neg)]`}>
+      {/* Redundant by inheritance and written anyway: the deleted rule painted this
+          heading directly, and a converted element that relies on its parent's colour
+          reads as an omission the next time someone recolours the box. */}
+      <h1 className="text-[var(--neg)]">
+        Schema version mismatch — refusing to render
+      </h1>
       <p>
         The stored snapshot is schema version <strong>{storedVersion}</strong>, which is
         outside the versions this app supports (

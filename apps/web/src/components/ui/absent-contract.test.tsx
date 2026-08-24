@@ -16,7 +16,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { render, screen } from "../../render.testkit.tsx";
+import { classTokens as tokens, render, screen } from "../../render.testkit.tsx";
 import { Absent } from "./Absent.tsx";
 
 describe("Absent", () => {
@@ -36,11 +36,50 @@ describe("Absent", () => {
     expect(screen.getByText("suppressed")).not.toBe(null);
   });
 
-  it("emits the class strings the stylesheet already carries", () => {
+  it("carries `.absent`'s four declarations as utilities, and no longer writes the name", () => {
     const { container } = render(<Absent why="no floor set" />);
 
-    const root = container.querySelector(".absent");
+    // FOUND BY THE EM DASH. The class name is gone (spec #420 slice 8) and the glyph is
+    // what identifies this primitive anyway — it is the half of the contract the two
+    // assertions above are about.
+    const root = container.querySelector('span[aria-hidden="true"]')?.parentElement;
     expect(root?.tagName).toBe("SPAN");
-    expect(screen.getByText("no floor set").className).toBe("muted absent-why");
+    for (const utility of [
+      "inline-flex",
+      "items-baseline",
+      "gap-1.5",
+      "text-[var(--muted)]",
+    ]) {
+      expect(tokens(root!)).toContain(utility);
+    }
+    // `absent` IS GONE (spec #420 slice 8). It survived its own rule for six slices as a
+    // bare hook because three contextual rules selected through it; the last of those,
+    // `.fp-detail .absent`, was deleted with the selected-rung card, so the name has
+    // nothing behind it. Asserted from the other side now — the absence is the decision.
+    expect(tokens(root!)).not.toContain("absent");
+  });
+
+  it("puts `.absent-why` and `.muted` on the reason, sized for the metrics context", () => {
+    render(<Absent why="no floor set" />);
+    const why = screen.getByText("no floor set");
+
+    for (const utility of [
+      "text-[0.72rem]",
+      "font-medium",
+      "text-[var(--muted)]",
+      // `.muted` set `margin: 4px 0 0` — three zeroed edges and one that is not.
+      // Preflight is off, so only `mt-1` would leave the UA free on the other three.
+      "m-0",
+      "mt-1",
+      // The `.metrics .muted` context, keyed off the element rather than the class,
+      // because slice 3 deletes the class and keeps the `<dd>`.
+      "[dd_&]:text-[0.75rem]",
+      "[dd_&]:mt-0",
+    ]) {
+      expect(tokens(why)).toContain(utility);
+    }
+    for (const deleted of ["muted", "absent-why"]) {
+      expect(tokens(why)).not.toContain(deleted);
+    }
   });
 });

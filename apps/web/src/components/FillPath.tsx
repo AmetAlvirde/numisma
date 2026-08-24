@@ -9,7 +9,8 @@ import type {
 import { COMPACT_USD } from "../ladder/price-drop-path.ts";
 import { PriceDropPathChart } from "./PriceDropPathChart.tsx";
 import { Absent } from "./ui/Absent.tsx";
-import { Card } from "./ui/Card.tsx";
+import { Card, CARD_SURFACE } from "./ui/Card.tsx";
+import { NOTICE_CODE } from "./ui/SnapshotNotice.tsx";
 
 /**
  * THE FILL PATH, ON THE PHONE (spec #285 §5.6–5.13 / G-D10b, slice #289) — the declared
@@ -69,6 +70,187 @@ import { Card } from "./ui/Card.tsx";
  * reachable without the chart being involved at all.
  */
 
+/**
+ * ── THE HEADER CARD'S SECTION, AS UTILITIES (spec #420 slice 7) ──────────────────────
+ *
+ * `styles.css` opened the fill path with about three hundred lines covering this one
+ * card: an identity row, a state chip, a spot reading, three tiles, a progress bar, the
+ * waiting block, day zero's hero and TWO `@container fp-header` blocks reflowing most of
+ * it at 380px. Every declaration in that section is now one of the strings below, and
+ * `fill-path-header-section-deleted.test.ts` holds the other end.
+ *
+ * ── THE CONTAINER IS THE CARD, NOT THE VIEWPORT, AND KEEPS ITS ONE NAME ──────────────
+ * `container: fp-header / inline-size` is a shorthand with a single name, which is
+ * exactly what Tailwind's NAMED container utility emits, so `@container/fp-header` is a
+ * literal translation here. The glance card's pair had to be split into a bare
+ * `@container` plus an arbitrary `container-name` because the shorthand carries only
+ * what it is given and that card needed two names; this one needed one.
+ *
+ * ── THE RAIL IS THE SHAPE, AND THREE BLOCKS SHARE IT ─────────────────────────────────
+ * Spot, a tile and the waiting block are the SAME row at 320px — label left, figure hard
+ * right, one line each — and all three turn into a stacked block at 380px of CARD width.
+ * `RAIL` is that shared narrow form; each block adds what it alone declared. Composing
+ * rather than repeating is what keeps the three from drifting apart at one edge, which is
+ * what the deleted rules' shared selector lists were doing.
+ *
+ * ── WHERE A SHORTHAND SITS BESIDE ITS OWN LONGHAND ───────────────────────────────────
+ * `m-0 mb-3` and `m-0 mt-1.5` are the preflight-off pattern every converted surface in
+ * this app uses: the UA margins on `p` are live, so a rule that said `margin: 0 0 12px`
+ * has to zero three edges and set one, and Tailwind sorts the shorthand ahead of the
+ * longhand so the specific edge wins. Two utilities setting the SAME property would be a
+ * coin toss instead — see `BADGE_TONE` below, which is a total map for that reason.
+ */
+const HEADER_CARD = "@container/fp-header";
+const HEADER_TITLE = "m-0 text-[1.15rem] wrap-anywhere";
+const HEADER_HEAD =
+  "block @[380px]/fp-header:flex @[380px]/fp-header:flex-wrap @[380px]/fp-header:items-baseline @[380px]/fp-header:justify-between @[380px]/fp-header:gap-x-4 @[380px]/fp-header:gap-y-0";
+const HEADER_ID =
+  "flex flex-wrap items-baseline gap-x-2 gap-y-1 min-w-0 mb-[10px] @[380px]/fp-header:flex-[1_1_180px]";
+
+/**
+ * THE STATE, AS A TAG — a chip rather than bare text, because it sits beside a heading
+ * and needs an edge to stop reading as part of the title.
+ *
+ * `border-current` IS THE WHOLE POINT OF SPLITTING THE COLOUR OUT. The deleted rule drew
+ * `1px solid currentColor`, so the chip's edge is whatever its text is, and the three
+ * tones below each move both at once.
+ */
+const BADGE =
+  "flex-none rounded-[999px] border border-current px-[7px] py-[2px] text-[0.65rem] font-semibold uppercase leading-[1.4] tracking-[0.05em]";
+
+/**
+ * ONE COLOUR REACHES THE CHIP, AND WHICH ONE IS A FACT ABOUT THIS MAP.
+ *
+ * The deleted rules were a base that painted `--muted` and two overrides that repainted
+ * it. As utilities that is a cascade this string cannot express: two unvariant `color`
+ * utilities on one element are resolved by Tailwind's EMITTED order, not by the order
+ * they are written in. A total map has no override to lose. `DcaCard`'s state word made
+ * the same move for the same reason, and the semantics are deliberately identical —
+ * `pending` is NOT an alarm colour, because a declared ladder awaiting its first fill is
+ * the normal starting state; `unreadable` is the only one that wants the eye.
+ */
+const BADGE_TONE: Record<FillPathView["state"], string> = {
+  pending: "text-[var(--muted)]",
+  active: "text-[var(--pos)]",
+  ended: "text-[var(--muted)]",
+  unreadable: "text-[var(--warn)]",
+};
+
+/** The narrow row every data block on this card is: label left, figure hard right. */
+const RAIL = "flex flex-wrap items-baseline justify-end gap-x-[10px] gap-y-0 m-0 min-w-0";
+
+/**
+ * THE LABEL IS THE ONLY THING THAT GIVES. `flex-[1_1_0]` — a ZERO basis, not `auto` — is
+ * what makes "Expected average entry" wrap to two lines instead of shoving its figure
+ * onto a line of its own: the label is prose and survives a break, the number is the
+ * thing being aligned and must not leave the rail.
+ */
+const TILE_LABEL =
+  "text-[0.7rem] font-semibold uppercase tracking-[0.04em] text-[var(--muted)]";
+const RAIL_LABEL = `${TILE_LABEL} flex-[1_1_0] min-w-0`;
+/** Spot keeps its right alignment when the card reflows; the tiles turn left. */
+const SPOT_LABEL = `${RAIL_LABEL} @[380px]/fp-header:flex-none`;
+const STACKED_LABEL = `${SPOT_LABEL} @[380px]/fp-header:text-left`;
+
+const TILE =
+  `${RAIL} @[380px]/fp-header:flex-col @[380px]/fp-header:items-stretch` +
+  " @[380px]/fp-header:justify-start @[380px]/fp-header:gap-x-0 @[380px]/fp-header:gap-y-[2px]";
+const TILE_VALUE =
+  "flex-none text-right text-[1.05rem] tabular-nums @[380px]/fp-header:text-left";
+/**
+ * An absent figure carries a CAUSE, and the cause is longer than any price. It wraps
+ * under its em dash at the right rail rather than widening the row, and follows the tile
+ * back to the left edge when the card reflows.
+ */
+const TILE_ABSENT =
+  "flex-wrap justify-end text-right @[380px]/fp-header:justify-start @[380px]/fp-header:text-left";
+
+/**
+ * SPOT IS CONTEXT, NOT THE ANSWER. It reads in `--muted` like every other reference
+ * figure on the card, which leaves Waiting as the one accented number.
+ *
+ * At 380px it becomes the corner figure again — label over value, right-aligned, no rule
+ * under it — which is why the border and the padding both have an arm that removes them.
+ */
+const SPOT =
+  `${RAIL} mb-3 pb-[10px] border-b border-b-[var(--line)]` +
+  " @[380px]/fp-header:flex-col @[380px]/fp-header:items-end @[380px]/fp-header:gap-x-0" +
+  " @[380px]/fp-header:gap-y-px @[380px]/fp-header:pb-0 @[380px]/fp-header:border-b-0" +
+  " @[380px]/fp-header:text-right";
+const SPOT_VALUE = "flex-none text-right text-[1.05rem] tabular-nums text-[var(--muted)]";
+const SPOT_NOTE = "m-0 mt-1 text-[0.7rem] text-[var(--muted)]";
+/** Spot's own reflow already right-aligns the block, so this one has no wide arm. */
+const SPOT_ABSENT = "flex-wrap justify-end text-right";
+
+/**
+ * One column of rows at 320px; a real grid of tiles once the CARD is wide enough.
+ *
+ * `grid-cols-1` IS NOT LITERALLY THE DELETED `grid-template-columns: 1fr`, and here it
+ * cannot differ. `1fr` is `minmax(auto, 1fr)`, whose automatic minimum is the item's
+ * min-content contribution; `grid-cols-1` emits `repeat(1, minmax(0, 1fr))`, which has no
+ * such floor. The two part company only when a tile's min-content exceeds the card
+ * interior — measured in Chrome at 320px, with `min-width: auto` forced onto a tile and a
+ * 363px unbreakable token in it: `1fr` grows the track to 363.008px, `minmax(0,1fr)`
+ * holds 254px.
+ *
+ * Every tile carries `min-w-0`, which is `TILE`'s reproduction of the `min-width: 0` the
+ * deleted `.fp-spot, .fp-tile` rule declared. That zeroes the automatic minimum, so the
+ * `auto` half of `minmax(auto, 1fr)` was already 0 on the pre-slice tree. The
+ * substitution is inert by construction, not merely unobserved: measured at 254px of card
+ * interior the real tiles' widest min-content is 97.82px, and both track definitions
+ * resolve to the same 254px track.
+ */
+const TILES =
+  "grid grid-cols-1 gap-2" +
+  " @[380px]/fp-header:grid-cols-[repeat(auto-fit,minmax(130px,1fr))] @[380px]/fp-header:gap-3";
+
+/**
+ * A BAR AT ZERO READS AS ABSENCE, which is the truth on day zero — so the track is always
+ * drawn and the fill is allowed to be 0 wide. The fill's WIDTH stays an inline style: it
+ * is a measurement, not a design decision, and there is no utility for "whatever fraction
+ * this ladder happens to be at".
+ */
+const PROGRESS = "m-0 mb-[14px]";
+const PROGRESS_TRACK = "h-1.5 overflow-hidden rounded-[3px] bg-[var(--line)]";
+const PROGRESS_FILL = "h-full bg-[var(--pos)]";
+const PROGRESS_NOTE = "m-0 mt-1.5 text-[0.78rem] text-[var(--muted)]";
+
+/**
+ * The measured-layout waiting block takes the SAME row shape as the tiles above it, with
+ * its sentence breaking to a full-width line under both. `flex-[1_0_100%]` is what forces
+ * that break, so the sentence never tries to share the rail with the number it explains.
+ */
+const WAITING =
+  "flex flex-wrap items-baseline justify-end gap-x-[10px] border-t border-t-[var(--line)] pt-3" +
+  " @[380px]/fp-header:flex-col @[380px]/fp-header:items-stretch" +
+  " @[380px]/fp-header:justify-start @[380px]/fp-header:gap-y-[2px]";
+const WAITING_SUB =
+  "flex-[1_0_100%] m-0 mt-1 text-[0.78rem] text-pretty text-[var(--muted)]";
+
+/**
+ * DAY ZERO'S BLOCK — a headline figure and two quiet projections under it.
+ *
+ * THE HERO STEPS OUT OF THE RAIL, label above rather than beside: the rail is for the
+ * reference rows and leaving it is half of what makes this figure read first. The other
+ * half is size — `--muted` alone lost to the projections, whose strings are simply
+ * longer, so the projections step DOWN in size as well as being muted.
+ */
+const EXPECTED = "mb-[14px]";
+const HERO = "flex flex-col gap-px mb-3";
+const HERO_VALUE =
+  "text-[1.75rem] font-bold leading-[1.15] tracking-[-0.01em] tabular-nums";
+/**
+ * A PROJECTION READS QUIETER THAN A MEASUREMENT, in two ways at once. `--muted` is the
+ * colour every other unmeasured thing on this page already uses, and 0.95rem is the step
+ * down `.fp-tiles-quiet .fp-tile-value` used to make. That rule was a CONTEXT — a
+ * descendant selector on the wrapper — and it collapses into this one string because
+ * `Expectation` is the only thing that ever rendered inside that wrapper. Both sizes are
+ * spelled once, never as a base plus an override: `TILE_VALUE`'s 1.05rem and this
+ * 0.95rem are unvariant `font-size` utilities and would race each other on one element.
+ */
+const EXPECTED_VALUE =
+  "flex-none text-right text-[0.95rem] tabular-nums text-[var(--muted)] @[380px]/fp-header:text-left";
+
 /** One measured tile: the figure, or the named reason there is none. Never a `$0`. */
 function Figure({
   label,
@@ -80,12 +262,12 @@ function Figure({
   render?: (value: number) => string;
 }) {
   return (
-    <div className="fp-tile">
-      <span className="fp-tile-label">{label}</span>
+    <div className={TILE}>
+      <span className={STACKED_LABEL}>{label}</span>
       {figure.known ? (
-        <strong className="fp-tile-value">{render(figure.value)}</strong>
+        <strong className={TILE_VALUE}>{render(figure.value)}</strong>
       ) : (
-        <Absent why={figure.why} />
+        <Absent why={figure.why} className={TILE_ABSENT} />
       )}
     </div>
   );
@@ -111,9 +293,9 @@ function Expectation({
   render?: (value: number) => string;
 }) {
   return (
-    <div className="fp-tile">
-      <span className="fp-tile-label">{label}</span>
-      <strong className="fp-tile-value fp-expected-value">~{render(value)}</strong>
+    <div className={TILE}>
+      <span className={STACKED_LABEL}>{label}</span>
+      <strong className={EXPECTED_VALUE}>~{render(value)}</strong>
     </div>
   );
 }
@@ -291,16 +473,48 @@ export function FillPathCards({ view }: { view: FillPathView }): ReactElement {
  * ABSENCE IS NOT THE ALL-CLEAR (absence rule 3). A row that could not check says so, in
  * a quiet line — silence there would claim a check that never ran.
  */
+/**
+ * THE ONE CARD-SURFACED ELEMENT THAT SPELLS THE SURFACE ITSELF (spec #420 slice 8).
+ *
+ * Everything else that is painted like a card imports `CARD_SURFACE` and adds to it. This
+ * banner cannot, because the deleted rule repainted the border: the shared string carries
+ * `border-[var(--line)]` and the banner's edge is `--neg`, and two unvariant
+ * `border-color` utilities on one element are resolved by Tailwind's EMITTED order rather
+ * than by the order they are written in. That is the same cascade `BADGE_TONE` is a total
+ * map to avoid, one property along. Written out once, with the border it actually wants.
+ *
+ * SPELLING THE SURFACE OUT DOES NOT BUY OUT THE DESCENDANT RULES. `.notice code` reached
+ * the `<code>` in the sentence below and is a separate deletion; dropping `notice` here
+ * takes the chip with it unless the chip carries `NOTICE_CODE` itself, which it does.
+ * The other three carriers of that rule import the same constant.
+ */
+const TORN =
+  "rounded-xl border border-[var(--neg)] bg-[var(--card)] p-4 text-[var(--neg)]";
+/**
+ * THE SENTENCE STEPS BACK TO `--text`. It is prose inside a block painted in the alarm
+ * colour, and reading it in that colour too makes the whole card shout instead of the one
+ * line that is the alarm.
+ */
+const TORN_BODY = "m-0 mt-1.5 text-[0.85rem] text-[var(--text)]";
+/**
+ * `margin: 0`, ALL FOUR EDGES. The deleted rule zeroed the margin outright and, being
+ * unlayered, beat the `mt-1` this paragraph carried from slice 2's shared-vocabulary
+ * conversion. Reproducing the rule means dropping that `mt-1`; keeping it would open a
+ * 4px gap nothing has ever rendered.
+ */
+const UNCHECKED = "m-0 text-[0.8rem] text-[var(--muted)]";
+
 function TornActBanner({ view }: { view: FillPathView }) {
   if (view.tornActs.status === "outstanding") {
     return (
-      <div className="card notice fp-torn" role="alert">
+      <div className={TORN} role="alert">
         <strong>
           {view.tornActs.count} torn fill{" "}
           {view.tornActs.count === 1 ? "act" : "acts"} outstanding
         </strong>
-        <p>
-          Recording is blocked until this is repaired — <code>pnpm orders:fill</code>{" "}
+        <p className={TORN_BODY}>
+          Recording is blocked until this is repaired —{" "}
+          <code className={NOTICE_CODE}>pnpm orders:fill</code>{" "}
           will refuse while a half-written act is open. Repair it at the desk.
         </p>
       </div>
@@ -308,7 +522,7 @@ function TornActBanner({ view }: { view: FillPathView }) {
   }
   if (view.tornActs.status === "unchecked") {
     return (
-      <p className="muted fp-unchecked">
+      <p className={UNCHECKED}>
         Torn fill acts were not checked for this snapshot — this is NOT "none
         outstanding".
       </p>
@@ -344,24 +558,26 @@ function Header() {
       : undefined;
 
   return (
-    <Card className="fp-header">
+    <Card className={HEADER_CARD}>
       {/* WHAT THIS IS, AND WHERE PRICE IS — the two things the operator reads before
           anything else, on one row. Spot used to sit in the provenance footer, four
           cards down, which put the only number that moves while you look at it below
           every number that does not. */}
-      <div className="fp-header-head">
-        <div className="fp-header-id">
+      <div className={HEADER_HEAD}>
+        <div className={HEADER_ID}>
           {/* `level={1}` IS NOT DECORATION. This card's heading is the PAGE's heading,
               which only the call site knows; `Card.Title` defaults to 2, and a page
               whose deepest heading is an `h2` reads as a document with no title to
               everything that navigates by headings. */}
-          <Card.Title level={1}>{view.title}</Card.Title>
+          <Card.Title level={1} className={HEADER_TITLE}>
+            {view.title}
+          </Card.Title>
           {/* THE STATE IS A BADGE, NOT A SENTENCE. It used to ride a `Price ladder ·
               pending · all figures in USD` sub-line, which spent two rows of a 320px
               card on one word the operator actually reads. The kind is already told by
               the ladder below, and every figure on this card carries its own `$` or its
               own unit, so the currency note was restating what the numbers say. */}
-          <span className={`fp-badge fp-badge-${view.state}`}>
+          <span className={`${BADGE} ${BADGE_TONE[view.state]}`}>
             {view.state === "active" ? "in force" : view.state}
           </span>
         </div>
@@ -371,7 +587,7 @@ function Header() {
       {projection ? (
         <ExpectedRow expected={projection.expected} figures={projection.figures} />
       ) : (
-        <div className="fp-tiles">
+        <div className={`${TILES} mb-[14px]`}>
           <Figure label="Deployed" figure={view.deployed} />
           <Figure
             label="Units acquired"
@@ -383,20 +599,20 @@ function Header() {
       )}
 
       {view.progress ? (
-        <div className="fp-progress">
+        <div className={PROGRESS}>
           {/* A BAR AT ZERO IS THE TRUTH and stays: it reads as absence, which is what
               day zero is. A zero-dollar figure would read as a measurement instead. */}
           <div
-            className="fp-progress-track"
+            className={PROGRESS_TRACK}
             role="img"
             aria-label={`${view.progress.filledRungs} of ${view.progress.totalRungs} rungs filled`}
           >
             <div
-              className="fp-progress-fill"
+              className={PROGRESS_FILL}
               style={{ width: `${view.progress.percent}%` }}
             />
           </div>
-          <p className="muted">
+          <p className={PROGRESS_NOTE}>
             {view.progress.filledRungs} of {view.progress.totalRungs} rungs walked
           </p>
         </div>
@@ -426,16 +642,16 @@ function Header() {
  */
 function SpotReadout({ view }: { view: FillPathView }) {
   return (
-    <p className="fp-spot">
-      <span className="fp-tile-label">Spot</span>
+    <p className={SPOT}>
+      <span className={SPOT_LABEL}>Spot</span>
       {view.spotLoading ? (
-        <Absent why="reading spot…" />
+        <Absent why="reading spot…" className={SPOT_ABSENT} />
       ) : view.spotUsd === undefined ? (
-        <Absent why="live price unavailable" />
+        <Absent why="live price unavailable" className={SPOT_ABSENT} />
       ) : (
         <>
-          <strong className="fp-spot-value">{formatUsd(view.spotUsd)}</strong>
-          <span className="muted fp-spot-note">
+          <strong className={SPOT_VALUE}>{formatUsd(view.spotUsd)}</strong>
+          <span className={SPOT_NOTE}>
             {view.spotUnavailable ? "last close · live price unavailable" : "live"}
           </span>
         </>
@@ -467,17 +683,17 @@ function ExpectedRow({
   figures: NonNullable<FillPathView["figures"]>;
 }) {
   return (
-    <div className="fp-expected">
+    <div className={EXPECTED}>
       {/* WAITING IS THE PROTAGONIST and is built to look like it: out of the tile grid
           entirely, label over figure, at the card's largest type. The two projections
           below it stay in the row form at a smaller size — muted alone did not carry
           the hierarchy, because the projected strings are the LONGEST on the card and
           at equal size length reads as importance. */}
-      <div className="fp-hero">
-        <span className="fp-tile-label">Waiting</span>
-        <strong className="fp-hero-value">{formatUsd(figures.waitingDeclaredUsd)}</strong>
+      <div className={HERO}>
+        <span className={TILE_LABEL}>Waiting</span>
+        <strong className={HERO_VALUE}>{formatUsd(figures.waitingDeclaredUsd)}</strong>
       </div>
-      <div className="fp-tiles fp-tiles-quiet">
+      <div className={`${TILES} mb-0`}>
         <Expectation label="Expected units" value={expected.units} render={formatUnits} />
         <Expectation label="Expected average entry" value={expected.avgEntryUsd} />
       </div>
@@ -497,10 +713,10 @@ function ExpectedRow({
 function Waiting({ figures }: { figures: FillPathView["figures"] }) {
   if (figures === undefined) {
     return (
-      <div className="fp-waiting">
-        <span className="fp-tile-label">Waiting</span>
-        <strong className="fp-tile-value">—</strong>
-        <p className="muted fp-waiting-sub">
+      <div className={WAITING}>
+        <span className={STACKED_LABEL}>Waiting</span>
+        <strong className={TILE_VALUE}>—</strong>
+        <p className={WAITING_SUB}>
           The orders sidecar could not be read for this ladder, so nothing here is a
           measurement — this is NOT "nothing is waiting".
         </p>
@@ -508,9 +724,9 @@ function Waiting({ figures }: { figures: FillPathView["figures"] }) {
     );
   }
   return (
-    <div className="fp-waiting">
-      <span className="fp-tile-label">Waiting</span>
-      <strong className="fp-tile-value">{formatUsd(figures.waitingDeclaredUsd)}</strong>
+    <div className={WAITING}>
+      <span className={STACKED_LABEL}>Waiting</span>
+      <strong className={TILE_VALUE}>{formatUsd(figures.waitingDeclaredUsd)}</strong>
     </div>
   );
 }
@@ -522,11 +738,28 @@ function Waiting({ figures }: { figures: FillPathView["figures"] }) {
  * venue has not said anything, which usually means nothing happened. Rendering them the
  * same would teach the operator to treat a certainty like a guess.
  */
+/**
+ * TWO CERTAINTIES, ONE SURFACE, AND ONE EDGE BETWEEN THEM.
+ *
+ * Both paragraphs are card-surfaced, so `CARD_SURFACE` rides along and only the left
+ * border differs. Every declaration that differs is a LONGHAND on purpose: `border-l-4`
+ * beats the shared string's shorthand width and `border-l-[…]` beats its shorthand
+ * colour, which is the one ordering Tailwind does guarantee.
+ *
+ * THE DASH IS ONE EDGE, NOT FOUR. `border-dashed` sets `border-style` on every side and
+ * would dash the card's other three; the arbitrary property puts it on the left alone.
+ * The difference between a venue fact and a guess is the whole reason these two look
+ * different, and it must not spill onto the surface they share.
+ */
+const WARN = `${CARD_SURFACE} m-0 text-[0.85rem] leading-[1.45]`;
+const WARN_CERTAIN = `${WARN} border-l-4 border-l-[var(--neg)]`;
+const WARN_INFERRED = `${WARN} border-l-4 border-l-[var(--warn)] [border-left-style:dashed] text-[var(--muted)]`;
+
 function UnrecordedWarnings({ view }: { view: FillPathView }) {
   return (
     <>
       {view.warnings.filledNotRecorded > 0 ? (
-        <p className="card fp-warn fp-warn-certain">
+        <p className={WARN_CERTAIN}>
           <span aria-hidden="true">⚠ </span>
           {view.warnings.filledNotRecorded} filled at the venue —{" "}
           {view.warnings.filledNotRecorded === 1 ? "it is" : "they are"} not recorded.
@@ -534,7 +767,7 @@ function UnrecordedWarnings({ view }: { view: FillPathView }) {
         </p>
       ) : null}
       {view.warnings.pricePassedNoFill > 0 ? (
-        <p className="card fp-warn fp-warn-inferred">
+        <p className={WARN_INFERRED}>
           <span aria-hidden="true">⚠ </span>
           {view.warnings.pricePassedNoFill} resting{" "}
           {view.warnings.pricePassedNoFill === 1 ? "rung has" : "rungs have"} had price
@@ -576,6 +809,65 @@ function priceSpan(rungs: readonly FillPathRungView[]): string | undefined {
   )}`;
 }
 
+/**
+ * THE CHART CARD'S SECTION, AS UTILITIES (spec #420 slice 9) — the last surface, and the
+ * one whose deletion leaves `styles.css` holding no rule at all.
+ *
+ * THE HEADING RULE'S THIRD ARM IS HERE, WHICH IS WHAT RETIRES THE RULE. `.fp-chart-card
+ * h2` was grouped with the ladder's two, and each arm was deleted in the commit that
+ * converted the heading it was styling. This is the last of the three, so the constant
+ * stops being the ladder's and becomes the card heading all three read. `m-0 mb-2.5` is
+ * the preflight-off pattern: the UA's own `h2` margin is live, so three edges are zeroed
+ * and one is set.
+ */
+const CARD_HEADING = "m-0 mb-2.5 text-[0.95rem]";
+
+/**
+ * TITLE LEFT, THE LADDER'S PRICE SPAN RIGHT — one row, baseline-aligned so the two read
+ * as a heading and its subject rather than as two stacked labels.
+ *
+ * IT WRAPS RATHER THAN SQUEEZES, and the span is the half that gives way. At 254px the
+ * two total 217px so the row survives as a row; a deeper ladder (`~$1.2M–$2.3M`) would
+ * not, and the choice then is between breaking the TITLE across two lines and dropping
+ * the span to its own. The span keeps the right rail on that second line through its own
+ * `ml-auto` rather than through the row's `justify-between`, which aligns a lone wrapped
+ * item to the start. No breakpoint: this holds at every width, so there is nothing for a
+ * query to ask.
+ *
+ * THE TWO GAP AXES ARE SPELLED SEPARATELY because the deleted rule set them apart:
+ * `gap: 0 10px` is `gap-x-[10px] gap-y-0`, and a single `gap-[10px]` would open a 10px
+ * hole above the wrapped span that the row never had.
+ */
+const CHART_HEAD = "flex flex-wrap items-baseline justify-between gap-x-[10px] gap-y-0";
+/** The title is the half that survives a break, so it grows and may shrink to nothing. */
+const CHART_TITLE = `${CARD_HEADING} flex-auto min-w-0`;
+/**
+ * Quieter than the title: it is the chart's subject, not a second heading. Tabular
+ * figures so the two ends of the span line up as numbers.
+ *
+ * ITS TWO FLEX DECLARATIONS CAME FROM A DESCENDANT RULE (`.fp-chart-head .fp-chart-range`)
+ * and are folded in here rather than split across two strings: the span renders in the
+ * head and nowhere else, so the context the descendant selector was testing for is the
+ * only context there is.
+ */
+const CHART_RANGE = "ml-auto mb-2.5 flex-none text-[0.8rem] tabular-nums text-[var(--muted)]";
+/**
+ * The chart's accessible substitute, sized as prose rather than as a caption footnote:
+ * for a screen-reader user this sentence IS the chart. `m-0 mt-2.5` because the UA's own
+ * `p` margin is live with preflight off and the deleted rule zeroed three edges of it.
+ */
+const CHART_CAPTION = "m-0 mt-2.5 text-[0.85rem] leading-[1.5]";
+/** The slider stacks under its label; the label's type comes from `TILE_LABEL`. */
+const INSPECT = "mt-3.5 flex flex-col gap-1.5";
+/**
+ * `w-full` IS NOT THE WHOLE STORY FOR A RANGE INPUT. The UA sheet gives it a 2px side
+ * margin, so a full-width slider is 4px wider than the label box around it and the tail
+ * of the track sat under the card's border at 320px. The margin goes, not the width —
+ * and with preflight off that margin is live, so `mx-0` is load-bearing here rather than
+ * a default spelled out for tidiness.
+ */
+const INSPECT_RANGE = "w-full mx-0";
+
 /** Card 2 — the chart, its generated caption, and the inspect slider. */
 function Chart() {
   // THE CHART ASKS IN INDEXES, because its inspect control is a range input and a range
@@ -589,9 +881,9 @@ function Chart() {
       {/* THE SPAN SITS OPPOSITE THE TITLE, not in the chart. It is the one number the
           picture cannot state exactly — an axis tick is a rounded gridline, and the
           reader who wants "how deep does this ladder go" should not have to measure. */}
-      <div className="fp-chart-head">
-        <Card.Title>Price Drop Path</Card.Title>
-        {span === undefined ? null : <span className="fp-chart-range">{span}</span>}
+      <div className={CHART_HEAD}>
+        <Card.Title className={CHART_TITLE}>Price Drop Path</Card.Title>
+        {span === undefined ? null : <span className={CHART_RANGE}>{span}</span>}
       </div>
       {view.chart ? (
         <PriceDropPathChart
@@ -625,14 +917,19 @@ function Chart() {
           design and this paragraph is the ONLY form in which its content reaches the
           accessibility tree; removing the node rather than hiding it visually would take
           the whole picture away from a screen-reader user to tidy a sighted one's card.
-          `.sr-only` is therefore load-bearing here — see the rule in `styles.css`.
+          `sr-only` is therefore load-bearing here, and it is TAILWIND'S now: spec #420
+          slice 2 deleted the house rule, which said the same thing in the same clip-rect
+          idiom. `display: none` and `visibility: hidden` would remove the node from the
+          tree along with the layout, which is exactly what must not happen to this
+          paragraph. The class is emitted because this line writes it and `@source "./"`
+          scans this file — nothing else in the repo asks for it.
 
           THE ABSENT ARM IS HIDDEN WITH IT. It stands in the same slot and speaks to the
           same reader: a sighted user needs no note that a caption they cannot see is
           unavailable, and its absence is already visible as a chart with no rings. */}
       <div className="sr-only">
         {view.caption ? (
-          <p className="fp-caption">{view.caption}</p>
+          <p className={CHART_CAPTION}>{view.caption}</p>
         ) : (
           <p>
             <Absent why="the ladder's shape is unavailable" />
@@ -641,9 +938,13 @@ function Chart() {
       </div>
 
       {view.rungs.length > 0 ? (
-        <label className="fp-inspect">
-          <span className="fp-tile-label">Inspect rung</span>
+        <label className={`fp-inspect ${INSPECT}`}>
+          {/* The slider's label wears the tile label's TYPOGRAPHY and none of its rail
+              geometry: `.fp-tile-label` was a type rule and the flex arms lived on the
+              three `>` selectors above it, none of which reached inside `.fp-inspect`. */}
+          <span className={TILE_LABEL}>Inspect rung</span>
           <input
+            className={INSPECT_RANGE}
             type="range"
             min={0}
             max={view.rungs.length - 1}
@@ -656,6 +957,86 @@ function Chart() {
     </Card>
   );
 }
+
+/**
+ * THE SELECTED-RUNG CARD'S SECTION, AS UTILITIES (spec #420 slice 8).
+ *
+ * THE CARD IS THE QUERY CONTAINER, not the viewport — the same rule the header card
+ * follows, and one name, which is exactly what Tailwind's named container utility emits.
+ *
+ * THE HEADING RULE WAS SHARED BY THREE CARDS and all three read `CARD_HEADING` now; the
+ * split ended when slice 9 took the chart's arm and the grouped rule went with it.
+ */
+const SELECTED_CARD = "@container/fp-selected";
+/** The heading carries the `next` badge, so it is a baseline row rather than a block. */
+const SELECTED_HEADING = `${CARD_HEADING} flex items-center gap-[10px]`;
+
+/**
+ * THE HEADLINE — the money committed, AT the price it buys at.
+ *
+ * COLOUR ALONE DEMOTES THE SIZE, at the same type size: the two figures are one sentence
+ * and shrinking half of it would break the line's rhythm and its tabular alignment. The
+ * joining word recedes one step further, being the only thing on the line that is not a
+ * number, and the UNIT steps down from the FIGURE — `0.75em`, relative to the price's own
+ * size rather than to the root's — so the eye lands on the amount and reads `USD` second.
+ * No opacity on the unit: it sits inside the muted size already, and stacking the two
+ * dimmed the currency past legibility.
+ */
+const SELECTED_PRICE = "m-0 mb-2 text-[1.3rem] tabular-nums";
+const SELECTED_SIZE = "text-[var(--muted)]";
+const SELECTED_UNIT = "text-[0.75em]";
+const SELECTED_AT = "text-[var(--muted)] opacity-70";
+
+/**
+ * THE EXCEPTION SHELF'S ROWS — term left, value against the right rail, until the card is
+ * wide enough for the value to sit beside its term instead. At desk width a right rail
+ * 690px from its label is not an alignment, it is a gap the eye has to cross.
+ *
+ * THE TERMS ARE SIZED TO CONTENT AND THE VALUE COLUMN TAKES THE REMAINDER, which is the
+ * opposite of the header card's `dl`: one value on this list is a sentence rather than a
+ * figure, and sizing it the header's way let that row's max-content eat the whole grid.
+ */
+const DETAIL =
+  "grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 m-0 mt-2.5 text-[0.85rem]" +
+  " @[380px]/fp-selected:grid-cols-[auto_1fr] @[380px]/fp-selected:gap-y-1";
+const DETAIL_TERM = "text-[var(--muted)]";
+/** `m-0` because the UA indents a `dd` by 40px and preflight is off. */
+const DETAIL_VALUE = "m-0 text-right tabular-nums @[380px]/fp-selected:text-left";
+
+/**
+ * THE PILLS, AS A TOTAL MAP — one tone per exception, never a base plus three overrides.
+ *
+ * The deleted rules WERE a base plus three overrides, and as utilities that is a cascade
+ * a class string cannot express: two unvariant `border-color` utilities on one element
+ * are resolved by Tailwind's emitted order rather than by the order they are written in.
+ * `BADGE_TONE` made the same move one card up and for the same reason.
+ *
+ * WHAT EACH TONE MEANS. Unplaced is greyed AND dashed (G-D12): a declared rung with no
+ * order is not a state the ladder is in, it is one it never entered. Inferred is dashed
+ * in `--warn`, matching the inferred warning above the chart — the same certainty, the
+ * same visual language. Next is `--now` and never `--pos`, because the next rung is where
+ * price is HEADING and green is the colour that means FILLED.
+ */
+const PILL =
+  "rounded-[10px] border px-[7px] py-[2px] text-[0.68rem] font-semibold uppercase tracking-[0.03em]";
+const PILL_TONE = {
+  state: "border-[var(--line)] text-[var(--muted)]",
+  unplaced: "border-[var(--line)] text-[var(--muted)] border-dashed opacity-[0.55]",
+  inferred: "border-[var(--warn)] text-[var(--warn)] border-dashed",
+  next: "border-[var(--now)] text-[var(--now)]",
+} as const;
+const PILLS = "flex flex-wrap items-center gap-1.5 m-0";
+
+/**
+ * THE COMPLETENESS LINE — quiet, and ruled off from the `State` row above it, because it
+ * is the caveat ON that row rather than another fact about the rung.
+ *
+ * 12px, not the 4px this paragraph carried from slice 2's shared-vocabulary conversion:
+ * the deleted rule set its own top margin and, being unlayered, won. Both edges of the
+ * hairline are here — a half-reproduced border is a rule that never goes away.
+ */
+const RECORDED =
+  "m-0 mt-3 pt-2.5 border-t border-t-[var(--line)] text-[0.75rem] leading-[1.5] text-[var(--muted)]";
 
 /** Card 3 — everything known about the one rung under inspection. */
 function SelectedRung() {
@@ -679,14 +1060,16 @@ function SelectedRung() {
     // changes. Widening the primitive to pass one attribute through for one caller is a
     // knob bought for a single site; the panel keeps its own element instead, exactly as
     // the two `fp-warn` paragraphs and the `role="alert"` banner below do.
-    <section className="card fp-selected" aria-live="polite">
+    <section className={`${CARD_SURFACE} ${SELECTED_CARD}`} aria-live="polite">
       {/* THE BADGE RIDES THE HEADING, because "next" answers WHICH RUNG THIS IS — the
           same question the heading asks — and not what state it is in. Down among the
           pills it read as one status among several; up here it qualifies the identity
           it belongs to, and the pill row below is left holding only exceptions. */}
-      <h2>
+      <h2 className={SELECTED_HEADING}>
         Rung {rung.ladderIndex} of {view.rungs.length}
-        {rung.isNext ? <span className="fp-pill fp-pill-next">next</span> : null}
+        {rung.isNext ? (
+          <span className={`${PILL} ${PILL_TONE.next}`}>next</span>
+        ) : null}
       </h2>
       <RungHeadline rung={rung} />
       <Pills rung={rung} />
@@ -698,13 +1081,13 @@ function SelectedRung() {
           than empty, since an empty definition list is a labelled box promising detail
           it does not have. */}
       {rung.placedAtUsd === undefined ? null : (
-        <dl className="fp-detail">
-          <dt>Order placed at</dt>
+        <dl className={DETAIL}>
+          <dt className={DETAIL_TERM}>Order placed at</dt>
           {/* A DECLARED join whose order sits elsewhere is honored AND flagged: the
               operator said these belong together, and they do — at a different price. */}
-          <dd>
+          <dd className={DETAIL_VALUE}>
             {formatUsd(rung.placedAtUsd)}{" "}
-            <span className="muted">differs from the declared rung</span>
+            <span className="m-0 mt-1 text-[var(--muted)]">differs from the declared rung</span>
           </dd>
         </dl>
       )}
@@ -740,18 +1123,18 @@ const PRICE_PLAIN = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 })
 
 function RungHeadline({ rung }: { rung: FillPathRungView }) {
   if (rung.sizeUsd === undefined) {
-    return <p className="fp-selected-price">{formatUsd(rung.priceUsd)}</p>;
+    return <p className={SELECTED_PRICE}>{formatUsd(rung.priceUsd)}</p>;
   }
   return (
-    <p className="fp-selected-price">
+    <p className={SELECTED_PRICE}>
       {/* THE PRICE TAKES THE ACCENT, NOT THE SIZE. This card is one stop on a ladder and
           the ladder's axis is PRICE — it is what the chart above plots vertically, what
           the rung list is ordered by, and the number the operator is deciding against.
           The size is what happens WHEN price gets here; it reads second by design. */}
-      <span className="fp-selected-size">
-        {SIZE_PLAIN.format(rung.sizeUsd)} <span className="fp-unit">USD</span>{" "}
+      <span className={SELECTED_SIZE}>
+        {SIZE_PLAIN.format(rung.sizeUsd)} <span className={SELECTED_UNIT}>USD</span>{" "}
       </span>
-      <span className="fp-selected-at">@</span> {PRICE_PLAIN.format(rung.priceUsd)}
+      <span className={SELECTED_AT}>@</span> {PRICE_PLAIN.format(rung.priceUsd)}
     </p>
   );
 }
@@ -776,8 +1159,9 @@ function RungHeadline({ rung }: { rung: FillPathRungView }) {
  */
 function RecordedThrough({ view }: { view: FillPathView }) {
   return (
-    <p className="muted fp-recorded">
-      {/* NO `<strong>` ON THE DATE. The paragraph is `.muted` because the whole sentence
+    <p className={RECORDED}>
+      {/* NO `<strong>` ON THE DATE. The paragraph is painted in the secondary
+          colour because the whole sentence
           is a provenance footnote, and bolding the date inside it pulled the loudest
           thing on the card down to its quietest line — the reader's eye landed on a
           cutoff before it landed on the rung. It is a boundary, not a headline. */}
@@ -821,21 +1205,21 @@ function Pills({ rung }: { rung: FillPathRungView }) {
   const stateIsRedundant = rung.isNext && rung.venueResting;
   const pills = [
     rung.notPlaced ? (
-      <span key="state" className="fp-pill fp-pill-unplaced">
+      <span key="state" className={`${PILL} ${PILL_TONE.unplaced}`}>
         declared — not placed
       </span>
     ) : stateIsRedundant ? null : (
-      <span key="state" className="fp-pill">
+      <span key="state" className={`${PILL} ${PILL_TONE.state}`}>
         {rung.stateCopy}
       </span>
     ),
     rung.pricePassedUnconfirmed ? (
-      <span key="unconfirmed" className="fp-pill fp-pill-inferred">
+      <span key="unconfirmed" className={`${PILL} ${PILL_TONE.inferred}`}>
         waiting · price passed, unconfirmed
       </span>
     ) : null,
     rung.filledPercent === undefined ? null : (
-      <span key="partial" className="fp-pill">
+      <span key="partial" className={`${PILL} ${PILL_TONE.state}`}>
         partly filled · {rung.filledPercent}%
       </span>
     ),
@@ -844,7 +1228,7 @@ function Pills({ rung }: { rung: FillPathRungView }) {
   // An empty pill row is still a row: it holds its own margin and opens a gap under the
   // headline that reads as something failing to load. The ordinary rung has no pills.
   if (pills.length === 0) return null;
-  return <p className="fp-pills">{pills}</p>;
+  return <p className={PILLS}>{pills}</p>;
 }
 
 /**
@@ -867,28 +1251,182 @@ function Pills({ rung }: { rung: FillPathRungView }) {
  * things about the same rung. The `next` pill was `--pos`-bordered before this, which
  * borrowed the colour that means FILLED for the one rung that has not.
  */
+/**
+ * THE RUNG LIST'S SECTION, AS UTILITIES (spec #420 slice 8).
+ *
+ * THE CARD IS THE QUERY CONTAINER, not the viewport, and the UA's own `ul` margin and
+ * 40px indent are live with preflight off — both are zeroed here or the ladder sits
+ * indented under its own heading.
+ *
+ * ── AT 320px THE PRICE IS SIZED AND THE STATE UNFOLDS ────────────────────────────────
+ * There are 224px inside a tile. The desk shape spends 36 of them on a fixed rung-number
+ * gutter and hands the leftover to the state, which took 93px for `matched by price` and
+ * left a price in a 71px box it silently overflowed. So at this width the gutter shrinks
+ * to the two characters it holds and the FIGURES column is sized to content: a price
+ * never clips, because it is the thing the row is about.
+ *
+ * THE GUTTER SHRINKS BUT STAYS FIXED at both widths. Each tile is its own grid, so an
+ * `auto` gutter would be measured per tile and `R9` and `R10` would set their prices at
+ * different left edges — a ragged ladder in the one list whose job is to be read down.
+ *
+ * BOTH GAPS ARE LONGHANDS, on both sides of the breakpoint. `gap-3` is the shorthand and
+ * Tailwind sorts shorthands ahead of longhands, so the narrow `gap-x`/`gap-y` pair would
+ * have beaten the wide arm and the desk shape would have kept the phone's gaps with
+ * nothing red.
+ */
+const LIST_CARD = "@container/fp-list";
+const LIST_ITEMS = "list-none grid gap-2 m-0 p-0";
+const ROW =
+  "grid grid-cols-[1.75rem_auto_minmax(0,1fr)] items-baseline gap-x-[10px] gap-y-0" +
+  " w-full px-[14px] py-3 border rounded-xl text-[var(--text)] [font:inherit]" +
+  " text-left cursor-pointer" +
+  // NEUTRAL, DELIBERATELY. `--pos` would ring a waiting rung in the colour that means
+  // filled the moment a keyboard reached it, and this is the accessible path to the
+  // inspect panel — it has to be visible.
+  " focus-visible:outline-2 focus-visible:outline-[var(--text)] focus-visible:outline-offset-2" +
+  " @[380px]/fp-list:grid-cols-[2.25rem_minmax(0,1fr)_auto] @[380px]/fp-list:items-center" +
+  " @[380px]/fp-list:gap-x-3 @[380px]/fp-list:gap-y-3";
+
+/**
+ * FOUR DECISIONS ON ONE ELEMENT, AS FOUR TOTAL MAPS.
+ *
+ * The deleted rules resolved them by ORDER: `.is-next` sat below `.is-filled` and
+ * `.is-selected` below both, so a rung that was two things at once took the lower rule's
+ * colour. Utilities have no order to lean on — two unvariant `background-color` or
+ * `border-color` utilities race — so the priority the stylesheet expressed by position is
+ * spelled out in `rungRowClasses` instead, where it can be read.
+ *
+ * THE TINT REUSES THE CHART'S PALETTE AND NO OTHER: `--pos` filled, `--now` next, bare
+ * `--bg` waiting. Mixed into the background rather than used neat, so the tint says which
+ * state without competing with the price for the eye.
+ *
+ * SELECTION IS A RING, NOT A FILL. A background swap would fight the state tint and could
+ * make a waiting rung look filled while the operator inspected it, so selection moves the
+ * border colour and adds a shadow and touches the background of nothing.
+ */
+const ROW_TINT = {
+  waiting: "bg-[var(--bg)]",
+  filled: "bg-[color-mix(in_srgb,var(--pos)_12%,var(--bg))]",
+  next: "bg-[color-mix(in_srgb,var(--now)_14%,var(--bg))]",
+} as const;
+const ROW_EDGE = {
+  line: "border-[var(--line)]",
+  filled: "border-[color-mix(in_srgb,var(--pos)_34%,var(--line))]",
+  next: "border-[color-mix(in_srgb,var(--now)_42%,var(--line))]",
+  selected: "border-[var(--text)]",
+} as const;
+/**
+ * AN ARBITRARY PROPERTY RATHER THAN `shadow-[…]`, and measured before it was written.
+ * Tailwind's shadow utility composes with its ring and inset variables, so the ring
+ * arrives behind four transparent layers: `rgba(0,0,0,0) 0 0 0 0, …, rgb(231,233,238) 0
+ * 0 0 1px`. Nothing paints differently, but the computed value stops being the deleted
+ * rule's, and parity by computed value is what this migration is checked by. The property
+ * form computes byte-for-byte what the rule did.
+ */
+const ROW_RING = "[box-shadow:0_0_0_1px_var(--text)]";
+
+/**
+ * Dashed, per G-D12: a declared rung with no order is not a state the ladder is in, it is
+ * one it never entered. SELECTION FORCES IT SOLID, which is what the deleted rule's
+ * `border-style: solid` did — a selected never-placed rung stops being dashed while it is
+ * the one under inspection.
+ */
+function rungRowClasses(rung: FillPathRungView, isSelected: boolean): string {
+  const tint = rung.isNext
+    ? ROW_TINT.next
+    : rung.filled
+      ? ROW_TINT.filled
+      : ROW_TINT.waiting;
+  const edge = isSelected
+    ? ROW_EDGE.selected
+    : rung.isNext
+      ? ROW_EDGE.next
+      : rung.filled
+        ? ROW_EDGE.filled
+        : ROW_EDGE.line;
+  const style = rung.notPlaced && !isSelected ? "border-dashed" : "border-solid";
+  return `${ROW} ${tint} ${edge} ${style}${isSelected ? ` ${ROW_RING}` : ""}`;
+}
+
+/**
+ * Centred against the whole tile rather than sat on the price's baseline: the rung number
+ * labels the tile, not the first figure in it. At desk width the row centres its items
+ * and the gutter goes back to sharing that alignment.
+ */
+const ROW_INDEX =
+  "self-center text-[0.78rem] font-semibold tracking-[0.03em] text-[var(--muted)]" +
+  " @[380px]/fp-list:self-auto";
+/** The two numbers that describe a rung, stacked in the order the chart plots them. */
+const ROW_FIGURES = "grid gap-px min-w-0";
+const ROW_PRICE = "text-[1.05rem] font-bold tracking-[-0.01em] tabular-nums";
+/**
+ * THE SIZE AND ITS `@`, DEMOTED TOGETHER — the row is scanned down the price column, so
+ * the price keeps its weight and everything leading up to it steps back. Weight AND
+ * colour, unlike the inspect card's colour-only demotion: a list row is read at a glance
+ * rather than as a sentence, and 700-weight grey still reads as loud. Its own string
+ * rather than the shared muted one so it stays legible against the two state tints, which
+ * already move the row's colour.
+ */
+const ROW_SIZE = "font-normal text-[var(--muted)]";
+/** The preposition recedes one step further than the figure it follows. */
+const ROW_AT = "opacity-70";
+
+/**
+ * THE STATE COLUMN DISSOLVES AT 320px. Even with the price sized, the remainder is ~80px
+ * and `price passed, unconfirmed` cannot go in — no width is guaranteed to hold a pill.
+ * `display: contents` dissolves the wrapper so its three children become items of the
+ * ROW's grid: the two status lines stay on the right rail in column 3 and the qualifiers
+ * take a full-width line of their own. It is the one thing CSS can do here that the
+ * markup's nesting otherwise forbids, and it costs no change to the elements below.
+ */
+const ROW_STATE =
+  "contents @[380px]/fp-list:grid @[380px]/fp-list:justify-items-end" +
+  " @[380px]/fp-list:gap-[3px] @[380px]/fp-list:text-right";
+const ROW_LINE = "col-start-3 text-right @[380px]/fp-list:col-start-auto";
+/** Sentence case from a lower-case wire label without touching the string. */
+const ROW_STATUS = `${ROW_LINE} text-[0.82rem] font-bold first-letter:uppercase`;
+/**
+ * ONE COLOUR REACHES THE STATUS WORD, and which one is a fact about this map rather than
+ * about rule order. Never-placed beats next beats filled, which is the order the three
+ * deleted context rules were written in. The ordinary rung is the empty string on purpose:
+ * its status had no rule and inherited the row's colour, and a `text-` utility here would
+ * be a declaration the file never carried.
+ */
+const ROW_STATUS_TONE = {
+  unplaced: "text-[var(--muted)]",
+  next: "text-[var(--now)]",
+  filled: "text-[var(--pos)]",
+  plain: "",
+} as const;
+/** The venue's word, under the spot-derived one: quiet, but present — two claims. */
+const ROW_SUBSTATUS = `${ROW_LINE} text-[0.72rem] text-[var(--muted)]`;
+/**
+ * A FULL-WIDTH LINE OF ITS OWN AT 320px. A pill cannot be made narrower than its longest
+ * word, so it is given the whole tile rather than a column that might not hold it; still
+ * right-aligned, so it hangs off the same rail as the status above.
+ */
+const ROW_QUALS =
+  "flex flex-wrap justify-end gap-1 col-span-full mt-1" +
+  " @[380px]/fp-list:col-auto @[380px]/fp-list:mt-0";
+/** 12px of its own, which is what the deleted rule set over slice 2's shared 4px. */
+const ORPHANS = "m-0 mt-3 text-[0.8rem] text-[var(--muted)]";
+
 function RungList() {
   const { view, selected, select } = useFillPath();
   return (
-    <Card className="fp-list">
-      <Card.Title>Rungs</Card.Title>
-      <ul>
+    <Card className={LIST_CARD}>
+      <Card.Title className={CARD_HEADING}>Rungs</Card.Title>
+      <ul className={LIST_ITEMS}>
         {view.rungs.map((rung) => (
           <li key={rung.key}>
             <button
               type="button"
-              className={
-                "fp-row" +
-                (rung.filled ? " is-filled" : "") +
-                (rung.isNext ? " is-next" : "") +
-                (rung.key === selected?.key ? " is-selected" : "") +
-                (rung.notPlaced ? " is-unplaced" : "")
-              }
+              className={rungRowClasses(rung, rung.key === selected?.key)}
               aria-current={rung.key === selected?.key ? "true" : undefined}
               onClick={() => select(rung.key)}
               onFocus={() => select(rung.key)}
             >
-              <span className="fp-row-index">R{rung.ladderIndex}</span>
+              <span className={ROW_INDEX}>R{rung.ladderIndex}</span>
               {/* ONE LINE, THE SAME SENTENCE THE INSPECT CARD LEADS WITH — see
                   `RungHeadline`. It was two stacked figures, `$57,500.00` over `$149.96`,
                   which made the reader pair them and printed a `$` eight times down a
@@ -898,19 +1436,23 @@ function RungList() {
                   ABSENT IS STILL THE EM-DASH AND ITS CAUSE, never a `0`: a rung whose size
                   the snapshot does not carry has not declared zero capital. It keeps the
                   `@ price` beside it, so the row still says which rung is missing it. */}
-              <span className="fp-row-figures">
-                <span className="fp-row-price">
+              <span className={ROW_FIGURES}>
+                <span
+                  className={
+                    rung.notPlaced ? `${ROW_PRICE} text-[var(--muted)]` : ROW_PRICE
+                  }
+                >
                   {/* MUTED, FOR THE SAME REASON AS THE INSPECT CARD'S — the column is
                       ordered by price and scanned by price, so price carries the weight
                       and the size trails it. Keeping both at accent weight made every
                       row two competing headlines. */}
-                  <span className="fp-row-size">
+                  <span className={ROW_SIZE}>
                     {rung.sizeUsd === undefined ? (
                       <Absent why="size not carried" />
                     ) : (
                       SIZE_PLAIN.format(rung.sizeUsd)
                     )}{" "}
-                    <span className="fp-row-at">@</span>
+                    <span className={ROW_AT}>@</span>
                   </span>{" "}
                   {PRICE_PLAIN.format(rung.priceUsd)}
                 </span>
@@ -924,7 +1466,7 @@ function RungList() {
       {/* THE ORPHAN BUCKET — recorded lots no declared rung explains. A count, never
           the lots: the conclusion crosses the wire and the position data does not. */}
       {view.orphanLots !== undefined && view.orphanLots > 0 ? (
-        <p className="muted fp-orphans">
+        <p className={ORPHANS}>
           {view.orphanLots} recorded {view.orphanLots === 1 ? "lot" : "lots"} that no
           declared rung explains.
         </p>
@@ -973,6 +1515,20 @@ function RungList() {
  * exactly that rung; the pill was the same sentence twice. The row's dashed border still
  * carries it visually, per G-D12.
  */
+/**
+ * WHICH OF THE FOUR TONES THE STATUS WORD TAKES, in the order the deleted context rules
+ * were written in: `.is-unplaced` sat below `.is-next`, which sat below `.is-filled`, so
+ * a rung that is two of them at once takes the last one's colour. Written as a lookup
+ * rather than as three class-name concatenations, because that is the shape the cascade
+ * had and utilities cannot reproduce it any other way.
+ */
+function statusTone(rung: FillPathRungView): keyof typeof ROW_STATUS_TONE {
+  if (rung.notPlaced) return "unplaced";
+  if (rung.isNext) return "next";
+  if (rung.filled) return "filled";
+  return "plain";
+}
+
 function RowState({ rung }: { rung: FillPathRungView }) {
   // THE ORDINARY RUNG, decided on the venue axis and not on what it is called.
   const stateIsDefault = rung.venueResting;
@@ -986,20 +1542,24 @@ function RowState({ rung }: { rung: FillPathRungView }) {
   if (status === undefined && !hasQuals) return null;
 
   return (
-    <span className="fp-row-state">
+    <span className={ROW_STATE}>
       {status === undefined ? null : (
-        <span className="fp-row-status">{status}</span>
+        <span className={`${ROW_STATUS} ${ROW_STATUS_TONE[statusTone(rung)]}`}>
+          {status}
+        </span>
       )}
       {substatus === undefined ? null : (
-        <span className="fp-row-substatus">{substatus}</span>
+        <span className={ROW_SUBSTATUS}>{substatus}</span>
       )}
       {hasQuals ? (
-        <span className="fp-row-quals">
+        <span className={ROW_QUALS}>
           {rung.pricePassedUnconfirmed ? (
-            <span className="fp-pill fp-pill-inferred">price passed, unconfirmed</span>
+            <span className={`${PILL} ${PILL_TONE.inferred}`}>price passed, unconfirmed</span>
           ) : null}
           {rung.filledPercent === undefined ? null : (
-            <span className="fp-pill">partly filled · {rung.filledPercent}%</span>
+            <span className={`${PILL} ${PILL_TONE.state}`}>
+              partly filled · {rung.filledPercent}%
+            </span>
           )}
         </span>
       ) : null}

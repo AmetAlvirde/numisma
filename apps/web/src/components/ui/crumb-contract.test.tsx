@@ -31,7 +31,12 @@ import {
   createRouter,
 } from "@tanstack/react-router";
 
-import { classCensus, render, screen } from "../../render.testkit.tsx";
+import {
+  classTokens as tokens,
+  render,
+  renderedClassNames,
+  screen,
+} from "../../render.testkit.tsx";
 import { Crumb } from "./Crumb.tsx";
 
 /**
@@ -62,17 +67,35 @@ async function renderCrumb(to: string, label: string) {
 }
 
 describe("Crumb", () => {
-  it("renders the `p.crumb` wrapping an anchor that all four call sites rendered", async () => {
+  it("renders the paragraph wrapping an anchor that all four call sites rendered", async () => {
     const { container } = await renderCrumb("/", "← Glance");
-    const root = container.querySelector(".crumb");
+    const root = container.firstElementChild;
 
     expect(root?.tagName).toBe("P");
-    expect(classCensus(root!)).toEqual(["crumb"]);
     // The anchor is the crumb's only child element: the arrow rides inside the link, the
     // way every call site wrote it, not beside it.
     expect(root?.children).toHaveLength(1);
     expect(root?.firstElementChild?.tagName).toBe("A");
     expect(root?.textContent).toBe("← Glance");
+  });
+
+  it("carries `.crumb`, `.crumb a` and the hover state as utilities", async () => {
+    const { container } = await renderCrumb("/", "← Glance");
+    const root = container.firstElementChild!;
+    const link = container.querySelector("a")!;
+
+    // `m-0` is the whole of `.crumb`'s `margin: 0` and preflight is off, so dropping it
+    // would let the UA's own paragraph margin push every crumb down the page.
+    expect(tokens(root)).toContain("m-0");
+    expect(tokens(root)).toContain("text-[0.9rem]");
+
+    expect(tokens(link)).toContain("text-[var(--muted)]");
+    expect(tokens(link)).toContain("no-underline");
+    // The hover state converts ONCE here because spec #403 pulled four call sites onto
+    // this primitive first. It is a class rather than a rule now, so it is assertable.
+    expect(tokens(link)).toContain("hover:text-[var(--text)]");
+
+    expect([...renderedClassNames(root)]).not.toContain("crumb");
   });
 
   // Two call sites, two directions, one case each. The ladder's crumb goes UP to the

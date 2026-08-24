@@ -24,7 +24,18 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { classCensus, render, screen } from "../render.testkit.tsx";
+import {
+  classTokens as tokens,
+  DELETED_IN_SLICE_2,
+  DELETED_IN_SLICE_3,
+  DELETED_IN_SLICE_4,
+  render,
+  renderedClassNames,
+  absentSlots,
+  expectNoStyledClassSurvives,
+  screen,
+} from "../render.testkit.tsx";
+import { CARD_SURFACE } from "./ui/Card.tsx";
 import { SectionTable } from "./SectionTable.tsx";
 import type { DashboardSection } from "@numisma/engine";
 import type { BigPictureView } from "../glance/row-view.ts";
@@ -97,41 +108,202 @@ describe("SectionTable on the shared Card", () => {
     expect(headings[0]?.textContent).toBe("Portfolios");
   });
 
-  it("emits the same class strings it emitted before the conversion", () => {
+  it("carries the bare card surface, with no class of its own beside it", () => {
     const { container } = render(
       <SectionTable section={section()} view={anchoredView()} />,
     );
     const root = container.firstElementChild;
 
     expect(root?.tagName).toBe("SECTION");
-    expect(classCensus(root!)).toEqual([
-      "absent",
-      "card",
-      "muted",
-      "muted absent-why",
-      "neg",
-      "num",
-      "pos",
-      "row-suppressed",
-      "table-scroll",
-    ]);
+    expect(root?.className).toBe(CARD_SURFACE);
   });
 
-  it("emits the same class strings on the genesis arm, with no anchor to name", () => {
+  it("converts the delta suffix, all four margin edges included", () => {
+    render(<SectionTable section={section()} view={anchoredView()} />);
+
+    // A `<span>`, so the vertical margins do not paint — and they are written anyway,
+    // because `.muted` set all four and the next element to carry this string may be a
+    // block. Preflight is off; a missing edge is a UA margin, not a zero.
+    const suffix = screen
+      .getAllByText(/%$/)
+      .find((element) => element.tagName === "SPAN")!;
+    for (const utility of ["text-[var(--muted)]", "m-0", "mt-1"]) {
+      expect(tokens(suffix)).toContain(utility);
+    }
+  });
+
+  it("paints its two deltas with the sign colours, as slice 3's carrier", () => {
+    render(<SectionTable section={section()} view={anchoredView()} />);
+
+    // `.pos`/`.neg` are a shared rule and the summary card is the first surface in the
+    // spec's order that carries them, so slice 3 deletes the rule and converts every
+    // carrier — including this one, in a component that slice otherwise does not own
+    // (spec #420 Seam B). `row-a` renders one of each, which is why the fixture gives
+    // it a positive anchor delta and a negative cost-basis one.
+    const up = screen.getByText(/▲/);
+    const down = screen.getByText(/▼/);
+    expect(tokens(up)).toContain("text-[var(--pos)]");
+    expect(tokens(down)).toContain("text-[var(--neg)]");
+  });
+
+  it("keeps the escape hatch on the scroller and the table", () => {
     const { container } = render(
+      <SectionTable section={section()} view={anchoredView()} />,
+    );
+    const table = container.querySelector("table")!;
+    const scroller = table.parentElement!;
+
+    // The scroller is the query container AND the thing that pans; both facts have to be
+    // on the same element or the breakpoint below measures the wrong box.
+    for (const utility of [
+      "@container/table-scroll",
+      "overflow-x-auto",
+      "[-webkit-overflow-scrolling:touch]",
+    ]) {
+      expect(tokens(scroller)).toContain(utility);
+    }
+
+    // Sized to content with a floor, and fitted only above a 380px SCROLLER. jsdom lays
+    // nothing out and resolves no container query, so this asserts that the two arms are
+    // written and on which element — Chrome is what proves the pan actually happens.
+    for (const utility of [
+      "w-max",
+      "min-w-full",
+      "@[380px]/table-scroll:w-full",
+      "border-collapse",
+      "tabular-nums",
+    ]) {
+      expect(tokens(table)).toContain(utility);
+    }
+  });
+
+  it("puts the cell box on every cell and the alignment per column", () => {
+    render(<SectionTable section={section()} view={anchoredView()} />);
+
+    const label = screen.getByRole("columnheader", { name: "Label" });
+    const figure = screen.getByRole("columnheader", { name: "USD value" });
+
+    // The header's own treatment, over the shared box. Preflight is off, so the padding,
+    // the hairline and the alignment are all written rather than inherited from a UA
+    // that centres a `th` and draws no border at all.
+    for (const utility of [
+      "px-[10px]",
+      "py-2",
+      "border-b",
+      "border-[var(--line)]",
+      "text-[var(--muted)]",
+      "text-[0.78rem]",
+      "uppercase",
+      "tracking-[0.04em]",
+    ]) {
+      expect(tokens(label)).toContain(utility);
+      expect(tokens(figure)).toContain(utility);
+    }
+
+    // The one thing that differs by column, and the reason the figure cell does not also
+    // carry the left arm: two unvariant `text-align` utilities are resolved by emitted
+    // order, so only the winning one is written.
+    expect(tokens(label)).toContain("text-left");
+    expect(tokens(label)).not.toContain("text-right");
+    expect(tokens(figure)).toContain("text-right");
+    expect(tokens(figure)).not.toContain("text-left");
+
+    const cells = screen.getAllByRole("cell");
+    const labelCell = cells.find((cell) => cell.textContent === "Alpha")!;
+    const usdCell = labelCell.nextElementSibling!;
+    for (const utility of ["px-[10px]", "py-2", "border-b", "border-[var(--line)]"]) {
+      expect(tokens(labelCell)).toContain(utility);
+      expect(tokens(usdCell)).toContain(utility);
+    }
+    expect(tokens(labelCell)).toContain("text-left");
+    expect(tokens(usdCell)).toContain("text-right");
+  });
+
+  it("writes none of the deleted class names, on either arm", () => {
+    const anchored = render(
+      <SectionTable section={section()} view={anchoredView()} />,
+    );
+    const genesis = render(
       <SectionTable section={section()} view={anchorlessView()} />,
     );
 
-    expect(classCensus(container.firstElementChild!)).toEqual([
-      "absent",
-      "card",
-      "muted",
-      "muted absent-why",
-      "neg",
-      "num",
-      "pos",
-      "row-suppressed",
-      "table-scroll",
+    for (const { container } of [anchored, genesis]) {
+      const rendered = renderedClassNames(container.firstElementChild!);
+      for (const deleted of [
+        ...DELETED_IN_SLICE_2,
+        ...DELETED_IN_SLICE_3,
+        ...DELETED_IN_SLICE_4,
+      ]) {
+        expect([...rendered]).not.toContain(deleted);
+      }
+      // The hook is gone as of slice 8, which deleted the last rule selecting through
+      // it; the primitive's own contract test holds that end.
+      expect([...rendered]).not.toContain("absent");
+    }
+  });
+
+  it("keeps `row-suppressed` on the suppressed `<tr>`, and its four stated causes", () => {
+    // `row-suppressed` NEVER HAD A RULE ON EITHER REF, and it is asserted anyway. `main`
+    // pinned it present in both censuses; the successors dropped it, so deleting it from
+    // the `<tr>` goes unnoticed and anything later keyed on it — a row tint, a scan
+    // guard, a test — misses silently. Drift, not breakage, and cheaper to stop here
+    // than to rediscover.
+    //
+    // THE FOUR CAUSES RIDE ALONG for the reason the three cards' witnesses do:
+    // `not.toContain("absent")` above is satisfied just as well by the row being gone.
+    // They are asserted by their own words because the four are DIFFERENT — the row's
+    // cause reaches two cells, and each delta column names its own — and a `Row` that
+    // collapsed them into one would still print an em dash in every cell.
+    const { container } = render(
+      <SectionTable section={section()} view={anchoredView()} />,
+    );
+    const suppressed = container.querySelector("tr.row-suppressed");
+
+    expect(suppressed).toBeTruthy();
+    expect(suppressed?.querySelector("td")?.textContent).toBe("Beta");
+    expect(absentSlots(suppressed!).map((slot) => slot.textContent)).toEqual([
+      "—no current mark",
+      "—no current mark",
+      "—no earlier anchor",
+      "—no cost basis",
     ]);
+
+    // One suppressed row out of the two the fixture declares. The rendered row carries
+    // no such class and no em dash, which is what makes the assertions above a
+    // suppression witness rather than a description of every `<tr>` this table draws.
+    expect(container.querySelectorAll("tr.row-suppressed")).toHaveLength(1);
+  });
+});
+
+/**
+ * THE TERMINAL ASSERTION (spec #420 Seam E, slice 9), on all five census successors and
+ * the shell's.
+ *
+ * THE SET OF CLASS NAMES THIS SURFACE RENDERS, INTERSECTED WITH THE SET OF CLASS
+ * SELECTORS LEFT IN `styles.css`, IS EMPTY. That is the mechanical proof that no house
+ * rule survives WITH A CARRIER — the failure mode the nine deletion guards cannot see,
+ * because each of them knows only the names its own slice took.
+ *
+ * IT COULD ONLY LAND HERE. Every slice but the last renders a class the file still
+ * styles, on purpose: that is what a nine-slice migration through a shared stylesheet
+ * looks like from the inside. The assertion is false by design for eight slices and true
+ * for good afterwards.
+ *
+ * IT IS NOT A RESTATEMENT OF "THE FILE HAS NO RULES". `styles-css-end-state.test.ts` says
+ * that about the file; this says something the file cannot know — that nothing RENDERED
+ * reaches whatever is in it. A rule added back under a name no guard lists goes red here
+ * the moment a component writes its class.
+ *
+ * AND AT THE END STATE IT CARRIES ITS OWN NEGATIVE CONTROL, because the file it reads is
+ * now empty of rules and the intersection is therefore empty for free.
+ * `expectNoStyledClassSurvives` re-runs the identical walk against a probe sheet built
+ * from this surface's own render, so a blank render, a reader that stopped reading or an
+ * intersection that never intersects reds here instead of passing green. What the claim
+ * is worth is written in that helper's docblock.
+ */
+describe("no rule left in styles.css reaches this surface", () => {
+  it("renders no class name the stylesheet still selects", () => {
+    const { container } = render(<SectionTable section={section()} view={anchoredView()} />);
+    expectNoStyledClassSurvives(container);
   });
 });

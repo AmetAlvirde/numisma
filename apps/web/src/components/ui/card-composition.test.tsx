@@ -22,29 +22,49 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { render, screen } from "../../render.testkit.tsx";
-import { Card, CardTitle } from "./Card.tsx";
+import { classTokens as tokens, render, screen } from "../../render.testkit.tsx";
+import { Card, CARD_SURFACE, CardTitle } from "./Card.tsx";
 
 describe("Card", () => {
   it("attaches its parts under both names, as one function each", () => {
     expect(Card.Title).toBe(CardTitle);
   });
 
-  it("renders a section carrying `card` and whatever the caller passes through", () => {
+  it("renders a section carrying the surface and whatever the caller passes through", () => {
     const { container } = render(<Card className="glance">body</Card>);
 
     const root = container.firstElementChild;
     expect(root?.tagName).toBe("SECTION");
-    expect(root?.className).toBe("card glance");
+    expect(root?.className).toBe(`${CARD_SURFACE} glance`);
     expect(root?.textContent).toBe("body");
   });
 
-  it("renders a bare `card` when the caller passes no extra classes", () => {
-    // No trailing space, no `undefined` in the class attribute: the class string is what
-    // the Tailwind migration reads at this one site, so it stays exactly what the
-    // stylesheet already carries.
+  it("renders the bare surface when the caller passes no extra classes", () => {
+    // No trailing space, no `undefined` in the class attribute.
     const { container } = render(<Card>body</Card>);
-    expect(container.firstElementChild?.className).toBe("card");
+    expect(container.firstElementChild?.className).toBe(CARD_SURFACE);
+  });
+
+  it("spells `.card`'s four declarations, and no longer writes the class name", () => {
+    // The one place in the app that pins the surface's utilities individually. Every
+    // other adopter asserts `CARD_SURFACE` by reference, which is the point of exporting
+    // it — this test is what stops the constant from being redefined into something else.
+    const { container } = render(<Card>body</Card>);
+    const root = container.firstElementChild!;
+
+    for (const utility of [
+      "bg-[var(--card)]",
+      "border",
+      "border-[var(--line)]",
+      // 12px and 16px, an exact match for Tailwind's `--radius-xl` and `--spacing`
+      // scale. `rounded-md` would have compiled and painted the package's 8px control
+      // radius, which `tailwind.css` remaps.
+      "rounded-xl",
+      "p-4",
+    ]) {
+      expect(tokens(root)).toContain(utility);
+    }
+    expect(tokens(root)).not.toContain("card");
   });
 
   it("titles at level 2 by default and at level 1 only when asked", () => {

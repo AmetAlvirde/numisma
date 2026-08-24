@@ -4,8 +4,8 @@
 specification it never supplies values for. Both halves of that arrangement fail
 **silently**, in two opposite ways, and the whole of this page exists because of
 them: what the package ships, what a consumer owes it in return, which
-instrument proves which half, and the manual theming pass that is the only check
-covering the parts no test can reach.
+instrument proves which half, and the two manual computed-style passes that are
+the only checks covering the parts no test can reach.
 
 Surfaces: [`packages/components/src/tokens.ts`](../packages/components/src/tokens.ts)
 (the specification, with the full argument in its header),
@@ -17,9 +17,12 @@ path and the consumer registry), and
 [`apps/workbench/`](../apps/workbench/) (react-cosmos, the three theme modes).
 
 The decisions behind it are
-[ADR-023](../context/adr/ADR-023-unbuilt-tsx-and-a-namespaced-token-spec-the-consumer-supplies.md)
+[ADR-023](../context/adr/ADR-023-unbuilt-tsx-and-a-namespaced-token-spec-the-consumer-supplies.md),
+[ADR-024](../context/adr/ADR-024-react-cosmos-as-the-workbench-standalone.md)
 and
-[ADR-024](../context/adr/ADR-024-react-cosmos-as-the-workbench-standalone.md).
+[ADR-025](../context/adr/ADR-025-the-end-state-cascade-contract.md), which is
+what makes `apps/web`'s missing preflight and its package-only colour utilities
+a contract rather than an accident.
 
 ---
 
@@ -137,14 +140,30 @@ may claim a theming result from a text search.
 | Every exported component has a fixture | [`apps/workbench/src/fixture-coverage.test.ts`](../apps/workbench/src/fixture-coverage.test.ts) | source scan |
 | App mode has not drifted from `styles.css` | [`apps/workbench/src/app-token-drift.test.ts`](../apps/workbench/src/app-token-drift.test.ts) | text |
 | The workbench imports nothing from `apps/web` | [`apps/workbench/src/seam-isolation.test.ts`](../apps/workbench/src/seam-isolation.test.ts) | source scan |
+| The app's own source is scanned | [`apps/web/src/app-scan-sentinel.test.ts`](../apps/web/src/app-scan-sentinel.test.ts) | built CSS text |
+| No `@theme` colour utility in app code | [`apps/web/src/theme-color-utilities.test.ts`](../apps/web/src/theme-color-utilities.test.ts) | source text |
+| `styles.css` holds no rule, only tokens | [`apps/web/src/styles-css-end-state.test.ts`](../apps/web/src/styles-css-end-state.test.ts) | CSS text |
+| No class a surface renders is selected by `styles.css` | the six `apps/web/src/components/*-structure.test.tsx` | DOM ∩ CSS text |
 
-Every row is a **text** channel. jsdom will not resolve `color-mix` through a
+The first four rows are the four standing guards, and each is required to fail on
+its own negative control: remove the package `@source` line, remove `@source
+"./"`, add a bare `var(--muted)` read to package source, write `text-muted` in
+app source. A guard that cannot be made to fail is proving nothing.
+
+Every row is a **text** channel, the last one being text intersected with a
+render. jsdom will not resolve `color-mix` through a
 cascade, so nothing above can answer failure two, and the render harness from
 [ADR-022](../context/adr/ADR-022-a-render-test-harness-for-the-web-component-layer.md)
 cannot carry it either. That is what §5 is for. Playwright is deferred to its own
 increment on purpose, rather than bought as a side effect of a package increment.
 
 ## 5. The manual theming procedure
+
+This is the **package-side** computed-style procedure: it judges a package
+component in the workbench, on each of the three theme modes. Its app-side twin
+is §8, the Chrome checklist, which judges a converted app surface in the real
+app. Both exist for the same reason, given in §3: a text channel cannot answer
+whether a rule won the cascade and computed to the right value.
 
 ### Where
 
@@ -238,13 +257,54 @@ export at a time.
 
 ## 7. Two things about the two Tailwind entries
 
-**Preflight is included in the workbench and omitted in `apps/web`.** This is the
-one deliberate divergence between the two entries. The app omits it because
-`styles.css` styles bare elements on purpose and a reset would flatten them; the
-workbench has no hand-written stylesheet and wants the reset, because a component
-reviewed on a browser-default backdrop is being reviewed partly on the browser.
-Importing `theme.css` plus `utilities.css` and not `preflight.css` is the only
-supported way to skip it in v4.
+**Preflight is included in the workbench and omitted in `apps/web`, permanently.**
+This is the one deliberate divergence between the two entries, and
+[ADR-025](../context/adr/ADR-025-the-end-state-cascade-contract.md) is the record
+of why it is permanent rather than transitional. Importing `theme.css` plus
+`utilities.css` and not `preflight.css` is the only supported way to skip it in
+v4.
+
+The workbench wants the reset, because a component reviewed on a browser-default
+backdrop is being reviewed partly on the browser. The app omits it because the
+user agent's own margins on `p`, `h1` through `h6`, `dl`, `dd`, `ul` and `figure`
+are load-bearing there: every converted surface reproduces the edges it needs by
+hand, and a reset would zero all of them at once, indistinguishably from the ones
+carrying real intent. The four bare-element rules that had no class to hang a
+utility on, `*`, `body`, `h1` and `h2`, live in an `@layer base` block in
+`tailwind.css`, which is the only place an element selector can sit inside
+Tailwind's cascade order.
+
+**`apps/web/src/styles.css` is a token file now, and holds no rule.** Spec #420
+emptied it one surface at a time, from about 1,400 lines to roughly a hundred:
+two `:root` blocks declaring the app's palette and the `--nms-*` aliases this
+package reads, plus the `color-scheme` hint, and nothing else. Earlier revisions
+of this page described a censused stylesheet whose rules had to stay
+byte-identical while components moved onto shared primitives. That constraint is
+over. The one thing that has not changed is why the aliases live there and not
+here: the package owns the names, the consumer owns the values, and this file is
+where `apps/web` pays.
+
+Two properties of that file are worth knowing before editing it. It is
+**unlayered**, which is what makes it beat the package's generated defaults even
+though `__root.tsx` links it first; the defaults arrive under `layer(theme)` and
+unlayered CSS beats every cascade layer regardless of order or specificity. And
+it holds **no rule**, which two tests enforce from opposite ends:
+`styles-css-end-state.test.ts` asserts the file holds exactly two rules, both
+`:root`, and the terminal assertion in each of the six `*-structure.test.tsx`
+files asserts that no class a component renders is selected by anything left in
+it.
+
+**Theme colour utilities are package-only in app code.** `bg-primary`,
+`border-border`, `text-muted` and the rest of the `@theme` vocabulary belong to
+`@numisma/components`. `apps/web` reads its own palette as arbitrary values
+instead, `text-[var(--muted)]` and `bg-[var(--card)]`, and
+`apps/web/src/theme-color-utilities.test.ts` fails on any hit in a non-test app
+`.tsx`. `text-muted` is the trap and it is failure two under a new name: it
+compiles, resolves and wins the cascade, and paints a recessed surface colour
+where the app meant secondary text. Package source is exempt by construction,
+being outside the scanned tree, and test files are exempt because
+`login-submit-button.test.tsx` asserts `bg-primary` on the package `Button` on
+purpose.
 
 **The theme decorator writes tokens to `document.documentElement`, and moving
 them is a silent break.** A custom property's `var()`s are substituted where the
@@ -254,3 +314,62 @@ moves the bare reads inside arbitrary values and leaves every Tailwind theme
 utility on the value `:root` already computed. Half the tokens switch, half do
 not, and nothing on screen says which half. That is failure two wearing a
 different hat, inside the instrument built to catch it.
+
+## 8. The app-side Chrome checklist
+
+§5 judges a package component in the workbench. This judges a converted **app
+surface** in the real app, and it is the procedure spec #420 ran once per slice,
+ten times. Reach for it whenever a change moves a class string on a surface that
+used to have a rule in `styles.css`, which is now every surface.
+
+### Why it cannot be a test
+
+The same reason §5 cannot. A text channel proves a rule was emitted and a render
+test proves an element references it; neither can say the rule won the cascade
+and computed to the value intended. jsdom resolves no `var()` chain through a
+cascade and measures every box at zero, so a converted surface can be green in
+the suite and wrong on screen. The division of labour is worth stating once: the
+scan guards prove the rule is emitted, the structure test proves the element
+references it, this proves it computed.
+
+### Where
+
+```
+pnpm dev
+```
+
+then the route the surface lives on. For ladder, Fill Path and chart states the
+live ledger does not happen to be in, use `/ladder-fixture/$state`, whose
+fixtures are authored and carry no ledger figure.
+
+### The procedure
+
+1. **Stash the change and probe the pre-slice tree with the identical script.**
+   The oracle is parity with what was there before, so the baseline has to be
+   measured, not remembered.
+2. **Diff computed properties and bounding rects**, every load-bearing property
+   on every element the change touched. `getComputedStyle(el).getPropertyValue(…)`
+   for the properties, `getBoundingClientRect()` for the geometry. A property
+   that matches while the box moved means the parity is on the wrong axis.
+3. **Read every colour as a computed value**, compared against the computed value
+   of the token, never against a token name and never against a class name.
+   `text-[var(--pos)]` and `text-pos` are the same class string to a grep and
+   different colours on screen.
+4. **Run negative controls.** Break the thing you just proved and confirm the
+   probe sees it. A script that reports parity between two identical readings of
+   the same tree is the failure this step exists to catch.
+5. **Run every row twice, at a 320px viewport and at desktop width.** 320px is
+   the app's floor and the width most conversions break at.
+6. **Write the result table into the change's final commit body.** CSS values
+   only: no price, size, quantity or rung figure enters the record.
+
+### Two measurement caveats
+
+**`resize_window` does not reach 320px.** The OS clamps the window below its
+minimum and the tool reports success anyway, so the viewport you measured is not
+the one you asked for. Measure 320px in a same-origin 320px `<iframe>` loading
+the same URL instead.
+
+**Keyboard state is unreliable through the browser extension.** Dispatching a
+Tab walk has failed more than once. If a row needs focus state, take the
+measurement early, and say plainly how you got it.

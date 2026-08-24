@@ -5,10 +5,11 @@ import type { ReactElement, ReactNode } from "react";
  * Tailwind migration translates the `card` class family at instead of twelve.
  *
  * ── IT IS A `<section>`, AND ONLY A `<section>` ──────────────────────────────────────
- * Twelve elements in this layer carry the `card` class and four of them are not cards:
- * the fill path's two `<p className="card fp-warn…">` warnings, its `role="alert"` banner
- * `<div>`, and login's `<form className="card auth-card">`. They keep their own elements
- * and do not use this. A shared class is not a shared component, and a polymorphic `as`
+ * A dozen elements in this layer carry the card surface and four of them are not cards:
+ * the fill path's two unrecorded-fill warnings, its `role="alert"` torn banner `<div>`,
+ * and login's `<form>`. They keep their own elements and import `CARD_SURFACE` below
+ * instead — all but the banner, which spells the surface itself for the reason its own
+ * docblock gives. A shared surface is not a shared component, and a polymorphic `as`
  * prop to absorb four one-off elements would buy a knob and lose the guarantee that a
  * `Card` is a landmark-bearing section. `card-composition.test.tsx` holds that.
  *
@@ -23,8 +24,7 @@ import type { ReactElement, ReactNode } from "react";
  * ── NO `variant` ENUM ────────────────────────────────────────────────────────────────
  * The twelve variant class strings are exactly what the Tailwind migration deletes, so an
  * enum now is a second thing to migrate and a second vocabulary to keep in step with the
- * stylesheet. Callers pass their extra classes through as words, and no new class name is
- * introduced anywhere: `styles.css` is byte-identical across this whole increment.
+ * stylesheet. Callers pass their extra classes through as words.
  *
  * ── THIS FILE IMPORTS REACT AND NOTHING ELSE ─────────────────────────────────────────
  * Everything a primitive imports enters the import closure `route-move.test.ts` walks
@@ -38,15 +38,42 @@ export function Card({
   className?: string | undefined;
   children?: ReactNode;
 }): ReactElement {
-  // Composed rather than interpolated, so a card with no extra classes emits `card` and
-  // not `card ` — the class string is what the migration reads, and a stray trailing
-  // space is the kind of thing that survives review and then confuses a codemod.
+  // Composed rather than interpolated, so a card with no extra classes emits the surface
+  // and not the surface plus a trailing space — the class string is what the structure
+  // tests read, and a stray space is the kind of thing that survives review.
   return (
-    <section className={className ? `card ${className}` : "card"}>
+    <section
+      className={className ? `${CARD_SURFACE} ${className}` : CARD_SURFACE}
+    >
       {children}
     </section>
   );
 }
+
+/**
+ * THE CARD SURFACE, SPELLED ONCE (spec #420 slice 2).
+ *
+ * `.card` was `background: var(--card); border: 1px solid var(--line);
+ * border-radius: 12px; padding: 16px`, and it is deleted. These four utilities are that
+ * rule, and they are exported because EIGHT ELEMENTS CARRY THE SURFACE AND THREE OF THEM
+ * ARE NOT CARDS: the fill path's two unrecorded-fill warnings, login's `<form>`, and the
+ * ladder routes' notice `<div>`s. The docblock above declines to absorb them into this
+ * component and that has not changed — what they share is a painted surface, not a
+ * landmark — so what they import is the string, not the section.
+ *
+ * THE TORN BANNER IS THE ONE THAT NO LONGER IMPORTS IT (spec #420 slice 8). Its edge is
+ * `--neg` rather than `--line`, and a second unvariant `border-color` utility beside this
+ * string's own would be resolved by Tailwind's emitted order rather than by the caller's,
+ * so it writes the surface out with the border it wants instead of repainting half of one.
+ *
+ * `rounded-xl` IS THE ONE DEFAULT-SCALE CLASS HERE and it is an exact match: Tailwind's
+ * `--radius-xl` is 0.75rem. `rounded-md` would NOT have been — `tailwind.css`'s `@theme`
+ * remaps `--radius-md` onto the package's 8px control radius — the same shape of trap as
+ * the theme colour utilities, in the radius namespace, and the reason the house colours
+ * below are read as arbitrary values.
+ */
+export const CARD_SURFACE =
+  "rounded-xl border border-[var(--line)] bg-[var(--card)] p-4";
 
 /**
  * The card's heading.
@@ -61,15 +88,28 @@ export function Card({
  * with no title to everything that navigates by headings. This primitive is now the one
  * thing in the layer that can get it wrong for every card at once, which is why the
  * adopters assert their level instead of leaving it to review.
+ *
+ * `className` EXISTS BECAUSE SOME HEADINGS ARE NOT THE DEFAULT HEADING. `tailwind.css`'s
+ * `@layer base` sets the app's `h1` and `h2` sizes and every card that wants those passes
+ * nothing; a card whose heading was sized by its own rule in `styles.css` passes the
+ * utilities that replace it (spec #420 — the fill path's header is the first). Omitted, no
+ * attribute is emitted at all, so a heading that opts out is indistinguishable in the DOM
+ * from one written before this prop existed.
  */
 export function CardTitle({
   level = 2,
+  className,
   children,
 }: {
   level?: 1 | 2;
+  className?: string | undefined;
   children?: ReactNode;
 }): ReactElement {
-  return level === 1 ? <h1>{children}</h1> : <h2>{children}</h2>;
+  return level === 1 ? (
+    <h1 className={className}>{children}</h1>
+  ) : (
+    <h2 className={className}>{children}</h2>
+  );
 }
 
 Card.Title = CardTitle;

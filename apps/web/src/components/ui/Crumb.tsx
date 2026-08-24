@@ -19,8 +19,14 @@ import { Link } from "@tanstack/react-router";
  * component that decided the glyph from the destination would be guessing at the
  * page's geography from a string.
  *
- * This is a `<p className="crumb">` because that is what all four call sites render
- * today. No new class name is introduced and `styles.css` is byte-identical.
+ * ── THE STYLING IS HERE NOW (spec #420 slice 2) ──────────────────────────────────────
+ * `.crumb`, `.crumb a` and `.crumb a:hover` are deleted from `styles.css` and this is
+ * where they landed, which is the payoff for spec #403 having pulled the four call sites
+ * onto one component first: the hover state converts once instead of four times.
+ *
+ * `m-0` IS NOT DECORATION. Preflight is off, so the UA's own `p` margin is live and
+ * `.crumb`'s `margin: 0` was holding it off on all four edges. Dropping it would push
+ * every crumb 16px down the page with nothing in the diff to say why.
  */
 export function Crumb({
   to,
@@ -30,8 +36,13 @@ export function Crumb({
   children: ReactNode;
 }): ReactElement {
   return (
-    <p className="crumb">
-      <Link to={to}>{children}</Link>
+    <p className="m-0 text-[0.9rem]">
+      <Link
+        className="text-[var(--muted)] no-underline hover:text-[var(--text)]"
+        to={to}
+      >
+        {children}
+      </Link>
     </p>
   );
 }
