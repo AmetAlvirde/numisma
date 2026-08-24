@@ -82,15 +82,28 @@ export const CARD_SURFACE =
  * with no title to everything that navigates by headings. This primitive is now the one
  * thing in the layer that can get it wrong for every card at once, which is why the
  * adopters assert their level instead of leaving it to review.
+ *
+ * `className` EXISTS BECAUSE SOME HEADINGS ARE NOT THE DEFAULT HEADING. `tailwind.css`'s
+ * `@layer base` sets the app's `h1` and `h2` sizes and every card that wants those passes
+ * nothing; a card whose heading was sized by its own rule in `styles.css` passes the
+ * utilities that replace it (spec #420 — the fill path's header is the first). Omitted, no
+ * attribute is emitted at all, so a heading that opts out is indistinguishable in the DOM
+ * from one written before this prop existed.
  */
 export function CardTitle({
   level = 2,
+  className,
   children,
 }: {
   level?: 1 | 2;
+  className?: string | undefined;
   children?: ReactNode;
 }): ReactElement {
-  return level === 1 ? <h1>{children}</h1> : <h2>{children}</h2>;
+  return level === 1 ? (
+    <h1 className={className}>{children}</h1>
+  ) : (
+    <h2 className={className}>{children}</h2>
+  );
 }
 
 Card.Title = CardTitle;

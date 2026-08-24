@@ -56,10 +56,29 @@ import type { ReactElement } from "react";
  * card reflowed. Both edges are here, and the container variant names the breakpoint the
  * card still declares — this element is inside a `metrics-card` container whenever the
  * `dd` proxy is true, which is the same measurement.
+ *
+ * ── `className` IS FOR THE CONTEXTS WITH NO ELEMENT TO KEY OFF ───────────────────────
+ * `.metrics dd .absent` had one, which is why it is a variant above. The fill path's two
+ * — `.fp-spot .absent` and `.fp-tile .absent`, both deleted in spec #420 slice 7 — do
+ * not: a spot reading is a `<p>` and a tile is a `<div>`, and neither element name is
+ * anywhere near specific enough to stand in for the class that is going away. So the call
+ * site passes what its own rule declared, which also keeps those declarations in the file
+ * that owns them rather than accumulating one variant per surface here. The two arrive
+ * with DIFFERENT strings on purpose: the tile's rule had a container arm returning it to
+ * the left edge and spot's did not, because spot's own reflow keeps it right-aligned.
  */
-export function Absent({ why }: { why?: string | undefined }): ReactElement {
+const ABSENT_SURFACE =
+  "absent inline-flex items-baseline gap-1.5 text-[var(--muted)] [dd_&]:flex-wrap [dd_&]:justify-end [dd_&]:@[380px]/metrics-card:justify-start";
+
+export function Absent({
+  why,
+  className,
+}: {
+  why?: string | undefined;
+  className?: string | undefined;
+}): ReactElement {
   return (
-    <span className="absent inline-flex items-baseline gap-1.5 text-[var(--muted)] [dd_&]:flex-wrap [dd_&]:justify-end [dd_&]:@[380px]/metrics-card:justify-start">
+    <span className={className ? `${ABSENT_SURFACE} ${className}` : ABSENT_SURFACE}>
       <span aria-hidden="true">—</span>
       <span className="m-0 mt-1 text-[0.72rem] font-medium text-[var(--muted)] [dd_&]:mt-0 [dd_&]:text-[0.75rem]">
         {why ?? "suppressed"}
