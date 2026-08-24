@@ -86,9 +86,17 @@ function without(view: FillPathView, keys: (keyof FillPathView)[]): FillPathView
   return copy as unknown as FillPathView;
 }
 
-/** `toContain` per class, never the whole string — spec #420 Seam E. */
+/**
+ * `toContain` per class, never the whole string — spec #420 Seam E.
+ *
+ * `toBeTruthy`, NOT `not.toBeNull`. Callers pass values that go `undefined` rather than
+ * `null` when the lookup misses — `absentSlots(container).at(-1)`, a `.find(...)` over
+ * the rows — and `undefined` passes `not.toBeNull` cleanly. The test still failed, on
+ * `undefined.getAttribute` one line down, but it failed as a TypeError with a stack
+ * instead of saying which element was missing.
+ */
 function expectClasses(element: Element | null | undefined, classes: string[]): void {
-  expect(element).not.toBeNull();
+  expect(element).toBeTruthy();
   const tokens = classTokens(element as Element);
   for (const wanted of classes) expect(tokens).toContain(wanted);
 }
