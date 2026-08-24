@@ -185,44 +185,11 @@
    used to style, so there is nothing for a converted element and a surviving rule to
    fight over. Slices 8 and 9 take the rest. */
 
-/* THE TORN-ACT BANNER — above everything, and the only red block on the page
-   that claims a hard stop, because it is the only one that is one. */
-.fp-torn {
-  border-color: var(--neg);
-  color: var(--neg);
-}
-
-.fp-torn p {
-  margin: 6px 0 0;
-  color: var(--text);
-  font-size: 0.85rem;
-}
-
-.fp-unchecked {
-  margin: 0;
-  font-size: 0.8rem;
-}
-
-/* THE TWO UNRECORDED-FILL WARNINGS, VISUALLY DISTINCT because their certainties
-   differ. The certain one is a fact from the venue and carries a solid left
-   edge in the negative colour; the inferred one is derived from spot and carries
-   a dashed edge in the warning colour. The difference is deliberate and load-
-   bearing: rendering them alike would teach the operator to treat a venue fact
-   like a guess. */
-.fp-warn {
-  margin: 0;
-  font-size: 0.85rem;
-  line-height: 1.45;
-}
-
-.fp-warn-certain {
-  border-left: 4px solid var(--neg);
-}
-
-.fp-warn-inferred {
-  border-left: 4px dashed var(--warn);
-  color: var(--muted);
-}
+/* THE TORN BANNER, THE UNCHECKED LINE AND THE TWO WARNINGS HAVE LEFT THIS FILE
+   (spec #420 slice 8). The banner's red edge, the zeroed margin that the unchecked line
+   depended on, and the solid-versus-dashed left rule that keeps a venue FACT from
+   reading like a GUESS are all utility strings in `FillPath.tsx` now, named beside the
+   elements that carry them. */
 
 .fp-chart-card h2,
 .fp-list h2,

@@ -455,15 +455,41 @@ export function FillPathCards({ view }: { view: FillPathView }): ReactElement {
  * ABSENCE IS NOT THE ALL-CLEAR (absence rule 3). A row that could not check says so, in
  * a quiet line — silence there would claim a check that never ran.
  */
+/**
+ * THE ONE CARD-SURFACED ELEMENT THAT SPELLS THE SURFACE ITSELF (spec #420 slice 8).
+ *
+ * Everything else that is painted like a card imports `CARD_SURFACE` and adds to it. This
+ * banner cannot, because the deleted rule repainted the border: the shared string carries
+ * `border-[var(--line)]` and the banner's edge is `--neg`, and two unvariant
+ * `border-color` utilities on one element are resolved by Tailwind's EMITTED order rather
+ * than by the order they are written in. That is the same cascade `BADGE_TONE` is a total
+ * map to avoid, one property along. Written out once, with the border it actually wants.
+ */
+const TORN =
+  "rounded-xl border border-[var(--neg)] bg-[var(--card)] p-4 text-[var(--neg)]";
+/**
+ * THE SENTENCE STEPS BACK TO `--text`. It is prose inside a block painted in the alarm
+ * colour, and reading it in that colour too makes the whole card shout instead of the one
+ * line that is the alarm.
+ */
+const TORN_BODY = "m-0 mt-1.5 text-[0.85rem] text-[var(--text)]";
+/**
+ * `margin: 0`, ALL FOUR EDGES. The deleted rule zeroed the margin outright and, being
+ * unlayered, beat the `mt-1` this paragraph carried from slice 2's shared-vocabulary
+ * conversion. Reproducing the rule means dropping that `mt-1`; keeping it would open a
+ * 4px gap nothing has ever rendered.
+ */
+const UNCHECKED = "m-0 text-[0.8rem] text-[var(--muted)]";
+
 function TornActBanner({ view }: { view: FillPathView }) {
   if (view.tornActs.status === "outstanding") {
     return (
-      <div className={`fp-torn ${CARD_SURFACE}`} role="alert">
+      <div className={TORN} role="alert">
         <strong>
           {view.tornActs.count} torn fill{" "}
           {view.tornActs.count === 1 ? "act" : "acts"} outstanding
         </strong>
-        <p>
+        <p className={TORN_BODY}>
           Recording is blocked until this is repaired — <code>pnpm orders:fill</code>{" "}
           will refuse while a half-written act is open. Repair it at the desk.
         </p>
@@ -472,7 +498,7 @@ function TornActBanner({ view }: { view: FillPathView }) {
   }
   if (view.tornActs.status === "unchecked") {
     return (
-      <p className="fp-unchecked m-0 mt-1 text-[var(--muted)]">
+      <p className={UNCHECKED}>
         Torn fill acts were not checked for this snapshot — this is NOT "none
         outstanding".
       </p>
@@ -688,11 +714,28 @@ function Waiting({ figures }: { figures: FillPathView["figures"] }) {
  * venue has not said anything, which usually means nothing happened. Rendering them the
  * same would teach the operator to treat a certainty like a guess.
  */
+/**
+ * TWO CERTAINTIES, ONE SURFACE, AND ONE EDGE BETWEEN THEM.
+ *
+ * Both paragraphs are card-surfaced, so `CARD_SURFACE` rides along and only the left
+ * border differs. Every declaration that differs is a LONGHAND on purpose: `border-l-4`
+ * beats the shared string's shorthand width and `border-l-[…]` beats its shorthand
+ * colour, which is the one ordering Tailwind does guarantee.
+ *
+ * THE DASH IS ONE EDGE, NOT FOUR. `border-dashed` sets `border-style` on every side and
+ * would dash the card's other three; the arbitrary property puts it on the left alone.
+ * The difference between a venue fact and a guess is the whole reason these two look
+ * different, and it must not spill onto the surface they share.
+ */
+const WARN = `${CARD_SURFACE} m-0 text-[0.85rem] leading-[1.45]`;
+const WARN_CERTAIN = `${WARN} border-l-4 border-l-[var(--neg)]`;
+const WARN_INFERRED = `${WARN} border-l-4 border-l-[var(--warn)] [border-left-style:dashed] text-[var(--muted)]`;
+
 function UnrecordedWarnings({ view }: { view: FillPathView }) {
   return (
     <>
       {view.warnings.filledNotRecorded > 0 ? (
-        <p className={`fp-warn fp-warn-certain ${CARD_SURFACE}`}>
+        <p className={WARN_CERTAIN}>
           <span aria-hidden="true">⚠ </span>
           {view.warnings.filledNotRecorded} filled at the venue —{" "}
           {view.warnings.filledNotRecorded === 1 ? "it is" : "they are"} not recorded.
@@ -700,7 +743,7 @@ function UnrecordedWarnings({ view }: { view: FillPathView }) {
         </p>
       ) : null}
       {view.warnings.pricePassedNoFill > 0 ? (
-        <p className={`fp-warn fp-warn-inferred ${CARD_SURFACE}`}>
+        <p className={WARN_INFERRED}>
           <span aria-hidden="true">⚠ </span>
           {view.warnings.pricePassedNoFill} resting{" "}
           {view.warnings.pricePassedNoFill === 1 ? "rung has" : "rungs have"} had price

@@ -6,9 +6,10 @@ import type { ReactElement, ReactNode } from "react";
  *
  * ── IT IS A `<section>`, AND ONLY A `<section>` ──────────────────────────────────────
  * A dozen elements in this layer carry the card surface and four of them are not cards:
- * the fill path's two `fp-warn` warning paragraphs, its `role="alert"` banner `<div>`,
+ * the fill path's two unrecorded-fill warnings, its `role="alert"` torn banner `<div>`,
  * and login's `<form>`. They keep their own elements and import `CARD_SURFACE` below
- * instead. A shared surface is not a shared component, and a polymorphic `as`
+ * instead — all but the banner, which spells the surface itself for the reason its own
+ * docblock gives. A shared surface is not a shared component, and a polymorphic `as`
  * prop to absorb four one-off elements would buy a knob and lose the guarantee that a
  * `Card` is a landmark-bearing section. `card-composition.test.tsx` holds that.
  *
@@ -54,11 +55,16 @@ export function Card({
  *
  * `.card` was `background: var(--card); border: 1px solid var(--line);
  * border-radius: 12px; padding: 16px`, and it is deleted. These four utilities are that
- * rule, and they are exported because EIGHT ELEMENTS CARRY THE SURFACE AND FOUR OF THEM
- * ARE NOT CARDS: the fill path's two `fp-warn` paragraphs and its `role="alert"` banner,
- * login's `<form>`, and the ladder routes' notice `<div>`s. The docblock above declines
- * to absorb them into this component and that has not changed — what they share is a
- * painted surface, not a landmark — so what they import is the string, not the section.
+ * rule, and they are exported because EIGHT ELEMENTS CARRY THE SURFACE AND THREE OF THEM
+ * ARE NOT CARDS: the fill path's two unrecorded-fill warnings, login's `<form>`, and the
+ * ladder routes' notice `<div>`s. The docblock above declines to absorb them into this
+ * component and that has not changed — what they share is a painted surface, not a
+ * landmark — so what they import is the string, not the section.
+ *
+ * THE TORN BANNER IS THE ONE THAT NO LONGER IMPORTS IT (spec #420 slice 8). Its edge is
+ * `--neg` rather than `--line`, and a second unvariant `border-color` utility beside this
+ * string's own would be resolved by Tailwind's emitted order rather than by the caller's,
+ * so it writes the surface out with the border it wants instead of repainting half of one.
  *
  * `rounded-xl` IS THE ONE DEFAULT-SCALE CLASS HERE and it is an exact match: Tailwind's
  * `--radius-xl` is 0.75rem. `rounded-md` would NOT have been — `tailwind.css`'s `@theme`

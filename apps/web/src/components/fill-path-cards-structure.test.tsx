@@ -434,3 +434,133 @@ describe("the header card carries its section as utilities", () => {
     for (const deleted of DELETED_IN_SLICE_7) expect(rendered).not.toContain(deleted);
   });
 });
+
+/**
+ * THE CENSUS SUCCESSOR FOR THE THREE BLOCKS ABOVE THE CHART (spec #420 slice 8, Seam E).
+ *
+ * The banner, the two warnings and the unchecked line render on VIEWS THIS FIXTURE IS
+ * NOT IN, so each arm is reached by overriding the one field of the composed view that
+ * decides it. That is the same move `renderHeader` makes for the state chip's four tones
+ * — the fixture decides the layout, the field decides the arm — and it is what lets a
+ * torn banner be asserted at all: no `started-ladder` fixture carries an outstanding
+ * torn act, by design, because every one of them is a ladder that reconciled.
+ */
+describe("the torn banner and the two warnings carry their rules as utilities", () => {
+  /** The view with an outstanding torn count, which no fixture composes to. */
+  function tornView(): FillPathView {
+    return { ...partlyWalkedView(), tornActs: { status: "outstanding", count: 2 } };
+  }
+
+  it("paints the banner in `--neg` and keeps it an alert", () => {
+    const { container } = render(<FillPathCards view={tornView()} />);
+    const banner = container.querySelector('[role="alert"]');
+
+    // The surface is spelled out on this one element rather than composed from
+    // `CARD_SURFACE`, because the banner's border is `--neg` and the shared string's is
+    // `--line`: two unvariant `border-color` utilities would race. Asserted from both
+    // ends — the colour that must be there, and the one that must not.
+    expectClasses(banner, [
+      "rounded-xl",
+      "border",
+      "border-[var(--neg)]",
+      "bg-[var(--card)]",
+      "p-4",
+      "text-[var(--neg)]",
+    ]);
+    expect(classTokens(banner!)).not.toContain("border-[var(--line)]");
+    expect(banner?.tagName).toBe("DIV");
+    expect(banner?.getAttribute("role")).toBe("alert");
+
+    // The sentence under the heading steps back to `--text`: it is prose inside a block
+    // painted `--neg`, and reading it in the alarm colour makes the whole card shout.
+    expectClasses(banner?.querySelector("p"), [
+      "m-0",
+      "mt-1.5",
+      "text-[0.85rem]",
+      "text-[var(--text)]",
+    ]);
+  });
+
+  it("zeroes every edge of the unchecked line's margin", () => {
+    // `.fp-unchecked` declared `margin: 0`, and while it stood it BEAT the `mt-1` this
+    // paragraph carried from slice 2's `.muted` conversion — an unlayered rule outranks
+    // every utility. Reproducing the rule therefore means dropping that `mt-1`, which is
+    // the quietest way this conversion could have moved a pixel.
+    const view = partlyWalkedView();
+    const { container } = render(
+      <FillPathCards view={{ ...view, tornActs: { status: "unchecked" } }} />,
+    );
+    const line = [...container.querySelectorAll("p")].find((paragraph) =>
+      paragraph.textContent?.includes("were not checked for this snapshot"),
+    );
+
+    expectClasses(line, ["m-0", "text-[0.8rem]", "text-[var(--muted)]"]);
+    expect(classTokens(line!)).not.toContain("mt-1");
+  });
+
+  it("keeps the certain warning solid and the inferred one dashed", () => {
+    const view = partlyWalkedView();
+    const { container } = render(
+      <FillPathCards
+        view={{
+          ...view,
+          warnings: { filledNotRecorded: 1, pricePassedNoFill: 2 },
+        }}
+      />,
+    );
+    const paragraphs = [...container.querySelectorAll("p")];
+    const certain = paragraphs.find((paragraph) =>
+      paragraph.textContent?.includes("filled at the venue"),
+    );
+    const inferred = paragraphs.find((paragraph) =>
+      paragraph.textContent?.includes("had price pass through"),
+    );
+
+    // Both are card-surfaced paragraphs, so the shared string rides along and only the
+    // left edge differs. The width and colour are LONGHANDS on purpose: `border-l-4`
+    // beats `border`'s shorthand width, and `border-l-[…]` beats its shorthand colour,
+    // which is the ordering Tailwind guarantees between the two.
+    for (const warning of [certain, inferred]) {
+      expectClasses(warning, [
+        ...CARD_SURFACE.split(" "),
+        "m-0",
+        "text-[0.85rem]",
+        "leading-[1.45]",
+        "border-l-4",
+      ]);
+    }
+    expectClasses(certain, ["border-l-[var(--neg)]"]);
+    expect(classTokens(certain!)).not.toContain("[border-left-style:dashed]");
+
+    // THE DASH IS ONE EDGE, NOT FOUR. `border-dashed` would dash the card's other three
+    // sides too, so the style is set as an arbitrary property on the left edge alone —
+    // the difference between the two certainties is the whole reason these paragraphs
+    // look different, and it must not spill onto the surface they share.
+    expectClasses(inferred, [
+      "border-l-[var(--warn)]",
+      "[border-left-style:dashed]",
+      "text-[var(--muted)]",
+    ]);
+  });
+
+  it("renders none of the five class names this block carried", () => {
+    const { container } = render(
+      <FillPathCards
+        view={{
+          ...tornView(),
+          warnings: { filledNotRecorded: 1, pricePassedNoFill: 2 },
+        }}
+      />,
+    );
+    const rendered = renderedClassNames(container);
+    for (const deleted of [
+      "fp-torn",
+      "fp-unchecked",
+      "fp-warn",
+      "fp-warn-certain",
+      "fp-warn-inferred",
+    ]) {
+      expect(rendered).not.toContain(deleted);
+    }
+  });
+});
