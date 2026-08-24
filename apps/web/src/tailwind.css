@@ -1,13 +1,20 @@
 /*
  * TAILWIND 4, MOUNTED BESIDE `styles.css` AND NEVER INSIDE IT.
  *
- * `styles.css` is the app's hand-written stylesheet, and spec #420 is emptying it
- * one surface at a time down to its two `:root` blocks. The Tailwind block lives
- * here and `__root.tsx` links this file as a SECOND stylesheet after `appCss`,
- * which is what lets a converted surface's utilities and the rules not yet
- * converted coexist without either winning by accident.
- * It also carries the app's palette: spec #412 Slice 5's `:root` block of
- * `--nms-*` overrides is where that reaches this package.
+ * THIS FILE IS THE APP'S ONLY STYLESHEET WITH RULES IN IT. `styles.css` is the
+ * token home and holds none: two `:root` blocks declaring the palette and the
+ * `--nms-*` aliases, and nothing else. Spec #420 emptied it one surface at a
+ * time across nine slices, and ADR-025 is the record of the arrangement it
+ * ended on — preflight off permanently, the house base rules in `@layer base`
+ * below, theme colour utilities package-only in app code.
+ *
+ * `__root.tsx` LINKS `styles.css` FIRST AND THIS FILE SECOND, and the order is
+ * not what decides anything. `styles.css` is UNLAYERED and unlayered CSS beats
+ * every cascade layer regardless of document order or specificity, so its
+ * tokens win over the generated defaults imported below no matter which link
+ * comes first. That was the coexistence mechanism while rules were still
+ * leaving it; what it buys now is that a token override in that file cannot be
+ * undone from here by accident.
  *
  * Every line below is load-bearing, and three of them fail SILENTLY if wrong:
  *
@@ -17,15 +24,22 @@
  *   Preflight would reset the bare elements this app styles deliberately — the
  *   four in `@layer base` below, and the UA margins on `p`, `h3`–`h6`, `dl`,
  *   `dd`, `ul` and `figure` that every converted surface now reproduces by hand.
+ *   IT IS OFF PERMANENTLY, not pending. Turning it on later would zero every
+ *   one of those reproduced edges at once, and the strings that were carrying
+ *   real intent would be indistinguishable from the ones only cancelling the
+ *   UA. ADR-025 carries the argument.
  * - THE `@layer` LINE MUST COME FIRST, or the layers order by first appearance.
  * - THE `layer()` PARAMS ARE NOT COSMETIC. Tailwind's shipped `theme.css` and
  *   `utilities.css` contain no `@layer` rules of their own, so the layer
  *   assignment lives entirely on the `@import`. Without it the output is
  *   UNLAYERED, and unlayered CSS beats every cascade layer regardless of
- *   specificity. With `layer(utilities)`, the unlayered hand-written
- *   `styles.css` wins on a shared property, which is the coexistence this
- *   increment needs. It is temporary by design; dismantling it belongs to the
- *   `styles.css` migration, which is why spec #412 §8 declines an ADR on it.
+ *   specificity. With `layer(utilities)`, the unlayered `styles.css` wins on a
+ *   shared property. That asymmetry bought the migration its coexistence and
+ *   OUTLIVES IT: `styles.css` declares no property a utility could share any
+ *   more, so what the layering guarantees now is that the four base rules below
+ *   lose to the utilities, which is the direction every converted surface
+ *   depends on. Spec #412 §8 declined an ADR here because the asymmetry was
+ *   scheduled to be unmade; ADR-025 is the decision that unmade it.
  * - `source(none)` BELONGS ON `utilities.css`, NEVER ON `theme.css`. It binds
  *   to the import carrying `@tailwind utilities`; on `theme.css` it is
  *   silently ignored. It disables implicit scanning, which is why the two
@@ -111,9 +125,9 @@
  * links `styles.css` FIRST and this file SECOND, so in document order the
  * generated defaults come last and would beat anything `styles.css` declares.
  * Inside `layer(theme)` they lose to unlayered CSS instead, which is what lets
- * `apps/web` override a token from its own `:root` in `styles.css` — the one
- * sanctioned edit to that file, and Slice 5 has now made it. THE APP RUNS ON ITS
- * OWN PALETTE; the grayscale below is the fallback nothing should reach.
+ * `apps/web` alias every one of these names onto its own palette from the second
+ * `:root` block in `styles.css`. THE APP RUNS ON ITS OWN PALETTE; the grayscale
+ * below is the fallback nothing should reach.
  *
  * ── THE `@theme` MAPPING, AND THE INDIRECTION IT RESTS ON ──────────────────
  *
