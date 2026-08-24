@@ -105,6 +105,12 @@
   --nms-secondary: var(--line);
   --nms-secondary-foreground: var(--text);
   --nms-destructive: var(--neg);
+  /* THE SIGN OF A NUMBER, and the second alias onto `--neg` on purpose (spec #432 §4.1).
+     `SnapshotStaleNotice` reads it from inside the package. Two package names at one app
+     colour is the intended end state: the line above is the affordance of a destructive
+     control, this one is data, and `--neg` stays declared exactly once so the pair cannot
+     drift apart while they mean the same red. */
+  --nms-neg: var(--neg);
   --nms-ring: var(--accent);
   /* GEOMETRY, NOT PALETTE, and the one override here that changes a built-in Tailwind
      utility (`rounded-md`) rather than creating one. The package default is 6px; every

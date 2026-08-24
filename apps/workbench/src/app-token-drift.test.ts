@@ -43,15 +43,15 @@ import { APP_TOKENS, THEME_MODES } from "./theme-modes.ts";
  * pass while the palette moved underneath it, which is the exact rot this test
  * exists to catch.
  *
- * ── NAME-FOR-NAME, WHICH IS NOW FOURTEEN ON BOTH SIDES ────────────────────
+ * ── NAME-FOR-NAME, WHICH IS NOW FIFTEEN ON BOTH SIDES ─────────────────────
  *
  * This test mirrors whatever `styles.css` declares, rather than scoping itself
  * to `NMS_TOKEN_NAMES`, and that is still the contract #418 asked for. What
  * changed is the app's block. It carried fourteen — the package's twelve plus
  * `--nms-card` and `--nms-muted-foreground`, minted by spec #412 §4.2 for
  * components that had not arrived — and spec #420 S0 deleted both, so the two
- * numbers agreed at twelve. Spec #432 §4.1 moved them to fourteen together, one
- * slice per name.
+ * numbers agreed at twelve. Spec #432 §4.1 moved them back one slice per name
+ * and minted `--nms-neg` alongside them, which is wave 1's third and last.
  *
  * THE ARGUMENT THAT LOST, recorded because it was a real one: carrying an
  * unexercised alias means the day `Card` enters the package, app mode is
@@ -64,15 +64,22 @@ import { APP_TOKENS, THEME_MODES } from "./theme-modes.ts";
  *
  * WHICH IS THE DAY WAVE 1 ARRIVES (spec #432 §4.1). `Absent` and `Card` cross
  * into the package in wave 1, and `--nms-muted-foreground` and `--nms-card`
- * come back with them, in those slices and not before. Both have landed now:
- * `Absent` reads `--nms-muted-foreground` and `Card` reads `--nms-card`, and the
- * app aliases each onto its house name in the slice that moved the component.
- * Reusing the deleted spellings is
- * deliberate: same role, same name, one vocabulary. Read it as the sentence
- * above being satisfied, not withdrawn — the losing argument asked to carry the
- * alias while nothing read it, and this carries it because something does. Both
- * sides move together, so the two numbers keep agreeing while they climb from
- * twelve to fifteen.
+ * come back with them, in those slices and not before. All three of wave 1's
+ * names have landed now: `Absent` reads `--nms-muted-foreground`, `Card` reads
+ * `--nms-card`, and the two snapshot notices read `--nms-neg`, with the app
+ * aliasing each onto its house name in the slice that moved the component.
+ * Reusing the two deleted spellings is deliberate: same role, same name, one
+ * vocabulary. Read it as the sentence above being satisfied, not withdrawn —
+ * the losing argument asked to carry the alias while nothing read it, and this
+ * carries it because something does. Both sides moved together on every one, so
+ * the two numbers agreed at each step and agree at fifteen.
+ *
+ * ONE APP VALUE NOW ANSWERS TO TWO NAMES. `styles.css` aliases both
+ * `--nms-destructive` and `--nms-neg` onto `--neg`, so the per-value cases below
+ * meet the same literal twice and pass, which is correct: this test asks whether
+ * the copy matches the app, never whether the app's names are distinct from each
+ * other. Themed mode is where distinctness is a contract, and the case for it is
+ * at the bottom of this file.
  *
  * THE MIRROR STILL POINTS BOTH WAYS, and that is what makes the deletion a
  * two-sided edit: dropping the aliases from `styles.css` without dropping them

@@ -9,8 +9,7 @@ import type {
 } from "../ladder/fill-path-view.ts";
 import { COMPACT_USD } from "../ladder/price-drop-path.ts";
 import { PriceDropPathChart } from "./PriceDropPathChart.tsx";
-import { Card, CARD_SURFACE } from "@numisma/components";
-import { NOTICE_CODE } from "./ui/SnapshotNotice.tsx";
+import { Card, CARD_SURFACE, NOTICE_CODE } from "@numisma/components";
 
 /**
  * THE FILL PATH, ON THE PHONE (spec #285 §5.6–5.13 / G-D10b, slice #289) — the declared

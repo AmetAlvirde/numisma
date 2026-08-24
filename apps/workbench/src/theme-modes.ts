@@ -59,6 +59,13 @@ export const GRAYSCALE_TOKENS: Readonly<Record<string, string>> =
  * `app-token-drift.test.ts` asserts the values are pairwise distinct and says
  * nothing about which colours they are. Ugly is fine here. Ambiguous is not.
  *
+ * `--nms-neg` AND `--nms-destructive` ARE THE PAIR THIS RULE WAS WRITTEN FOR.
+ * App mode resolves both to `#f0736a`, because `apps/web` aliases each onto
+ * `--neg`, and a reviewer looking at app mode alone cannot tell whether a red
+ * box read the sign token or the destructive one. Here they are a cyan and a
+ * red, so the two roles come apart on screen in the one mode built to pull them
+ * apart — which is the whole reason spec #432 §4.1 refused to weld the names.
+ *
  * SCOPED TO THE PACKAGE'S DECLARED TOKENS, unlike app mode. A name the package
  * never declared cannot be an unexercised declared token, so it is out of this
  * mode's scope by definition.
@@ -76,6 +83,7 @@ export const THEMED_TOKENS: Readonly<Record<string, string>> = {
   "--nms-secondary": "#2c8c78",
   "--nms-secondary-foreground": "#f0fff9",
   "--nms-destructive": "#c62828",
+  "--nms-neg": "#00e5ff",
   "--nms-ring": "#f2a516",
   "--nms-radius-md": "14px",
 };
@@ -89,17 +97,18 @@ export const THEMED_TOKENS: Readonly<Record<string, string>> = {
  * alias chain to meet these literals, rather than comparing alias text that
  * would keep matching while the palette moved underneath it.
  *
- * FOURTEEN NAMES, MATCHING THE PACKAGE EXACTLY — and it took a deletion and two
- * returns to get here. This table carried fourteen once before, while
- * `styles.css` defined `--nms-card` and `--nms-muted-foreground`, two aliases
- * spec #412 §4.2 minted for components that had not arrived. Spec #420 S0
- * deleted both on the rule `tokens.ts` already keeps: a token nothing reads is a
- * token nothing can verify, and app mode was carrying two values no fixture
- * could ever show. Spec #432 §4.1 then moved `Absent` into the package reading
+ * FIFTEEN NAMES, MATCHING THE PACKAGE EXACTLY, and wave 1's final count. This
+ * table carried fourteen once before, while `styles.css` defined `--nms-card`
+ * and `--nms-muted-foreground`, two aliases spec #412 §4.2 minted for
+ * components that had not arrived. Spec #420 S0 deleted both on the rule
+ * `tokens.ts` already keeps: a token nothing reads is a token nothing can
+ * verify, and app mode was carrying two values no fixture could ever show. Spec
+ * #432 §4.1 then moved `Absent` into the package reading
  * `--nms-muted-foreground` and `Card` reading `--nms-card`, so both are back —
- * met precondition, not undone decision, and the fourteen are not the same
- * fourteen. The mirror is what makes each of those a two-sided edit — the drift
- * test below reads `styles.css` off disk and reds if either side moves alone.
+ * met precondition, not undone decision — and the snapshot notices minted
+ * `--nms-neg` on top, which is a name this table never carried. The mirror is
+ * what makes each of those a two-sided edit — the drift test below reads
+ * `styles.css` off disk and reds if either side moves alone.
  *
  * `#9aa1ad` IS `--muted` RESOLVED, and it is the app's most-used grey. The alias
  * chain is `--nms-muted-foreground: var(--muted)` and `--muted: #9aa1ad`; the
@@ -112,10 +121,18 @@ export const THEMED_TOKENS: Readonly<Record<string, string>> = {
  * close in app mode is the reason themed mode paints them nothing like each
  * other. The argument the drift test records as "the argument that lost" —
  * carry the alias early so app mode is already correct on arrival — stayed lost
- * for both names. What changed is the arrival, not the argument. The count
- * climbs from twelve to fifteen one component at a time; the exact spellings are
- * reused on purpose, so the vocabulary stays one vocabulary rather than growing a
- * second name per role.
+ * for both names. What changed is the arrival, not the argument. Each name
+ * landed in the slice that moved the component reading it, and the exact
+ * spellings are reused on purpose, so the vocabulary stays one vocabulary
+ * rather than growing a second name per role.
+ *
+ * `#f0736a` IS `--neg` RESOLVED, AND IT APPEARS TWICE. `--nms-destructive` and
+ * `--nms-neg` both alias onto `--neg` in `styles.css`, so app mode carries one
+ * literal under two names and no guard objects: only themed mode asserts
+ * pairwise distinctness, because only themed mode is the one whose job is
+ * telling roles apart. Two names at one value is the state spec #432 §4.1 chose
+ * on purpose — sign is data, destructive is intent — and it is the reason
+ * themed mode paints them a cyan and a red.
  */
 export const APP_TOKENS: Readonly<Record<string, string>> = {
   "--nms-background": "#0f1115",
@@ -130,6 +147,7 @@ export const APP_TOKENS: Readonly<Record<string, string>> = {
   "--nms-secondary": "#262a33",
   "--nms-secondary-foreground": "#e7e9ee",
   "--nms-destructive": "#f0736a",
+  "--nms-neg": "#f0736a",
   "--nms-ring": "#3b6cf0",
   "--nms-radius-md": "8px",
 };

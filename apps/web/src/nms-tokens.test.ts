@@ -70,7 +70,7 @@ describe("the app defines every token the package declares", () => {
   it("declares at least as many tokens as the package does", () => {
     // Guards the direction the per-name cases cannot: a token list that shrank
     // to nothing would pass an empty `it.each`.
-    expect(NMS_TOKEN_NAMES.length).toBeGreaterThanOrEqual(14);
+    expect(NMS_TOKEN_NAMES.length).toBeGreaterThanOrEqual(15);
   });
 
   it("defines no --nms-* name the package never declared", () => {
@@ -117,8 +117,9 @@ describe("the app defines every token the package declares", () => {
  * no component in the package read either one; spec #432 §4.1 brought each back
  * in the slice that moved the component reading it, `Absent` and then `Card`,
  * which is the precondition the deletion was about. The block stays an exact
- * mirror of `NMS_TOKEN_NAMES` in both directions — fourteen names now, and both
- * sides moved together to get there.
+ * mirror of `NMS_TOKEN_NAMES` in both directions — fifteen names now, the two
+ * that came back plus `--nms-neg`, which the app never carried before, and both
+ * sides moved together on every one.
  *
  * `--nms-muted` IS NOT `--muted`, and the collision of English words is exactly
  * why the prefix exists. shadcn reads `--nms-muted` as a recessed SURFACE
@@ -154,6 +155,13 @@ describe("the app's --nms-* overrides in styles.css", () => {
     ["--nms-destructive", "var(--neg)"],
     ["--nms-muted-foreground", "var(--muted)"],
     ["--nms-card", "var(--card)"],
+    // TWO NAMES, ONE HOUSE COLOUR, AND THAT IS THE END STATE (spec #432 §4.1).
+    // `--nms-destructive` is the affordance of a control that destroys
+    // something; `--nms-neg` is the sign of a number. Both read `--neg` today,
+    // and the pair is written out here rather than collapsed so a future edit
+    // that points one of them somewhere else reds this line instead of passing
+    // as a tidy-up.
+    ["--nms-neg", "var(--neg)"],
   ])("aliases %s onto %s rather than copying its value", (name, alias) => {
     expect(overrides.get(name)).toBe(alias);
   });

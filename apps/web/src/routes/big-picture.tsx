@@ -4,10 +4,7 @@ import { composeBigPicture } from "../glance/row-view.ts";
 import { getDashboard } from "../lib/dashboard.ts";
 import { Shell } from "../components/Shell.tsx";
 import { Crumb } from "../components/ui/Crumb.tsx";
-import {
-  SnapshotEmptyNotice,
-  SnapshotStaleNotice,
-} from "../components/ui/SnapshotNotice.tsx";
+import { SnapshotEmptyNotice, SnapshotStaleNotice } from "@numisma/components";
 import { SummaryCard } from "../components/SummaryCard.tsx";
 import { SectionTable } from "../components/SectionTable.tsx";
 

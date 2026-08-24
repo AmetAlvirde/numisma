@@ -58,8 +58,8 @@
  *
  * `apps/web` owns ten bare palette names. Each has exactly one counterpart in
  * this namespace, and the whole mapping is written here so a component crossing
- * into the package looks the name up rather than choosing it again. Five are
- * declared below; the other five are named and not yet declared, each waiting
+ * into the package looks the name up rather than choosing it again. Six are
+ * declared below; the other four are named and not yet declared, each waiting
  * on the component that first reads it.
  *
  *     house      package                  status
@@ -68,7 +68,7 @@
  *     --line     --nms-border             declared
  *     --card     --nms-card               declared
  *     --muted    --nms-muted-foreground   declared
- *     --neg      --nms-neg                named; declared with the snapshot notices
+ *     --neg      --nms-neg                declared
  *     --pos      --nms-pos                named; not yet declared (wave 2)
  *     --ok       --nms-ok                 named; not yet declared (wave 2)
  *     --warn     --nms-warn               named; not yet declared (wave 2)
@@ -174,6 +174,11 @@ export const NMS_TOKENS = [
     name: "--nms-destructive",
     value: "oklch(0.45 0 0)",
     note: "The destructive role. Button `destructive`, and every `aria-invalid` ring in the package. Grayscale here on purpose: upstream ships this red, and shipping the red would be the one place the package smuggled in a palette.",
+  },
+  {
+    name: "--nms-neg",
+    value: "oklch(0.45 0 0)",
+    note: "The negative SIGN of a number — data, not intent. `SnapshotStaleNotice` paints its refusal with it. NOT `--nms-destructive`, the row above, which is the affordance of a button that destroys something: `apps/web` resolves both to one red today, and welding them means the day the money-red wants to soften, or wants a colourblind-safe pairing with `--nms-pos`, every destructive affordance moves with it. Grayscale here makes sign UNREVIEWABLE in grayscale mode, and that is correct: grayscale reviews hierarchy, spacing and state, and sign is reviewed in themed and app mode, which is what those modes are for.",
   },
   {
     name: "--nms-ring",

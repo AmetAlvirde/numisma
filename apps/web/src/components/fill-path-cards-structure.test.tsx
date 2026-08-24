@@ -44,8 +44,7 @@ import { FillPath, FillPathCards, FillPathProvider } from "./FillPath.tsx";
 import { composeFillPathPage } from "../ladder/fill-path-view.ts";
 import type { FillPathView } from "../ladder/fill-path-view.ts";
 import { ladderFixture } from "../ladder/started-ladder.fixtures.ts";
-import { CARD_SURFACE } from "@numisma/components";
-import { NOTICE_CODE } from "./ui/SnapshotNotice.tsx";
+import { CARD_SURFACE, NOTICE_CODE } from "@numisma/components";
 
 /** One fixture, composed through the real view module — never a hand-built view object. */
 function viewOf(name: "partly-walked" | "day-zero"): FillPathView {

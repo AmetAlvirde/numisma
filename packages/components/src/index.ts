@@ -19,6 +19,11 @@
 export { Absent } from "./ui/absent";
 export { Button, buttonVariants } from "./ui/button";
 export { Card, CardTitle, CARD_SURFACE } from "./ui/card";
+export {
+  NOTICE_CODE,
+  SnapshotEmptyNotice,
+  SnapshotStaleNotice,
+} from "./ui/snapshot-notice";
 export { cn } from "./lib/utils";
 export {
   NMS_PREFIX,

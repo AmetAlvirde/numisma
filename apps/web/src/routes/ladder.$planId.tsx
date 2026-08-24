@@ -2,11 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { getDashboard } from "../lib/dashboard.ts";
 import { Shell } from "../components/Shell.tsx";
 import { Crumb } from "../components/ui/Crumb.tsx";
-import { CARD_SURFACE } from "@numisma/components";
 import {
+  CARD_SURFACE,
   SnapshotEmptyNotice,
   SnapshotStaleNotice,
-} from "../components/ui/SnapshotNotice.tsx";
+} from "@numisma/components";
 import { FillPathCards } from "../components/FillPath.tsx";
 import { composeFillPathPage } from "../ladder/fill-path-view.ts";
 import { useBinanceSpotUsd } from "../lib/binance-spot.ts";
