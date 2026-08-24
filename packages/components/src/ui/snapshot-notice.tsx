@@ -65,9 +65,23 @@ import { CARD_SURFACE } from "./card";
  * arbitrary value is 6px. `bg-black` IS an exact match for the deleted `#000` and is a
  * Tailwind default rather than a mapped house token, so it is not that collision.
  *
+ * ── `text-white` PAIRS THE BACKGROUND, AND IS NOT DECORATION ─────────────────────────
+ * The chip painted its own background and inherited its foreground, which reads as
+ * economical and is a latent bug: an element that sets a background owns the text on it.
+ * It only ever looked right because the one consumer was a dark app whose ambient
+ * foreground happened to be light. The workbench rendered it against two palettes that
+ * are not, and both painted near-black on black — `--nms-foreground` is `#1b1a17` in
+ * themed mode and `oklch(0.145 0 0)` in grayscale. The pairing is literal for the same
+ * reason `bg-black` is: no house token stays light in every mode, so a `var()` read here
+ * would re-acquire the dependence on ambient palette that broke it.
+ *
+ * The chip therefore does NOT theme, by construction. Grayscale mode reviews hierarchy,
+ * spacing and state, and a command chip is a constant in all three — the same argument
+ * `--nms-neg` makes above about sign.
+ *
  * Exported because the ladder fixture route spells the same chip inside its own notices.
  */
-export const NOTICE_CODE = "rounded-[6px] bg-black px-1.5 py-0.5";
+export const NOTICE_CODE = "rounded-[6px] bg-black text-white px-1.5 py-0.5";
 
 export function SnapshotEmptyNotice(): ReactElement {
   return (

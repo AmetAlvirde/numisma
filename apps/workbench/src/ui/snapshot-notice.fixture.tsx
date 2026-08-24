@@ -33,9 +33,17 @@ import {
  *
  * `NOTICE_CODE` GETS ITS OWN ROW because it is a class string three files spell onto
  * their own `<code>` elements — the empty notice, the fill path's unrecorded-fill copy
- * and the ladder fixture route — and it reads no house colour at all: `bg-black` is a
- * Tailwind default, not a mapped token. A chip that repaints on a mode switch is the
- * finding.
+ * and the ladder fixture route — and it reads no house colour at all: `bg-black` and
+ * `text-white` are Tailwind defaults, not mapped tokens. A chip that repaints on a mode
+ * switch is the finding.
+ *
+ * THIS ROW ALREADY PAID FOR ITSELF, and the way it did is worth keeping. The rule above
+ * was written about the background, so the background is what it watched. The chip set
+ * `bg-black` and inherited its foreground, and in app mode the ambient foreground is
+ * light, so it read correctly and no test disagreed — the class list was pinned to
+ * exactly what the app shipped. Rendered here against a palette whose foreground is
+ * near-black, it painted black on black. The pairing is now literal on the chip, and the
+ * rule reads BOTH halves: an element that sets a background owns the text on it.
  *
  * SYNTHESIZED. The version numbers are authored and are not the engine's real schema
  * window.
@@ -89,7 +97,7 @@ export default {
       </Row>
       <Row
         title="the inline chip on its own"
-        note="NOTICE_CODE, the class string the empty notice, the fill path and the ladder fixture route each spell onto their own <code>. bg-black is a Tailwind default and must not repaint."
+        note="NOTICE_CODE, the class string the empty notice, the fill path and the ladder fixture route each spell onto their own <code>. bg-black and text-white are Tailwind defaults and must not repaint. Read the text, not just the pill: this chip inherited its foreground until this mode showed it black on black."
       >
         <p className="text-sm">
           Run <code className={NOTICE_CODE}>pnpm push</code> to publish the

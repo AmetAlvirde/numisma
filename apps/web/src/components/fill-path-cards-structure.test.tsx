@@ -514,6 +514,7 @@ describe("the torn banner and the two warnings carry their rules as utilities", 
     expect(NOTICE_CODE.split(" ")).toEqual([
       "rounded-[6px]",
       "bg-black",
+      "text-white",
       "px-1.5",
       "py-0.5",
     ]);

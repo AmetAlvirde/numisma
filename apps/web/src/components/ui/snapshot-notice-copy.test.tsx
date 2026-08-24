@@ -79,6 +79,7 @@ describe("SnapshotEmptyNotice", () => {
     expect(NOTICE_CODE.split(" ")).toEqual([
       "rounded-[6px]",
       "bg-black",
+      "text-white",
       "px-1.5",
       "py-0.5",
     ]);
