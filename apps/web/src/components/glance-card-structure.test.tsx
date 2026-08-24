@@ -44,7 +44,7 @@ import {
   expectNoStyledClassSurvives,
   screen,
 } from "../render.testkit.tsx";
-import { CARD_SURFACE } from "./ui/Card.tsx";
+import { CARD_SURFACE } from "@numisma/components";
 import { GlanceCard } from "./GlanceCard.tsx";
 import type { Verdict } from "../glance/verdict.ts";
 

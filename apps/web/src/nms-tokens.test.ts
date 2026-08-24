@@ -70,7 +70,7 @@ describe("the app defines every token the package declares", () => {
   it("declares at least as many tokens as the package does", () => {
     // Guards the direction the per-name cases cannot: a token list that shrank
     // to nothing would pass an empty `it.each`.
-    expect(NMS_TOKEN_NAMES.length).toBeGreaterThanOrEqual(12);
+    expect(NMS_TOKEN_NAMES.length).toBeGreaterThanOrEqual(15);
   });
 
   it("defines no --nms-* name the package never declared", () => {
@@ -86,7 +86,10 @@ describe("the app defines every token the package declares", () => {
     // token no component reads is a token no test can verify, which is the
     // rule `tokens.ts` already keeps on the package's own side. When a
     // component starts reading a name, the name lands in `NMS_TOKEN_NAMES`
-    // first and this case goes green with it.
+    // first and this case goes green with it. Both names spec #412 minted
+    // early have now made that round trip: `--nms-muted-foreground` with
+    // `Absent` and `--nms-card` with `Card`, each declared, aliased and
+    // mirrored again in the slice that moved the component reading it.
     expect([...defined].sort()).toEqual([...NMS_TOKEN_NAMES].sort());
   });
 });
@@ -108,11 +111,15 @@ describe("the app defines every token the package declares", () => {
  * THE APP'S `--muted` IS READ, NEVER REDEFINED, and that has not changed.
  * Redefining it would repaint 25 call sites in `styles.css` and 2 in
  * `PriceDropPathChart.tsx` — the capture the spike suffered by accident, which
- * is the whole reason this increment namespaces rather than renames. What went
- * away is the alias that carried it into the package's namespace: spec #420 S0
- * deleted `--nms-muted-foreground` along with `--nms-card`, because no
- * component in the package reads either name and the block is now an exact
- * mirror of `NMS_TOKEN_NAMES` in both directions.
+ * is the whole reason this increment namespaces rather than renames. What
+ * carries it into the package's namespace is an ALIAS under a second name.
+ * Spec #420 S0 deleted `--nms-muted-foreground` along with `--nms-card` because
+ * no component in the package read either one; spec #432 §4.1 brought each back
+ * in the slice that moved the component reading it, `Absent` and then `Card`,
+ * which is the precondition the deletion was about. The block stays an exact
+ * mirror of `NMS_TOKEN_NAMES` in both directions — fifteen names now, the two
+ * that came back plus `--nms-neg`, which the app never carried before, and both
+ * sides moved together on every one.
  *
  * `--nms-muted` IS NOT `--muted`, and the collision of English words is exactly
  * why the prefix exists. shadcn reads `--nms-muted` as a recessed SURFACE
@@ -146,6 +153,15 @@ describe("the app's --nms-* overrides in styles.css", () => {
     ["--nms-border", "var(--line)"],
     ["--nms-input", "var(--line)"],
     ["--nms-destructive", "var(--neg)"],
+    ["--nms-muted-foreground", "var(--muted)"],
+    ["--nms-card", "var(--card)"],
+    // TWO NAMES, ONE HOUSE COLOUR, AND THAT IS THE END STATE (spec #432 §4.1).
+    // `--nms-destructive` is the affordance of a control that destroys
+    // something; `--nms-neg` is the sign of a number. Both read `--neg` today,
+    // and the pair is written out here rather than collapsed so a future edit
+    // that points one of them somewhere else reds this line instead of passing
+    // as a tidy-up.
+    ["--nms-neg", "var(--neg)"],
   ])("aliases %s onto %s rather than copying its value", (name, alias) => {
     expect(overrides.get(name)).toBe(alias);
   });
@@ -166,13 +182,20 @@ describe("the app's --nms-* overrides in styles.css", () => {
   it("mints a recessed surface for --nms-muted, distinct from the app's --muted text", () => {
     expect(stylesCss).toMatch(/^\s*--recess:\s*#[0-9a-f]{6};/m);
     expect(overrides.get("--nms-muted")).toBe("var(--recess)");
-    // And the app's own `--muted` is READ by hand-written rules, never aliased
-    // into the package's namespace. `--nms-muted-foreground` used to carry it
-    // across; spec #420 S0 deleted that alias because nothing in the package
-    // reads the name. The two greys stay separate either way — that is what the
-    // prefix is for — and this line is what stops the collision being "fixed"
-    // by pointing one at the other.
-    expect(overrides.has("--nms-muted-foreground")).toBe(false);
+    // And the app's own `--muted` is READ by hand-written rules, never
+    // REDEFINED. What carries it into the package's namespace is a second name,
+    // `--nms-muted-foreground`, which spec #432 §4.1 restored in the same slice
+    // that moved `Absent` into the package reading it. The two greys stay
+    // separate either way — that is what the prefix is for — and the pair of
+    // assertions here is what stops the collision being "fixed" by pointing one
+    // at the other.
+    //
+    // THE ASSERTION ABOVE IS THE ONE THAT MATTERS ON THIS LINE'S ACCOUNT.
+    // `--nms-muted` stays pointed at `--recess` no matter how many aliases the
+    // block carries, because the surface and the text are two different roles.
+    // A mechanical rename that welded them would satisfy the line below and red
+    // the line above, which is exactly the order those two are written in.
+    expect(overrides.get("--nms-muted-foreground")).toBe("var(--muted)");
   });
 
   it("leaves --ok, --warn and --pos app-only", () => {

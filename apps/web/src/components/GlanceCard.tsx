@@ -1,3 +1,4 @@
+import { Absent, Card } from "@numisma/components";
 import { formatUsd } from "@numisma/engine/format";
 import type {
   ChangeSlot,
@@ -7,8 +8,6 @@ import type {
   Verdict,
 } from "../glance/verdict.ts";
 import { referenceLabel } from "../glance/verdict.ts";
-import { Absent } from "./ui/Absent.tsx";
-import { Card } from "./ui/Card.tsx";
 import {
   METRICS_FIGURE,
   METRICS_LIST,

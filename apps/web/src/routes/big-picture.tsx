@@ -1,13 +1,13 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import type { SnapshotAnchor } from "../projection/contract.ts";
 import { composeBigPicture } from "../glance/row-view.ts";
 import { getDashboard } from "../lib/dashboard.ts";
 import { Shell } from "../components/Shell.tsx";
-import { Crumb } from "../components/ui/Crumb.tsx";
 import {
+  Crumb,
   SnapshotEmptyNotice,
   SnapshotStaleNotice,
-} from "../components/ui/SnapshotNotice.tsx";
+} from "@numisma/components";
 import { SummaryCard } from "../components/SummaryCard.tsx";
 import { SectionTable } from "../components/SectionTable.tsx";
 
@@ -75,7 +75,15 @@ function BigPictureView({
   const view = composeBigPicture(latest, anchors);
   return (
     <Shell>
-      <Crumb to="/">← Glance</Crumb>
+      <Crumb
+        renderLink={({ className, children }) => (
+          <Link className={className} to="/">
+            {children}
+          </Link>
+        )}
+      >
+        ← Glance
+      </Crumb>
       <SummaryCard
         summary={report.dashboard.summary}
         usdMxn={report.totals.usdMxn}

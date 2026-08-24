@@ -14,7 +14,9 @@
 
 :root {
   --nms-background: oklch(1 0 0);
+  --nms-card: oklch(0.985 0 0);
   --nms-foreground: oklch(0.145 0 0);
+  --nms-muted-foreground: oklch(0.556 0 0);
   --nms-muted: oklch(0.97 0 0);
   --nms-border: oklch(0.922 0 0);
   --nms-input: oklch(0.922 0 0);
@@ -23,6 +25,7 @@
   --nms-secondary: oklch(0.97 0 0);
   --nms-secondary-foreground: oklch(0.205 0 0);
   --nms-destructive: oklch(0.45 0 0);
+  --nms-neg: oklch(0.45 0 0);
   --nms-ring: oklch(0.708 0 0);
   --nms-radius-md: 0.375rem;
 }

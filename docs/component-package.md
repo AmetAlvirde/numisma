@@ -34,13 +34,20 @@ a contract rather than an accident.
   Tailwind build scan the class strings inside it. Adding a build step here
   removes the scanning.
 - **No CSS at all.** Not a stylesheet, not a `@theme` block, not a token file.
-- **The token specification**, `NMS_TOKENS` in `src/tokens.ts`: twelve
+- **The token specification**, `NMS_TOKENS` in `src/tokens.ts`: fifteen
   `--nms-*` names today, each with a grayscale default and a note saying what
   reads it. The names are read off component source, not pasted from an upstream
   shadcn theme, so a token a consumer is asked to define is always a token
-  something renders.
+  something renders. Spec #432 wave 1 minted the last three
+  (`--nms-card`, `--nms-muted-foreground`, `--nms-neg`), each in the slice that
+  moved the component reading it. Four more names are written down in the
+  file's header table and deliberately unminted, waiting on the component that
+  reads them.
 - **A curated export surface.** `src/index.ts` names each export by hand. Today
-  that is `Button`, `buttonVariants`, `cn`, and the token spec. No `export *`.
+  that is seven components — `Absent`, `Button`, `Card`, `CardTitle`, `Crumb`,
+  `SnapshotEmptyNotice` and `SnapshotStaleNotice` — plus `buttonVariants`, the
+  two data exports `CARD_SURFACE` and `NOTICE_CODE`, `cn`, and the token spec.
+  No `export *`.
 - **No `paths` in the package tsconfig**, deliberately. A stray `@/` specifier
   is a typecheck failure rather than a bundler-specific silence, so the package
   proves its own self-containment on every `pnpm typecheck`.
@@ -161,7 +168,7 @@ increment on purpose, rather than bought as a side effect of a package increment
 
 This is the **package-side** computed-style procedure: it judges a package
 component in the workbench, on each of the three theme modes. Its app-side twin
-is §8, the Chrome checklist, which judges a converted app surface in the real
+is §9, the Chrome checklist, which judges a converted app surface in the real
 app. Both exist for the same reason, given in §3: a text channel cannot answer
 whether a rule won the cascade and computed to the right value.
 
@@ -171,9 +178,13 @@ whether a rule won the cascade and computed to the right value.
 pnpm --filter @numisma/workbench dev
 ```
 
-then http://localhost:5100. The fixtures live under `button`
-([`apps/workbench/src/ui/button.fixture.tsx`](../apps/workbench/src/ui/button.fixture.tsx)):
-`variants`, `sizes`, `icon sizes`, `states`. The mode switcher is the `theme`
+then http://localhost:5100. Every exported component has a fixture under
+[`apps/workbench/src/ui/`](../apps/workbench/src/ui/), one file per component,
+and `fixture-coverage.test.ts` fails the moment an export arrives without one.
+The passes below are written against `button`
+([`apps/workbench/src/ui/button.fixture.tsx`](../apps/workbench/src/ui/button.fixture.tsx)),
+whose fixtures are `variants`, `sizes`, `icon sizes` and `states`; it exercises
+the most roles, so it is the one to walk first. The mode switcher is the `theme`
 select in the control panel's inputs section, top right. **It opens in
 grayscale**, deliberately: a component opened cold should be judged before
 palette gets a vote.
@@ -234,7 +245,11 @@ before reading anything computed.
 
 ## 6. Adding a component
 
-`pnpm components:add <name>` is the **only** sanctioned way. It injects the
+A component reaches the package one of two ways, and which one depends on where
+it came from.
+
+**From upstream shadcn: `pnpm components:add <name>`, the only sanctioned way.**
+It injects the
 tsconfig `paths` mapping the shadcn CLI needs, runs the add against the package's
 own `components.json`, strips the mapping again, rewrites `@/…` imports to
 relative specifiers, rewrites bare custom-property reads into the `--nms-`
@@ -255,7 +270,68 @@ Two things it refuses on rather than guessing:
 The script never touches `src/index.ts`. That surface is curated by hand, one
 export at a time.
 
-## 7. Two things about the two Tailwind entries
+**From `apps/web`: by hand, under §7's two conventions.** The house components
+were written in the app before the package existed, so there is no upstream to
+add them from and nothing for the script to rewrite. Spec #432 wave 1 moved the
+first four — `Absent`, `Card`, `Crumb` and `SnapshotNotice` — and the move is a
+rewrite rather than a `git mv`: the file is renamed to kebab-case, its imports
+are made relative and extensionless, and every colour read is re-spelled from
+the app's bare palette name into the `--nms-` namespace, one substitution per
+line. The last of those is the step with a trap in it, and `src/tokens.ts`'s
+header table is what a migrating file looks the name up in rather than guessing.
+`ops/components/nms-namespace.test.ts` catches a read left outside the
+namespace; nothing catches the right namespace with the wrong name in it, which
+is why the table exists.
+
+## 7. Two conventions about package source
+
+Both are house rules with a cost attached, and both are decided here so a file
+crossing in from `apps/web` is not deciding them again under migration pressure.
+
+### How a component reads colour
+
+**shadcn-derived components read Tailwind theme utilities. House components read
+bare `var(--nms-*)` inside arbitrary values.**
+
+`Button` came from the shadcn CLI and writes `bg-primary`, `border-ring`. That
+stays: the utilities are how shadcn writes components, and rewriting them would
+make every future `components:add` diff against upstream by hand. A component
+written in this repo writes `text-[var(--nms-muted-foreground)]` instead, never
+`text-muted-foreground`.
+
+Both forms resolve to the same value, through the `@theme` mapping §2 already
+asks every consumer for, so this is a convention about source form and not a
+second palette.
+
+Why the bare form for house components:
+
+- **A mint stays a three-sided edit.** A new name needs `src/tokens.ts`, the
+  app's `styles.css` alias, and the workbench's `theme-modes.ts` tables. Reading
+  it through a utility would add two more sides: the consumer's `@theme` block,
+  and [`ops/components/consumers.ts`](../ops/components/consumers.ts), which
+  generates the workbench's CSS.
+- **It keeps a guard's list short.**
+  [`apps/web/src/theme-color-utilities.test.ts`](../apps/web/src/theme-color-utilities.test.ts)
+  forbids app code from reaching house colour through a theme utility, and it
+  works off a **literal** list of nine names. Every house name promoted to a
+  utility has to join that list or `text-neg` in app code walks past the guard
+  that exists to catch exactly that.
+- **It makes a migration mechanical.** `[var(--x)]` becomes `[var(--nms-x)]`,
+  one substitution per line, which is a diff a reviewer can count.
+
+### How a component file is named
+
+**Every component file in the package is kebab-case**, generic and domain alike.
+`button.tsx` from the shadcn CLI, and `absent.tsx`, `card.tsx`, `crumb.tsx` and
+`snapshot-notice.tsx` renamed on the way in from `apps/web`.
+
+That is the name the shadcn CLI writes and the name `pnpm components:add` keeps
+writing, so the alternative is not "PascalCase files" but a package where the
+scripted path and the hand path disagree about the same file. Components
+arriving from `apps/web` are renamed on the way in, once, rather than landing
+under their old name and being renamed later by a sweep nobody scheduled.
+
+## 8. Two things about the two Tailwind entries
 
 **Preflight is included in the workbench and omitted in `apps/web`, permanently.**
 This is the one deliberate divergence between the two entries, and
@@ -315,7 +391,7 @@ utility on the value `:root` already computed. Half the tokens switch, half do
 not, and nothing on screen says which half. That is failure two wearing a
 different hat, inside the instrument built to catch it.
 
-## 8. The app-side Chrome checklist
+## 9. The app-side Chrome checklist
 
 §5 judges a package component in the workbench. This judges a converted **app
 surface** in the real app, and it is the procedure spec #420 ran once per slice,

@@ -1,74 +1,74 @@
 // @vitest-environment jsdom
 /**
- * THE CRUMB'S MARKUP AND ITS DESTINATION — Seam D's fourth part, and the only primitive
- * in this increment that changed a SIGNATURE rather than only moving markup.
+ * THE CRUMB'S MARKUP AND ITS SLOT — Seam D's fourth part, and the one primitive in
+ * `@numisma/components` whose signature changed on the way across the boundary
+ * (spec #432 §4.4, slice #437).
  *
- * S5's acceptance is that `big-picture.tsx`'s inline crumb is gone AND its rendered
- * markup is unchanged. The first clause is visible in a diff. The second is what this
- * file holds, on the two axes a call site can get wrong:
+ * The acceptance is that no page moved AND that the destination still type-checks
+ * where it is written, on the three axes a call site can get wrong:
  *
- *   1. THE ELEMENT AND ITS CLASS. All four call sites rendered `<p class="crumb"><a>`.
- *      A `<div>` here would change the element and the class census on four pages at
- *      once, and look identical in every screenshot.
- *   2. THE DESTINATION. The route-local version hard-coded `to="/"`; this one takes it as
- *      a required prop, precisely because the `/big-picture` crumb points the other way.
- *      A component that ignored `to` would render four crumbs that all look right and
- *      send the operator to one place.
+ *   1. THE ELEMENT AND ITS CLASS. All five call sites render `<p><a>`. A `<div>`
+ *      here would change the element and the class census on three pages at once,
+ *      and look identical in every screenshot.
+ *   2. THE PACKAGE'S CLASSES. The package owns the anchor's class attribute and
+ *      hands it to the slot; it does not own the anchor. A slot that dropped the
+ *      `className` it was handed would render an unstyled crumb that still has the
+ *      right words in it.
+ *   3. THE DESTINATION, which is now entirely the caller's. `to` left the package
+ *      with the router, so what this file pins is that the crumb renders whatever
+ *      the slot returns — including the direction. Two call sites point opposite
+ *      ways and a crumb that overrode either would send the operator to one place.
  *
- * IT MOUNTS UNDER A MEMORY ROUTER, because `Link` reads router context and throws without
- * one. A memory history is the honest substitute: the link is a real `Link` resolving a
- * real `to` against a real router, so `href` is what the router computed rather than what
- * a stub echoed back. The route tree here is authored for the test and is deliberately
- * not the app's — this is a primitive's contract, not a routing assertion.
+ * THERE IS NO ROUTER HERE ANY MORE, and its absence is the point rather than a
+ * simplification. The previous version mounted a memory router because `Link` read
+ * router context and threw without one; the package cannot import a router at all,
+ * so a crumb that still needed one would not render in `apps/workbench` either.
+ * The slot is what makes both true, and `<a href>` below is the same stub the
+ * workbench fixture supplies.
  *
  * Every value below is authored. No product data and no route file is involved.
  */
 import { describe, expect, it } from "vitest";
-import {
-  RouterProvider,
-  createMemoryHistory,
-  createRootRoute,
-  createRouter,
-} from "@tanstack/react-router";
+import type { ReactNode } from "react";
+
+import { Crumb } from "@numisma/components";
 
 import {
   classTokens as tokens,
   render,
   renderedClassNames,
-  screen,
 } from "../../render.testkit.tsx";
-import { Crumb } from "./Crumb.tsx";
 
 /**
- * Mount one crumb at the top of a throwaway router and hand back its container.
+ * Mount one crumb whose slot builds a plain anchor at `href`, and hand back both
+ * the render result and the props the package passed into the slot.
  *
- * AWAITED, because a TanStack router resolves its first match asynchronously: the
- * container is empty on the synchronous return and every assertion below would read
- * `undefined` off an unmounted tree. One crumb per case, so the awaited link is
- * unambiguously this case's.
+ * SYNCHRONOUS NOW. The awaited `findByRole` the router version needed is gone with
+ * the router: nothing here resolves a route match, so the container holds the
+ * crumb on the synchronous return.
  */
-async function renderCrumb(to: string, label: string) {
-  const rootRoute = createRootRoute({
-    component: () => <Crumb to={to}>{label}</Crumb>,
-  });
-  const router = createRouter({
-    routeTree: rootRoute,
-    // THE HISTORY SITS SOMEWHERE ELSE, deliberately. `Link` adds its own `active` class
-    // when the current location matches `to`, and a crumb links AWAY from the page that
-    // renders it — all four call sites point at a route the reader is not on. Starting
-    // the history on the crumb's own destination would census a class no call site emits.
-    history: createMemoryHistory({ initialEntries: ["/elsewhere"] }),
-  });
-  // The router's own type is registered against the app's route tree; this authored tree
-  // is not that tree, which is the one place a test-local router has to say so.
-  const result = render(<RouterProvider router={router as never} />);
-  await screen.findByRole("link");
-  return result;
+function renderCrumb(href: string, label: string) {
+  const seen: { className: string; children: ReactNode }[] = [];
+  const result = render(
+    <Crumb
+      renderLink={(props) => {
+        seen.push(props);
+        return (
+          <a className={props.className} data-from-slot="" href={href}>
+            {props.children}
+          </a>
+        );
+      }}
+    >
+      {label}
+    </Crumb>,
+  );
+  return { ...result, seen };
 }
 
 describe("Crumb", () => {
-  it("renders the paragraph wrapping an anchor that all four call sites rendered", async () => {
-    const { container } = await renderCrumb("/", "← Glance");
+  it("renders the paragraph wrapping an anchor that all five call sites rendered", () => {
+    const { container } = renderCrumb("/", "← Glance");
     const root = container.firstElementChild;
 
     expect(root?.tagName).toBe("P");
@@ -79,8 +79,8 @@ describe("Crumb", () => {
     expect(root?.textContent).toBe("← Glance");
   });
 
-  it("carries `.crumb`, `.crumb a` and the hover state as utilities", async () => {
-    const { container } = await renderCrumb("/", "← Glance");
+  it("carries `.crumb`, `.crumb a` and the hover state as utilities", () => {
+    const { container } = renderCrumb("/", "← Glance");
     const root = container.firstElementChild!;
     const link = container.querySelector("a")!;
 
@@ -89,26 +89,53 @@ describe("Crumb", () => {
     expect(tokens(root)).toContain("m-0");
     expect(tokens(root)).toContain("text-[0.9rem]");
 
-    expect(tokens(link)).toContain("text-[var(--muted)]");
+    // Both colours are namespaced now: a package file may read no house name, and
+    // `apps/web` aliases each onto the house colour the deleted `.crumb a` rule read.
+    expect(tokens(link)).toContain("text-[var(--nms-muted-foreground)]");
     expect(tokens(link)).toContain("no-underline");
-    // The hover state converts ONCE here because spec #403 pulled four call sites onto
+    // The hover state converts ONCE here because spec #403 pulled five call sites onto
     // this primitive first. It is a class rather than a rule now, so it is assertable.
-    expect(tokens(link)).toContain("hover:text-[var(--text)]");
+    expect(tokens(link)).toContain("hover:text-[var(--nms-foreground)]");
 
     expect([...renderedClassNames(root)]).not.toContain("crumb");
   });
 
+  // THE NEW CASE, and the wave's only one (spec #432 §6). The two above would both
+  // pass against a package that still built its own anchor, which is exactly what it
+  // may no longer do: the workbench has no router and `@tanstack/react-router` is not
+  // a dependency of `@numisma/components`.
+  it("renders the caller's anchor, through the slot, with the package's classes", () => {
+    const { container, seen } = renderCrumb("/", "← Glance");
+    const link = container.querySelector("a")!;
+
+    // The rendered anchor is the element the SLOT built. `data-from-slot` is not a
+    // thing the package could have emitted, so an anchor without it is an anchor the
+    // package made for itself.
+    expect(link.hasAttribute("data-from-slot")).toBe(true);
+
+    // Called once, with the class string the package owns and the children the caller
+    // passed — the whole of the slot's contract, and nothing about navigation in it.
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.className).toBe(
+      "text-[var(--nms-muted-foreground)] no-underline hover:text-[var(--nms-foreground)]",
+    );
+    expect(seen[0]?.children).toBe("← Glance");
+    // What the slot was handed is what the anchor wears: a call site that dropped the
+    // class would render the words with none of the paint.
+    expect(link.getAttribute("class")).toBe(seen[0]?.className);
+  });
+
   // Two call sites, two directions, one case each. The ladder's crumb goes UP to the
   // glance; the big picture's goes DOWN from it, which is why the destination could
-  // never be implicit — a primitive that ignored `to` passes one of these and fails the
-  // other.
-  it("points at the destination it was handed, going up", async () => {
-    const { container } = await renderCrumb("/", "← Glance");
+  // never live in the primitive — the slot hands out a class name and children, and
+  // everything about where the link goes stays at the call site.
+  it("points at the destination the slot built, going up", () => {
+    const { container } = renderCrumb("/", "← Glance");
     expect(container.querySelector("a")?.getAttribute("href")).toBe("/");
   });
 
-  it("points at the destination it was handed, going down", async () => {
-    const { container } = await renderCrumb("/big-picture", "Big picture →");
+  it("points at the destination the slot built, going down", () => {
+    const { container } = renderCrumb("/big-picture", "Big picture →");
     expect(container.querySelector("a")?.getAttribute("href")).toBe("/big-picture");
     // The glyph is the caller's (see the primitive's header): nothing here derives it
     // from the destination, so a crumb pointing down still reads as pointing down.

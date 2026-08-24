@@ -19,11 +19,19 @@
  * this primitive is now the single thing that can get it wrong for every card.
  *
  * Everything below is authored. No ledger output has been near this file.
+ *
+ * THE PRIMITIVE MOVED AND THE TEST DID NOT (spec #432 §4.1, §4.6). `Card`, `CardTitle`
+ * and `CARD_SURFACE` ship from `@numisma/components`, and this file imports the
+ * specifier rather than a path, so what it pins is the SHIPPED surface — what five
+ * component call sites, nine more importers of the string and the workbench fixture all
+ * get — instead of a local file. "The later workbench fixtures" named above are no
+ * longer later: `ui/card.fixture.tsx` imports both names, which is what
+ * `fixture-coverage.test.ts` demands the day a component is exported.
  */
 import { describe, expect, it } from "vitest";
 
 import { classTokens as tokens, render, screen } from "../../render.testkit.tsx";
-import { Card, CARD_SURFACE, CardTitle } from "./Card.tsx";
+import { Card, CARD_SURFACE, CardTitle } from "@numisma/components";
 
 describe("Card", () => {
   it("attaches its parts under both names, as one function each", () => {
@@ -52,10 +60,14 @@ describe("Card", () => {
     const { container } = render(<Card>body</Card>);
     const root = container.firstElementChild!;
 
+    // THE TWO COLOURS ARE THE DECLARATIONS THAT CHANGED SPELLING (spec #432 §4.1). A
+    // package file may read no house name, so the fill is `--nms-card` and the hairline
+    // `--nms-border`, and `styles.css` aliases each onto the house name `.card` used.
+    // The painted values are unmoved: `#181b22` behind a `#262a33` edge.
     for (const utility of [
-      "bg-[var(--card)]",
+      "bg-[var(--nms-card)]",
       "border",
-      "border-[var(--line)]",
+      "border-[var(--nms-border)]",
       // 12px and 16px, an exact match for Tailwind's `--radius-xl` and `--spacing`
       // scale. `rounded-md` would have compiled and painted the package's 8px control
       // radius, which `tailwind.css` remaps.

@@ -1,11 +1,11 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import { getDashboard } from "../lib/dashboard.ts";
 import { Shell } from "../components/Shell.tsx";
-import { Crumb } from "../components/ui/Crumb.tsx";
 import {
+  Crumb,
   SnapshotEmptyNotice,
   SnapshotStaleNotice,
-} from "../components/ui/SnapshotNotice.tsx";
+} from "@numisma/components";
 import { GlanceCard } from "../components/GlanceCard.tsx";
 import { DcaCard } from "../components/DcaCard.tsx";
 import { computeVerdict } from "../glance/verdict.ts";
@@ -91,7 +91,15 @@ function GlanceView({
   return (
     <Shell>
       <GlanceCard verdict={verdict} />
-      <Crumb to="/big-picture">Big picture →</Crumb>
+      <Crumb
+        renderLink={({ className, children }) => (
+          <Link className={className} to="/big-picture">
+            {children}
+          </Link>
+        )}
+      >
+        Big picture →
+      </Crumb>
       <DcaCard view={dca} />
     </Shell>
   );

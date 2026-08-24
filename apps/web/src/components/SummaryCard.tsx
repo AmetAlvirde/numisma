@@ -1,7 +1,6 @@
 import type { DashboardSummary } from "@numisma/engine";
 import { formatUsd, formatSignedPercent } from "@numisma/engine/format";
-import { Absent } from "./ui/Absent.tsx";
-import { Card } from "./ui/Card.tsx";
+import { Absent, Card } from "@numisma/components";
 
 /**
  * The one cause that can reach this card, stated rather than passed. `Absent` takes the
@@ -65,8 +64,8 @@ export const NEGATIVE = "text-[var(--neg)]";
  * written in; `[header_&]:` compiles to a descendant selector that outranks the base on
  * specificity, so the override is decided by the cascade rule it means. It keys off the
  * ELEMENT because the class it used to key off (`.summary-head`) is what this slice
- * deletes, and the summary head is a `<header>` — the same substitution `ui/Absent.tsx`
- * makes with `[dd_&]`. Measured: this string renders in no other `<header>` in the app.
+ * deletes, and the summary head is a `<header>` — the same substitution the package's
+ * `Absent` makes with `[dd_&]`. Measured: this string renders in no other `<header>` in the app.
  */
 const BADGE =
   "inline-block rounded-[999px] px-[10px] py-1 text-[0.78rem] font-semibold whitespace-nowrap [header_&]:flex-initial [header_&]:whitespace-normal";

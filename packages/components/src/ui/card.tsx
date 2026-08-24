@@ -17,7 +17,7 @@ import type { ReactElement, ReactNode } from "react";
  * Grill decision D1. The parts share nothing at runtime, so a provider would buy an
  * indirection with no state behind it. D4 fixes the export shape: parts are attached as
  * plain properties AND named-exported. `Card.Title` is the call-site vocabulary; the
- * named `CardTitle` is what per-part tests and the later workbench fixtures import
+ * named `CardTitle` is what per-part tests and the workbench fixture import
  * directly. They are the same function, asserted. React 19 makes a `forwardRef` wrapper
  * unnecessary, so there is not one.
  *
@@ -27,9 +27,11 @@ import type { ReactElement, ReactNode } from "react";
  * stylesheet. Callers pass their extra classes through as words.
  *
  * ── THIS FILE IMPORTS REACT AND NOTHING ELSE ─────────────────────────────────────────
- * Everything a primitive imports enters the import closure `route-move.test.ts` walks
- * from the ladder route, which allows exactly two `@numisma/*` runtime imports. Prop
- * types are declared inline for the same reason.
+ * The discipline is the one it kept in `apps/web`; what enforces it now sits on the other
+ * side of the boundary. `packages/components` declares four runtime dependencies, and
+ * that short list is the whole reason `apps/web`'s ladder-route closure guard admits
+ * `@numisma/components` into a browser bundle at all. Everything this file imports, every
+ * consumer of the package inherits. Prop types are declared inline for the same reason.
  */
 export function Card({
   className,
@@ -53,13 +55,14 @@ export function Card({
 /**
  * THE CARD SURFACE, SPELLED ONCE (spec #420 slice 2).
  *
- * `.card` was `background: var(--card); border: 1px solid var(--line);
- * border-radius: 12px; padding: 16px`, and it is deleted. These four utilities are that
- * rule, and they are exported because EIGHT ELEMENTS CARRY THE SURFACE AND THREE OF THEM
- * ARE NOT CARDS: the fill path's two unrecorded-fill warnings, login's `<form>`, and the
- * ladder routes' notice `<div>`s. The docblock above declines to absorb them into this
- * component and that has not changed — what they share is a painted surface, not a
- * landmark — so what they import is the string, not the section.
+ * `.card` filled with the app's house surface colour `--card`, drew a 1px border in its
+ * house hairline `--line`, and set a 12px radius and 16px of padding. It is deleted.
+ * These four utilities are that rule, and they are exported because EIGHT ELEMENTS CARRY
+ * THE SURFACE AND THREE OF THEM ARE NOT CARDS: the fill path's two unrecorded-fill
+ * warnings, login's `<form>`, and the ladder routes' notice `<div>`s. The docblock above
+ * declines to absorb them into this component and that has not changed — what they share
+ * is a painted surface, not a landmark — so what they import is the string, not the
+ * section.
  *
  * THE TORN BANNER IS THE ONE THAT NO LONGER IMPORTS IT (spec #420 slice 8). Its edge is
  * `--neg` rather than `--line`, and a second unvariant `border-color` utility beside this
@@ -69,11 +72,23 @@ export function Card({
  * `rounded-xl` IS THE ONE DEFAULT-SCALE CLASS HERE and it is an exact match: Tailwind's
  * `--radius-xl` is 0.75rem. `rounded-md` would NOT have been — `tailwind.css`'s `@theme`
  * remaps `--radius-md` onto the package's 8px control radius — the same shape of trap as
- * the theme colour utilities, in the radius namespace, and the reason the house colours
- * below are read as arbitrary values.
+ * the theme colour utilities, in the radius namespace, and the reason the colours below
+ * are read as arbitrary values.
+ *
+ * THE TWO COLOURS ARE THE ONLY THING THAT DID NOT SURVIVE THE MOVE VERBATIM (spec #432
+ * §4.1). A package file may read no house name, so the fill spells `--nms-card` and the
+ * hairline `--nms-border`, and `apps/web` aliases each onto the house name the deleted
+ * rule used. In app mode that is `#181b22` behind a `#262a33` hairline, which is what
+ * `apps/web` painted before the move and what it paints after it.
+ *
+ * THE QUOTED RULE ABOVE IS DELIBERATELY WRITTEN WITHOUT `var()`. The package's namespace
+ * guard scans raw file text with no comment stripping, so a historically exact quotation
+ * would be reported as a bare house read. Rewriting the quote to the `--nms-*` spellings
+ * would be worse: the deleted rule never read those names, and this docblock is where a
+ * reader goes to find out what it did read.
  */
 export const CARD_SURFACE =
-  "rounded-xl border border-[var(--line)] bg-[var(--card)] p-4";
+  "rounded-xl border border-[var(--nms-border)] bg-[var(--nms-card)] p-4";
 
 /**
  * The card's heading.

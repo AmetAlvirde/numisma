@@ -189,9 +189,11 @@
  */
 @theme {
   --color-background: var(--nms-background);
+  --color-card: var(--nms-card);
   --color-foreground: var(--nms-foreground);
 
   --color-muted: var(--nms-muted);
+  --color-muted-foreground: var(--nms-muted-foreground);
   --color-border: var(--nms-border);
   --color-input: var(--nms-input);
   --color-ring: var(--nms-ring);
@@ -203,6 +205,7 @@
   --color-secondary-foreground: var(--nms-secondary-foreground);
 
   --color-destructive: var(--nms-destructive);
+  --color-neg: var(--nms-neg);
 
   --radius-md: var(--nms-radius-md);
 }

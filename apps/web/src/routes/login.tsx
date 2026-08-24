@@ -1,10 +1,9 @@
 import { useState } from "react";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useMutation } from "@tanstack/react-query";
-import { Button } from "@numisma/components";
+import { Button, CARD_SURFACE } from "@numisma/components";
 
 import { authClient } from "../lib/auth-client.ts";
-import { CARD_SURFACE } from "../components/ui/Card.tsx";
 
 export const Route = createFileRoute("/login")({
   component: LoginPage,

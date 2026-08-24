@@ -43,7 +43,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { classCensus, render, screen, userEvent } from "../render.testkit.tsx";
 import { Route } from "./login.tsx";
-import { CARD_SURFACE } from "../components/ui/Card.tsx";
+import { CARD_SURFACE } from "@numisma/components";
 
 /**
  * Never settles by default, so the pending arm cannot race the assertions below. The

@@ -27,7 +27,7 @@ import { describe, expect, it } from "vitest";
  * that none may.
  *
  * WHAT THIS FILE DELIBERATELY DOES NOT ASSERT, because §8.1's other two clauses are held
- * where they were already held and a second copy would drift: the twelve `--nms-*` names
+ * where they were already held and a second copy would drift: the fifteen `--nms-*` names
  * matching `NMS_TOKEN_NAMES` in both directions is `nms-tokens.test.ts`, and no colour
  * literal outside the two blocks is `summary-section-deleted.test.ts`, which has held it
  * since the badges took the file's last two.

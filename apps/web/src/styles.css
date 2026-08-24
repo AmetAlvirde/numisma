@@ -59,7 +59,9 @@
    hovered ghost button), `--muted` is secondary TEXT. So `--muted` is READ here and
    NEVER redefined — the whole app's secondary text reads it, as `text-[var(--muted)]` in
    class strings and as `var(--muted)` in the chart's own marks — and
-   the surface gets its own minted grey instead. `--ok`, `--warn`, `--pos` and `--now`
+   the surface gets its own minted grey instead. The package's secondary text reaches the
+   same grey through `--nms-muted-foreground`, an alias and never a second definition, so
+   an `Absent` rendered from the package paints exactly what it painted from `apps/web`. `--ok`, `--warn`, `--pos` and `--now`
    have no package counterpart and get no alias; `--now` in particular is the spot colour
    chosen to collide with nothing on the Price Drop Path, and aliasing it onto
    `--nms-primary` would put "where price is now" on every button in the app. */
@@ -80,7 +82,18 @@
   --recess: #14161c;
 
   --nms-background: var(--bg);
+  /* THE RAISED SURFACE. `CARD_SURFACE` reads it from inside the package (spec #432
+     §4.1), and the spelling is the one spec #420 slice 0 deleted, reused so the card
+     keeps one name across both vocabularies. Aliased, never copied: `--card` stays the
+     single definition, so the eight elements that carry the surface and the package's
+     `Card` cannot drift apart. */
+  --nms-card: var(--card);
   --nms-foreground: var(--text);
+  /* SECONDARY TEXT, and the one alias that carries a house colour into the package
+     unchanged. `Absent` reads it (spec #432 §4.1); the name is the one spec #420 slice 0
+     deleted, reused on purpose so the two vocabularies keep one word per role. It is NOT
+     the line below — see this block's header. */
+  --nms-muted-foreground: var(--muted);
   --nms-muted: var(--recess);
   --nms-border: var(--line);
   --nms-input: var(--line);
@@ -92,6 +105,12 @@
   --nms-secondary: var(--line);
   --nms-secondary-foreground: var(--text);
   --nms-destructive: var(--neg);
+  /* THE SIGN OF A NUMBER, and the second alias onto `--neg` on purpose (spec #432 §4.1).
+     `SnapshotStaleNotice` reads it from inside the package. Two package names at one app
+     colour is the intended end state: the line above is the affordance of a destructive
+     control, this one is data, and `--neg` stays declared exactly once so the pair cannot
+     drift apart while they mean the same red. */
+  --nms-neg: var(--neg);
   --nms-ring: var(--accent);
   /* GEOMETRY, NOT PALETTE, and the one override here that changes a built-in Tailwind
      utility (`rounded-md`) rather than creating one. The package default is 6px; every

@@ -35,7 +35,7 @@ import {
   expectNoStyledClassSurvives,
   screen,
 } from "../render.testkit.tsx";
-import { CARD_SURFACE } from "./ui/Card.tsx";
+import { CARD_SURFACE } from "@numisma/components";
 import { SectionTable } from "./SectionTable.tsx";
 import type { DashboardSection } from "@numisma/engine";
 import type { BigPictureView } from "../glance/row-view.ts";

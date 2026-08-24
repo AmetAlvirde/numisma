@@ -19,6 +19,14 @@
  * half of that, so the stale variant's census is now the successor shape (Seam E) —
  * per class, `toContain` — and carries the two utilities that replaced `.error`.
  *
+ * ── IT STAYS IN `apps/web` AND IMPORTS THE SHIPPED SURFACE (spec #432 §4.6) ──────────
+ * The notices now live in `packages/components`; this file did not follow them, because
+ * it renders through `../../render.testkit.tsx`, whose header states RTL is imported at
+ * exactly one path in this repo, and the package has neither RTL nor jsdom. Importing
+ * from `"@numisma/components"` rather than a relative path is the better half of that
+ * accident: the copy is asserted against the surface consumers actually get, so an export
+ * dropped from `index.ts` reds here rather than passing against a file still on disk.
+ *
  * The version numbers here are authored, and deliberately not the real schema window —
  * the primitive renders whatever the route hands it, and pinning today's numbers would
  * make this test fail the day the engine's window moves for an unrelated reason.
@@ -31,12 +39,12 @@ import {
   renderedClassNames,
   screen,
 } from "../../render.testkit.tsx";
-import { CARD_SURFACE } from "./Card.tsx";
 import {
+  CARD_SURFACE,
   NOTICE_CODE,
   SnapshotEmptyNotice,
   SnapshotStaleNotice,
-} from "./SnapshotNotice.tsx";
+} from "@numisma/components";
 
 /** JSX collapses its own newlines; the DOM keeps them. Compare on words. */
 function text(node: Element): string {
@@ -71,6 +79,7 @@ describe("SnapshotEmptyNotice", () => {
     expect(NOTICE_CODE.split(" ")).toEqual([
       "rounded-[6px]",
       "bg-black",
+      "text-white",
       "px-1.5",
       "py-0.5",
     ]);
@@ -118,13 +127,20 @@ describe("SnapshotStaleNotice", () => {
 
     expect(root?.tagName).toBe("DIV");
     // Per class, `toContain`, never full-string equality (spec #420 Seam E).
-    for (const utility of [...CARD_SURFACE.split(" "), "text-[var(--neg)]", "m-0"]) {
+    // `--nms-neg`, not `--neg`: the component now lives in `packages/components`, where
+    // the namespace guard forbids a bare house read, and `styles.css` aliases the
+    // package name onto `--neg` so the app paints the colour it painted before.
+    for (const utility of [
+      ...CARD_SURFACE.split(" "),
+      "text-[var(--nms-neg)]",
+      "m-0",
+    ]) {
       expect(tokens(root!)).toContain(utility);
     }
     // `.notice.error h1` is deleted and this is where it went. The heading would inherit
     // the colour from the box anyway; it is written because the rule painted the heading
     // and an element that leans on its parent reads as an omission next time.
-    expect(tokens(screen.getByRole("heading"))).toContain("text-[var(--neg)]");
+    expect(tokens(screen.getByRole("heading"))).toContain("text-[var(--nms-neg)]");
 
     // The last two hooks in this file go with the rules that needed them: slice 1 kept
     // `error` alive only because `.notice.error h1` still selected through it.

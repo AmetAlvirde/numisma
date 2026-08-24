@@ -1,6 +1,7 @@
 import { createContext, useContext, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import { formatUsd } from "@numisma/engine/format";
+import { Absent } from "@numisma/components";
 import type {
   FillPathRungView,
   FillPathView,
@@ -8,9 +9,7 @@ import type {
 } from "../ladder/fill-path-view.ts";
 import { COMPACT_USD } from "../ladder/price-drop-path.ts";
 import { PriceDropPathChart } from "./PriceDropPathChart.tsx";
-import { Absent } from "./ui/Absent.tsx";
-import { Card, CARD_SURFACE } from "./ui/Card.tsx";
-import { NOTICE_CODE } from "./ui/SnapshotNotice.tsx";
+import { Card, CARD_SURFACE, NOTICE_CODE } from "@numisma/components";
 
 /**
  * THE FILL PATH, ON THE PHONE (spec #285 §5.6–5.13 / G-D10b, slice #289) — the declared

@@ -53,6 +53,48 @@
  * none of them are here, because nothing in this package reads them, and a
  * token a consumer is asked to define but nothing renders is a token nobody can
  * verify. Add a name here when a component starts reading it, not before.
+ *
+ * ── THE HOUSE VOCABULARY: TEN NAMES, DECIDED ONCE (spec #432 §4.2) ────────
+ *
+ * `apps/web` owns ten bare palette names. Each has exactly one counterpart in
+ * this namespace, and the whole mapping is written here so a component crossing
+ * into the package looks the name up rather than choosing it again. Six are
+ * declared below; the other four are named and not yet declared, each waiting
+ * on the component that first reads it.
+ *
+ *     house      package                  status
+ *     --bg       --nms-background         declared
+ *     --text     --nms-foreground         declared
+ *     --line     --nms-border             declared
+ *     --card     --nms-card               declared
+ *     --muted    --nms-muted-foreground   declared
+ *     --neg      --nms-neg                declared
+ *     --pos      --nms-pos                named; not yet declared (wave 2)
+ *     --ok       --nms-ok                 named; not yet declared (wave 2)
+ *     --warn     --nms-warn               named; not yet declared (wave 2)
+ *     --now      --nms-now                named; not yet declared (wave 2)
+ *
+ * NAMING WITHOUT DECLARING IS THE POINT, not a half-measure. Declaring the
+ * remaining four now would put four grayscale defaults and four distinct themed
+ * values in front of a reviewer for roles nothing in this package renders, which
+ * is the state the rule above refuses. Naming them costs nothing and settles the two
+ * mappings that are genuinely hard, below, while the argument is still fresh.
+ *
+ * `--muted` MAPS TO `--nms-muted-foreground`, NEVER TO `--nms-muted`. The
+ * English collides and the roles do not: `--nms-muted` is a recessed SURFACE
+ * (Button's `ghost` and `outline` hover), the app's `--muted` is secondary TEXT.
+ * A mechanical `--muted` → `--nms-muted` rewrite compiles, emits a rule, paints
+ * the app's most-used grey wrong, and leaves every guard green, because the
+ * package-side guard checks only that a read sits inside the namespace and never
+ * that it is the right name in it. This row is the defence against that.
+ *
+ * `--nms-neg` IS DISTINCT FROM `--nms-destructive`, though `apps/web` resolves
+ * both to the same red today. They are different kinds of thing: `--neg` is
+ * data, the sign of a number, and `--nms-destructive` is intent, the affordance
+ * of a button that destroys something. Welding them means the money-red cannot
+ * soften, or pair colourblind-safely with `--nms-pos`, without dragging every
+ * destructive affordance along. Two names at one value now is free; one name at
+ * two meanings later is not.
  */
 
 /**
@@ -79,14 +121,24 @@ export const NMS_TOKENS = [
     note: "Page/base surface. Button `outline` sits on it.",
   },
   {
+    name: "--nms-card",
+    value: "oklch(0.985 0 0)",
+    note: "The raised surface a card is painted on, one step off the page. `CARD_SURFACE` fills with it, and eight elements in the app carry that string, three of which are not cards — they share the paint and nothing else. Off-white rather than the page's white on purpose: grayscale mode reviews hierarchy, and a card at the background's value has none to review.",
+  },
+  {
     name: "--nms-foreground",
     value: "oklch(0.145 0 0)",
     note: "Primary text. Also read bare in Button's secondary hover mix.",
   },
   {
+    name: "--nms-muted-foreground",
+    value: "oklch(0.556 0 0)",
+    note: "Secondary TEXT — the quieter of the two type colours. `Absent`'s em dash and its stated cause. NOT `--nms-muted`, which is a surface: same English word, opposite roles, and the mechanical `--muted` rename that welds them is the defect this pair is written against.",
+  },
+  {
     name: "--nms-muted",
     value: "oklch(0.97 0 0)",
-    note: "Recessed surface. Button `ghost` and `outline` hover.",
+    note: "Recessed SURFACE — a well, never type colour. Button `ghost` and `outline` hover. See the row above before reaching for it as a text grey.",
   },
   {
     name: "--nms-border",
@@ -122,6 +174,11 @@ export const NMS_TOKENS = [
     name: "--nms-destructive",
     value: "oklch(0.45 0 0)",
     note: "The destructive role. Button `destructive`, and every `aria-invalid` ring in the package. Grayscale here on purpose: upstream ships this red, and shipping the red would be the one place the package smuggled in a palette.",
+  },
+  {
+    name: "--nms-neg",
+    value: "oklch(0.45 0 0)",
+    note: "The negative SIGN of a number — data, not intent. `SnapshotStaleNotice` paints its refusal with it. NOT `--nms-destructive`, the row above, which is the affordance of a button that destroys something: `apps/web` resolves both to one red today, and welding them means the day the money-red wants to soften, or wants a colourblind-safe pairing with `--nms-pos`, every destructive affordance moves with it. Grayscale here makes sign UNREVIEWABLE in grayscale mode, and that is correct: grayscale reviews hierarchy, spacing and state, and sign is reviewed in themed and app mode, which is what those modes are for.",
   },
   {
     name: "--nms-ring",
