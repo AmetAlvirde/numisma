@@ -69,6 +69,170 @@ import { Card, CARD_SURFACE } from "./ui/Card.tsx";
  * reachable without the chart being involved at all.
  */
 
+/**
+ * ── THE HEADER CARD'S SECTION, AS UTILITIES (spec #420 slice 7) ──────────────────────
+ *
+ * `styles.css` opened the fill path with about three hundred lines covering this one
+ * card: an identity row, a state chip, a spot reading, three tiles, a progress bar, the
+ * waiting block, day zero's hero and TWO `@container fp-header` blocks reflowing most of
+ * it at 380px. Every declaration in that section is now one of the strings below, and
+ * `fill-path-header-section-deleted.test.ts` holds the other end.
+ *
+ * ── THE CONTAINER IS THE CARD, NOT THE VIEWPORT, AND KEEPS ITS ONE NAME ──────────────
+ * `container: fp-header / inline-size` is a shorthand with a single name, which is
+ * exactly what Tailwind's NAMED container utility emits, so `@container/fp-header` is a
+ * literal translation here. The glance card's pair had to be split into a bare
+ * `@container` plus an arbitrary `container-name` because the shorthand carries only
+ * what it is given and that card needed two names; this one needed one.
+ *
+ * ── THE RAIL IS THE SHAPE, AND THREE BLOCKS SHARE IT ─────────────────────────────────
+ * Spot, a tile and the waiting block are the SAME row at 320px — label left, figure hard
+ * right, one line each — and all three turn into a stacked block at 380px of CARD width.
+ * `RAIL` is that shared narrow form; each block adds what it alone declared. Composing
+ * rather than repeating is what keeps the three from drifting apart at one edge, which is
+ * what the deleted rules' shared selector lists were doing.
+ *
+ * ── WHERE A SHORTHAND SITS BESIDE ITS OWN LONGHAND ───────────────────────────────────
+ * `m-0 mb-3` and `m-0 mt-1.5` are the preflight-off pattern every converted surface in
+ * this app uses: the UA margins on `p` are live, so a rule that said `margin: 0 0 12px`
+ * has to zero three edges and set one, and Tailwind sorts the shorthand ahead of the
+ * longhand so the specific edge wins. Two utilities setting the SAME property would be a
+ * coin toss instead — see `BADGE_TONE` below, which is a total map for that reason.
+ */
+const HEADER_CARD = "@container/fp-header";
+const HEADER_TITLE = "m-0 text-[1.15rem] wrap-anywhere";
+const HEADER_HEAD =
+  "block @[380px]/fp-header:flex @[380px]/fp-header:flex-wrap @[380px]/fp-header:items-baseline @[380px]/fp-header:justify-between @[380px]/fp-header:gap-x-4 @[380px]/fp-header:gap-y-0";
+const HEADER_ID =
+  "flex flex-wrap items-baseline gap-x-2 gap-y-1 min-w-0 mb-[10px] @[380px]/fp-header:flex-[1_1_180px]";
+
+/**
+ * THE STATE, AS A TAG — a chip rather than bare text, because it sits beside a heading
+ * and needs an edge to stop reading as part of the title.
+ *
+ * `border-current` IS THE WHOLE POINT OF SPLITTING THE COLOUR OUT. The deleted rule drew
+ * `1px solid currentColor`, so the chip's edge is whatever its text is, and the three
+ * tones below each move both at once.
+ */
+const BADGE =
+  "flex-none rounded-[999px] border border-current px-[7px] py-[2px] text-[0.65rem] font-semibold uppercase leading-[1.4] tracking-[0.05em]";
+
+/**
+ * ONE COLOUR REACHES THE CHIP, AND WHICH ONE IS A FACT ABOUT THIS MAP.
+ *
+ * The deleted rules were a base that painted `--muted` and two overrides that repainted
+ * it. As utilities that is a cascade this string cannot express: two unvariant `color`
+ * utilities on one element are resolved by Tailwind's EMITTED order, not by the order
+ * they are written in. A total map has no override to lose. `DcaCard`'s state word made
+ * the same move for the same reason, and the semantics are deliberately identical —
+ * `pending` is NOT an alarm colour, because a declared ladder awaiting its first fill is
+ * the normal starting state; `unreadable` is the only one that wants the eye.
+ */
+const BADGE_TONE: Record<FillPathView["state"], string> = {
+  pending: "text-[var(--muted)]",
+  active: "text-[var(--pos)]",
+  ended: "text-[var(--muted)]",
+  unreadable: "text-[var(--warn)]",
+};
+
+/** The narrow row every data block on this card is: label left, figure hard right. */
+const RAIL = "flex flex-wrap items-baseline justify-end gap-x-[10px] gap-y-0 m-0 min-w-0";
+
+/**
+ * THE LABEL IS THE ONLY THING THAT GIVES. `flex-[1_1_0]` — a ZERO basis, not `auto` — is
+ * what makes "Expected average entry" wrap to two lines instead of shoving its figure
+ * onto a line of its own: the label is prose and survives a break, the number is the
+ * thing being aligned and must not leave the rail.
+ */
+const TILE_LABEL =
+  "text-[0.7rem] font-semibold uppercase tracking-[0.04em] text-[var(--muted)]";
+const RAIL_LABEL = `${TILE_LABEL} flex-[1_1_0] min-w-0`;
+/** Spot keeps its right alignment when the card reflows; the tiles turn left. */
+const SPOT_LABEL = `${RAIL_LABEL} @[380px]/fp-header:flex-none`;
+const STACKED_LABEL = `${SPOT_LABEL} @[380px]/fp-header:text-left`;
+
+const TILE =
+  `${RAIL} @[380px]/fp-header:flex-col @[380px]/fp-header:items-stretch` +
+  " @[380px]/fp-header:justify-start @[380px]/fp-header:gap-x-0 @[380px]/fp-header:gap-y-[2px]";
+const TILE_VALUE =
+  "flex-none text-right text-[1.05rem] tabular-nums @[380px]/fp-header:text-left";
+/**
+ * An absent figure carries a CAUSE, and the cause is longer than any price. It wraps
+ * under its em dash at the right rail rather than widening the row, and follows the tile
+ * back to the left edge when the card reflows.
+ */
+const TILE_ABSENT =
+  "flex-wrap justify-end text-right @[380px]/fp-header:justify-start @[380px]/fp-header:text-left";
+
+/**
+ * SPOT IS CONTEXT, NOT THE ANSWER. It reads in `--muted` like every other reference
+ * figure on the card, which leaves Waiting as the one accented number.
+ *
+ * At 380px it becomes the corner figure again — label over value, right-aligned, no rule
+ * under it — which is why the border and the padding both have an arm that removes them.
+ */
+const SPOT =
+  `${RAIL} mb-3 pb-[10px] border-b border-b-[var(--line)]` +
+  " @[380px]/fp-header:flex-col @[380px]/fp-header:items-end @[380px]/fp-header:gap-x-0" +
+  " @[380px]/fp-header:gap-y-px @[380px]/fp-header:pb-0 @[380px]/fp-header:border-b-0" +
+  " @[380px]/fp-header:text-right";
+const SPOT_VALUE = "flex-none text-right text-[1.05rem] tabular-nums text-[var(--muted)]";
+const SPOT_NOTE = "m-0 mt-1 text-[0.7rem] text-[var(--muted)]";
+/** Spot's own reflow already right-aligns the block, so this one has no wide arm. */
+const SPOT_ABSENT = "flex-wrap justify-end text-right";
+
+/** One column of rows at 320px; a real grid of tiles once the CARD is wide enough. */
+const TILES =
+  "grid grid-cols-1 gap-2" +
+  " @[380px]/fp-header:grid-cols-[repeat(auto-fit,minmax(130px,1fr))] @[380px]/fp-header:gap-3";
+
+/**
+ * A BAR AT ZERO READS AS ABSENCE, which is the truth on day zero — so the track is always
+ * drawn and the fill is allowed to be 0 wide. The fill's WIDTH stays an inline style: it
+ * is a measurement, not a design decision, and there is no utility for "whatever fraction
+ * this ladder happens to be at".
+ */
+const PROGRESS = "m-0 mb-[14px]";
+const PROGRESS_TRACK = "h-1.5 overflow-hidden rounded-[3px] bg-[var(--line)]";
+const PROGRESS_FILL = "h-full bg-[var(--pos)]";
+const PROGRESS_NOTE = "m-0 mt-1.5 text-[0.78rem] text-[var(--muted)]";
+
+/**
+ * The measured-layout waiting block takes the SAME row shape as the tiles above it, with
+ * its sentence breaking to a full-width line under both. `flex-[1_0_100%]` is what forces
+ * that break, so the sentence never tries to share the rail with the number it explains.
+ */
+const WAITING =
+  "flex flex-wrap items-baseline justify-end gap-x-[10px] border-t border-t-[var(--line)] pt-3" +
+  " @[380px]/fp-header:flex-col @[380px]/fp-header:items-stretch" +
+  " @[380px]/fp-header:justify-start @[380px]/fp-header:gap-y-[2px]";
+const WAITING_SUB =
+  "flex-[1_0_100%] m-0 mt-1 text-[0.78rem] text-pretty text-[var(--muted)]";
+
+/**
+ * DAY ZERO'S BLOCK — a headline figure and two quiet projections under it.
+ *
+ * THE HERO STEPS OUT OF THE RAIL, label above rather than beside: the rail is for the
+ * reference rows and leaving it is half of what makes this figure read first. The other
+ * half is size — `--muted` alone lost to the projections, whose strings are simply
+ * longer, so the projections step DOWN in size as well as being muted.
+ */
+const EXPECTED = "mb-[14px]";
+const HERO = "flex flex-col gap-px mb-3";
+const HERO_VALUE =
+  "text-[1.75rem] font-bold leading-[1.15] tracking-[-0.01em] tabular-nums";
+/**
+ * A PROJECTION READS QUIETER THAN A MEASUREMENT, in two ways at once. `--muted` is the
+ * colour every other unmeasured thing on this page already uses, and 0.95rem is the step
+ * down `.fp-tiles-quiet .fp-tile-value` used to make. That rule was a CONTEXT — a
+ * descendant selector on the wrapper — and it collapses into this one string because
+ * `Expectation` is the only thing that ever rendered inside that wrapper. Both sizes are
+ * spelled once, never as a base plus an override: `TILE_VALUE`'s 1.05rem and this
+ * 0.95rem are unvariant `font-size` utilities and would race each other on one element.
+ */
+const EXPECTED_VALUE =
+  "flex-none text-right text-[0.95rem] tabular-nums text-[var(--muted)] @[380px]/fp-header:text-left";
+
 /** One measured tile: the figure, or the named reason there is none. Never a `$0`. */
 function Figure({
   label,
@@ -80,12 +244,12 @@ function Figure({
   render?: (value: number) => string;
 }) {
   return (
-    <div className="fp-tile">
-      <span className="fp-tile-label">{label}</span>
+    <div className={TILE}>
+      <span className={STACKED_LABEL}>{label}</span>
       {figure.known ? (
-        <strong className="fp-tile-value">{render(figure.value)}</strong>
+        <strong className={TILE_VALUE}>{render(figure.value)}</strong>
       ) : (
-        <Absent why={figure.why} />
+        <Absent why={figure.why} className={TILE_ABSENT} />
       )}
     </div>
   );
@@ -111,9 +275,9 @@ function Expectation({
   render?: (value: number) => string;
 }) {
   return (
-    <div className="fp-tile">
-      <span className="fp-tile-label">{label}</span>
-      <strong className="fp-tile-value fp-expected-value">~{render(value)}</strong>
+    <div className={TILE}>
+      <span className={STACKED_LABEL}>{label}</span>
+      <strong className={EXPECTED_VALUE}>~{render(value)}</strong>
     </div>
   );
 }
@@ -344,24 +508,26 @@ function Header() {
       : undefined;
 
   return (
-    <Card className="fp-header">
+    <Card className={HEADER_CARD}>
       {/* WHAT THIS IS, AND WHERE PRICE IS — the two things the operator reads before
           anything else, on one row. Spot used to sit in the provenance footer, four
           cards down, which put the only number that moves while you look at it below
           every number that does not. */}
-      <div className="fp-header-head">
-        <div className="fp-header-id">
+      <div className={HEADER_HEAD}>
+        <div className={HEADER_ID}>
           {/* `level={1}` IS NOT DECORATION. This card's heading is the PAGE's heading,
               which only the call site knows; `Card.Title` defaults to 2, and a page
               whose deepest heading is an `h2` reads as a document with no title to
               everything that navigates by headings. */}
-          <Card.Title level={1}>{view.title}</Card.Title>
+          <Card.Title level={1} className={HEADER_TITLE}>
+            {view.title}
+          </Card.Title>
           {/* THE STATE IS A BADGE, NOT A SENTENCE. It used to ride a `Price ladder ·
               pending · all figures in USD` sub-line, which spent two rows of a 320px
               card on one word the operator actually reads. The kind is already told by
               the ladder below, and every figure on this card carries its own `$` or its
               own unit, so the currency note was restating what the numbers say. */}
-          <span className={`fp-badge fp-badge-${view.state}`}>
+          <span className={`${BADGE} ${BADGE_TONE[view.state]}`}>
             {view.state === "active" ? "in force" : view.state}
           </span>
         </div>
@@ -371,7 +537,7 @@ function Header() {
       {projection ? (
         <ExpectedRow expected={projection.expected} figures={projection.figures} />
       ) : (
-        <div className="fp-tiles">
+        <div className={`${TILES} mb-[14px]`}>
           <Figure label="Deployed" figure={view.deployed} />
           <Figure
             label="Units acquired"
@@ -383,20 +549,20 @@ function Header() {
       )}
 
       {view.progress ? (
-        <div className="fp-progress">
+        <div className={PROGRESS}>
           {/* A BAR AT ZERO IS THE TRUTH and stays: it reads as absence, which is what
               day zero is. A zero-dollar figure would read as a measurement instead. */}
           <div
-            className="fp-progress-track"
+            className={PROGRESS_TRACK}
             role="img"
             aria-label={`${view.progress.filledRungs} of ${view.progress.totalRungs} rungs filled`}
           >
             <div
-              className="fp-progress-fill"
+              className={PROGRESS_FILL}
               style={{ width: `${view.progress.percent}%` }}
             />
           </div>
-          <p className="m-0 mt-1 text-[var(--muted)]">
+          <p className={PROGRESS_NOTE}>
             {view.progress.filledRungs} of {view.progress.totalRungs} rungs walked
           </p>
         </div>
@@ -426,16 +592,16 @@ function Header() {
  */
 function SpotReadout({ view }: { view: FillPathView }) {
   return (
-    <p className="fp-spot">
-      <span className="fp-tile-label">Spot</span>
+    <p className={SPOT}>
+      <span className={SPOT_LABEL}>Spot</span>
       {view.spotLoading ? (
-        <Absent why="reading spot…" />
+        <Absent why="reading spot…" className={SPOT_ABSENT} />
       ) : view.spotUsd === undefined ? (
-        <Absent why="live price unavailable" />
+        <Absent why="live price unavailable" className={SPOT_ABSENT} />
       ) : (
         <>
-          <strong className="fp-spot-value">{formatUsd(view.spotUsd)}</strong>
-          <span className="fp-spot-note m-0 mt-1 text-[var(--muted)]">
+          <strong className={SPOT_VALUE}>{formatUsd(view.spotUsd)}</strong>
+          <span className={SPOT_NOTE}>
             {view.spotUnavailable ? "last close · live price unavailable" : "live"}
           </span>
         </>
@@ -467,17 +633,17 @@ function ExpectedRow({
   figures: NonNullable<FillPathView["figures"]>;
 }) {
   return (
-    <div className="fp-expected">
+    <div className={EXPECTED}>
       {/* WAITING IS THE PROTAGONIST and is built to look like it: out of the tile grid
           entirely, label over figure, at the card's largest type. The two projections
           below it stay in the row form at a smaller size — muted alone did not carry
           the hierarchy, because the projected strings are the LONGEST on the card and
           at equal size length reads as importance. */}
-      <div className="fp-hero">
-        <span className="fp-tile-label">Waiting</span>
-        <strong className="fp-hero-value">{formatUsd(figures.waitingDeclaredUsd)}</strong>
+      <div className={HERO}>
+        <span className={TILE_LABEL}>Waiting</span>
+        <strong className={HERO_VALUE}>{formatUsd(figures.waitingDeclaredUsd)}</strong>
       </div>
-      <div className="fp-tiles fp-tiles-quiet">
+      <div className={`${TILES} mb-0`}>
         <Expectation label="Expected units" value={expected.units} render={formatUnits} />
         <Expectation label="Expected average entry" value={expected.avgEntryUsd} />
       </div>
@@ -497,10 +663,10 @@ function ExpectedRow({
 function Waiting({ figures }: { figures: FillPathView["figures"] }) {
   if (figures === undefined) {
     return (
-      <div className="fp-waiting">
-        <span className="fp-tile-label">Waiting</span>
-        <strong className="fp-tile-value">—</strong>
-        <p className="fp-waiting-sub m-0 mt-1 text-[var(--muted)]">
+      <div className={WAITING}>
+        <span className={STACKED_LABEL}>Waiting</span>
+        <strong className={TILE_VALUE}>—</strong>
+        <p className={WAITING_SUB}>
           The orders sidecar could not be read for this ladder, so nothing here is a
           measurement — this is NOT "nothing is waiting".
         </p>
@@ -508,9 +674,9 @@ function Waiting({ figures }: { figures: FillPathView["figures"] }) {
     );
   }
   return (
-    <div className="fp-waiting">
-      <span className="fp-tile-label">Waiting</span>
-      <strong className="fp-tile-value">{formatUsd(figures.waitingDeclaredUsd)}</strong>
+    <div className={WAITING}>
+      <span className={STACKED_LABEL}>Waiting</span>
+      <strong className={TILE_VALUE}>{formatUsd(figures.waitingDeclaredUsd)}</strong>
     </div>
   );
 }
@@ -647,7 +813,10 @@ function Chart() {
 
       {view.rungs.length > 0 ? (
         <label className="fp-inspect">
-          <span className="fp-tile-label">Inspect rung</span>
+          {/* The slider's label wears the tile label's TYPOGRAPHY and none of its rail
+              geometry: `.fp-tile-label` was a type rule and the flex arms lived on the
+              three `>` selectors above it, none of which reached inside `.fp-inspect`. */}
+          <span className={TILE_LABEL}>Inspect rung</span>
           <input
             type="range"
             min={0}

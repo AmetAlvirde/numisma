@@ -279,6 +279,54 @@ export const DELETED_IN_SLICE_6 = [
 ];
 
 /**
+ * THE CLASS NAMES SLICE 7 DELETED — the fill path's header card, top to bottom.
+ *
+ * The longest list of the seven, because the section it names was the longest in
+ * `styles.css`: an identity row, a state chip, a spot reading, three tiles and their
+ * grid, a progress bar, a waiting block, day zero's hero, and two container blocks
+ * reflowing most of it. One card, thirteen names.
+ *
+ * THE FOUR BADGE SUFFIXES ARE ALL HERE, and only two of them ever had a rule. The chip's
+ * class was assembled from a template, so `pending` and `ended` were always emitted and
+ * always painted by the base alone; the template is what is being deleted, and a template
+ * rebuilt later would put back the two that never had a rule first. Slice 6's list is
+ * shaped the same way for the same reason.
+ *
+ * `absent` IS STILL NOT ON THE LIST. `.fp-tile .absent` and `.fp-spot .absent` — two of
+ * the three contextual rules slice 2's note named — go here, and the hook survives for
+ * the last of them, `.fp-detail .absent`, which is slice 8's. `fp-chart-card`,
+ * `fp-selected`, `fp-list` and every ladder name are likewise absent from this list and
+ * must stay absent: they still have rules, and this same render still carries them.
+ */
+export const DELETED_IN_SLICE_7 = [
+  "fp-header",
+  "fp-header-head",
+  "fp-header-id",
+  "fp-badge",
+  "fp-badge-pending",
+  "fp-badge-active",
+  "fp-badge-ended",
+  "fp-badge-unreadable",
+  "fp-spot",
+  "fp-spot-value",
+  "fp-spot-note",
+  "fp-tile",
+  "fp-tiles",
+  "fp-tiles-quiet",
+  "fp-tile-label",
+  "fp-tile-value",
+  "fp-progress",
+  "fp-progress-track",
+  "fp-progress-fill",
+  "fp-waiting",
+  "fp-waiting-sub",
+  "fp-expected",
+  "fp-expected-value",
+  "fp-hero",
+  "fp-hero-value",
+];
+
+/**
  * Everything a render test is allowed to reach for, re-exported from one place.
  *
  * `fireEvent` RIDES ALONGSIDE `userEvent`, NOT INSTEAD OF IT. Spec #403 §3.4 bought

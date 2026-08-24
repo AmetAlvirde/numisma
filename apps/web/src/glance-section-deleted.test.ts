@@ -55,8 +55,8 @@ describe("the glance section's deletion", () => {
   it("leaves neither container name declared anywhere in the file", () => {
     // `.glance` was the file's last LONGHAND container declaration — slice 3 took
     // `.summary`, the only other one — so the two longhand properties should now be
-    // absent outright. The fill path's three shorthand containers (`fp-header`,
-    // `fp-selected`, `fp-list`) are slices 7 and 8's and are deliberately still here;
+    // absent outright. The fill path's shorthand containers are slices 7 and 8's and
+    // whichever of them are still here at any point in the migration are deliberately so;
     // what may not survive is either of THIS card's names, in any form. A second
     // declaration of `metrics-card` in this unlayered file would beat the utility on the
     // element and answer the list's variants from two places at once.

@@ -28,21 +28,63 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { render, screen } from "../render.testkit.tsx";
-import { FillPathCards } from "./FillPath.tsx";
+import {
+  DELETED_IN_SLICE_7,
+  classTokens,
+  render,
+  renderedClassNames,
+  screen,
+} from "../render.testkit.tsx";
+import { FillPath, FillPathCards, FillPathProvider } from "./FillPath.tsx";
 import { composeFillPathPage } from "../ladder/fill-path-view.ts";
+import type { FillPathView } from "../ladder/fill-path-view.ts";
 import { ladderFixture } from "../ladder/started-ladder.fixtures.ts";
 import { CARD_SURFACE } from "./ui/Card.tsx";
 
-/** The widest fixture: filled rungs, waiting rungs and a live spot, so every card draws. */
-function partlyWalkedView() {
-  const fixture = ladderFixture("partly-walked");
-  if (fixture === undefined) throw new Error("fixture `partly-walked` is gone");
+/** One fixture, composed through the real view module — never a hand-built view object. */
+function viewOf(name: "partly-walked" | "day-zero"): FillPathView {
+  const fixture = ladderFixture(name);
+  if (fixture === undefined) throw new Error(`fixture \`${name}\` is gone`);
   const page = composeFillPathPage(fixture.anchor, fixture.planId, fixture.spot);
   if (page.status !== "ok") {
     throw new Error(`fixture composed to \`${page.status}\`, not a page`);
   }
   return page.view;
+}
+
+/** The widest fixture: filled rungs, waiting rungs and a live spot, so every card draws. */
+function partlyWalkedView(): FillPathView {
+  return viewOf("partly-walked");
+}
+
+/** The header alone, so an assertion about it names one card's markup and not four. */
+function renderHeader(view: FillPathView) {
+  return render(
+    <FillPathProvider view={view}>
+      <FillPath.Header />
+    </FillPathProvider>,
+  );
+}
+
+/**
+ * The same view with an optional field GENUINELY ABSENT.
+ *
+ * `exactOptionalPropertyTypes` is on, so `{ ...view, spotUsd: undefined }` is not the
+ * same thing as a view that never had the key and the compiler says so. Deleting the key
+ * is what the composer's own absent arm produces, which is the state these arms render
+ * against.
+ */
+function without(view: FillPathView, keys: (keyof FillPathView)[]): FillPathView {
+  const copy: Record<string, unknown> = { ...view };
+  for (const key of keys) delete copy[key as string];
+  return copy as unknown as FillPathView;
+}
+
+/** `toContain` per class, never the whole string — spec #420 Seam E. */
+function expectClasses(element: Element | null | undefined, classes: string[]): void {
+  expect(element).not.toBeNull();
+  const tokens = classTokens(element as Element);
+  for (const wanted of classes) expect(tokens).toContain(wanted);
 }
 
 describe("the fill path's card shell", () => {
@@ -74,12 +116,15 @@ describe("the fill path's card shell", () => {
 
     // The four names are still asserted in order and once each; what each section
     // carries beside its name is now the shared surface, by reference rather than as a
-    // pinned string (spec #420 Seam E).
+    // pinned string (spec #420 Seam E). THE HEADER'S NAME IS NOW A UTILITY: slice 7
+    // deleted `.fp-header`, whose whole body was the container declaration, and the
+    // named container utility emits that same shorthand. The other three still name
+    // rules this file's later halves have yet to delete, so their strings are unchanged.
     const sections = [...container.querySelectorAll("section")].map(
       (section) => section.className,
     );
     expect(sections).toEqual([
-      `${CARD_SURFACE} fp-header`,
+      `${CARD_SURFACE} @container/fp-header`,
       `${CARD_SURFACE} fp-chart-card`,
       `fp-selected ${CARD_SURFACE}`,
       `${CARD_SURFACE} fp-list`,
@@ -96,5 +141,296 @@ describe("the fill path's card shell", () => {
     const panel = container.querySelector(".fp-selected");
     expect(panel?.tagName).toBe("SECTION");
     expect(panel?.getAttribute("aria-live")).toBe("polite");
+  });
+});
+
+/**
+ * THE CENSUS SUCCESSOR FOR THE HEADER CARD (spec #420 slice 7, Seam E and gate line 3).
+ *
+ * ONE OF THREE PASSES OVER THIS FILE. Slice 7 owns the header, the tiles, the progress
+ * bar and day zero's block; the ladder is slice 8's and the chart is slice 9's, and the
+ * assertions above are deliberately untouched because their rules are still in
+ * `styles.css`. Converting an assertion before its rule is deleted asserts a utility that
+ * is losing to an unlayered rule — the lose-the-cascade failure wearing a green test.
+ *
+ * WHAT IT CAN AND CANNOT SEE. It proves the element REFERENCES the declaration: per
+ * class, with `toContain`, never full-string equality, so Prettier's class sort is not a
+ * contract. That the rule is EMITTED is `tailwind-scan.test.ts`'s job and that it WON the
+ * cascade and computed to the right value is Chrome's — three channels, no overlap.
+ *
+ * THE SUBSET IS LOAD-BEARING, NOT COMPLETE. Every class listed below is one whose loss
+ * changes the rendered card: a size, a colour, a rail, a reflow arm. Utilities that
+ * merely restate a default are left out, so a later edit that drops one is caught here
+ * rather than argued about.
+ */
+describe("the header card carries its section as utilities", () => {
+  it("puts the container on the card and the deleted heading rule on the `h1`", () => {
+    const { container } = renderHeader(partlyWalkedView());
+
+    // `container: fp-header / inline-size` — one name, which is exactly what Tailwind's
+    // named container utility emits. Both `@container fp-header` blocks answer to it.
+    expectClasses(container.querySelector("section"), ["@container/fp-header"]);
+    // `.fp-header h1` overrode the app's base `h1` size. `m-0` rides along because
+    // preflight is off and the UA's own heading margin is live.
+    expectClasses(container.querySelector("h1"), [
+      "m-0",
+      "text-[1.15rem]",
+      "wrap-anywhere",
+    ]);
+  });
+
+  it("reflows the identity row and the head at 380px of card width", () => {
+    const { container } = renderHeader(partlyWalkedView());
+    const head = container.querySelector("h1")?.parentElement?.parentElement;
+    const id = container.querySelector("h1")?.parentElement;
+
+    // Both deleted `@container fp-header` blocks reached this pair: the head goes from
+    // `block` to a spread row, and the identity block takes a flex basis inside it.
+    expectClasses(head, ["block", "@[380px]/fp-header:flex", "@[380px]/fp-header:gap-x-4"]);
+    expectClasses(id, ["flex", "mb-[10px]", "@[380px]/fp-header:flex-[1_1_180px]"]);
+  });
+
+  it("paints the state chip from a total map, one colour per state", () => {
+    // All four arms, not only the one this fixture is in. Two of the four never had a
+    // rule of their own and were painted by the base; the base is gone, so each arm has
+    // to name its colour or the chip renders in the inherited text colour.
+    const base = partlyWalkedView();
+    const tones: [FillPathView["state"], string][] = [
+      ["pending", "text-[var(--muted)]"],
+      ["active", "text-[var(--pos)]"],
+      ["ended", "text-[var(--muted)]"],
+      ["unreadable", "text-[var(--warn)]"],
+    ];
+    for (const [state, tone] of tones) {
+      const { container, unmount } = renderHeader({ ...base, state });
+      const chip = container.querySelector("h1")?.nextElementSibling;
+      expectClasses(chip, [
+        "rounded-[999px]",
+        "border",
+        "border-current",
+        "text-[0.65rem]",
+        "uppercase",
+        "tracking-[0.05em]",
+        tone,
+      ]);
+      unmount();
+    }
+  });
+
+  it("keeps spot on the rail at 320px and in the corner at 380px", () => {
+    const { container } = renderHeader(partlyWalkedView());
+    const spot = container.querySelector("section > div > p");
+
+    // The rule under spot is the thing the wide arm removes, together with the padding
+    // that made room for it — both edges, because a half-reproduced border is a hairline
+    // that never goes away.
+    expectClasses(spot, [
+      "justify-end",
+      "pb-[10px]",
+      "border-b",
+      "border-b-[var(--line)]",
+      "mb-3",
+      "@[380px]/fp-header:flex-col",
+      "@[380px]/fp-header:items-end",
+      "@[380px]/fp-header:pb-0",
+      "@[380px]/fp-header:border-b-0",
+      "@[380px]/fp-header:text-right",
+    ]);
+    // Spot reads muted so that Waiting is the one accented figure on the card.
+    expectClasses(spot?.querySelector("strong"), [
+      "text-[1.05rem]",
+      "tabular-nums",
+      "text-[var(--muted)]",
+    ]);
+    expectClasses(spot?.querySelector("span:last-of-type"), [
+      "m-0",
+      "mt-1",
+      "text-[0.7rem]",
+      "text-[var(--muted)]",
+    ]);
+  });
+
+  it("carries the tile grid, the label rail and the figure rail", () => {
+    const { container } = renderHeader(partlyWalkedView());
+    const tiles = container.querySelectorAll("section > div")[1];
+    const tile = tiles?.firstElementChild;
+
+    expectClasses(tiles, [
+      "grid",
+      "grid-cols-1",
+      "gap-2",
+      "mb-[14px]",
+      "@[380px]/fp-header:grid-cols-[repeat(auto-fit,minmax(130px,1fr))]",
+      "@[380px]/fp-header:gap-3",
+    ]);
+    expectClasses(tile, [
+      "flex",
+      "justify-end",
+      "gap-x-[10px]",
+      "@[380px]/fp-header:flex-col",
+      "@[380px]/fp-header:items-stretch",
+    ]);
+    // The zero basis is what lets a two-word label wrap instead of pushing its figure
+    // off the rail, so it is asserted rather than left to read as decoration.
+    expectClasses(tile?.querySelector("span"), [
+      "text-[0.7rem]",
+      "uppercase",
+      "tracking-[0.04em]",
+      "text-[var(--muted)]",
+      "flex-[1_1_0]",
+      "min-w-0",
+      "@[380px]/fp-header:flex-none",
+      "@[380px]/fp-header:text-left",
+    ]);
+    expectClasses(tile?.querySelector("strong"), [
+      "flex-none",
+      "text-right",
+      "text-[1.05rem]",
+      "tabular-nums",
+      "@[380px]/fp-header:text-left",
+    ]);
+  });
+
+  it("draws the progress track and its fill, and the count under them", () => {
+    const { container } = renderHeader(partlyWalkedView());
+    const track = container.querySelector('[role="img"]');
+
+    expectClasses(track, [
+      "h-1.5",
+      "overflow-hidden",
+      "rounded-[3px]",
+      "bg-[var(--line)]",
+    ]);
+    expectClasses(track?.firstElementChild, ["h-full", "bg-[var(--pos)]"]);
+    // THE WIDTH IS AN INLINE STYLE AND STAYS ONE. It is a measurement, and there is no
+    // utility for "whatever fraction this ladder happens to be at".
+    expect(track?.firstElementChild?.getAttribute("style")).toMatch(/width:/);
+    // 6px, not 4px: the deleted `.fp-progress p` rule beat the muted line's own margin
+    // while it stood, and losing that step is invisible in every other channel.
+    expectClasses(track?.parentElement?.querySelector("p"), [
+      "m-0",
+      "mt-1.5",
+      "text-[0.78rem]",
+      "text-[var(--muted)]",
+    ]);
+  });
+
+  it("keeps the waiting block on the rail, rule above it", () => {
+    const { container } = renderHeader(partlyWalkedView());
+    const waiting = container.querySelector("section")?.lastElementChild;
+
+    expectClasses(waiting, [
+      "flex",
+      "justify-end",
+      "gap-x-[10px]",
+      "border-t",
+      "border-t-[var(--line)]",
+      "pt-3",
+      "@[380px]/fp-header:flex-col",
+      "@[380px]/fp-header:items-stretch",
+    ]);
+  });
+
+  it("breaks the unreadable-sidecar sentence to its own full-width line", () => {
+    // `figures` absent means the orders sidecar could not be read. The sentence is the
+    // cause attached to its own em dash, and `flex-[1_0_100%]` is what stops it trying to
+    // share the rail with the number it explains.
+    const { container } = renderHeader(
+      without(partlyWalkedView(), ["expected", "figures"]),
+    );
+    const sub = container.querySelector("section")?.lastElementChild?.querySelector("p");
+
+    expectClasses(sub, [
+      "flex-[1_0_100%]",
+      "m-0",
+      "mt-1",
+      "text-[0.78rem]",
+      "text-pretty",
+      "text-[var(--muted)]",
+    ]);
+  });
+
+  it("gives day zero its hero and its two quieter projections", () => {
+    const { container } = renderHeader(viewOf("day-zero"));
+    const expected = container.querySelectorAll("section > div")[1];
+    const hero = expected?.firstElementChild;
+    const quiet = expected?.lastElementChild;
+
+    expectClasses(expected, ["mb-[14px]"]);
+    // Out of the rail entirely — label above the figure, at the card's largest type.
+    expectClasses(hero, ["flex", "flex-col", "gap-px", "mb-3"]);
+    expectClasses(hero?.querySelector("strong"), [
+      "text-[1.75rem]",
+      "font-bold",
+      "leading-[1.15]",
+      "tracking-[-0.01em]",
+      "tabular-nums",
+    ]);
+    // The quiet grid is the same grid with its bottom margin taken back off, which is
+    // what the deleted `.fp-expected .fp-tiles` context rule did.
+    expectClasses(quiet, ["grid", "grid-cols-1", "mb-0"]);
+    // A projection reads quieter in two ways at once, and the size is the half that had
+    // been a descendant selector rather than a class of its own.
+    expectClasses(quiet?.firstElementChild?.querySelector("strong"), [
+      "text-[0.95rem]",
+      "text-[var(--muted)]",
+      "tabular-nums",
+    ]);
+  });
+
+  it("wraps an absent figure under its em dash at the rail it sits on", () => {
+    // The two arms differ on purpose. A tile's cause follows the tile back to the left
+    // edge when the card reflows; spot's does not, because spot's own reflow keeps the
+    // whole block right-aligned.
+    const spotOut = renderHeader({
+      ...without(partlyWalkedView(), ["spotUsd"]),
+      spotLoading: false,
+    });
+    expectClasses(spotOut.container.querySelector(".absent"), [
+      "flex-wrap",
+      "justify-end",
+      "text-right",
+    ]);
+    expect(classTokens(spotOut.container.querySelector(".absent")!)).not.toContain(
+      "@[380px]/fp-header:text-left",
+    );
+    spotOut.unmount();
+
+    const base = partlyWalkedView();
+    const { container } = renderHeader({
+      ...base,
+      deployed: { known: false, why: "the orders sidecar could not be read" },
+    });
+    const tileAbsent = [...container.querySelectorAll(".absent")].at(-1);
+    expectClasses(tileAbsent, [
+      "flex-wrap",
+      "justify-end",
+      "text-right",
+      "@[380px]/fp-header:justify-start",
+      "@[380px]/fp-header:text-left",
+    ]);
+  });
+
+  it("renders none of the twenty-five class names slice 7 deleted", () => {
+    // THE WHOLE PAGE, not the header alone: the assertion that catches the carrier
+    // nobody remembered is a claim about the subtree, and `fp-tile-label` in particular
+    // was rendered by the CHART card's inspect label as well as by the header's tiles.
+    const { container } = render(<FillPathCards view={partlyWalkedView()} />);
+    const rendered = renderedClassNames(container);
+    for (const deleted of DELETED_IN_SLICE_7) expect(rendered).not.toContain(deleted);
+
+    // And the ladder and the chart still carry theirs, which is what makes the line
+    // above a claim about slice 7 rather than about the file having been emptied.
+    for (const surviving of ["fp-selected", "fp-list", "fp-chart-card", "fp-row"]) {
+      expect(rendered).toContain(surviving);
+    }
+  });
+
+  it("renders both day-zero blocks free of those names too", () => {
+    // Day zero draws the hero, the projections and the expected wrapper — three of the
+    // deleted names' carriers that `partly-walked` never reaches.
+    const { container } = render(<FillPathCards view={viewOf("day-zero")} />);
+    const rendered = renderedClassNames(container);
+    for (const deleted of DELETED_IN_SLICE_7) expect(rendered).not.toContain(deleted);
   });
 });

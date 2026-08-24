@@ -318,8 +318,9 @@ describe("every fill-path part mounts on its own", () => {
       </FillPathProvider>,
     );
 
+    // The header card's own class is now its container utility (spec #420 slice 7).
     expect([...container.querySelectorAll("section")].map((s) => s.className)).toEqual([
-      `${CARD_SURFACE} fp-header`,
+      `${CARD_SURFACE} @container/fp-header`,
     ]);
     expect(container.querySelector("h1")?.textContent).toBe(view.title);
   });
