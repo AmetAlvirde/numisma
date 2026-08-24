@@ -58,11 +58,11 @@ export function Card({
  * `.card` filled with the app's house surface colour `--card`, drew a 1px border in its
  * house hairline `--line`, and set a 12px radius and 16px of padding. It is deleted.
  * These four utilities are that rule, and they are exported because EIGHT ELEMENTS CARRY
- * THE SURFACE AND THREE OF THEM
- * ARE NOT CARDS: the fill path's two unrecorded-fill warnings, login's `<form>`, and the
- * ladder routes' notice `<div>`s. The docblock above declines to absorb them into this
- * component and that has not changed — what they share is a painted surface, not a
- * landmark — so what they import is the string, not the section.
+ * THE SURFACE AND THREE OF THEM ARE NOT CARDS: the fill path's two unrecorded-fill
+ * warnings, login's `<form>`, and the ladder routes' notice `<div>`s. The docblock above
+ * declines to absorb them into this component and that has not changed — what they share
+ * is a painted surface, not a landmark — so what they import is the string, not the
+ * section.
  *
  * THE TORN BANNER IS THE ONE THAT NO LONGER IMPORTS IT (spec #420 slice 8). Its edge is
  * `--neg` rather than `--line`, and a second unvariant `border-color` utility beside this

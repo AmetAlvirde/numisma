@@ -236,7 +236,9 @@ describe("G-D13: the ladder route", () => {
     // filesystem, no environment read and no database client anywhere in it. What ADR-007
     // keeps out of the browser bundle is the engine's `node:os`/`node:path` reach and the
     // secrets that travel with it; a component package with none of that is not the thing
-    // this list is narrow about.
+    // this list is narrow about. THAT DEPENDENCY LIST IS ASSERTED BELOW rather than
+    // argued here, because the walk stops at the package boundary and would not see it
+    // change.
     const allowed = [
       "@numisma/engine/format",
       "@numisma/engine/calendar",
@@ -258,6 +260,39 @@ describe("G-D13: the ladder route", () => {
         /\bimport\s*\(\s*["']@numisma\/engine["']/,
       );
     }
+  });
+
+  it("pins the dependencies `@numisma/components` is allowed to drag in", () => {
+    // THE OTHER HALF OF THE ALLOW-LIST ENTRY ABOVE. The walk follows relative specifiers
+    // only, so it judges the package specifier and never traverses it: whatever the
+    // package depends on rides into the ladder route's browser bundle unexamined. The
+    // entry's safety argument is a claim about a dependency list, and a claim about a
+    // dependency list belongs in an assertion — add `@numisma/engine` to that manifest
+    // and re-export from it, and `node:os`/`node:path` reach the bundle with every
+    // assertion above still green.
+    //
+    // THE WHOLE SET, NOT A DENY-LIST OF TODAY'S OFFENDERS. What makes a dependency unsafe
+    // here is `node:` reach, which is not a property of any name this file could enumerate
+    // in advance. So the check is that the set has not moved at all; a legitimate addition
+    // reds it, and the fix is to read the new package for `node:` reach and then write it
+    // down here. This is deliberately not a transitive resolver — it is one manifest, the
+    // one the entry above rests on.
+    const manifest = JSON.parse(
+      readFileSync(join(HERE, "../../../../packages/components/package.json"), "utf-8"),
+    ) as { dependencies?: Record<string, string>; peerDependencies?: Record<string, string> };
+    expect(Object.keys(manifest.dependencies ?? {}).sort()).toEqual([
+      "@base-ui/react",
+      "class-variance-authority",
+      "clsx",
+      "tailwind-merge",
+    ]);
+    // Peers count the same: a peer is resolved out of the app's own tree and bundled just
+    // as a dependency is, so this is where the same addition would go to avoid the list
+    // above. React and React DOM the app already ships.
+    expect(Object.keys(manifest.peerDependencies ?? {}).sort()).toEqual([
+      "react",
+      "react-dom",
+    ]);
   });
 });
 

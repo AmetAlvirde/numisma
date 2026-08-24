@@ -39,9 +39,19 @@ function sourceFiles(dir: string = SRC): string[] {
 
 /**
  * Every custom property read in a file's text, BY EITHER OF TAILWIND 4'S TWO
- * SYNTAXES — `var(--bg)` and the shorthand `bg-(--bg)`, which compiles to
- * the same declaration and writes no `var(` anywhere in the source. Typed
- * shorthands (`w-(length:--sidebar-width)`) are the same form.
+ * SYNTAXES — `var(--nms-bg)` and the shorthand `bg-( --nms-bg )`, which compiles
+ * to the same declaration and writes no `var(` anywhere in the source. Typed
+ * shorthands (`w-( length:--sidebar-width )`) are the same form.
+ *
+ * THE SPACES INSIDE THOSE PARENS ARE DELIBERATE; DO NOT CLOSE THEM UP. Both
+ * namespace guards skip `*.test.ts`, and Tailwind's scanner does not:
+ * `apps/web/src/tailwind.css` points `@source` at this whole directory, so a
+ * well-formed shorthand written here as prose is read as a class candidate and
+ * emitted as a real rule into the app's stylesheet — a colour declaration no
+ * element wears, shipped out of a comment. Tailwind's candidate scan stops at
+ * whitespace, so the space costs the example nothing and stops it compiling.
+ * The regex below matches the closed-up form, which is the only form source
+ * files are allowed to contain.
  *
  * Matching `var(` alone would let a hand edit or a merge put a bare read into
  * the package with this guard green — the capture bug the namespace exists to
@@ -104,8 +114,8 @@ describe("the --nms-* token spec", () => {
 
   it("declares nothing the components do not read", () => {
     // The spec is read OFF component source. A token pasted in from an upstream
-    // theme — `--nms-card`, `--nms-popover` — is a name every consumer is asked
-    // to define and nothing ever renders, so nothing can verify it.
+    // theme — `--nms-popover` — is a name every consumer is asked to define and
+    // nothing ever renders, so nothing can verify it.
     const text = files
       .filter((path) => !path.endsWith("tokens.ts"))
       .map((path) => readFileSync(path, "utf8"))

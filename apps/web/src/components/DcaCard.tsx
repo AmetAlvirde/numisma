@@ -1,8 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { formatUsd } from "@numisma/engine/format";
-import { Absent } from "@numisma/components";
+import { Absent, Card } from "@numisma/components";
 import type { DcaPositionView, DcaView } from "../glance/dca-view.ts";
-import { Card } from "@numisma/components";
 // The table surface, from the component that owns its deleted element rules (spec #420
 // Seam B — the first surface in the migration's order converts every carrier, wherever
 // it renders). The rung ladder is a table on the same terms as the composition one.
