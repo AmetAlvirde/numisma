@@ -17,7 +17,7 @@ import type { ReactElement, ReactNode } from "react";
  * Grill decision D1. The parts share nothing at runtime, so a provider would buy an
  * indirection with no state behind it. D4 fixes the export shape: parts are attached as
  * plain properties AND named-exported. `Card.Title` is the call-site vocabulary; the
- * named `CardTitle` is what per-part tests and the later workbench fixtures import
+ * named `CardTitle` is what per-part tests and the workbench fixture import
  * directly. They are the same function, asserted. React 19 makes a `forwardRef` wrapper
  * unnecessary, so there is not one.
  *

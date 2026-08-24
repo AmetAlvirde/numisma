@@ -74,10 +74,10 @@
  *     --warn     --nms-warn               named; not yet declared (wave 2)
  *     --now      --nms-now                named; not yet declared (wave 2)
  *
- * NAMING WITHOUT DECLARING IS THE POINT, not a half-measure. Declaring all ten
- * at once would put seven grayscale defaults and seven distinct themed values in
- * front of a reviewer for roles nothing in this package renders, which is the
- * state the rule above refuses. Naming them costs nothing and settles the two
+ * NAMING WITHOUT DECLARING IS THE POINT, not a half-measure. Declaring the
+ * remaining four now would put four grayscale defaults and four distinct themed
+ * values in front of a reviewer for roles nothing in this package renders, which
+ * is the state the rule above refuses. Naming them costs nothing and settles the two
  * mappings that are genuinely hard, below, while the argument is still fresh.
  *
  * `--muted` MAPS TO `--nms-muted-foreground`, NEVER TO `--nms-muted`. The

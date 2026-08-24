@@ -36,8 +36,12 @@ import { DEFAULT_THEME_MODE, THEME_MODES, themeModeById } from "./theme-modes";
  * `document` HERE IS THE RENDERER IFRAME'S, not the Cosmos UI's. The decorator
  * runs inside the renderer, so the Cosmos chrome keeps its own styling and only
  * the fixture surface is themed. The cleanup removes exactly the names it set,
- * which is what lets a mode switch to a mode with FEWER tokens (the package's
- * twelve, after app mode's fourteen) without leaving two stale values behind.
+ * rather than every name any mode knows, so a switch between two modes of
+ * UNEQUAL size cannot strand a value from the larger one. Nothing exercises
+ * that today: all three modes carry the same fifteen names, held there by
+ * `app-token-drift.test.ts` and `apps/web/src/nms-tokens.test.ts`. Scoping the
+ * cleanup per mode is what makes that safe by construction rather than by
+ * coincidence.
  */
 export default function ThemeModeDecorator({ children }: DecoratorProps) {
   const [modeId] = useFixtureSelect("theme", {
