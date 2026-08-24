@@ -44,6 +44,7 @@ import { composeFillPathPage } from "../ladder/fill-path-view.ts";
 import type { FillPathView } from "../ladder/fill-path-view.ts";
 import { ladderFixture } from "../ladder/started-ladder.fixtures.ts";
 import { CARD_SURFACE } from "./ui/Card.tsx";
+import { NOTICE_CODE } from "./ui/SnapshotNotice.tsx";
 
 /** One fixture, composed through the real view module — never a hand-built view object. */
 function viewOf(name: "partly-walked" | "day-zero"): FillPathView {
@@ -490,6 +491,27 @@ describe("the torn banner and the two warnings carry their rules as utilities", 
       "mt-1.5",
       "text-[0.85rem]",
       "text-[var(--text)]",
+    ]);
+  });
+
+  it("chips the command in the banner's sentence, like every other `.notice code`", () => {
+    // THE FOURTH `<code>` THAT SAT IN A `.notice` BOX ON `main`. `.notice code`
+    // (`background: #000; padding: 2px 6px; border-radius: 6px`) reached four elements,
+    // and this banner is the one whose carrier was spelled out by hand — `TORN` writes
+    // the surface itself because its border is `--neg` — so it is the one that could
+    // lose the descendant rule without any other assertion noticing. Asserted against
+    // the shared constant rather than against three literals, so the chip cannot drift
+    // away from the three that import it.
+    const { container } = render(<FillPathCards view={tornView()} />);
+    const chip = container.querySelector('[role="alert"] code');
+
+    expect(chip?.textContent).toBe("pnpm orders:fill");
+    expectClasses(chip, NOTICE_CODE.split(" "));
+    expect(NOTICE_CODE.split(" ")).toEqual([
+      "rounded-[6px]",
+      "bg-black",
+      "px-1.5",
+      "py-0.5",
     ]);
   });
 

@@ -10,6 +10,7 @@ import { COMPACT_USD } from "../ladder/price-drop-path.ts";
 import { PriceDropPathChart } from "./PriceDropPathChart.tsx";
 import { Absent } from "./ui/Absent.tsx";
 import { Card, CARD_SURFACE } from "./ui/Card.tsx";
+import { NOTICE_CODE } from "./ui/SnapshotNotice.tsx";
 
 /**
  * THE FILL PATH, ON THE PHONE (spec #285 §5.6–5.13 / G-D10b, slice #289) — the declared
@@ -464,6 +465,11 @@ export function FillPathCards({ view }: { view: FillPathView }): ReactElement {
  * `border-color` utilities on one element are resolved by Tailwind's EMITTED order rather
  * than by the order they are written in. That is the same cascade `BADGE_TONE` is a total
  * map to avoid, one property along. Written out once, with the border it actually wants.
+ *
+ * SPELLING THE SURFACE OUT DOES NOT BUY OUT THE DESCENDANT RULES. `.notice code` reached
+ * the `<code>` in the sentence below and is a separate deletion; dropping `notice` here
+ * takes the chip with it unless the chip carries `NOTICE_CODE` itself, which it does.
+ * The other three carriers of that rule import the same constant.
  */
 const TORN =
   "rounded-xl border border-[var(--neg)] bg-[var(--card)] p-4 text-[var(--neg)]";
@@ -490,7 +496,8 @@ function TornActBanner({ view }: { view: FillPathView }) {
           {view.tornActs.count === 1 ? "act" : "acts"} outstanding
         </strong>
         <p className={TORN_BODY}>
-          Recording is blocked until this is repaired — <code>pnpm orders:fill</code>{" "}
+          Recording is blocked until this is repaired —{" "}
+          <code className={NOTICE_CODE}>pnpm orders:fill</code>{" "}
           will refuse while a half-written act is open. Repair it at the desk.
         </p>
       </div>
