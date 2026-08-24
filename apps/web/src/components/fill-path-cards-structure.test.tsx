@@ -36,6 +36,7 @@ import {
   fireEvent,
   render,
   renderedClassNames,
+  absentSlots,
   expectNoStyledClassSurvives,
   screen,
 } from "../render.testkit.tsx";
@@ -394,15 +395,11 @@ describe("the header card carries its section as utilities", () => {
     // three contextual rules that selected through it, and slice 8 deleted the last of
     // them along with the hook. The decorative glyph is the primitive's own marker and
     // is what `absent-contract.test.tsx` pins, so it is the stable handle.
-    const absentIn = (root: Element) =>
-      [...root.querySelectorAll('span[aria-hidden="true"]')]
-        .filter((dash) => dash.textContent === "—")
-        .map((dash) => dash.parentElement!);
     const spotOut = renderHeader({
       ...without(partlyWalkedView(), ["spotUsd"]),
       spotLoading: false,
     });
-    const spotAbsent = absentIn(spotOut.container)[0];
+    const spotAbsent = absentSlots(spotOut.container)[0];
     expectClasses(spotAbsent, ["flex-wrap", "justify-end", "text-right"]);
     expect(classTokens(spotAbsent!)).not.toContain("@[380px]/fp-header:text-left");
     spotOut.unmount();
@@ -412,7 +409,7 @@ describe("the header card carries its section as utilities", () => {
       ...base,
       deployed: { known: false, why: "the orders sidecar could not be read" },
     });
-    const tileAbsent = absentIn(container).at(-1);
+    const tileAbsent = absentSlots(container).at(-1);
     expectClasses(tileAbsent, [
       "flex-wrap",
       "justify-end",

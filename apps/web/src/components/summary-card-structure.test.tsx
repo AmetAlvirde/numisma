@@ -36,6 +36,7 @@ import {
   DELETED_IN_SLICE_3,
   render,
   renderedClassNames,
+  absentSlots,
   expectNoStyledClassSurvives,
   screen,
 } from "../render.testkit.tsx";
@@ -250,6 +251,33 @@ describe("SummaryCard on the shared Card", () => {
     expect([
       ...renderedClassNames(suppressed.container.firstElementChild!),
     ]).not.toContain("absent");
+  });
+
+  it("still mounts both suppressed figures' `Absent`, em dash and stated cause", () => {
+    // THE WITNESS THE DELETED CENSUS USED TO BE. `main` pinned `"absent"` and
+    // `"muted absent-why"` as PRESENT, which incidentally proved this card's suppression
+    // path rendered; the successor asserts the inverse, and `not.toContain` passes just
+    // as well when the element is gone. Two slots, not one — `USD/MXN` is deliberately
+    // NOT gated on the mark, so a card that blacked out all three would be the
+    // whole-page blackout per-key suppression exists to avoid.
+    //
+    // FOUND BY THE EM DASH, the marker the primitive still writes now that the class is
+    // gone, and the one `absent-contract.test.tsx` pins.
+    const { container } = render(
+      <SummaryCard summary={cleanSummary()} usdMxn={18.5} fundValueRendered={false} />,
+    );
+    const slots = absentSlots(container);
+
+    expect(slots).toHaveLength(2);
+    for (const slot of slots) expect(slot.textContent).toBe("—no current mark");
+    // The clean arm renders none, which is what makes the two above a suppression
+    // witness rather than a count of decorative glyphs the card always draws.
+    expect(
+      absentSlots(
+        render(<SummaryCard summary={cleanSummary()} usdMxn={18.5} fundValueRendered />)
+          .container,
+      ),
+    ).toHaveLength(0);
   });
 });
 

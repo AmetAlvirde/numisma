@@ -161,6 +161,30 @@ export function renderedClassNames(root: Element): Set<string> {
 }
 
 /**
+ * EVERY `Absent` UNDER `root`, FOUND BY ITS EM DASH (spec #403 Seam B, spec #420 slice 8).
+ *
+ * The old censuses pinned `"absent"` and `"muted absent-why"` as PRESENT, and that
+ * incidentally proved the primitive had MOUNTED on each card's suppression path. Slice 8
+ * deleted the name, and `not.toContain("absent")` is satisfied two ways: by a correct
+ * conversion, and by the element being gone. A card that ships printing nothing where an
+ * em dash and a stated cause belong would keep every one of those assertions green.
+ *
+ * So the witness moves to the marker the primitive still writes. `ui/Absent.tsx` renders
+ * a decorative `<span aria-hidden="true">—</span>` beside the cause; that glyph is what
+ * `absent-contract.test.tsx` pins, and it is the stable handle now that the class is
+ * gone. Returns the primitive's outer `<span>`, in document order.
+ *
+ * `aria-hidden` IS PART OF THE QUERY, not incidental. The em dash is decoration the
+ * accessibility tree never hears — an em dash elsewhere in prose would not match, and a
+ * primitive that stopped hiding its glyph should not silently keep passing.
+ */
+export function absentSlots(root: Element): Element[] {
+  return [...root.querySelectorAll('span[aria-hidden="true"]')]
+    .filter((dash) => dash.textContent === "—")
+    .map((dash) => dash.parentElement!);
+}
+
+/**
  * THE CLASS NAMES SLICE 2 DELETED, spelled once for the five structure tests and the
  * `ui/` contracts that all assert their absence.
  *

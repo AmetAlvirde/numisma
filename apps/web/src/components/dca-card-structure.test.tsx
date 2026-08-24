@@ -48,6 +48,7 @@ import {
   DELETED_IN_SLICE_6,
   render,
   renderedClassNames,
+  absentSlots,
   expectNoStyledClassSurvives,
   screen,
 } from "../render.testkit.tsx";
@@ -361,6 +362,40 @@ describe("DcaCard on the shared Card", () => {
         );
       }
     });
+  });
+
+  it("still mounts each rungless arm's `Absent`, em dash and stated cause", () => {
+    // THE WITNESS THE DELETED CENSUS USED TO BE. `main` pinned `"absent"` and
+    // `"muted absent-why"` as PRESENT, which incidentally proved this card's three
+    // rungless arms rendered at all; the branch asserted nothing about `Absent`
+    // whatsoever, so `Rungs` returning `null` on any of them stayed green.
+    //
+    // ALL THREE ARMS, BY THEIR OWN WORDS. The causes are the whole point: "cadence plan"
+    // and "plan ended" are declarations the operator made, and "plan unreadable" is a
+    // file that could not be read. Asserting a count would let the three collapse into
+    // one another silently, which is the difference between "no rungs, on purpose" and
+    // "we could not tell you".
+    //
+    // FOUND BY THE EM DASH, the marker the primitive still writes now that the class is
+    // gone, and the one `absent-contract.test.tsx` pins.
+    const arms = [
+      [cadenceView(), "—cadence plan — no rung ladder"],
+      [bareView("ended"), "—plan ended"],
+      [bareView("unreadable"), "—plan unreadable"],
+    ] as const;
+
+    for (const [view, cause] of arms) {
+      const { container, unmount } = render(<DcaCard view={view} />);
+      const slots = absentSlots(container);
+
+      expect(slots).toHaveLength(1);
+      expect(slots[0]?.textContent).toBe(cause);
+      unmount();
+    }
+
+    // The ladder arm draws its rungs and no em dash, which is what makes the three above
+    // suppression witnesses rather than a glyph this card always prints.
+    expect(absentSlots(render(<DcaCard view={ladderView()} />).container)).toHaveLength(0);
   });
 });
 

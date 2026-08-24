@@ -40,6 +40,7 @@ import {
   DELETED_IN_SLICE_5,
   render,
   renderedClassNames,
+  absentSlots,
   expectNoStyledClassSurvives,
   screen,
 } from "../render.testkit.tsx";
@@ -231,6 +232,25 @@ describe("GlanceCard on the shared Card", () => {
     // Slice 8 deleted the last of them (`.fp-detail .absent`) and the hook with it, so
     // the claim flips: nothing renders the name, because nothing selects it.
     expect([...rendered]).not.toContain("absent");
+  });
+
+  it("still mounts the suppressed change's `Absent`, em dash and stated cause", () => {
+    // THE WITNESS THE DELETED CENSUS USED TO BE. `main` pinned `"absent"` and
+    // `"muted absent-why"` as PRESENT, which incidentally proved this card's suppression
+    // path rendered at all; the successor asserts the inverse, and `not.toContain` is
+    // satisfied just as well by the element being gone. `GlanceCard.tsx`'s `Change`
+    // returning `null` would leave every other assertion in this file green while the
+    // card shipped printing nothing where a cause belongs.
+    //
+    // FOUND BY THE EM DASH, which is the marker the primitive still writes now that the
+    // class name is gone, and the one `absent-contract.test.tsx` pins.
+    const { container } = render(<GlanceCard verdict={standingVerdict()} />);
+    const slots = absentSlots(container);
+
+    expect(slots).toHaveLength(1);
+    // The fixture withholds the reference, so the cause is that vocabulary's words and
+    // not the primitive's `suppressed` default.
+    expect(slots[0]?.textContent).toBe("—reference withheld");
   });
 });
 
