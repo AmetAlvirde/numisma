@@ -1,9 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import { getDashboard } from "../lib/dashboard.ts";
 import { Shell } from "../components/Shell.tsx";
-import { Crumb } from "../components/ui/Crumb.tsx";
 import {
   CARD_SURFACE,
+  Crumb,
   SnapshotEmptyNotice,
   SnapshotStaleNotice,
 } from "@numisma/components";
@@ -86,7 +86,15 @@ function LadderView({ latest, planId }: { latest: SnapshotAnchor; planId: string
   if (page.status === "not-found") {
     return (
       <Shell>
-        <Crumb to="/">← Glance</Crumb>
+        <Crumb
+          renderLink={({ className, children }) => (
+            <Link className={className} to="/">
+              {children}
+            </Link>
+          )}
+        >
+          ← Glance
+        </Crumb>
         <div className={CARD_SURFACE}>
           <h1>No such ladder</h1>
           {/* HONEST, NOT BLANK — and the cause distinguishes an id that no row carries
@@ -101,7 +109,15 @@ function LadderView({ latest, planId }: { latest: SnapshotAnchor; planId: string
   if (page.status === "no-price-axis") {
     return (
       <Shell>
-        <Crumb to="/">← Glance</Crumb>
+        <Crumb
+          renderLink={({ className, children }) => (
+            <Link className={className} to="/">
+              {children}
+            </Link>
+          )}
+        >
+          ← Glance
+        </Crumb>
         <div className={CARD_SURFACE}>
           <h1>{page.positionId}</h1>
           {/* A cadence plan is honestly rungless. An empty ladder would be a picture of
@@ -114,7 +130,15 @@ function LadderView({ latest, planId }: { latest: SnapshotAnchor; planId: string
 
   return (
     <Shell>
-      <Crumb to="/">← Glance</Crumb>
+      <Crumb
+        renderLink={({ className, children }) => (
+          <Link className={className} to="/">
+            {children}
+          </Link>
+        )}
+      >
+        ← Glance
+      </Crumb>
       <FillPathCards view={page.view} />
     </Shell>
   );
