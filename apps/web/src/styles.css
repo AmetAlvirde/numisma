@@ -82,6 +82,12 @@
   --recess: #14161c;
 
   --nms-background: var(--bg);
+  /* THE RAISED SURFACE. `CARD_SURFACE` reads it from inside the package (spec #432
+     §4.1), and the spelling is the one spec #420 slice 0 deleted, reused so the card
+     keeps one name across both vocabularies. Aliased, never copied: `--card` stays the
+     single definition, so the eight elements that carry the surface and the package's
+     `Card` cannot drift apart. */
+  --nms-card: var(--card);
   --nms-foreground: var(--text);
   /* SECONDARY TEXT, and the one alias that carries a house colour into the package
      unchanged. `Absent` reads it (spec #432 §4.1); the name is the one spec #420 slice 0

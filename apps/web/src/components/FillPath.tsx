@@ -9,7 +9,7 @@ import type {
 } from "../ladder/fill-path-view.ts";
 import { COMPACT_USD } from "../ladder/price-drop-path.ts";
 import { PriceDropPathChart } from "./PriceDropPathChart.tsx";
-import { Card, CARD_SURFACE } from "./ui/Card.tsx";
+import { Card, CARD_SURFACE } from "@numisma/components";
 import { NOTICE_CODE } from "./ui/SnapshotNotice.tsx";
 
 /**

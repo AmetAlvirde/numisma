@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 
-import { CARD_SURFACE } from "./Card.tsx";
+import { CARD_SURFACE } from "@numisma/components";
 
 /**
  * THE TWO SNAPSHOT GUARD NOTICES — Seam D of spec #403.

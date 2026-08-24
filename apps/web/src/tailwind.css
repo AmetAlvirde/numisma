@@ -189,6 +189,7 @@
  */
 @theme {
   --color-background: var(--nms-background);
+  --color-card: var(--nms-card);
   --color-foreground: var(--nms-foreground);
 
   --color-muted: var(--nms-muted);

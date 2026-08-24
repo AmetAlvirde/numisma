@@ -1,7 +1,7 @@
 import type { DashboardSummary } from "@numisma/engine";
 import { formatUsd, formatSignedPercent } from "@numisma/engine/format";
 import { Absent } from "@numisma/components";
-import { Card } from "./ui/Card.tsx";
+import { Card } from "@numisma/components";
 
 /**
  * The one cause that can reach this card, stated rather than passed. `Absent` takes the

@@ -58,15 +58,15 @@
  *
  * `apps/web` owns ten bare palette names. Each has exactly one counterpart in
  * this namespace, and the whole mapping is written here so a component crossing
- * into the package looks the name up rather than choosing it again. Four are
- * declared below; the other six are named and not yet declared, each waiting
+ * into the package looks the name up rather than choosing it again. Five are
+ * declared below; the other five are named and not yet declared, each waiting
  * on the component that first reads it.
  *
  *     house      package                  status
  *     --bg       --nms-background         declared
  *     --text     --nms-foreground         declared
  *     --line     --nms-border             declared
- *     --card     --nms-card               named; declared with `Card`
+ *     --card     --nms-card               declared
  *     --muted    --nms-muted-foreground   declared
  *     --neg      --nms-neg                named; declared with the snapshot notices
  *     --pos      --nms-pos                named; not yet declared (wave 2)
@@ -119,6 +119,11 @@ export const NMS_TOKENS = [
     name: "--nms-background",
     value: "oklch(1 0 0)",
     note: "Page/base surface. Button `outline` sits on it.",
+  },
+  {
+    name: "--nms-card",
+    value: "oklch(0.985 0 0)",
+    note: "The raised surface a card is painted on, one step off the page. `CARD_SURFACE` fills with it, and eight elements in the app carry that string, three of which are not cards — they share the paint and nothing else. Off-white rather than the page's white on purpose: grayscale mode reviews hierarchy, and a card at the background's value has none to review.",
   },
   {
     name: "--nms-foreground",

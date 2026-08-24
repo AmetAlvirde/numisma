@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { getDashboard } from "../lib/dashboard.ts";
 import { Shell } from "../components/Shell.tsx";
 import { Crumb } from "../components/ui/Crumb.tsx";
-import { CARD_SURFACE } from "../components/ui/Card.tsx";
+import { CARD_SURFACE } from "@numisma/components";
 import {
   SnapshotEmptyNotice,
   SnapshotStaleNotice,

@@ -40,7 +40,7 @@ import {
   expectNoStyledClassSurvives,
   screen,
 } from "../render.testkit.tsx";
-import { CARD_SURFACE } from "./ui/Card.tsx";
+import { CARD_SURFACE } from "@numisma/components";
 import { SummaryCard } from "./SummaryCard.tsx";
 import type { DashboardSummary } from "@numisma/engine";
 

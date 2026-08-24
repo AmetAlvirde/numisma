@@ -65,7 +65,7 @@ import {
 } from "./FillPath.tsx";
 import { composeFillPathPage } from "../ladder/fill-path-view.ts";
 import { ladderFixture } from "../ladder/started-ladder.fixtures.ts";
-import { CARD_SURFACE } from "./ui/Card.tsx";
+import { CARD_SURFACE } from "@numisma/components";
 
 /** The widest fixture: filled rungs, waiting rungs and a live spot, so every card draws. */
 function partlyWalkedView() {

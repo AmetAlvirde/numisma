@@ -70,7 +70,7 @@ describe("the app defines every token the package declares", () => {
   it("declares at least as many tokens as the package does", () => {
     // Guards the direction the per-name cases cannot: a token list that shrank
     // to nothing would pass an empty `it.each`.
-    expect(NMS_TOKEN_NAMES.length).toBeGreaterThanOrEqual(13);
+    expect(NMS_TOKEN_NAMES.length).toBeGreaterThanOrEqual(14);
   });
 
   it("defines no --nms-* name the package never declared", () => {
@@ -86,9 +86,10 @@ describe("the app defines every token the package declares", () => {
     // token no component reads is a token no test can verify, which is the
     // rule `tokens.ts` already keeps on the package's own side. When a
     // component starts reading a name, the name lands in `NMS_TOKEN_NAMES`
-    // first and this case goes green with it. `--nms-muted-foreground` is the
-    // first to make that round trip: spec #432 §4.1 moved `Absent` into the
-    // package reading it, so it is declared, aliased and mirrored again.
+    // first and this case goes green with it. Both names spec #412 minted
+    // early have now made that round trip: `--nms-muted-foreground` with
+    // `Absent` and `--nms-card` with `Card`, each declared, aliased and
+    // mirrored again in the slice that moved the component reading it.
     expect([...defined].sort()).toEqual([...NMS_TOKEN_NAMES].sort());
   });
 });
@@ -113,11 +114,11 @@ describe("the app defines every token the package declares", () => {
  * is the whole reason this increment namespaces rather than renames. What
  * carries it into the package's namespace is an ALIAS under a second name.
  * Spec #420 S0 deleted `--nms-muted-foreground` along with `--nms-card` because
- * no component in the package read either one; spec #432 §4.1 brought this one
- * back in the same slice that moved `Absent` in reading it, which is the
- * precondition the deletion was about. The block stays an exact mirror of
- * `NMS_TOKEN_NAMES` in both directions — thirteen names now, and both sides
- * moved together to get there.
+ * no component in the package read either one; spec #432 §4.1 brought each back
+ * in the slice that moved the component reading it, `Absent` and then `Card`,
+ * which is the precondition the deletion was about. The block stays an exact
+ * mirror of `NMS_TOKEN_NAMES` in both directions — fourteen names now, and both
+ * sides moved together to get there.
  *
  * `--nms-muted` IS NOT `--muted`, and the collision of English words is exactly
  * why the prefix exists. shadcn reads `--nms-muted` as a recessed SURFACE
@@ -152,6 +153,7 @@ describe("the app's --nms-* overrides in styles.css", () => {
     ["--nms-input", "var(--line)"],
     ["--nms-destructive", "var(--neg)"],
     ["--nms-muted-foreground", "var(--muted)"],
+    ["--nms-card", "var(--card)"],
   ])("aliases %s onto %s rather than copying its value", (name, alias) => {
     expect(overrides.get(name)).toBe(alias);
   });

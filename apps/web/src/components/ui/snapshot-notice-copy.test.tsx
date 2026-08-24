@@ -31,7 +31,7 @@ import {
   renderedClassNames,
   screen,
 } from "../../render.testkit.tsx";
-import { CARD_SURFACE } from "./Card.tsx";
+import { CARD_SURFACE } from "@numisma/components";
 import {
   NOTICE_CODE,
   SnapshotEmptyNotice,

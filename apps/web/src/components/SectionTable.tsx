@@ -1,5 +1,5 @@
 import { Absent } from "@numisma/components";
-import { Card } from "./ui/Card.tsx";
+import { Card } from "@numisma/components";
 // The two sign colours, from the card that owns their deleted rule (spec #420 Seam B —
 // a shared rule is converted by the first surface in the migration's order that carries
 // it, wherever its other carriers render).

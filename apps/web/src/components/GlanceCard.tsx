@@ -8,7 +8,7 @@ import type {
   Verdict,
 } from "../glance/verdict.ts";
 import { referenceLabel } from "../glance/verdict.ts";
-import { Card } from "./ui/Card.tsx";
+import { Card } from "@numisma/components";
 import {
   METRICS_FIGURE,
   METRICS_LIST,
