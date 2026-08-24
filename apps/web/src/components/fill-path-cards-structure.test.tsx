@@ -36,7 +36,7 @@ import {
   fireEvent,
   render,
   renderedClassNames,
-  styleSheetClassSelectors,
+  expectNoStyledClassSurvives,
   screen,
 } from "../render.testkit.tsx";
 import { FillPath, FillPathCards, FillPathProvider } from "./FillPath.tsx";
@@ -1298,13 +1298,17 @@ describe("the chart card carries its section as utilities", () => {
  * that about the file; this says something the file cannot know — that nothing RENDERED
  * reaches whatever is in it. A rule added back under a name no guard lists goes red here
  * the moment a component writes its class.
+ *
+ * AND AT THE END STATE IT CARRIES ITS OWN NEGATIVE CONTROL, because the file it reads is
+ * now empty of rules and the intersection is therefore empty for free.
+ * `expectNoStyledClassSurvives` re-runs the identical walk against a probe sheet built
+ * from this surface's own render, so a blank render, a reader that stopped reading or an
+ * intersection that never intersects reds here instead of passing green. What the claim
+ * is worth is written in that helper's docblock.
  */
 describe("no rule left in styles.css reaches this surface", () => {
   it("renders no class name the stylesheet still selects", () => {
     const { container } = render(<FillPathCards view={partlyWalkedView()} />);
-    const styled = styleSheetClassSelectors();
-    const survivors = [...renderedClassNames(container)].filter((name) => styled.has(name));
-
-    expect(survivors).toEqual([]);
+    expectNoStyledClassSurvives(container);
   });
 });

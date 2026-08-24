@@ -21,7 +21,7 @@ import {
   DELETED_IN_SLICE_2,
   render,
   renderedClassNames,
-  styleSheetClassSelectors,
+  expectNoStyledClassSurvives,
 } from "../render.testkit.tsx";
 import { Shell } from "./Shell.tsx";
 
@@ -85,13 +85,17 @@ describe("Shell", () => {
  * that about the file; this says something the file cannot know — that nothing RENDERED
  * reaches whatever is in it. A rule added back under a name no guard lists goes red here
  * the moment a component writes its class.
+ *
+ * AND AT THE END STATE IT CARRIES ITS OWN NEGATIVE CONTROL, because the file it reads is
+ * now empty of rules and the intersection is therefore empty for free.
+ * `expectNoStyledClassSurvives` re-runs the identical walk against a probe sheet built
+ * from this surface's own render, so a blank render, a reader that stopped reading or an
+ * intersection that never intersects reds here instead of passing green. What the claim
+ * is worth is written in that helper's docblock.
  */
 describe("no rule left in styles.css reaches this surface", () => {
   it("renders no class name the stylesheet still selects", () => {
     const { container } = render(<Shell>page</Shell>);
-    const styled = styleSheetClassSelectors();
-    const survivors = [...renderedClassNames(container)].filter((name) => styled.has(name));
-
-    expect(survivors).toEqual([]);
+    expectNoStyledClassSurvives(container);
   });
 });

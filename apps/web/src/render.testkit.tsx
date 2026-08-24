@@ -32,7 +32,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ReactElement } from "react";
-import { afterEach } from "vitest";
+import { afterEach, expect } from "vitest";
 import {
   cleanup,
   fireEvent,
@@ -450,6 +450,46 @@ export const DELETED_IN_SLICE_9 = [
 export function styleSheetClassSelectors(css: string = appStyleSheet()): Set<string> {
   const selectors = css.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{[^{}]*\}/g, "{}");
   return new Set([...selectors.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)].map((match) => match[1]!));
+}
+
+/**
+ * THE TERMINAL ASSERTION ITSELF, WITH ITS OWN NEGATIVE CONTROL (spec #420 Seam E, §8.4).
+ *
+ * THE CLAIM: the set of class names this surface renders, intersected with the set of
+ * class selectors left in `styles.css`, is empty. That is the mechanical proof that no
+ * house rule survives WITH A CARRIER — the failure the nine deletion guards cannot see,
+ * because each knows only the names its own slice took.
+ *
+ * ── WHY THE SECOND HALF EXISTS ───────────────────────────────────────────────────────
+ * At the end state `styles.css` holds no rule, so `styleSheetClassSelectors()` returns
+ * the empty set and the first expectation is `expect([]).toEqual([])` — green against a
+ * blank render, green against a reader that silently stopped reading, green against an
+ * intersection that never intersects. A guard that cannot fail is worse than no guard:
+ * it reports the strongest possible result while measuring nothing, which is the exact
+ * shape of failure the instrument was built to make impossible.
+ *
+ * So the same walk runs a SECOND time against a stylesheet built from this surface's own
+ * render. Every plain class name the surface writes becomes a selector in a probe
+ * sheet, and the intersection must come back holding all of them. That reds when the
+ * render is empty, when the parse returns nothing, and when the intersection is not
+ * really being taken — the three ways the real assertion could pass while asleep.
+ *
+ * PLAIN NAMES ONLY, because the probe sheet is CSS: `text-[0.85rem]` has to be written
+ * `.text-\[0\.85rem\]` to be a selector, and the reader — correctly — does not resolve
+ * escapes. Filtering them out keeps the control honest about what it measures rather
+ * than teaching the reader a syntax the real file will never contain. Every one of the
+ * six surfaces writes plenty of plain names; the assertion below says so out loud, so a
+ * surface that stopped writing any could not quietly empty the control.
+ */
+export function expectNoStyledClassSurvives(container: Element): void {
+  const rendered = [...renderedClassNames(container)];
+
+  expect(rendered.filter((name) => styleSheetClassSelectors().has(name))).toEqual([]);
+
+  const plain = rendered.filter((name) => /^-?[_a-zA-Z][\w-]*$/.test(name)).sort();
+  expect(plain.length).toBeGreaterThan(0);
+  const probe = styleSheetClassSelectors(plain.map((name) => `.${name} { color: red }`).join("\n"));
+  expect(rendered.filter((name) => probe.has(name)).sort()).toEqual(plain);
 }
 
 /** The app's hand-written stylesheet, read from disk. */
