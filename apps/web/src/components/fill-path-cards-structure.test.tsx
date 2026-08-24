@@ -36,6 +36,7 @@ import {
   fireEvent,
   render,
   renderedClassNames,
+  styleSheetClassSelectors,
   screen,
 } from "../render.testkit.tsx";
 import { FillPath, FillPathCards, FillPathProvider } from "./FillPath.tsx";
@@ -1235,5 +1236,34 @@ describe("the chart card carries its section as utilities", () => {
     for (const hook of ["fp-chart-card", "fp-chart", "fp-inspect"]) {
       expect(rendered).toContain(hook);
     }
+  });
+});
+
+/**
+ * THE TERMINAL ASSERTION (spec #420 Seam E, slice 9), on all five census successors and
+ * the shell's.
+ *
+ * THE SET OF CLASS NAMES THIS SURFACE RENDERS, INTERSECTED WITH THE SET OF CLASS
+ * SELECTORS LEFT IN `styles.css`, IS EMPTY. That is the mechanical proof that no house
+ * rule survives WITH A CARRIER — the failure mode the nine deletion guards cannot see,
+ * because each of them knows only the names its own slice took.
+ *
+ * IT COULD ONLY LAND HERE. Every slice but the last renders a class the file still
+ * styles, on purpose: that is what a nine-slice migration through a shared stylesheet
+ * looks like from the inside. The assertion is false by design for eight slices and true
+ * for good afterwards.
+ *
+ * IT IS NOT A RESTATEMENT OF "THE FILE HAS NO RULES". `styles-css-end-state.test.ts` says
+ * that about the file; this says something the file cannot know — that nothing RENDERED
+ * reaches whatever is in it. A rule added back under a name no guard lists goes red here
+ * the moment a component writes its class.
+ */
+describe("no rule left in styles.css reaches this surface", () => {
+  it("renders no class name the stylesheet still selects", () => {
+    const { container } = render(<FillPathCards view={partlyWalkedView()} />);
+    const styled = styleSheetClassSelectors();
+    const survivors = [...renderedClassNames(container)].filter((name) => styled.has(name));
+
+    expect(survivors).toEqual([]);
   });
 });

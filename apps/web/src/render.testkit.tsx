@@ -27,6 +27,10 @@
  * spell rung-state copy or the venue-axis predicate they census. Keep this module free of
  * domain vocabulary: it knows about the DOM, not about ladders.
  */
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import type { ReactElement } from "react";
 import { afterEach } from "vitest";
 import {
@@ -416,6 +420,42 @@ export const DELETED_IN_SLICE_9 = [
   "is-waiting",
   "is-now",
 ];
+
+/**
+ * THE CLASS SELECTORS LEFT IN `styles.css` — the terminal assertion's other half
+ * (spec #420 Seam E, slice 9).
+ *
+ * THE CLAIM IT SERVES: the set of class names a component renders, intersected with this
+ * set, is empty. That is the mechanical proof that no house rule survives WITH A CARRIER,
+ * and it is the one assertion in this migration that no single slice could make — every
+ * slice but the last renders a class the file still styles, on purpose.
+ *
+ * IT READS THE FILE RATHER THAN NAMING WHAT IS IN IT. Nine `*-section-deleted.test.ts`
+ * guards already say which names may not return; this says something different and
+ * stronger for the five surfaces that render: whatever is in that file, none of it
+ * reaches them. A rule added back under a name no guard lists is caught here the moment
+ * anything renders its class.
+ *
+ * COMMENTS GO FIRST, for the reason every guard in this suite strips them: the file's
+ * remaining prose quotes selectors and means none of them. DECLARATION BODIES GO SECOND,
+ * so a `.5s` in a transition or a `.25` in a `color-mix` cannot read as a class name.
+ * What is left is selector text, scanned for `.name`.
+ *
+ * IT TAKES THE CSS SO THE PARSE CAN BE PINNED. A reader that silently stopped reading
+ * would return an empty set and report the strongest possible green on all five
+ * surfaces — the exact failure this instrument exists to make impossible. Passing a
+ * sample stylesheet is how `render.testkit.test.tsx` holds the other direction; the five
+ * callers pass nothing and get the real file.
+ */
+export function styleSheetClassSelectors(css: string = appStyleSheet()): Set<string> {
+  const selectors = css.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{[^{}]*\}/g, "{}");
+  return new Set([...selectors.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)].map((match) => match[1]!));
+}
+
+/** The app's hand-written stylesheet, read from disk. */
+export function appStyleSheet(): string {
+  return readFileSync(join(dirname(fileURLToPath(import.meta.url)), "styles.css"), "utf8");
+}
 
 /**
  * Everything a render test is allowed to reach for, re-exported from one place.
