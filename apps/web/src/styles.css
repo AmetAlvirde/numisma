@@ -139,90 +139,35 @@
    nothing red. The reasoning is in `GlanceCard.tsx` beside the two classes that carry it,
    and `glance-section-deleted.test.ts` holds the deletion. */
 
-/* ── the DCA card (spec #277 D4/D6) ─────────────────────────────────────────
-   ONE BLOCK, APPENDED, when it landed. The card is built out of classes that
-   already exist (`.card`, `.table-scroll`, `table`, `th.num`, `.absent`,
-   `.muted`), because the price-sorted rung table IS hot-set item 11's plot and it
-   costs no new substrate. What is genuinely new is only the plan header — an id, a
-   state word and a kind, on one line that wraps on a phone.
+/* THE DCA CARD LEFT THIS FILE (spec #420 slice 6), and its block header went with it:
+   that header described a section that no longer exists, and every neighbour it named
+   (`.metrics`, `.summary-head`, `.table-scroll table`) had already gone in slices 3 and
+   4. The plan block, the wrapping head, the state badge and the alert line are utilities
+   on the elements `DcaCard.tsx` renders; the rung table went in slice 4 with the rest of
+   the table surface.
 
-   THE 320px REWORK DID REACH ABOVE THIS LINE, and the sentence that used to say
-   "nothing above this line changed" is gone rather than left to be believed.
-   `.metrics`, `.summary-head` and `.table-scroll table` were rewritten phone-first
-   in place, because they are the shared substrate this card and the glance and the
-   big picture all render through — a second, later block redeclaring them would put
-   two competing definitions of one grid in one file. THE DCA CARD ITSELF NEEDED NO
-   BREAKPOINT: `.dca-head` already wraps, `.dca-alert` is one line of prose, and the
-   rung table is two columns that fit 254px unwrapped. It has no container.
+   THE STATE WORD'S THREE COLOURS ARE NOW ONE TOTAL MAP, not a base plus two overrides.
+   `.dca-state` painted grey and `.dca-state-active` and `.dca-state-unreadable` repainted
+   it — a cascade this file could express and a class string cannot, since two unvariant
+   utilities on one property are resolved by Tailwind's emitted order rather than by the
+   order they are written in. Every state names its own colour instead, so there is no
+   override left to lose.
 
-   THE CHART GATE IS RETIRED (spec #285 §6.2, slice #289). This comment used to
-   say the chart "and any rewrite of this file" were gated on node 7.10 (#145),
-   the sign-in design issue. The chart shipped in slice #289 and this file was NOT
-   rewritten — the constraint the gate was really protecting. Leaving the sentence
-   standing would read as a live rule to the next person and stop them building
-   something already built. #145 stays independent. */
-.dca-plan {
-  margin-top: 14px;
-}
-
-.dca-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px;
-  margin: 0 0 6px;
-}
-
-/* The state word is the card's whole answer on day zero, so it reads as a badge
-   rather than as prose — and `pending` is deliberately NOT an alarm colour: a
-   declared plan awaiting its first fill is the normal starting state, not a
-   problem. `unreadable` is the only one that wants the eye. */
-.dca-state {
-  font-size: 0.72rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-}
-
-.dca-state-active {
-  color: var(--pos);
-}
-
-.dca-state-unreadable {
-  color: var(--warn);
-}
-
-/* ── the DCA card's alert line (spec #285 G-D13) ────────────────────────────
-   The card became the tap target, so its one new line is a link. Sized to be
-   hit with a thumb without turning the card into a button. */
-.dca-alert {
-  margin: 0 0 8px;
-  font-size: 0.85rem;
-}
-
-.dca-alert a {
-  color: var(--text);
-  text-decoration: none;
-  display: inline-block;
-  padding: 4px 0;
-}
-
-.dca-alert a:hover,
-.dca-alert a:focus-visible {
-  text-decoration: underline;
-}
-
-.dca-alert-warn {
-  color: var(--neg);
-}
+   NOTHING HERE EVER DECLARED THE ALERT LINK'S FOCUS RING. `a:hover, a:focus-visible` set
+   `text-decoration` and no more; the outline a keyboard draws on that link is the user
+   agent's, live because preflight is off. It survives by nothing suppressing it, which is
+   why `dca-section-deleted.test.ts` asserts that every `outline` declaration left in this
+   file sits on a ladder row and Chrome measured the ring after a real Tab. The reasoning
+   for each string is in `DcaCard.tsx` beside it, and that same test holds the deletion. */
 
 /* ── the Fill Path (spec #285, slice #289) ──────────────────────────────────
-   ONE BLOCK, APPENDED, when it landed — no rewrite, which is the promise the
-   retired chart gate above was really making. Plain hand-written CSS: no styling
-   library, no chart library. The 320px rework has since edited `.metrics`,
-   `.summary-head` and `.table-scroll table` above the line, in place and phone-
-   first; see the DCA card's header for why those three and no others.
+   ONE BLOCK, APPENDED, when it landed — no rewrite. Plain hand-written CSS: no
+   styling library, no chart library. The 320px rework had since edited `.metrics`,
+   `.summary-head` and `.table-scroll table` above this line, in place and phone-
+   first, because they were the shared substrate three cards rendered through; all
+   three have now left the file entirely (spec #420 slices 3 and 4), and the DCA
+   card's block header, which carried that reasoning and a long-retired chart gate,
+   went with them in slice 6.
 
    PHONE FIRST, against U's 320px rework. Every width here is fluid and every
    fixed number is a type size or a gap, so the four cards stack the same at

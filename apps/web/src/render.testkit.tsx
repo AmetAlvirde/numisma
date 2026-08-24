@@ -249,6 +249,36 @@ export const DELETED_IN_SLICE_4 = ["table-scroll", "num"];
 export const DELETED_IN_SLICE_5 = ["glance", "verdict", "verdict-no", "verdict-yes"];
 
 /**
+ * THE CLASS NAMES SLICE 6 DELETED — the DCA card's plan block, head, state badge and
+ * alert line.
+ *
+ * One surface asserts this one, for the reason slice 5's list has one: slices 2, 3 and 4
+ * had already taken every class this card shares with anything else (spec #420 Seam B),
+ * so what is left is the card's own and renders nowhere but inside it.
+ *
+ * THE STATE BADGE CONTRIBUTES FOUR NAMES, NOT THREE. Only two of the state suffixes ever
+ * had a rule; the card assembled the class from a template, so `pending` and `ended` were
+ * always emitted and always styled by the base alone. All four are listed because the
+ * template is what is being deleted, and a template rebuilt later would put back the two
+ * that never had a rule first — which is the same mistake arriving in its quietest form.
+ *
+ * `dca` IS NOT ON THE LIST AND MUST NOT BE. It is the card root's hook, it never had a
+ * rule in `styles.css` and this slice does not remove it; asserting its absence would
+ * fail on a card that is behaving exactly as intended.
+ */
+export const DELETED_IN_SLICE_6 = [
+  "dca-plan",
+  "dca-head",
+  "dca-state",
+  "dca-state-pending",
+  "dca-state-active",
+  "dca-state-ended",
+  "dca-state-unreadable",
+  "dca-alert",
+  "dca-alert-warn",
+];
+
+/**
  * Everything a render test is allowed to reach for, re-exported from one place.
  *
  * `fireEvent` RIDES ALONGSIDE `userEvent`, NOT INSTEAD OF IT. Spec #403 §3.4 bought

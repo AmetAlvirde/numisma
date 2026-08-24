@@ -91,6 +91,20 @@ export function DcaCard({ view }: { view: DcaView }) {
 }
 
 /**
+ * THE PLAN BLOCK AND ITS HEAD (spec #420 slice 6).
+ *
+ * `m-0 mb-[6px]` IS NOT `mb-[6px]`. Preflight is off, so the UA's `<p>` margin is live on
+ * all four edges and the deleted rule set three of them to zero. The plan block is a
+ * `<div>`, which the UA gives no margin, so its one edge is the whole of it.
+ *
+ * The head wraps and always did: an id, a state word and a kind on one line at desk
+ * width, on two or three at 320px. That wrap is the reason this card needed no breakpoint
+ * of its own and has no container.
+ */
+const PLAN_BLOCK = "mt-[14px]";
+const PLAN_HEAD = "flex flex-wrap items-baseline gap-2 m-0 mb-[6px]";
+
+/**
  * The state word, in the operator's terms — and each one says what it means, because
  * `active` in particular does NOT mean "accumulating". It names the POLICY in force
  * on this date (ADR-004); a ladder whose rungs sit far below spot is `active` with
@@ -103,6 +117,32 @@ const STATE_COPY: Record<DcaPositionView["state"], string> = {
   unreadable: "unreadable",
 };
 
+/**
+ * THE STATE WORD READS AS A BADGE — small, heavy, upper-cased and tracked out — and its
+ * COLOUR IS THE CARD'S WHOLE ANSWER ON DAY ZERO.
+ *
+ * `pending` IS DELIBERATELY NOT AN ALARM COLOUR: a declared plan awaiting its first fill
+ * is the normal starting state, not a problem, so it takes the same recessed grey `ended`
+ * does. `unreadable` is the only one that wants the eye.
+ *
+ * EVERY ARM NAMES ITS OWN COLOUR AND THE BADGE NAMES NONE. The deleted rules were a base
+ * that painted grey and two overrides that repainted it, which is a cascade the stylesheet
+ * could express and this string cannot: two unvariant `color` utilities on one element are
+ * resolved by Tailwind's EMITTED order, not by the order they are written in, so a base
+ * grey beside a state colour would be a coin toss decided inside the framework's sort. A
+ * total map has no override to lose — one colour reaches the element, and which one is a
+ * fact about this table rather than about a cascade. `dca-card-structure.test.tsx` walks
+ * all four arms for that reason, not only the one the live wire happens to be in.
+ */
+const STATE_BADGE = "text-[0.72rem] font-semibold uppercase tracking-[0.04em]";
+
+const STATE_TONE: Record<DcaPositionView["state"], string> = {
+  pending: "text-[var(--muted)]",
+  active: "text-[var(--pos)]",
+  ended: "text-[var(--muted)]",
+  unreadable: "text-[var(--warn)]",
+};
+
 /** What kind of plan this is, where the wire names one. */
 const KIND_COPY: Record<"dcaLadder" | "dcaTime", string> = {
   dcaLadder: "price ladder",
@@ -111,10 +151,10 @@ const KIND_COPY: Record<"dcaLadder" | "dcaTime", string> = {
 
 function Plan({ position }: { position: DcaPositionView }) {
   return (
-    <div className="dca-plan">
-      <p className="dca-head">
+    <div className={PLAN_BLOCK}>
+      <p className={PLAN_HEAD}>
         <span>{position.positionId}</span>
-        <span className={`dca-state dca-state-${position.state}`}>
+        <span className={`${STATE_BADGE} ${STATE_TONE[position.state]}`}>
           {STATE_COPY[position.state]}
         </span>
         {position.kind ? (
@@ -126,6 +166,40 @@ function Plan({ position }: { position: DcaPositionView }) {
     </div>
   );
 }
+
+/**
+ * THE ALERT LINE AND ITS TAP TARGET (spec #420 slice 6).
+ *
+ * `m-0 mb-2` for the same reason the head is `m-0 mb-[6px]`: the deleted rule set three
+ * `<p>` edges to zero and preflight is off, so all three are written.
+ *
+ * ── THE KEYBOARD RING WAS NEVER IN `styles.css`, AND THAT IS THE HAZARD ──────────────
+ * The deleted `a:hover, a:focus-visible` pair declared TEXT-DECORATION and nothing else.
+ * The outline a keyboard puts on this link is the USER AGENT's, live because preflight is
+ * off and this app has never overridden it. So the conversion's risk is not a rule that
+ * fails to move, it is a utility that suppresses something no rule ever declared: any
+ * outline reset landing here removes a focus ring, and nothing in this repo's suite would
+ * go red. Nothing below touches `outline`, deliberately, and Chrome measured the ring
+ * after a real Tab rather than a scripted focus — the only channel that can see it.
+ *
+ * THE UNDERLINE IS A VARIANT PAIR, NOT AN OVERRIDE HOPING TO WIN. The base removes the
+ * decoration and the two states put it back; both variants compile to a higher-specificity
+ * selector than the base, so the restoration is decided by the cascade rule it means
+ * rather than by Tailwind's emitted order.
+ *
+ * `px-0 py-1` IS THE WHOLE SHORTHAND. The deleted rule said `padding: 4px 0`, which sets
+ * four edges, and it is what makes the line a thumb-sized target without turning the card
+ * into a button.
+ *
+ * The warn span keeps its own colour on its own element, so it inherits nothing from the
+ * link and overrides nothing on it — the two never meet on one property.
+ */
+const ALERT_LINE = "m-0 mb-2 text-[0.85rem]";
+
+const ALERT_LINK =
+  "inline-block px-0 py-1 text-[var(--text)] no-underline hover:underline focus-visible:underline";
+
+const ALERT_WARN = "text-[var(--neg)]";
 
 /**
  * The alert line, and the tap through to the Fill Path.
@@ -146,7 +220,7 @@ function Alert({ position }: { position: DcaPositionView }) {
     <>
       {alert.rungs} {alert.rungs === 1 ? "rung" : "rungs"} · {alert.filled} filled
       {alert.needsRecording > 0 ? (
-        <span className="dca-alert-warn">
+        <span className={ALERT_WARN}>
           {" "}
           · <span aria-hidden="true">⚠ </span>
           {alert.needsRecording} needs recording
@@ -155,10 +229,10 @@ function Alert({ position }: { position: DcaPositionView }) {
     </>
   );
 
-  if (planId === undefined) return <p className="dca-alert">{line}</p>;
+  if (planId === undefined) return <p className={ALERT_LINE}>{line}</p>;
   return (
-    <p className="dca-alert">
-      <Link to="/ladder/$planId" params={{ planId }}>
+    <p className={ALERT_LINE}>
+      <Link to="/ladder/$planId" params={{ planId }} className={ALERT_LINK}>
         {line} <span aria-hidden="true">→</span>
       </Link>
     </p>
