@@ -1169,28 +1169,182 @@ function Pills({ rung }: { rung: FillPathRungView }) {
  * things about the same rung. The `next` pill was `--pos`-bordered before this, which
  * borrowed the colour that means FILLED for the one rung that has not.
  */
+/**
+ * THE RUNG LIST'S SECTION, AS UTILITIES (spec #420 slice 8).
+ *
+ * THE CARD IS THE QUERY CONTAINER, not the viewport, and the UA's own `ul` margin and
+ * 40px indent are live with preflight off — both are zeroed here or the ladder sits
+ * indented under its own heading.
+ *
+ * ── AT 320px THE PRICE IS SIZED AND THE STATE UNFOLDS ────────────────────────────────
+ * There are 224px inside a tile. The desk shape spends 36 of them on a fixed rung-number
+ * gutter and hands the leftover to the state, which took 93px for `matched by price` and
+ * left a price in a 71px box it silently overflowed. So at this width the gutter shrinks
+ * to the two characters it holds and the FIGURES column is sized to content: a price
+ * never clips, because it is the thing the row is about.
+ *
+ * THE GUTTER SHRINKS BUT STAYS FIXED at both widths. Each tile is its own grid, so an
+ * `auto` gutter would be measured per tile and `R9` and `R10` would set their prices at
+ * different left edges — a ragged ladder in the one list whose job is to be read down.
+ *
+ * BOTH GAPS ARE LONGHANDS, on both sides of the breakpoint. `gap-3` is the shorthand and
+ * Tailwind sorts shorthands ahead of longhands, so the narrow `gap-x`/`gap-y` pair would
+ * have beaten the wide arm and the desk shape would have kept the phone's gaps with
+ * nothing red.
+ */
+const LIST_CARD = "@container/fp-list";
+const LIST_ITEMS = "list-none grid gap-2 m-0 p-0";
+const ROW =
+  "grid grid-cols-[1.75rem_auto_minmax(0,1fr)] items-baseline gap-x-[10px] gap-y-0" +
+  " w-full px-[14px] py-3 border rounded-xl text-[var(--text)] [font:inherit]" +
+  " text-left cursor-pointer" +
+  // NEUTRAL, DELIBERATELY. `--pos` would ring a waiting rung in the colour that means
+  // filled the moment a keyboard reached it, and this is the accessible path to the
+  // inspect panel — it has to be visible.
+  " focus-visible:outline-2 focus-visible:outline-[var(--text)] focus-visible:outline-offset-2" +
+  " @[380px]/fp-list:grid-cols-[2.25rem_minmax(0,1fr)_auto] @[380px]/fp-list:items-center" +
+  " @[380px]/fp-list:gap-x-3 @[380px]/fp-list:gap-y-3";
+
+/**
+ * FOUR DECISIONS ON ONE ELEMENT, AS FOUR TOTAL MAPS.
+ *
+ * The deleted rules resolved them by ORDER: `.is-next` sat below `.is-filled` and
+ * `.is-selected` below both, so a rung that was two things at once took the lower rule's
+ * colour. Utilities have no order to lean on — two unvariant `background-color` or
+ * `border-color` utilities race — so the priority the stylesheet expressed by position is
+ * spelled out in `rungRowClasses` instead, where it can be read.
+ *
+ * THE TINT REUSES THE CHART'S PALETTE AND NO OTHER: `--pos` filled, `--now` next, bare
+ * `--bg` waiting. Mixed into the background rather than used neat, so the tint says which
+ * state without competing with the price for the eye.
+ *
+ * SELECTION IS A RING, NOT A FILL. A background swap would fight the state tint and could
+ * make a waiting rung look filled while the operator inspected it, so selection moves the
+ * border colour and adds a shadow and touches the background of nothing.
+ */
+const ROW_TINT = {
+  waiting: "bg-[var(--bg)]",
+  filled: "bg-[color-mix(in_srgb,var(--pos)_12%,var(--bg))]",
+  next: "bg-[color-mix(in_srgb,var(--now)_14%,var(--bg))]",
+} as const;
+const ROW_EDGE = {
+  line: "border-[var(--line)]",
+  filled: "border-[color-mix(in_srgb,var(--pos)_34%,var(--line))]",
+  next: "border-[color-mix(in_srgb,var(--now)_42%,var(--line))]",
+  selected: "border-[var(--text)]",
+} as const;
+/**
+ * AN ARBITRARY PROPERTY RATHER THAN `shadow-[…]`, and measured before it was written.
+ * Tailwind's shadow utility composes with its ring and inset variables, so the ring
+ * arrives behind four transparent layers: `rgba(0,0,0,0) 0 0 0 0, …, rgb(231,233,238) 0
+ * 0 0 1px`. Nothing paints differently, but the computed value stops being the deleted
+ * rule's, and parity by computed value is what this migration is checked by. The property
+ * form computes byte-for-byte what the rule did.
+ */
+const ROW_RING = "[box-shadow:0_0_0_1px_var(--text)]";
+
+/**
+ * Dashed, per G-D12: a declared rung with no order is not a state the ladder is in, it is
+ * one it never entered. SELECTION FORCES IT SOLID, which is what the deleted rule's
+ * `border-style: solid` did — a selected never-placed rung stops being dashed while it is
+ * the one under inspection.
+ */
+function rungRowClasses(rung: FillPathRungView, isSelected: boolean): string {
+  const tint = rung.isNext
+    ? ROW_TINT.next
+    : rung.filled
+      ? ROW_TINT.filled
+      : ROW_TINT.waiting;
+  const edge = isSelected
+    ? ROW_EDGE.selected
+    : rung.isNext
+      ? ROW_EDGE.next
+      : rung.filled
+        ? ROW_EDGE.filled
+        : ROW_EDGE.line;
+  const style = rung.notPlaced && !isSelected ? "border-dashed" : "border-solid";
+  return `${ROW} ${tint} ${edge} ${style}${isSelected ? ` ${ROW_RING}` : ""}`;
+}
+
+/**
+ * Centred against the whole tile rather than sat on the price's baseline: the rung number
+ * labels the tile, not the first figure in it. At desk width the row centres its items
+ * and the gutter goes back to sharing that alignment.
+ */
+const ROW_INDEX =
+  "self-center text-[0.78rem] font-semibold tracking-[0.03em] text-[var(--muted)]" +
+  " @[380px]/fp-list:self-auto";
+/** The two numbers that describe a rung, stacked in the order the chart plots them. */
+const ROW_FIGURES = "grid gap-px min-w-0";
+const ROW_PRICE = "text-[1.05rem] font-bold tracking-[-0.01em] tabular-nums";
+/**
+ * THE SIZE AND ITS `@`, DEMOTED TOGETHER — the row is scanned down the price column, so
+ * the price keeps its weight and everything leading up to it steps back. Weight AND
+ * colour, unlike the inspect card's colour-only demotion: a list row is read at a glance
+ * rather than as a sentence, and 700-weight grey still reads as loud. Its own string
+ * rather than the shared muted one so it stays legible against the two state tints, which
+ * already move the row's colour.
+ */
+const ROW_SIZE = "font-normal text-[var(--muted)]";
+/** The preposition recedes one step further than the figure it follows. */
+const ROW_AT = "opacity-70";
+
+/**
+ * THE STATE COLUMN DISSOLVES AT 320px. Even with the price sized, the remainder is ~80px
+ * and `price passed, unconfirmed` cannot go in — no width is guaranteed to hold a pill.
+ * `display: contents` dissolves the wrapper so its three children become items of the
+ * ROW's grid: the two status lines stay on the right rail in column 3 and the qualifiers
+ * take a full-width line of their own. It is the one thing CSS can do here that the
+ * markup's nesting otherwise forbids, and it costs no change to the elements below.
+ */
+const ROW_STATE =
+  "contents @[380px]/fp-list:grid @[380px]/fp-list:justify-items-end" +
+  " @[380px]/fp-list:gap-[3px] @[380px]/fp-list:text-right";
+const ROW_LINE = "col-start-3 text-right @[380px]/fp-list:col-start-auto";
+/** Sentence case from a lower-case wire label without touching the string. */
+const ROW_STATUS = `${ROW_LINE} text-[0.82rem] font-bold first-letter:uppercase`;
+/**
+ * ONE COLOUR REACHES THE STATUS WORD, and which one is a fact about this map rather than
+ * about rule order. Never-placed beats next beats filled, which is the order the three
+ * deleted context rules were written in. The ordinary rung is the empty string on purpose:
+ * its status had no rule and inherited the row's colour, and a `text-` utility here would
+ * be a declaration the file never carried.
+ */
+const ROW_STATUS_TONE = {
+  unplaced: "text-[var(--muted)]",
+  next: "text-[var(--now)]",
+  filled: "text-[var(--pos)]",
+  plain: "",
+} as const;
+/** The venue's word, under the spot-derived one: quiet, but present — two claims. */
+const ROW_SUBSTATUS = `${ROW_LINE} text-[0.72rem] text-[var(--muted)]`;
+/**
+ * A FULL-WIDTH LINE OF ITS OWN AT 320px. A pill cannot be made narrower than its longest
+ * word, so it is given the whole tile rather than a column that might not hold it; still
+ * right-aligned, so it hangs off the same rail as the status above.
+ */
+const ROW_QUALS =
+  "flex flex-wrap justify-end gap-1 col-span-full mt-1" +
+  " @[380px]/fp-list:col-auto @[380px]/fp-list:mt-0";
+/** 12px of its own, which is what the deleted rule set over slice 2's shared 4px. */
+const ORPHANS = "m-0 mt-3 text-[0.8rem] text-[var(--muted)]";
+
 function RungList() {
   const { view, selected, select } = useFillPath();
   return (
-    <Card className="fp-list">
-      <Card.Title>Rungs</Card.Title>
-      <ul>
+    <Card className={LIST_CARD}>
+      <Card.Title className={LADDER_HEADING}>Rungs</Card.Title>
+      <ul className={LIST_ITEMS}>
         {view.rungs.map((rung) => (
           <li key={rung.key}>
             <button
               type="button"
-              className={
-                "fp-row" +
-                (rung.filled ? " is-filled" : "") +
-                (rung.isNext ? " is-next" : "") +
-                (rung.key === selected?.key ? " is-selected" : "") +
-                (rung.notPlaced ? " is-unplaced" : "")
-              }
+              className={rungRowClasses(rung, rung.key === selected?.key)}
               aria-current={rung.key === selected?.key ? "true" : undefined}
               onClick={() => select(rung.key)}
               onFocus={() => select(rung.key)}
             >
-              <span className="fp-row-index">R{rung.ladderIndex}</span>
+              <span className={ROW_INDEX}>R{rung.ladderIndex}</span>
               {/* ONE LINE, THE SAME SENTENCE THE INSPECT CARD LEADS WITH — see
                   `RungHeadline`. It was two stacked figures, `$57,500.00` over `$149.96`,
                   which made the reader pair them and printed a `$` eight times down a
@@ -1200,19 +1354,23 @@ function RungList() {
                   ABSENT IS STILL THE EM-DASH AND ITS CAUSE, never a `0`: a rung whose size
                   the snapshot does not carry has not declared zero capital. It keeps the
                   `@ price` beside it, so the row still says which rung is missing it. */}
-              <span className="fp-row-figures">
-                <span className="fp-row-price">
+              <span className={ROW_FIGURES}>
+                <span
+                  className={
+                    rung.notPlaced ? `${ROW_PRICE} text-[var(--muted)]` : ROW_PRICE
+                  }
+                >
                   {/* MUTED, FOR THE SAME REASON AS THE INSPECT CARD'S — the column is
                       ordered by price and scanned by price, so price carries the weight
                       and the size trails it. Keeping both at accent weight made every
                       row two competing headlines. */}
-                  <span className="fp-row-size">
+                  <span className={ROW_SIZE}>
                     {rung.sizeUsd === undefined ? (
                       <Absent why="size not carried" />
                     ) : (
                       SIZE_PLAIN.format(rung.sizeUsd)
                     )}{" "}
-                    <span className="fp-row-at">@</span>
+                    <span className={ROW_AT}>@</span>
                   </span>{" "}
                   {PRICE_PLAIN.format(rung.priceUsd)}
                 </span>
@@ -1226,7 +1384,7 @@ function RungList() {
       {/* THE ORPHAN BUCKET — recorded lots no declared rung explains. A count, never
           the lots: the conclusion crosses the wire and the position data does not. */}
       {view.orphanLots !== undefined && view.orphanLots > 0 ? (
-        <p className="fp-orphans m-0 mt-1 text-[var(--muted)]">
+        <p className={ORPHANS}>
           {view.orphanLots} recorded {view.orphanLots === 1 ? "lot" : "lots"} that no
           declared rung explains.
         </p>
@@ -1275,6 +1433,20 @@ function RungList() {
  * exactly that rung; the pill was the same sentence twice. The row's dashed border still
  * carries it visually, per G-D12.
  */
+/**
+ * WHICH OF THE FOUR TONES THE STATUS WORD TAKES, in the order the deleted context rules
+ * were written in: `.is-unplaced` sat below `.is-next`, which sat below `.is-filled`, so
+ * a rung that is two of them at once takes the last one's colour. Written as a lookup
+ * rather than as three class-name concatenations, because that is the shape the cascade
+ * had and utilities cannot reproduce it any other way.
+ */
+function statusTone(rung: FillPathRungView): keyof typeof ROW_STATUS_TONE {
+  if (rung.notPlaced) return "unplaced";
+  if (rung.isNext) return "next";
+  if (rung.filled) return "filled";
+  return "plain";
+}
+
 function RowState({ rung }: { rung: FillPathRungView }) {
   // THE ORDINARY RUNG, decided on the venue axis and not on what it is called.
   const stateIsDefault = rung.venueResting;
@@ -1288,15 +1460,17 @@ function RowState({ rung }: { rung: FillPathRungView }) {
   if (status === undefined && !hasQuals) return null;
 
   return (
-    <span className="fp-row-state">
+    <span className={ROW_STATE}>
       {status === undefined ? null : (
-        <span className="fp-row-status">{status}</span>
+        <span className={`${ROW_STATUS} ${ROW_STATUS_TONE[statusTone(rung)]}`}>
+          {status}
+        </span>
       )}
       {substatus === undefined ? null : (
-        <span className="fp-row-substatus">{substatus}</span>
+        <span className={ROW_SUBSTATUS}>{substatus}</span>
       )}
       {hasQuals ? (
-        <span className="fp-row-quals">
+        <span className={ROW_QUALS}>
           {rung.pricePassedUnconfirmed ? (
             <span className={`${PILL} ${PILL_TONE.inferred}`}>price passed, unconfirmed</span>
           ) : null}

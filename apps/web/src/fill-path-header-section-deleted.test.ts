@@ -145,14 +145,27 @@ const OWNED_PREFIXES = [
 ];
 
 /**
- * Still in the file, and still carried by the render — slices 8 and 9 take these.
+ * Still in the file, and still carried by the render — slice 9 takes these.
  *
- * `.fp-torn` AND `.fp-selected` HAVE LEFT WITH SLICE 8 and are no longer among them. The
- * list shrinks as slice 8 works down the ladder; what it is asserting is that slice 7's
+ * THE LADDER'S FOUR HAVE LEFT WITH SLICE 8, so what holds this claim up is the chart's.
+ * The list shrank as slice 8 worked down the ladder; what it asserts is that slice 7's
  * deletion took nothing beyond its own, so a name leaving it is a later slice doing its
- * job rather than this one over-reaching.
+ * job rather than this one over-reaching. When slice 9 empties it, this assertion has
+ * nothing left to say and goes with the file's last rule.
+ *
+ * MATCHED AT COLUMN ZERO followed by a delimiter, which is what every rule in this list
+ * opens with. `.fp-chart-card` is deliberately not among them: its only rule is a
+ * DESCENDANT one (`.fp-chart-card h2`), so the pattern would not see it and listing it
+ * would fail on a file behaving exactly as intended.
  */
-const SURVIVING_SELECTORS = [".fp-list", ".fp-row"];
+const SURVIVING_SELECTORS = [
+  ".fp-chart-head",
+  ".fp-chart-range",
+  ".fp-chart",
+  ".fp-legend",
+  ".fp-caption",
+  ".fp-inspect",
+];
 
 describe("the fill path header section's deletion", () => {
   it("has taken every selector slice 7 owns out of styles.css", () => {
@@ -192,7 +205,7 @@ describe("the fill path header section's deletion", () => {
     expect(UNCOMMENTED).not.toMatch(/@container\s+fp-header\b/);
   });
 
-  it("leaves the ladder and the chart untouched", () => {
+  it("leaves the chart untouched", () => {
     // The deletion is defined by a selector list, not by a file, and this is the half of
     // that claim a text channel can hold: nothing outside slice 7's list moved. A green
     // suite with these gone would mean the slice took two later slices' work with it.

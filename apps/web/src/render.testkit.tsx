@@ -165,11 +165,12 @@ export function renderedClassNames(root: Element): Set<string> {
  * deleted. Each of these had a rule in `styles.css` and has none now; every declaration
  * they carried is a utility on the elements that used to reference them.
  *
- * `absent` IS NOT ON THE LIST AND MUST NOT BE. Its own rule is deleted, but three
- * contextual rules still select through it — `.metrics dd .absent` (slice 3),
+ * `absent` IS NOT ON THIS LIST, and it is on slice 8's. Its own rule went here, but
+ * three contextual rules still selected through it — `.metrics dd .absent` (slice 3),
  * `.fp-tile .absent` (slice 7), `.fp-detail .absent` (slice 8), two with `@container`
- * arms. It is a bare hook until the last of those goes. `sr-only` is not on the list
- * either, for the opposite reason: the name stays and Tailwind's own utility took it
+ * arms — so it stayed a bare hook until the last of them went. It belongs to the slice
+ * that deleted the name, not to the slice that deleted the rule. `sr-only` is on no list
+ * at all, for the opposite reason: the name stays and Tailwind's own utility took it
  * over.
  */
 export const DELETED_IN_SLICE_2 = [
@@ -197,7 +198,8 @@ export const DELETED_IN_SLICE_2 = [
  *
  * `absent` IS STILL NOT ON THE LIST. `.metrics dd .absent` — one of the three contextual
  * rules named in slice 2's note — goes here, and the other two (`.fp-tile .absent`,
- * `.fp-detail .absent`) do not. The hook stays until slice 8 takes the last of them.
+ * `.fp-detail .absent`) do not. The hook stays until slice 8 takes the last of them, and
+ * the NAME is on slice 8's list because that is the slice that stopped writing it.
  */
 export const DELETED_IN_SLICE_3 = [
   "summary",
@@ -294,9 +296,9 @@ export const DELETED_IN_SLICE_6 = [
  *
  * `absent` IS STILL NOT ON THE LIST. `.fp-tile .absent` and `.fp-spot .absent` — two of
  * the three contextual rules slice 2's note named — go here, and the hook survives for
- * the last of them, `.fp-detail .absent`, which is slice 8's. `fp-chart-card`,
- * `fp-selected`, `fp-list` and every ladder name are likewise absent from this list and
- * must stay absent: they still have rules, and this same render still carries them.
+ * the last of them, `.fp-detail .absent`, which is slice 8's. `fp-chart-card` and every
+ * ladder name are likewise absent from this list and had to be: they still had rules
+ * when this list was written, and this same render still carried them.
  */
 export const DELETED_IN_SLICE_7 = [
   "fp-header",
@@ -324,6 +326,63 @@ export const DELETED_IN_SLICE_7 = [
   "fp-expected-value",
   "fp-hero",
   "fp-hero-value",
+];
+
+/**
+ * THE CLASS NAMES SLICE 8 DELETED — the ladder, from the banner above the chart to the
+ * completeness line under the last rung.
+ *
+ * THIRTY-FOUR NAMES, AND ONE OF THEM IS SIX SLICES OLD. `absent` is here rather than on
+ * slice 2's list because slice 2 deleted its RULE and this slice deleted the NAME: three
+ * contextual rules selected through the bare hook, and `.fp-detail .absent` was the last
+ * of them. A list is a record of what a render may no longer contain, so the name belongs
+ * to the slice after which the render no longer contains it.
+ *
+ * THREE OF THE ROW'S FOUR STATE SUFFIXES ARE HERE, AND `is-filled` IS NOT. The row
+ * assembled `is-filled`, `is-next`, `is-selected` and `is-unplaced` by concatenation and
+ * all four left with the template that built them — but the CHART's legend swatch still
+ * writes `is-filled`, and `.fp-legend-swatch.is-filled` is still in `styles.css` until
+ * slice 9. Listing it would fail on a render behaving exactly as intended, which is the
+ * same trap `dca` was kept off slice 6's list to avoid.
+ *
+ * `fp-chart-card` AND THE CHART'S NAMES ARE NOT HERE AND MUST NOT BE. They still have
+ * rules in `styles.css` and this same render still carries them; slice 9 takes them.
+ */
+export const DELETED_IN_SLICE_8 = [
+  "fp-torn",
+  "fp-unchecked",
+  "fp-warn",
+  "fp-warn-certain",
+  "fp-warn-inferred",
+  "fp-selected",
+  "fp-selected-price",
+  "fp-selected-size",
+  "fp-selected-at",
+  "fp-unit",
+  "fp-detail",
+  "fp-pills",
+  "fp-pill",
+  "fp-pill-unplaced",
+  "fp-pill-inferred",
+  "fp-pill-next",
+  "fp-pill-caption",
+  "fp-recorded",
+  "fp-list",
+  "fp-row",
+  "fp-row-index",
+  "fp-row-figures",
+  "fp-row-price",
+  "fp-row-size",
+  "fp-row-at",
+  "fp-row-state",
+  "fp-row-status",
+  "fp-row-substatus",
+  "fp-row-quals",
+  "fp-orphans",
+  "is-next",
+  "is-selected",
+  "is-unplaced",
+  "absent",
 ];
 
 /**

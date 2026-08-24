@@ -30,7 +30,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   DELETED_IN_SLICE_7,
+  DELETED_IN_SLICE_8,
   classTokens,
+  fireEvent,
   render,
   renderedClassNames,
   screen,
@@ -127,7 +129,7 @@ describe("the fill path's card shell", () => {
       `${CARD_SURFACE} @container/fp-header`,
       `${CARD_SURFACE} fp-chart-card`,
       `${CARD_SURFACE} @container/fp-selected`,
-      `${CARD_SURFACE} fp-list`,
+      `${CARD_SURFACE} @container/fp-list`,
     ]);
     expect(sections.join(" ").split(/\s+/)).not.toContain("card");
   });
@@ -426,10 +428,10 @@ describe("the header card carries its section as utilities", () => {
     for (const deleted of DELETED_IN_SLICE_7) expect(rendered).not.toContain(deleted);
 
     // And the ladder and the chart still carry theirs, which is what makes the line
-    // above a claim about slice 7 rather than about the file having been emptied. The
-    // list shrinks as slice 8 works down the ladder; the chart's names are slice 9's and
-    // are the last to go.
-    for (const surviving of ["fp-list", "fp-chart-card", "fp-row"]) {
+    // above a claim about slice 7 rather than about the file having been emptied. Slice
+    // 8 took the ladder's names, so what is left to hold that line is the chart's, which
+    // slice 9 takes last.
+    for (const surviving of ["fp-chart-card"]) {
       expect(rendered).toContain(surviving);
     }
   });
@@ -772,5 +774,303 @@ describe("the selected-rung card carries its section as utilities", () => {
     // through `absent`, and it left with this card; the primitive stopped writing the
     // name in the same commit.
     expect(rendered).not.toContain("absent");
+  });
+});
+
+/**
+ * THE CENSUS SUCCESSOR FOR THE RUNG LIST (spec #420 slice 8, Seam E), and the last of
+ * three passes over this file's ladder half.
+ *
+ * THE ROW IS FOUR DECISIONS ON ONE ELEMENT — background, border colour, border style and
+ * a ring — and the deleted rules resolved them by ORDER: `.is-next` sat below
+ * `.is-filled`, `.is-selected` below both. Utilities have no such order to lean on, so
+ * each axis is a total map and the priority the file expressed is spelled out in the
+ * expression that picks from it. What this test pins is the picking: every combination
+ * the ladder can be in, including the two the fixture never renders together.
+ */
+describe("the rung list carries its section as utilities", () => {
+  function rowsOf(view: FillPathView) {
+    const { container } = render(<FillPathCards view={view} />);
+    return {
+      container,
+      rows: [...container.querySelectorAll<HTMLButtonElement>("li > button")],
+    };
+  }
+
+  it("makes the list card the query container and sizes its heading", () => {
+    const { container } = rowsOf(partlyWalkedView());
+    // THROUGH A ROW, not through the first `li` on the page — the chart's legend is a
+    // list too, and it sits above this one.
+    const list = container.querySelector("li > button")?.closest("ul");
+
+    expectClasses(list?.closest("section"), [
+      ...CARD_SURFACE.split(" "),
+      "@container/fp-list",
+    ]);
+    expectClasses(list?.closest("section")?.querySelector("h2"), [
+      "m-0",
+      "mb-2.5",
+      "text-[0.95rem]",
+    ]);
+    // The UA gives a `ul` a 1em block margin and a 40px inline padding, and preflight is
+    // off, so both are zeroed here or the ladder sits indented under its own heading.
+    expectClasses(list, ["list-none", "grid", "gap-2", "m-0", "p-0"]);
+  });
+
+  it("lays the row out as a tile and folds it back at 380px of card width", () => {
+    const { rows } = rowsOf(partlyWalkedView());
+
+    // THE GUTTER STAYS FIXED AT BOTH WIDTHS, narrow at 320px and a column of its own at
+    // desk width. An `auto` gutter would be measured per tile and set `R9` and `R10`'s
+    // prices at different left edges — a ragged ladder in the one list whose whole job is
+    // to be read down.
+    expectClasses(rows[0], [
+      "grid",
+      "grid-cols-[1.75rem_auto_minmax(0,1fr)]",
+      "items-baseline",
+      "gap-x-[10px]",
+      "gap-y-0",
+      "w-full",
+      "px-[14px]",
+      "py-3",
+      "border",
+      "rounded-xl",
+      "text-[var(--text)]",
+      // A button's font is the UA's until something says otherwise, and no utility spells
+      // the `font` shorthand.
+      "[font:inherit]",
+      "text-left",
+      "cursor-pointer",
+      "@[380px]/fp-list:grid-cols-[2.25rem_minmax(0,1fr)_auto]",
+      "@[380px]/fp-list:items-center",
+      // LONGHANDS ON BOTH SIDES OF THE BREAKPOINT. `gap-3` is the shorthand and Tailwind
+      // sorts shorthands BEFORE longhands, so the narrow `gap-x`/`gap-y` pair would have
+      // beaten the wide arm and the desk shape would have quietly kept the phone's gaps.
+      "@[380px]/fp-list:gap-x-3",
+      "@[380px]/fp-list:gap-y-3",
+    ]);
+    // NEUTRAL, DELIBERATELY: `--pos` here would ring a waiting rung in the colour that
+    // means filled the moment a keyboard reached it.
+    expectClasses(rows[0], [
+      "focus-visible:outline-2",
+      "focus-visible:outline-[var(--text)]",
+      "focus-visible:outline-offset-2",
+    ]);
+  });
+
+  it("tints the row from the chart's three colours and no fourth", () => {
+    const { rows } = rowsOf(partlyWalkedView());
+    const tokensOf = (row: Element) => classTokens(row);
+    const backgrounds = new Set(
+      rows.flatMap((row) =>
+        tokensOf(row).filter((token) => token.startsWith("bg-")),
+      ),
+    );
+
+    // Exactly three backgrounds across the whole ladder, and each one is a mix of a chart
+    // colour into the page background — the tint says WHICH STATE without competing with
+    // the price for the eye.
+    expect(backgrounds).toEqual(
+      new Set([
+        "bg-[var(--bg)]",
+        "bg-[color-mix(in_srgb,var(--pos)_12%,var(--bg))]",
+        "bg-[color-mix(in_srgb,var(--now)_14%,var(--bg))]",
+      ]),
+    );
+    // Every row carries exactly one of them; a row with two would be a race.
+    for (const row of rows) {
+      expect(tokensOf(row).filter((token) => token.startsWith("bg-"))).toHaveLength(1);
+      expect(
+        tokensOf(row).filter((token) => token.startsWith("border-[")),
+      ).toHaveLength(1);
+    }
+  });
+
+  it("rings the selected row instead of filling it, on every state", () => {
+    // BOTH HALVES, on a row whose state already paints a background: the ring is present
+    // AND the background is the one the state gave it. A conversion that reached for a
+    // background utility here would look emphatic and would make a waiting rung read as
+    // filled while the operator inspected it.
+    const base = partlyWalkedView();
+    for (const key of base.rungs.map((rung) => rung.key)) {
+      const { container } = render(<FillPathCards view={base} />);
+      const rows = [...container.querySelectorAll<HTMLButtonElement>("li > button")];
+      const index = base.rungs.findIndex((rung) => rung.key === key);
+      const unselected = classTokens(rows[index]!).filter((token) =>
+        token.startsWith("bg-"),
+      );
+      fireEvent.click(rows[index]!);
+      const selected = classTokens(rows[index]!);
+
+      expect(selected).toContain("[box-shadow:0_0_0_1px_var(--text)]");
+      expect(selected).toContain("border-[var(--text)]");
+      // SELECTION FORCES THE BORDER SOLID, which is what the deleted rule did — a
+      // selected never-placed rung stops being dashed while it is under inspection.
+      expect(selected).toContain("border-solid");
+      expect(selected.filter((token) => token.startsWith("bg-"))).toEqual(unselected);
+    }
+  });
+
+  it("dashes a rung that was never placed, and mutes its price", () => {
+    const { rows } = rowsOf(partlyWalkedView());
+    const view = partlyWalkedView();
+    const unplaced = rows.filter((_, index) => view.rungs[index]!.notPlaced);
+    expect(unplaced.length).toBeGreaterThan(0);
+
+    for (const row of unplaced) {
+      // `border-style: dashed` is the WHOLE signal that a rung was never placed (G-D12):
+      // not a state the ladder is in, one it never entered.
+      expect(classTokens(row)).toContain("border-dashed");
+      expectClasses(row.children[1]?.querySelector("span"), ["text-[var(--muted)]"]);
+    }
+    for (const row of rows.filter((_, index) => !view.rungs[index]!.notPlaced)) {
+      expect(classTokens(row)).toContain("border-solid");
+    }
+  });
+
+  it("stacks the figures and demotes everything leading up to the price", () => {
+    const { rows } = rowsOf(partlyWalkedView());
+    const figures = rows[0]?.children[1];
+
+    expectClasses(rows[0]?.children[0], [
+      "self-center",
+      "text-[0.78rem]",
+      "font-semibold",
+      "tracking-[0.03em]",
+      "text-[var(--muted)]",
+      "@[380px]/fp-list:self-auto",
+    ]);
+    expectClasses(figures, ["grid", "gap-px", "min-w-0"]);
+    const price = figures?.firstElementChild;
+    expectClasses(price, [
+      "text-[1.05rem]",
+      "font-bold",
+      "tracking-[-0.01em]",
+      "tabular-nums",
+    ]);
+    // WEIGHT AND COLOUR BOTH, unlike the inspect card's colour-only demotion: a list row
+    // is read at a glance rather than as a sentence, and 700-weight grey still reads loud.
+    const size = price?.firstElementChild;
+    expectClasses(size, ["font-normal", "text-[var(--muted)]"]);
+    expectClasses(
+      [...(size?.children ?? [])].find((span) => span.textContent === "@"),
+      ["opacity-70"],
+    );
+  });
+
+  it("dissolves the state column at 320px and folds it back at 380px", () => {
+    const { rows } = rowsOf(partlyWalkedView());
+    const view = partlyWalkedView();
+    const next = rows[view.rungs.findIndex((rung) => rung.isNext)];
+    const state = next?.children[2];
+
+    // `display: contents` is the one thing CSS can do that the markup's nesting otherwise
+    // forbids: the wrapper dissolves so its three children become items of the ROW's grid,
+    // and a pill gets a full-width line instead of a column that might not hold it.
+    expectClasses(state, [
+      "contents",
+      "@[380px]/fp-list:grid",
+      "@[380px]/fp-list:justify-items-end",
+      "@[380px]/fp-list:gap-[3px]",
+      "@[380px]/fp-list:text-right",
+    ]);
+    expectClasses(state?.children[0], [
+      "col-start-3",
+      "text-right",
+      "@[380px]/fp-list:col-start-auto",
+      "text-[0.82rem]",
+      "font-bold",
+      // Sentence case from a lower-case wire label without touching the string: the DOM
+      // still carries exactly what the view module decided.
+      "first-letter:uppercase",
+    ]);
+  });
+
+  it("paints the status word per state, from a total map", () => {
+    // The deleted rules were three context selectors that overrode nothing — each state
+    // painted its own — and the ORDER decided a rung that was two states at once. Here
+    // the priority is in the expression: never-placed beats next beats filled.
+    const view = partlyWalkedView();
+    const { rows } = rowsOf(view);
+    const toneOf = (row: Element) =>
+      classTokens(row.children[2]?.children[0] ?? row).filter((token) =>
+        token.startsWith("text-[var("),
+      );
+
+    for (const [index, rung] of view.rungs.entries()) {
+      const status = rows[index]?.children[2]?.children[0];
+      if (status === undefined) continue;
+      if (rung.notPlaced) expect(toneOf(rows[index]!)).toEqual(["text-[var(--muted)]"]);
+      else if (rung.isNext) expect(toneOf(rows[index]!)).toEqual(["text-[var(--now)]"]);
+      else if (rung.filled) expect(toneOf(rows[index]!)).toEqual(["text-[var(--pos)]"]);
+      // The ordinary rung's status inherits the row's own colour, as it did when it had
+      // no rule of its own; a `text-` utility here would be a declaration the file never
+      // carried.
+      else expect(toneOf(rows[index]!)).toEqual([]);
+    }
+  });
+
+  it("gives the qualifiers a full-width line at 320px and a cell at 380px", () => {
+    const view = partlyWalkedView();
+    const { rows } = rowsOf(view);
+    const withQuals = rows.find((row) => row.children[2]?.children.length === 3);
+    const quals = withQuals?.children[2]?.children[2];
+
+    // A pill cannot be made narrower than its longest word, so at 320px it is given the
+    // whole tile rather than a column that might not hold it — still right-aligned, so it
+    // hangs off the same rail as the status above.
+    expectClasses(quals, [
+      "flex",
+      "flex-wrap",
+      "justify-end",
+      "gap-1",
+      "col-span-full",
+      "mt-1",
+      "@[380px]/fp-list:col-auto",
+      "@[380px]/fp-list:mt-0",
+    ]);
+  });
+
+  it("sets the orphan line's own top margin, not the shared one", () => {
+    // 12px, not the 4px it carried from slice 2's `.muted` conversion: the deleted rule
+    // set its own and, being unlayered, won.
+    const view = partlyWalkedView();
+    const { container } = render(
+      <FillPathCards view={{ ...view, orphanLots: 2 }} />,
+    );
+    const orphans = [...container.querySelectorAll("p")].find((paragraph) =>
+      paragraph.textContent?.includes("that no declared rung explains"),
+    );
+
+    expectClasses(orphans, ["m-0", "mt-3", "text-[0.8rem]", "text-[var(--muted)]"]);
+    expect(classTokens(orphans!)).not.toContain("mt-1");
+  });
+
+  it("renders none of the thirty-four class names slice 8 deleted", () => {
+    // THE WHOLE PAGE, on the widest view this file can build: every warning, the banner,
+    // an orphan count, and a rung patched into three states at once, so every carrier the
+    // slice touched is on screen at the same time.
+    const view = partlyWalkedView();
+    const { container } = render(
+      <FillPathCards
+        view={{
+          ...view,
+          tornActs: { status: "outstanding", count: 1 },
+          warnings: { filledNotRecorded: 1, pricePassedNoFill: 1 },
+          orphanLots: 2,
+          rungs: view.rungs.map((rung) =>
+            rung.isNext
+              ? { ...rung, placedAtUsd: 1, notPlaced: true, pricePassedUnconfirmed: true }
+              : rung,
+          ),
+        }}
+      />,
+    );
+    const rendered = renderedClassNames(container);
+    for (const deleted of DELETED_IN_SLICE_8) expect(rendered).not.toContain(deleted);
+
+    // And the chart still carries its own, which is what makes the line above a claim
+    // about slice 8 rather than about the render having been emptied.
+    expect(rendered).toContain("fp-chart-card");
   });
 });
