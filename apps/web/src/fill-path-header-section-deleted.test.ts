@@ -15,10 +15,12 @@ import { describe, expect, it } from "vitest";
  * `fill-path-cards-structure.test.tsx` asserts from the other end that the elements
  * carry those declarations as utilities.
  *
- * The second is what makes this slice's mixed state safe rather than merely tolerated.
- * The ladder and the chart still have rules in this file and still render the class names
- * that select them; what may not survive is a rule that reaches an element this slice
- * converted. A prefix sweep is the instrument, because the section did not own a tidy
+ * The second was what made this slice's mixed state safe rather than merely tolerated —
+ * the ladder and the chart still had rules here then, and what could not survive was a
+ * rule reaching an element THIS slice converted. The mixed state is over (slice 9 emptied
+ * the file) and the claim outlives it: a rule REAPPEARING under one of these names would
+ * be an unlayered declaration beating the utility that replaced it, with nothing else in
+ * the suite red. A prefix sweep is the instrument, because the section did not own a tidy
  * namespace — `.fp-tile-label` was rendered by the CHART card's inspect label too, and a
  * surviving rule under any of these names would be an unlayered declaration beating the
  * utility that replaced it, with nothing else in the suite red.
@@ -145,27 +147,16 @@ const OWNED_PREFIXES = [
 ];
 
 /**
- * Still in the file, and still carried by the render — slice 9 takes these.
+ * THE SURVIVOR LIST IS GONE, AND ITS ASSERTION WITH IT (spec #420 slice 9).
  *
- * THE LADDER'S FOUR HAVE LEFT WITH SLICE 8, so what holds this claim up is the chart's.
- * The list shrank as slice 8 worked down the ladder; what it asserts is that slice 7's
- * deletion took nothing beyond its own, so a name leaving it is a later slice doing its
- * job rather than this one over-reaching. When slice 9 empties it, this assertion has
- * nothing left to say and goes with the file's last rule.
- *
- * MATCHED AT COLUMN ZERO followed by a delimiter, which is what every rule in this list
- * opens with. `.fp-chart-card` is deliberately not among them: its only rule is a
- * DESCENDANT one (`.fp-chart-card h2`), so the pattern would not see it and listing it
- * would fail on a file behaving exactly as intended.
+ * It held the other half of this slice's claim while the file still had rules: the ladder
+ * and the chart were still there, and a green suite with THEM missing would have meant
+ * slice 7 took two later slices' work along with its own. The list shrank as slice 8
+ * worked down the ladder and emptied when slice 9 took the chart, which is the end state
+ * `styles-css-end-state.test.ts` now asserts directly — no rule in the file at all. An
+ * empty list asserting nothing is worse than no list, so both are deleted rather than
+ * kept as a vestige.
  */
-const SURVIVING_SELECTORS = [
-  ".fp-chart-head",
-  ".fp-chart-range",
-  ".fp-chart",
-  ".fp-legend",
-  ".fp-caption",
-  ".fp-inspect",
-];
 
 describe("the fill path header section's deletion", () => {
   it("has taken every selector slice 7 owns out of styles.css", () => {
@@ -203,15 +194,6 @@ describe("the fill path header section's deletion", () => {
     expect(UNCOMMENTED).not.toMatch(/container-name\s*:/);
     expect(UNCOMMENTED).not.toMatch(/container\s*:[^;}]*\bfp-header\b/);
     expect(UNCOMMENTED).not.toMatch(/@container\s+fp-header\b/);
-  });
-
-  it("leaves the chart untouched", () => {
-    // The deletion is defined by a selector list, not by a file, and this is the half of
-    // that claim a text channel can hold: nothing outside slice 7's list moved. A green
-    // suite with these gone would mean the slice took two later slices' work with it.
-    for (const selector of SURVIVING_SELECTORS) {
-      expect(UNCOMMENTED).toMatch(new RegExp(`^\\${selector}\\s*[,{:.]`, "m"));
-    }
   });
 
   it("keeps the file free of any selector that is not a class, an at-rule or :root", () => {

@@ -172,15 +172,13 @@ const OWNED_PREFIXES = [
   "\\.fp-recorded",
 ];
 
-/** Still in the file, and still carried by the render — slice 9 takes these. */
-const SURVIVING_SELECTORS = [
-  ".fp-chart-head",
-  ".fp-chart-range",
-  ".fp-chart",
-  ".fp-legend",
-  ".fp-caption",
-  ".fp-inspect",
-];
+/**
+ * THE SURVIVOR LIST IS GONE, AND ITS ASSERTION WITH IT (spec #420 slice 9). It held the
+ * half of this slice's claim that says nothing outside slice 8's list moved, and the only
+ * thing left to hold it up was the chart. Slice 9 took the chart, so the list empties and
+ * `styles-css-end-state.test.ts` asserts the stronger thing directly: the file has no rule
+ * at all. An empty list asserting nothing is worse than no list.
+ */
 
 describe("the fill path ladder section's deletion", () => {
   it("has taken every selector slice 8 owns out of styles.css", () => {
@@ -216,15 +214,6 @@ describe("the fill path ladder section's deletion", () => {
     // primitive stopped writing it. Over the whole uncommented file rather than over the
     // selector list, because what is being asserted is that NO rule mentions it.
     expect(UNCOMMENTED).not.toMatch(/\.absent\b/);
-  });
-
-  it("leaves the chart untouched", () => {
-    // The deletion is defined by a selector list, not by a file, and this is the half of
-    // that claim a text channel can hold: nothing outside slice 8's list moved. A green
-    // suite with these gone would mean this slice took slice 9's work with it.
-    for (const selector of SURVIVING_SELECTORS) {
-      expect(UNCOMMENTED).toMatch(new RegExp(`^\\${selector}\\s*[,{:.]`, "m"));
-    }
   });
 
   it("keeps the file free of any selector that is not a class, an at-rule or :root", () => {

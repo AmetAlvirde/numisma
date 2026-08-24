@@ -404,12 +404,19 @@ describe("the chart's legend gates every entry on the mark it explains", () => {
   );
 
   it("renders no legend entry unconditionally", () => {
-    const legend = /<ul className="fp-legend">([\s\S]*?)<\/ul>/.exec(source)?.[1];
-    expect(legend, "the legend is no longer a `fp-legend` list").toBeDefined();
+    // THE LIST IS FOUND BY ITS CONSTANT, not by a class name. Spec #420 slice 9 took the
+    // legend's rules out of `styles.css` and its class names out of the markup with them,
+    // so the `<ul>` carries a utility string held in `LEGEND` rather than a hook this
+    // regex could match on. What is being located is still the same element.
+    const legend = /<ul className=\{LEGEND\}>([\s\S]*?)<\/ul>/.exec(source)?.[1];
+    expect(legend, "the legend is no longer a `LEGEND`-classed list").toBeDefined();
     // Each `<li>` must be preceded — since the previous entry closed — by a JSX
     // conditional. `?` covers the two ternary spellings the file already uses (`cond ? (…)
     // : null` and `cond ? null : (…)`); `&&` covers the other way anyone would write it.
-    const chunks = legend!.split("<li>");
+    // SPLIT ON THE TAG, NOT ON `<li>`. Slice 9 gave each entry a `className`, so the
+    // opener is `<li className={…}>` now; a delimiter that required the closing angle
+    // bracket found zero entries and reported the gate as missing on all three.
+    const chunks = legend!.split(/<li[\s>]/);
     expect(chunks.length - 1, "the legend no longer has three entries").toBe(3);
     for (const [index, chunk] of chunks.slice(0, -1).entries()) {
       const sincePreviousEntry = chunk.slice(chunk.lastIndexOf("</li>") + 1);

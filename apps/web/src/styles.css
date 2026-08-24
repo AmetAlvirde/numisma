@@ -1,3 +1,19 @@
+/* ── THE TOKEN HOME, AND NOTHING ELSE (spec #420, ADR-025) ──────────────────────────
+   Two `:root` blocks, unlayered, holding the app's palette and the `--nms-*` aliases the
+   component package reads. NO RULE LIVES HERE ANY MORE, and none may return: every
+   surface this file used to style carries its declarations as Tailwind utilities, the
+   four bare-element rules are an `@layer base` block in `tailwind.css`, and a rule added
+   back here would be unlayered CSS beating the utility that replaced it — with nothing
+   else in the suite red. `styles-css-end-state.test.ts` is what holds that.
+
+   BEING UNLAYERED IS THE MECHANISM, not an oversight. `__root.tsx` links this file
+   BEFORE `tailwind.css`, so in document order the package's generated token defaults come
+   last; they lose anyway, because that import carries `layer(theme)` and unlayered CSS
+   beats every cascade layer regardless of specificity or order. Do not "fix" the load
+   order — reversing it would change nothing.
+
+   THE ONLY COLOUR LITERALS IN THE APP ARE BELOW. Everything else reads a name, in CSS as
+   `var(--muted)` and in a class string as `text-[var(--muted)]`. */
 :root {
   color-scheme: light dark;
   --bg: #0f1115;
@@ -27,26 +43,22 @@
    this block is where they land. Until it existed the app rendered every package
    component in the package's grayscale base mode — correct, silent, and colourless.
 
-   IT IS ALL ONE BLOCK, INCLUDING THE MINTED VALUES. The three colours below are new
-   palette entries and would sit as naturally in the block above; keeping them here makes
-   the whole of Slice 5's edit to this 1,396-line file one contiguous addition that a
-   reader can take in at once, and nothing above this line moved.
-
-   WHY IT WINS DESPITE COMING FIRST. `__root.tsx` links this file BEFORE `tailwind.css`,
-   so in document order the package's generated defaults come last. They lose anyway:
-   that import carries `layer(theme)` and this file is UNLAYERED, and unlayered CSS beats
-   every cascade layer regardless of specificity or order. Do not "fix" the load order —
-   the layering is the mechanism, and reversing the link order would change nothing.
+   IT IS A SECOND BLOCK, INCLUDING THE MINTED VALUES. The three colours below are new
+   palette entries and would sit as naturally in the block above; keeping them apart is
+   what let spec #412's whole edit to a then-1,396-line file be one contiguous addition,
+   and the split survives its occasion — a reader can now see the app's own vocabulary
+   and the package's without having to separate them by prefix.
 
    ALIASES, NOT COPIES. `var(--bg)`, never `#0f1115`. This file stays the one place that
    defines colour, so a palette change reaches the package's components for free. A hex
    pasted here would drift the first time the palette moved, painting shadcn components
-   in last season's grey while every rule below moved on.
+   in last season's grey while the rest of the app moved on.
 
    THE PREFIX IS WHY NO RENAME IS OWED. shadcn's vocabulary and this file's overlap on
    one word and mean opposite things by it: `--nms-muted` is a recessed SURFACE (a
    hovered ghost button), `--muted` is secondary TEXT. So `--muted` is READ here and
-   NEVER redefined — 25 rules below and 2 in `PriceDropPathChart.tsx` depend on it — and
+   NEVER redefined — the whole app's secondary text reads it, as `text-[var(--muted)]` in
+   class strings and as `var(--muted)` in the chart's own marks — and
    the surface gets its own minted grey instead. `--ok`, `--warn`, `--pos` and `--now`
    have no package counterpart and get no alias; `--now` in particular is the spot colour
    chosen to collide with nothing on the Price Drop Path, and aliasing it onto
@@ -89,290 +101,3 @@
      page. Cards stay 12px and are not this token. */
   --nms-radius-md: 8px;
 }
-
-/* THE FOUR BARE-ELEMENT RULES LEFT THIS FILE (spec #420 Seam C, slice 2). `*`, `body`,
-   `h1` and `h2` are now an `@layer base` block in `tailwind.css`, which is the only place
-   an element selector can live under Tailwind's cascade order, and the 320px floor the
-   `body` rule declared is now the min-width sentinel utility on `<body>` in `__root.tsx`
-   (spelled out in that file and, deliberately, in no other). The
-   reasoning that stood here — why the page stops responding at 320px rather than going on
-   solving narrower, and why this and `.table-scroll` are the only sanctioned sideways
-   scrolls — moved with them. */
-
-/* THE SUMMARY CARD LEFT THIS FILE (spec #420 slice 3). `.summary*`, `.badge*`, the
-   shared `.metrics*` grid with its `@container metrics-card` arm, and `.pos`/`.neg` are
-   utilities on the elements that referenced them — `SummaryCard.tsx` holds the six
-   shared strings and `GlanceCard` and `SectionTable` import them, because a rule written
-   once for two surfaces stays one thing. The breakpoint kept its NAME: both cards still
-   reflow at a 380px CARD width, now through `@[380px]/metrics-card:` variants.
-
-   THE FILE'S LAST COLOUR LITERALS WENT WITH THE BADGES. `.badge-ok` and `.badge-warn`
-   each painted `color: #fff`; nothing outside the two `:root` blocks spells a colour
-   any more, and `summary-section-deleted.test.ts` is what keeps that true. */
-
-/* THE TABLE SURFACE LEFT THIS FILE (spec #420 slice 4). The scroller, the table element
-   rules, the cell box and the header treatment are utilities on the elements two
-   components render: `SectionTable.tsx` holds the seven shared strings and `DcaCard`
-   imports them for its rung ladder, because a rule written once for two surfaces stays
-   one thing.
-
-   THE ESCAPE HATCH MOVED WITH THEM, INTACT. A five-column composition row is not
-   reflowable at 320px: `Label · USD value · % of fund` and two deltas each named
-   against a reference are five figures that mean nothing apart, and stacking them per
-   row would turn one table into thirty-one blocks. So the table keeps its shape and the
-   reader pans it, below a 380px SCROLLER — which is still the query container, and
-   still the only sanctioned sideways scroll on any surface this app draws. Above that
-   width the table fits the card again. `table-section-deleted.test.ts` holds the
-   deletion; the reasoning for each half is in `SectionTable.tsx` beside the string that
-   carries it. */
-
-/* THE GLANCE CARD LEFT THIS FILE (spec #420 slice 5). The verdict line and its two sign
-   colours are utilities on the `<p>` `GlanceCard.tsx` renders, and the card's query
-   container is two classes on the section: the bare container-type utility, and an
-   arbitrary `container-name` carrying BOTH of the names this rule carried.
-
-   KEEPING THE SECOND NAME IS THE WHOLE OF THAT SLICE. `container-name: glance
-   metrics-card` was the last declaration in the repo supplying `metrics-card`, the name
-   slice 3 moved this card's metrics list onto; Tailwind's named container utility emits
-   the `container` shorthand and can carry only one name, so reaching for it would have
-   stranded the list at its narrow layout at every width — with no rule missing and
-   nothing red. The reasoning is in `GlanceCard.tsx` beside the two classes that carry it,
-   and `glance-section-deleted.test.ts` holds the deletion. */
-
-/* THE DCA CARD LEFT THIS FILE (spec #420 slice 6), and its block header went with it:
-   that header described a section that no longer exists, and every neighbour it named
-   (`.metrics`, `.summary-head`, `.table-scroll table`) had already gone in slices 3 and
-   4. The plan block, the wrapping head, the state badge and the alert line are utilities
-   on the elements `DcaCard.tsx` renders; the rung table went in slice 4 with the rest of
-   the table surface.
-
-   THE STATE WORD'S THREE COLOURS ARE NOW ONE TOTAL MAP, not a base plus two overrides.
-   `.dca-state` painted grey and `.dca-state-active` and `.dca-state-unreadable` repainted
-   it — a cascade this file could express and a class string cannot, since two unvariant
-   utilities on one property are resolved by Tailwind's emitted order rather than by the
-   order they are written in. Every state names its own colour instead, so there is no
-   override left to lose.
-
-   NOTHING HERE EVER DECLARED THE ALERT LINK'S FOCUS RING. `a:hover, a:focus-visible` set
-   `text-decoration` and no more; the outline a keyboard draws on that link is the user
-   agent's, live because preflight is off. It survives by nothing suppressing it, which is
-   why `dca-section-deleted.test.ts` asserts that every `outline` declaration left in this
-   file sits on a ladder row and Chrome measured the ring after a real Tab. The reasoning
-   for each string is in `DcaCard.tsx` beside it, and that same test holds the deletion. */
-
-/* ── the Fill Path (spec #285, slice #289) ──────────────────────────────────
-   ONE BLOCK, APPENDED, when it landed — no rewrite. Plain hand-written CSS: no
-   styling library, no chart library. The 320px rework had since edited `.metrics`,
-   `.summary-head` and `.table-scroll table` above this line, in place and phone-
-   first, because they were the shared substrate three cards rendered through; all
-   three have now left the file entirely (spec #420 slices 3 and 4), and the DCA
-   card's block header, which carried that reasoning and a long-retired chart gate,
-   went with them in slice 6.
-
-   PHONE FIRST, against U's 320px rework. Every width here is fluid and every
-   fixed number is a type size or a gap, so the four cards stack the same at
-   320px and at desk width; `.dashboard` already caps the line length. */
-/* THE HEADER, THE TILES AND THE PROGRESS BAR HAVE LEFT THIS FILE (spec #420 slice 7).
-   About three hundred lines stood here: `.fp-header` and its container declaration, the
-   identity row, the state chip, the spot reading, the tiles and their grid, the progress
-   bar, the waiting block, day zero's hero and BOTH `@container fp-header` blocks. Every
-   declaration is now a utility string in `FillPath.tsx`, named and reasoned about beside
-   the element that carries it, and `fill-path-header-section-deleted.test.ts` holds this
-   end of the claim while `fill-path-cards-structure.test.tsx` holds the other.
-
-   THE LADDER AND THE CHART BELOW ARE STILL HERE, and that mixed state is safe rather
-   than merely tolerated: not one rule left in this file selects anything the block above
-   used to style, so there is nothing for a converted element and a surviving rule to
-   fight over. Slices 8 and 9 take the rest. */
-
-/* THE TORN BANNER, THE UNCHECKED LINE AND THE TWO WARNINGS HAVE LEFT THIS FILE
-   (spec #420 slice 8). The banner's red edge, the zeroed margin that the unchecked line
-   depended on, and the solid-versus-dashed left rule that keeps a venue FACT from
-   reading like a GUESS are all utility strings in `FillPath.tsx` now, named beside the
-   elements that carry them. */
-
-/* TWO OF THIS RULE'S THREE ARMS HAVE LEFT (spec #420 slice 8). The selected-rung card's
-   heading and the rung list's carry these two declarations as utilities now; the chart
-   card's arm is slice 9's and is the last thing between this rule and its deletion.
-   Listed member by member on purpose — a grouped rule left standing with one arm removed
-   is still a rule on every element it still reaches, and each arm was deleted in the
-   commit that converted the heading it was styling, never before. */
-.fp-chart-card h2 {
-  margin: 0 0 10px;
-  font-size: 0.95rem;
-}
-
-/* Title left, the ladder's price span right — one row, baseline-aligned so the two read
-   as a heading and its subject rather than as two stacked labels.
-
-   IT WRAPS RATHER THAN SQUEEZES, and the span is the half that gives way. At 254px the
-   two total 217px so the row survives as a row; a deeper ladder (`~$1.2M–$2.3M`) would
-   not, and the choice then is between breaking the TITLE across two lines and dropping
-   the span to its own. The span keeps the right rail on that second line — `margin-left`
-   rather than `space-between`, which aligns a lone wrapped item to the start.
-   No breakpoint: this holds at every width, so there is nothing for a query to ask. */
-.fp-chart-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0 10px;
-}
-
-.fp-chart-head h2 {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.fp-chart-head .fp-chart-range {
-  flex: 0 0 auto;
-  margin-left: auto;
-}
-
-/* Quieter than the title: it is the chart's subject, not a second heading. Tabular
-   figures so the two ends of the span line up as numbers. */
-.fp-chart-range {
-  margin-bottom: 10px;
-  font-size: 0.8rem;
-  font-variant-numeric: tabular-nums;
-  color: var(--muted);
-}
-
-/* The aria-hidden wrapper around the TanStack chart. It measures the card and the
-   library owns everything inside it.
-
-   NO `preserveAspectRatio: none` ANYWHERE. The hand-rolled predecessor stretched a
-   fixed viewBox to the card's width, which squashed every dot into an ellipse and
-   made the same ladder a different shape on every screen. The library re-lays the
-   scene out at the measured width instead, so a circle is a circle.
-
-   `color` IS THE CHART'S THEME. TanStack Charts uses `currentColor` for its axes,
-   tick labels, grid and titles rather than shipping a palette, so setting it here is
-   what makes the guides legible in the dark theme. Per-mark paint comes from the same
-   variables, named in `PriceDropPathChart`. */
-/* THE CAP IS WHAT KEEPS THE RATIO SANE. The chart's height is now derived from its
-   measured width (`ASPECT_RATIO` in `PriceDropPathChart`), so width and height cannot be
-   tuned independently: uncapped on the 760px column, the same 5:4 box that reads well on
-   a phone becomes a 550px-tall chart. Centred, so it does not read as left-weighted on a
-   wide screen.
-
-   RAISED FROM 360px: capping near the phone width left the desk rendering a phone-sized
-   picture in the middle of a 760px card, and this chart's whole subject is the SHAPE of a
-   curve — the thing that gets harder to read the smaller the box. 500px is still short of
-   the column, so the 5:4 box stays a box rather than becoming a half-viewport wall, and
-   the phone is untouched (it never reached the old cap either). */
-.fp-chart {
-  display: block;
-  width: 100%;
-  max-width: 500px;
-  margin-inline: auto;
-  color: var(--muted);
-  font-size: 10px;
-}
-
-/* THE KEY TO THE PICTURE, IN HTML. TanStack Charts' own legend is bound to a colour
-   scale and draws colour chips; it cannot show a dashed stroke or a rule, which is
-   most of what there is to explain here. Each swatch is drawn with the SAME variable
-   and dash pattern as the mark it stands for.
-
-   It lives inside the `aria-hidden` wrapper on purpose — see `PriceDropPathChart`. */
-.fp-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 14px;
-  margin: 6px 0 0;
-  padding: 0;
-  list-style: none;
-  font-size: 0.72rem;
-  color: var(--muted);
-}
-
-.fp-legend li {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.fp-legend-swatch {
-  width: 18px;
-  border-top: 2px solid var(--muted);
-}
-
-.fp-legend-swatch.is-filled {
-  border-top-color: var(--pos);
-}
-
-.fp-legend-swatch.is-waiting {
-  border-top-style: dashed;
-}
-
-/* The now rule is HORIZONTAL in the chart — price is the y axis now, so spot is a price
-   LEVEL the way a trading chart draws last price — and this swatch turned with it. It
-   was a vertical tick while the rule was vertical; leaving it that way would have made
-   the key draw a mark the picture no longer contains.
-
-   It stays distinguishable from `waiting` on colour and on solidity, not on angle:
-   `--now` and unbroken, where waiting is `--muted` and dashed. */
-.fp-legend-swatch.is-now {
-  border-top-color: var(--now);
-}
-
-/* The chart's accessible substitute. Sized as prose, not as a caption footnote:
-   for a screen-reader user this sentence IS the chart — and since it went `.sr-only`,
-   that reader is the ONLY one it has. */
-.fp-caption {
-  margin: 10px 0 0;
-  font-size: 0.85rem;
-  line-height: 1.5;
-}
-
-.fp-inspect {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 14px;
-}
-
-/* `width: 100%` IS NOT THE WHOLE STORY for a range input: the UA sheet gives it a 2px
-   side margin, so a full-width slider is 4px wider than its card and the tail of the
-   track sat under the card's border at 320px. The margin goes, not the width. */
-.fp-inspect input {
-  width: 100%;
-  margin-inline: 0;
-}
-
-/* THE SELECTED-RUNG CARD HAS LEFT THIS FILE (spec #420 slice 8). Its container
-   declaration, the headline and its three demotions, the `Order placed at` rows with
-   their `@container fp-selected` arm, every pill tone and the completeness line are
-   utility strings in `FillPath.tsx` now.
-
-   THE PILLS WENT AS A TOTAL MAP, not as a base and three overrides: two unvariant
-   `border-color` utilities on one element are resolved by Tailwind's emitted order, so
-   the override this file could express is one a class string cannot.
-
-   `.fp-pill-caption` LEFT WITHOUT A REPLACEMENT. Nothing has rendered it since the join
-   caption was dropped from the card, so it was a rule with no carrier; deleting it is
-   the whole of its conversion. `.fp-detail .absent` went the same way — the `<dd>` under
-   it renders a price and never an em dash — and it was the LAST contextual rule selecting
-   through `absent`, so that bare hook left the primitive in the same commit. No rule in
-   this file selects `.absent` any more. */
-
-/* THE RUNG LIST HAS LEFT THIS FILE, AND WITH IT THE WHOLE LADDER (spec #420 slice 8).
-   The card's container declaration, the list reset, the tile the row is, its four state
-   tints and the selection ring, the figures and their demotions, the state column that
-   dissolves at 320px, the `@container fp-list` block that folds it back at 380px, and the
-   orphan line are utility strings in `FillPath.tsx` now.
-
-   FOUR DECISIONS ON THE ROW WERE RESOLVED HERE BY ORDER — `.is-next` sat below
-   `.is-filled`, `.is-selected` below both — and utilities have no order to lean on. Each
-   axis is a total map now and the priority is spelled out in `rungRowClasses`, where it
-   can be read instead of inferred from position in a stylesheet.
-
-   `.fp-recorded` AND `.fp-recorded strong` GO WITH THEM though the card they belong to
-   left one commit earlier. The first had been dead since that commit; the second has been
-   dead far longer — no `<strong>` has been rendered inside that paragraph since the date
-   stopped being bolded, and it is deleted with no replacement.
-
-   `fill-path-ladder-section-deleted.test.ts` holds this end of the claim and
-   `fill-path-cards-structure.test.tsx` holds the other. What is left of the fill path in
-   this file is the chart, which is slice 9's. */

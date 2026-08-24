@@ -785,6 +785,65 @@ function priceSpan(rungs: readonly FillPathRungView[]): string | undefined {
   )}`;
 }
 
+/**
+ * THE CHART CARD'S SECTION, AS UTILITIES (spec #420 slice 9) — the last surface, and the
+ * one whose deletion leaves `styles.css` holding no rule at all.
+ *
+ * THE HEADING RULE'S THIRD ARM IS HERE, WHICH IS WHAT RETIRES THE RULE. `.fp-chart-card
+ * h2` was grouped with the ladder's two, and each arm was deleted in the commit that
+ * converted the heading it was styling. This is the last of the three, so the constant
+ * stops being the ladder's and becomes the card heading all three read. `m-0 mb-2.5` is
+ * the preflight-off pattern: the UA's own `h2` margin is live, so three edges are zeroed
+ * and one is set.
+ */
+const CARD_HEADING = "m-0 mb-2.5 text-[0.95rem]";
+
+/**
+ * TITLE LEFT, THE LADDER'S PRICE SPAN RIGHT — one row, baseline-aligned so the two read
+ * as a heading and its subject rather than as two stacked labels.
+ *
+ * IT WRAPS RATHER THAN SQUEEZES, and the span is the half that gives way. At 254px the
+ * two total 217px so the row survives as a row; a deeper ladder (`~$1.2M–$2.3M`) would
+ * not, and the choice then is between breaking the TITLE across two lines and dropping
+ * the span to its own. The span keeps the right rail on that second line through its own
+ * `ml-auto` rather than through the row's `justify-between`, which aligns a lone wrapped
+ * item to the start. No breakpoint: this holds at every width, so there is nothing for a
+ * query to ask.
+ *
+ * THE TWO GAP AXES ARE SPELLED SEPARATELY because the deleted rule set them apart:
+ * `gap: 0 10px` is `gap-x-[10px] gap-y-0`, and a single `gap-[10px]` would open a 10px
+ * hole above the wrapped span that the row never had.
+ */
+const CHART_HEAD = "flex flex-wrap items-baseline justify-between gap-x-[10px] gap-y-0";
+/** The title is the half that survives a break, so it grows and may shrink to nothing. */
+const CHART_TITLE = `${CARD_HEADING} flex-auto min-w-0`;
+/**
+ * Quieter than the title: it is the chart's subject, not a second heading. Tabular
+ * figures so the two ends of the span line up as numbers.
+ *
+ * ITS TWO FLEX DECLARATIONS CAME FROM A DESCENDANT RULE (`.fp-chart-head .fp-chart-range`)
+ * and are folded in here rather than split across two strings: the span renders in the
+ * head and nowhere else, so the context the descendant selector was testing for is the
+ * only context there is.
+ */
+const CHART_RANGE = "ml-auto mb-2.5 flex-none text-[0.8rem] tabular-nums text-[var(--muted)]";
+/**
+ * The chart's accessible substitute, sized as prose rather than as a caption footnote:
+ * for a screen-reader user this sentence IS the chart. `m-0 mt-2.5` because the UA's own
+ * `p` margin is live with preflight off and the deleted rule zeroed three edges of it.
+ */
+const CHART_CAPTION = "m-0 mt-2.5 text-[0.85rem] leading-[1.5]";
+/** The slider stacks under its label; the label's type comes from `TILE_LABEL`. */
+const INSPECT = "mt-3.5 flex flex-col gap-1.5";
+/**
+ * `w-full` IS NOT THE WHOLE STORY FOR A RANGE INPUT. The UA sheet gives it a 2px side
+ * margin, so a full-width slider is 4px wider than the label box around it and the tail
+ * of the track sat under the card's border at 320px. The margin goes, not the width —
+ * and with preflight off that margin is live, so `mx-0` is load-bearing here rather than
+ * a default spelled out for tidiness.
+ */
+const INSPECT_RANGE = "w-full mx-0";
+
 /** Card 2 — the chart, its generated caption, and the inspect slider. */
 function Chart() {
   // THE CHART ASKS IN INDEXES, because its inspect control is a range input and a range
@@ -798,9 +857,9 @@ function Chart() {
       {/* THE SPAN SITS OPPOSITE THE TITLE, not in the chart. It is the one number the
           picture cannot state exactly — an axis tick is a rounded gridline, and the
           reader who wants "how deep does this ladder go" should not have to measure. */}
-      <div className="fp-chart-head">
-        <Card.Title>Price Drop Path</Card.Title>
-        {span === undefined ? null : <span className="fp-chart-range">{span}</span>}
+      <div className={CHART_HEAD}>
+        <Card.Title className={CHART_TITLE}>Price Drop Path</Card.Title>
+        {span === undefined ? null : <span className={CHART_RANGE}>{span}</span>}
       </div>
       {view.chart ? (
         <PriceDropPathChart
@@ -846,7 +905,7 @@ function Chart() {
           unavailable, and its absence is already visible as a chart with no rings. */}
       <div className="sr-only">
         {view.caption ? (
-          <p className="fp-caption">{view.caption}</p>
+          <p className={CHART_CAPTION}>{view.caption}</p>
         ) : (
           <p>
             <Absent why="the ladder's shape is unavailable" />
@@ -855,12 +914,13 @@ function Chart() {
       </div>
 
       {view.rungs.length > 0 ? (
-        <label className="fp-inspect">
+        <label className={`fp-inspect ${INSPECT}`}>
           {/* The slider's label wears the tile label's TYPOGRAPHY and none of its rail
               geometry: `.fp-tile-label` was a type rule and the flex arms lived on the
               three `>` selectors above it, none of which reached inside `.fp-inspect`. */}
           <span className={TILE_LABEL}>Inspect rung</span>
           <input
+            className={INSPECT_RANGE}
             type="range"
             min={0}
             max={view.rungs.length - 1}
@@ -880,14 +940,12 @@ function Chart() {
  * THE CARD IS THE QUERY CONTAINER, not the viewport — the same rule the header card
  * follows, and one name, which is exactly what Tailwind's named container utility emits.
  *
- * THE HEADING RULE WAS SHARED BY THREE CARDS and is split here: the chart's arm is slice
- * 9's and stays in the file until then. `m-0 mb-2.5` is the preflight-off pattern — the
- * UA's own `h2` margin is live, so three edges are zeroed and one is set.
+ * THE HEADING RULE WAS SHARED BY THREE CARDS and all three read `CARD_HEADING` now; the
+ * split ended when slice 9 took the chart's arm and the grouped rule went with it.
  */
 const SELECTED_CARD = "@container/fp-selected";
-const LADDER_HEADING = "m-0 mb-2.5 text-[0.95rem]";
 /** The heading carries the `next` badge, so it is a baseline row rather than a block. */
-const SELECTED_HEADING = `${LADDER_HEADING} flex items-center gap-[10px]`;
+const SELECTED_HEADING = `${CARD_HEADING} flex items-center gap-[10px]`;
 
 /**
  * THE HEADLINE — the money committed, AT the price it buys at.
@@ -1333,7 +1391,7 @@ function RungList() {
   const { view, selected, select } = useFillPath();
   return (
     <Card className={LIST_CARD}>
-      <Card.Title className={LADDER_HEADING}>Rungs</Card.Title>
+      <Card.Title className={CARD_HEADING}>Rungs</Card.Title>
       <ul className={LIST_ITEMS}>
         {view.rungs.map((rung) => (
           <li key={rung.key}>

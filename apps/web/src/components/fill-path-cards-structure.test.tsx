@@ -31,6 +31,7 @@ import { describe, expect, it } from "vitest";
 import {
   DELETED_IN_SLICE_7,
   DELETED_IN_SLICE_8,
+  DELETED_IN_SLICE_9,
   classTokens,
   fireEvent,
   render,
@@ -1072,5 +1073,167 @@ describe("the rung list carries its section as utilities", () => {
     // And the chart still carries its own, which is what makes the line above a claim
     // about slice 8 rather than about the render having been emptied.
     expect(rendered).toContain("fp-chart-card");
+  });
+});
+
+describe("the chart card carries its section as utilities", () => {
+  /** The whole page, on the view that draws all three legend entries at once. */
+  function renderChartCard() {
+    const { container } = render(<FillPathCards view={partlyWalkedView()} />);
+    const card = container.querySelector(".fp-chart-card");
+    expect(card).not.toBeNull();
+    return { container, card: card as Element };
+  }
+
+  it("lays the head out as a baseline row that wraps without opening a row gap", () => {
+    const { card } = renderChartCard();
+    const head = card.firstElementChild;
+
+    expectClasses(head, [
+      "flex",
+      "flex-wrap",
+      "items-baseline",
+      "justify-between",
+      "gap-x-[10px]",
+      // THE ROW GAP IS THE ASSERTION, not the column gap. `gap: 0 10px` spelled as a
+      // single `gap-[10px]` would open a 10px hole above the wrapped span that the
+      // deleted rule never had, and nothing else in this suite would see it.
+      "gap-y-0",
+    ]);
+    expect(classTokens(head!)).not.toContain("gap-[10px]");
+  });
+
+  it("gives the title the card heading and lets it be the half that gives way", () => {
+    const { card } = renderChartCard();
+    const title = card.querySelector("h2");
+
+    // THE THIRD ARM OF THE HEADING RULE. `.fp-chart-card h2` grouped with the ladder's
+    // two, and these three classes are what the chart's arm said.
+    expectClasses(title, ["m-0", "mb-2.5", "text-[0.95rem]", "flex-auto", "min-w-0"]);
+  });
+
+  it("rails the price span right and demotes it beneath the title", () => {
+    const { card } = renderChartCard();
+    const span = card.querySelector("h2 + span");
+
+    // `ml-auto` IS WHAT KEEPS THE RIGHT RAIL ON A WRAPPED LINE. `justify-between` aligns
+    // a lone wrapped item to the start, so the span's own auto margin is load-bearing
+    // rather than a restatement of the row's justification.
+    expectClasses(span, [
+      "ml-auto",
+      "mb-2.5",
+      "flex-none",
+      "text-[0.8rem]",
+      "tabular-nums",
+      "text-[var(--muted)]",
+    ]);
+  });
+
+  it("caps the measured wrapper and centres it, and paints the chart's own theme", () => {
+    const { container } = renderChartCard();
+    const wrapper = container.querySelector(".fp-chart");
+
+    expectClasses(wrapper, [
+      "block",
+      "w-full",
+      // THE CAP AND THE CENTRING ARE ONE DECISION. Uncapped on the wide column the 5:4
+      // box the ratio derives becomes a half-viewport-tall chart; capped and not centred
+      // it reads as left-weighted.
+      "max-w-[500px]",
+      "mx-auto",
+      // `currentColor` IS THE CHART LIBRARY'S THEME for axes, ticks, grid and titles, so
+      // these two are guide legibility rather than label styling.
+      "text-[10px]",
+      "text-[var(--muted)]",
+    ]);
+    // The hook survives its rule: `fill-path-chart-a11y.test.tsx` queries this wrapper.
+    expect(wrapper?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("resets the legend list and lays its entries out as rows", () => {
+    const { container } = renderChartCard();
+    const legend = container.querySelector(".fp-chart ul");
+
+    expectClasses(legend, [
+      // PREFLIGHT IS OFF, so the UA's list padding and block margin are live and both
+      // are load-bearing here; `mt-1.5` is the one edge the deleted rule set.
+      "m-0",
+      "mt-1.5",
+      "p-0",
+      "list-none",
+      "flex",
+      "flex-wrap",
+      "gap-x-[14px]",
+      "gap-y-1",
+      "text-[0.72rem]",
+      "text-[var(--muted)]",
+    ]);
+    for (const entry of legend!.querySelectorAll("li")) {
+      expectClasses(entry, ["flex", "items-center", "gap-1.5"]);
+    }
+  });
+
+  it("paints each swatch from a total map, one colour and one style per entry", () => {
+    const { container } = renderChartCard();
+    const swatches = [...container.querySelectorAll(".fp-chart ul li span")];
+
+    // ALL THREE ENTRIES DRAW, which is what makes this a total map rather than three
+    // assertions about one element: `partly-walked` has filled rungs, waiting rungs and
+    // a live spot.
+    expect(swatches).toHaveLength(3);
+    const [filled, waiting, now] = swatches;
+
+    // EACH NAMES ITS OWN COLOUR AND ITS OWN BORDER STYLE. The deleted rules were a base
+    // and three modifiers; two unvariant utilities on one property are resolved by
+    // Tailwind's emitted order, so an override written here would lose silently.
+    expectClasses(filled, ["w-[18px]", "border-t-2", "border-solid", "border-t-[var(--pos)]"]);
+    expectClasses(waiting, [
+      "w-[18px]",
+      "border-t-2",
+      "border-dashed",
+      "border-t-[var(--muted)]",
+    ]);
+    // THE NOW SWATCH IS A HORIZONTAL RULE, matching the picture: price is the y axis, so
+    // spot is a price LEVEL. It stays distinguishable from `waiting` on colour and on
+    // solidity, not on angle.
+    expectClasses(now, ["w-[18px]", "border-t-2", "border-solid", "border-t-[var(--now)]"]);
+  });
+
+  it("sizes the hidden caption as prose and keeps it in the accessibility tree", () => {
+    const { card } = renderChartCard();
+    const hidden = card.querySelector(".sr-only");
+    const caption = hidden?.querySelector("p");
+
+    // `m-0 mt-2.5` — the UA's own `p` margin is live, so three edges are zeroed.
+    expectClasses(caption, ["m-0", "mt-2.5", "text-[0.85rem]", "leading-[1.5]"]);
+    // The wrapper is Tailwind's `sr-only` and it must not become `hidden`: this sentence
+    // is the only form in which the chart reaches a screen reader.
+    expect(classTokens(hidden!)).toContain("sr-only");
+    expect(caption?.textContent?.length).toBeGreaterThan(0);
+  });
+
+  it("stacks the inspect slider under its label and unpicks the UA's side margin", () => {
+    const { container } = renderChartCard();
+    const label = container.querySelector(".fp-inspect");
+    const input = label?.querySelector('input[type="range"]');
+
+    expectClasses(label, ["mt-3.5", "flex", "flex-col", "gap-1.5"]);
+    // `mx-0` IS THE ONE THAT MATTERS. The UA sheet gives a range input a 2px side margin
+    // and preflight is off, so `w-full` alone leaves the slider 4px wider than the box
+    // around it, with its track tail under the card's border at 320px.
+    expectClasses(input, ["w-full", "mx-0"]);
+  });
+
+  it("renders none of the eight class names slice 9 deleted", () => {
+    const { container } = renderChartCard();
+    const rendered = renderedClassNames(container);
+    for (const deleted of DELETED_IN_SLICE_9) expect(rendered).not.toContain(deleted);
+
+    // AND THE THREE HOOKS SURVIVE. They lost their rules and kept their names, because
+    // the chart's a11y and selection contracts query the render by them; a green line
+    // above with these gone would mean the conversion took a test surface with it.
+    for (const hook of ["fp-chart-card", "fp-chart", "fp-inspect"]) {
+      expect(rendered).toContain(hook);
+    }
   });
 });

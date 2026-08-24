@@ -386,6 +386,38 @@ export const DELETED_IN_SLICE_8 = [
 ];
 
 /**
+ * THE CLASS NAMES SLICE 9 DELETED — the chart's head, its legend and its caption, and the
+ * last list of the nine.
+ *
+ * EIGHT NAMES, AND THREE OF THE CHART'S ARE NOT AMONG THEM. `fp-chart-card`, `fp-chart`
+ * and `fp-inspect` keep their rules' NAMES after losing their rules, because three tests
+ * outside this file query the render by them: `fill-path-chart-a11y.test.tsx` reaches for
+ * `.fp-chart` to prove the wrapper mounts no focusable node, and the selection tests reach
+ * for `.fp-inspect input` and the card. Listing them would fail on a render behaving
+ * exactly as intended — the same trap `dca` was kept off slice 6's list to avoid — and
+ * deleting them from the markup would take a presentation contract's only handle with it.
+ * A hook with no rule is what a converted surface looks like; the terminal assertion below
+ * is what proves the rule is gone.
+ *
+ * `is-filled` IS HERE, SIX SLICES AFTER ITS THREE SIBLINGS. Slice 8 deleted `is-next`,
+ * `is-selected` and `is-unplaced` with the row template that built them and had to leave
+ * this one, because `.fp-legend-swatch.is-filled` was still in `styles.css` and the
+ * legend's swatch still wrote it. A list is a record of what a render may no longer
+ * contain, so the name belongs to the slice after which the render no longer contains it.
+ * `is-waiting` and `is-now` had no such delay and arrive with it.
+ */
+export const DELETED_IN_SLICE_9 = [
+  "fp-chart-head",
+  "fp-chart-range",
+  "fp-legend",
+  "fp-legend-swatch",
+  "fp-caption",
+  "is-filled",
+  "is-waiting",
+  "is-now",
+];
+
+/**
  * Everything a render test is allowed to reach for, re-exported from one place.
  *
  * `fireEvent` RIDES ALONGSIDE `userEvent`, NOT INSTEAD OF IT. Spec #403 §3.4 bought

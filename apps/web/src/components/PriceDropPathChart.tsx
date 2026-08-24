@@ -110,10 +110,65 @@ const INITIAL_WIDTH = 320;
  *  wider than it is tall, which gives the cumulative climb room to read as a climb
  *  without turning the price axis into a slit.
  *
- *  The wrapper caps the width (`.fp-chart`) so the ratio cannot turn a wide desktop card
- *  into a half-viewport-tall chart. The cap belongs in CSS rather than here because it is
- *  a layout bound, not a property of the chart. */
+ *  The wrapper caps the width (`CHART_BOX` below) so the ratio cannot turn a wide desktop
+ *  card into a half-viewport-tall chart. The cap belongs on the wrapper rather than here
+ *  because it is a layout bound, not a property of the chart. */
 const ASPECT_RATIO = 1.25 / 1;
+
+/**
+ * THE MEASURED WRAPPER, AS UTILITIES (spec #420 slice 9).
+ *
+ * THE CAP IS WHAT KEEPS THE RATIO SANE. The chart's height is derived from its measured
+ * width (`ASPECT_RATIO` above), so width and height cannot be tuned independently:
+ * uncapped on the 760px column, the same 5:4 box that reads well on a phone becomes a
+ * 550px-tall chart. Centred, so it does not read as left-weighted on a wide screen.
+ * 500px rather than the 360px it shipped with: capping near the phone width left the desk
+ * rendering a phone-sized picture in the middle of a wide card, and this chart's whole
+ * subject is the SHAPE of a curve. The phone never reached either cap.
+ *
+ * `text-[var(--muted)]` IS THE CHART'S THEME, not a label colour. TanStack Charts paints
+ * its axes, ticks, grid and titles with `currentColor` rather than shipping a palette, so
+ * the wrapper's colour is what makes the guides legible on the dark palette; `text-[10px]`
+ * is the tick size for the same reason. Per-mark paint is named below, from the same
+ * house variables.
+ *
+ * THE CLASS NAME STAYS AND THE RULE DOES NOT. `fp-chart` selects nothing in `styles.css`
+ * any more; it is the hook `fill-path-chart-a11y.test.tsx` and the selection tests query
+ * the wrapper by, and deleting it would take a presentation contract's only handle with
+ * it.
+ */
+const CHART_BOX = "block w-full max-w-[500px] mx-auto text-[10px] text-[var(--muted)]";
+
+/**
+ * THE KEY TO THE PICTURE, AS UTILITIES. The `<ul>` carries the UA's own list padding and
+ * block margin with preflight off, so `m-0 p-0` are load-bearing and `mt-1.5` is the one
+ * edge the deleted rule set. The two gap axes differ (`gap: 4px 14px`) and are spelled
+ * apart for that reason.
+ */
+const LEGEND =
+  "m-0 mt-1.5 flex flex-wrap gap-x-[14px] gap-y-1 p-0 list-none" +
+  " text-[0.72rem] text-[var(--muted)]";
+const LEGEND_ENTRY = "flex items-center gap-1.5";
+/**
+ * EACH SWATCH IS A TOTAL MAP, not a base plus two overrides.
+ *
+ * The deleted rules were a base swatch and three modifiers that repainted it — a cascade
+ * an unlayered stylesheet could express and a class string cannot, since two unvariant
+ * utilities on one property are resolved by Tailwind's emitted order rather than by the
+ * order they are written in. So colour and border style are named on every entry and
+ * there is no override left to lose.
+ *
+ * IT IS A TOP BORDER AND NOT A BOX, which is what lets the key draw a RULE — a dashed
+ * one, a solid one, a coloured one — rather than the colour chips a chart library's own
+ * legend is limited to. `now` stays distinguishable from `waiting` on colour and on
+ * solidity rather than on angle: the now rule is HORIZONTAL in the picture, because price
+ * is the y axis and spot is a price LEVEL the way a trading chart draws last price, and
+ * this swatch turned with it.
+ */
+const SWATCH = "w-[18px] border-t-2";
+const SWATCH_FILLED = `${SWATCH} border-solid border-t-[var(--pos)]`;
+const SWATCH_WAITING = `${SWATCH} border-dashed border-t-[var(--muted)]`;
+const SWATCH_NOW = `${SWATCH} border-solid border-t-[var(--now)]`;
 
 /** The dash the WAITING segment and its legend swatch share. One constant, so the
  *  picture and the key that explains it cannot drift apart. */
@@ -478,7 +533,7 @@ export function PriceDropPathChart({
     // THE WRAPPER IS WHAT HIDES IT — chart AND legend. `ariaLabel` below is a required
     // prop of the adapter and cannot be omitted; `aria-hidden` here hides the whole
     // subtree including it. See this file's header for why the legend is hidden too.
-    <div className="fp-chart" aria-hidden="true">
+    <div className={`fp-chart ${CHART_BOX}`} aria-hidden="true">
       <Chart
         definition={definition}
         aspectRatio={ASPECT_RATIO}
@@ -492,22 +547,22 @@ export function PriceDropPathChart({
           or a "now" line, and these marks use explicit strokes rather than a colour
           scale at all. Faking a scale to borrow the legend would invent a data
           structure to satisfy a widget. */}
-      <ul className="fp-legend">
+      <ul className={LEGEND}>
         {anyFilled ? (
-          <li>
-            <span className="fp-legend-swatch is-filled" />
+          <li className={LEGEND_ENTRY}>
+            <span className={SWATCH_FILLED} />
             Filled
           </li>
         ) : null}
         {anyWaiting ? (
-          <li>
-            <span className="fp-legend-swatch is-waiting" />
+          <li className={LEGEND_ENTRY}>
+            <span className={SWATCH_WAITING} />
             Waiting
           </li>
         ) : null}
         {spotUsd === undefined ? null : (
-          <li>
-            <span className="fp-legend-swatch is-now" />
+          <li className={LEGEND_ENTRY}>
+            <span className={SWATCH_NOW} />
             Now
           </li>
         )}
