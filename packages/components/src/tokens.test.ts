@@ -39,7 +39,7 @@ function sourceFiles(dir: string = SRC): string[] {
 
 /**
  * Every custom property read in a file's text, BY EITHER OF TAILWIND 4'S TWO
- * SYNTAXES — `var(--muted)` and the shorthand `bg-(--muted)`, which compiles to
+ * SYNTAXES — `var(--line)` and the shorthand `bg-(--line)`, which compiles to
  * the same declaration and writes no `var(` anywhere in the source. Typed
  * shorthands (`w-(length:--sidebar-width)`) are the same form.
  *

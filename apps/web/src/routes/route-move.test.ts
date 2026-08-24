@@ -227,7 +227,21 @@ describe("G-D13: the ladder route", () => {
     // The two PURE SUBPATHS are browser-safe by construction: each is a leaf module with
     // no imports of its own, which is why the subpath exports exist at all. The engine
     // ROOT is what drags `node:os`/`node:path` into the bundle.
-    const allowed = ["@numisma/engine/format", "@numisma/engine/calendar"];
+    //
+    // `@numisma/components` IS THE THIRD, AND IT IS SAFE FOR THE SAME REASON THE ENGINE
+    // ROOT IS NOT (spec #432 §4.1, slice 1). The fill path renders `Absent` from the
+    // package, so the package is in this closure from now on. It declares four runtime
+    // dependencies — `@base-ui/react`, `class-variance-authority`, `clsx` and
+    // `tailwind-merge` — reaches no `node:` builtin, and ships browser-only TSX with no
+    // filesystem, no environment read and no database client anywhere in it. What ADR-007
+    // keeps out of the browser bundle is the engine's `node:os`/`node:path` reach and the
+    // secrets that travel with it; a component package with none of that is not the thing
+    // this list is narrow about.
+    const allowed = [
+      "@numisma/engine/format",
+      "@numisma/engine/calendar",
+      "@numisma/components",
+    ];
     for (const file of closure) {
       const source = readFileSync(join(HERE, "..", file), "utf-8");
       for (const match of source.matchAll(

@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { formatUsd } from "@numisma/engine/format";
+import { Absent } from "@numisma/components";
 import type { DcaPositionView, DcaView } from "../glance/dca-view.ts";
-import { Absent } from "./ui/Absent.tsx";
 import { Card } from "./ui/Card.tsx";
 // The table surface, from the component that owns its deleted element rules (spec #420
 // Seam B — the first surface in the migration's order converts every carrier, wherever

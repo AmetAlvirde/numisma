@@ -16,6 +16,7 @@
  * costs and the contract that makes them testable.
  */
 
+export { Absent } from "./ui/absent";
 export { Button, buttonVariants } from "./ui/button";
 export { cn } from "./lib/utils";
 export {

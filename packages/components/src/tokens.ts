@@ -58,8 +58,8 @@
  *
  * `apps/web` owns ten bare palette names. Each has exactly one counterpart in
  * this namespace, and the whole mapping is written here so a component crossing
- * into the package looks the name up rather than choosing it again. Three are
- * declared below; the other seven are named and not yet declared, each waiting
+ * into the package looks the name up rather than choosing it again. Four are
+ * declared below; the other six are named and not yet declared, each waiting
  * on the component that first reads it.
  *
  *     house      package                  status
@@ -67,7 +67,7 @@
  *     --text     --nms-foreground         declared
  *     --line     --nms-border             declared
  *     --card     --nms-card               named; declared with `Card`
- *     --muted    --nms-muted-foreground   named; declared with `Absent`
+ *     --muted    --nms-muted-foreground   declared
  *     --neg      --nms-neg                named; declared with the snapshot notices
  *     --pos      --nms-pos                named; not yet declared (wave 2)
  *     --ok       --nms-ok                 named; not yet declared (wave 2)
@@ -126,9 +126,14 @@ export const NMS_TOKENS = [
     note: "Primary text. Also read bare in Button's secondary hover mix.",
   },
   {
+    name: "--nms-muted-foreground",
+    value: "oklch(0.556 0 0)",
+    note: "Secondary TEXT — the quieter of the two type colours. `Absent`'s em dash and its stated cause. NOT `--nms-muted`, which is a surface: same English word, opposite roles, and the mechanical `--muted` rename that welds them is the defect this pair is written against.",
+  },
+  {
     name: "--nms-muted",
     value: "oklch(0.97 0 0)",
-    note: "Recessed surface. Button `ghost` and `outline` hover.",
+    note: "Recessed SURFACE — a well, never type colour. Button `ghost` and `outline` hover. See the row above before reaching for it as a text grey.",
   },
   {
     name: "--nms-border",

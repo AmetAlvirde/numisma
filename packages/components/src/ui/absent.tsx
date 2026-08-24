@@ -19,17 +19,35 @@ import type { ReactElement } from "react";
  * and would give this file a domain import it has no business having.
  *
  * ── THIS FILE IMPORTS REACT AND NOTHING ELSE ─────────────────────────────────────────
- * `route-move.test.ts` walks the reachable module graph from the ladder route and allows
- * exactly two `@numisma/*` runtime imports. Everything a primitive imports enters that
- * closure, so primitives stay dependency-free — the `why` prop's type is declared inline
- * here for the same reason. It is spelled `string | undefined` rather than `string`
- * because `exactOptionalPropertyTypes` is on: the call sites resolve a reason that may be
- * absent and pass the result straight through, which is the whole point of the default.
+ * The discipline is the same one it kept in `apps/web`; what enforces it is now on this
+ * side of the boundary. `packages/components` declares four runtime dependencies —
+ * `@base-ui/react`, `class-variance-authority`, `clsx` and `tailwind-merge` — and that
+ * short list is the whole reason `apps/web`'s ladder-route closure guard admits
+ * `@numisma/components` into a browser bundle at all. Anything this file imports, every
+ * consumer inherits, so a primitive stays dependency-free. The `why` prop's type is
+ * declared inline for the same reason. It is spelled `string | undefined` rather than
+ * `string` because `exactOptionalPropertyTypes` is on: the call sites resolve a reason
+ * that may be absent and pass the result straight through, which is the whole point of
+ * the default.
  *
  * ── THE STYLING IS HERE NOW, AND THE CLASS NAME IS FINALLY GONE ──────────────────────
- * Spec #420 slice 2 deletes `.absent` (`display: inline-flex; align-items: baseline;
- * gap: 6px; color: var(--muted)`), `.absent-why` and `.muted`, and those declarations are
- * the utilities below.
+ * Spec #420 slice 2 deletes `.absent` — `display: inline-flex`, `align-items: baseline`,
+ * `gap: 6px`, and a `color` reading the app's house grey `--muted` — along with
+ * `.absent-why` and `.muted`, and those declarations are the utilities below.
+ *
+ * THE COLOUR IS THE ONE THING THAT DID NOT SURVIVE THE MOVE VERBATIM (spec #432 §4.1).
+ * A package file may read no house name, so both reads below spell
+ * `--nms-muted-foreground`, and `apps/web` aliases that onto its own `--muted`. The
+ * quoted declaration above is written without `var()` on purpose: the namespace guard
+ * scans raw file text with no comment stripping, so a historically accurate quotation
+ * would be reported as a bare read. Rewriting the quote to name the package token
+ * instead would be worse — the deleted rule never read that name, and this docblock is
+ * where a future reader goes to find out what it did read.
+ *
+ * `--nms-muted-foreground` IS NOT `--nms-muted`. The recessed SURFACE is `--nms-muted`
+ * (Button's `ghost` and `outline` hover); this is secondary TEXT. `tokens.ts` carries the
+ * full argument, and it is why the mechanical rename was the risk this move was cut to
+ * catch.
  *
  * `absent` OUTLIVED ITS OWN RULE BY SIX SLICES, as a bare hook, because three CONTEXTUAL
  * rules still selected through it: `.metrics dd .absent` (slice 3), `.fp-tile .absent`
@@ -73,7 +91,7 @@ import type { ReactElement } from "react";
  * the left edge and spot's did not, because spot's own reflow keeps it right-aligned.
  */
 const ABSENT_SURFACE =
-  "inline-flex items-baseline gap-1.5 text-[var(--muted)] [dd_&]:flex-wrap [dd_&]:justify-end [dd_&]:@[380px]/metrics-card:justify-start";
+  "inline-flex items-baseline gap-1.5 text-[var(--nms-muted-foreground)] [dd_&]:flex-wrap [dd_&]:justify-end [dd_&]:@[380px]/metrics-card:justify-start";
 
 export function Absent({
   why,
@@ -85,7 +103,7 @@ export function Absent({
   return (
     <span className={className ? `${ABSENT_SURFACE} ${className}` : ABSENT_SURFACE}>
       <span aria-hidden="true">—</span>
-      <span className="m-0 mt-1 text-[0.72rem] font-medium text-[var(--muted)] [dd_&]:mt-0 [dd_&]:text-[0.75rem]">
+      <span className="m-0 mt-1 text-[0.72rem] font-medium text-[var(--nms-muted-foreground)] [dd_&]:mt-0 [dd_&]:text-[0.75rem]">
         {why ?? "suppressed"}
       </span>
     </span>

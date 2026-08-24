@@ -192,6 +192,7 @@
   --color-foreground: var(--nms-foreground);
 
   --color-muted: var(--nms-muted);
+  --color-muted-foreground: var(--nms-muted-foreground);
   --color-border: var(--nms-border);
   --color-input: var(--nms-input);
   --color-ring: var(--nms-ring);

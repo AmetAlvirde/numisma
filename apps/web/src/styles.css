@@ -59,7 +59,9 @@
    hovered ghost button), `--muted` is secondary TEXT. So `--muted` is READ here and
    NEVER redefined — the whole app's secondary text reads it, as `text-[var(--muted)]` in
    class strings and as `var(--muted)` in the chart's own marks — and
-   the surface gets its own minted grey instead. `--ok`, `--warn`, `--pos` and `--now`
+   the surface gets its own minted grey instead. The package's secondary text reaches the
+   same grey through `--nms-muted-foreground`, an alias and never a second definition, so
+   an `Absent` rendered from the package paints exactly what it painted from `apps/web`. `--ok`, `--warn`, `--pos` and `--now`
    have no package counterpart and get no alias; `--now` in particular is the spot colour
    chosen to collide with nothing on the Price Drop Path, and aliasing it onto
    `--nms-primary` would put "where price is now" on every button in the app. */
@@ -81,6 +83,11 @@
 
   --nms-background: var(--bg);
   --nms-foreground: var(--text);
+  /* SECONDARY TEXT, and the one alias that carries a house colour into the package
+     unchanged. `Absent` reads it (spec #432 §4.1); the name is the one spec #420 slice 0
+     deleted, reused on purpose so the two vocabularies keep one word per role. It is NOT
+     the line below — see this block's header. */
+  --nms-muted-foreground: var(--muted);
   --nms-muted: var(--recess);
   --nms-border: var(--line);
   --nms-input: var(--line);

@@ -66,6 +66,7 @@ export const GRAYSCALE_TOKENS: Readonly<Record<string, string>> =
 export const THEMED_TOKENS: Readonly<Record<string, string>> = {
   "--nms-background": "#fdf6ec",
   "--nms-foreground": "#1b1a17",
+  "--nms-muted-foreground": "#5c7cff",
   "--nms-muted": "#ead9c0",
   "--nms-border": "#c9a86a",
   "--nms-input": "#8f6f2a",
@@ -87,30 +88,36 @@ export const THEMED_TOKENS: Readonly<Record<string, string>> = {
  * alias chain to meet these literals, rather than comparing alias text that
  * would keep matching while the palette moved underneath it.
  *
- * TWELVE NAMES, MATCHING THE PACKAGE EXACTLY — and it took a deletion to get
- * here. This table carried fourteen while `styles.css` defined `--nms-card` and
- * `--nms-muted-foreground`, two aliases spec #412 §4.2 minted for components
- * that had not arrived. Spec #420 S0 deleted both on the rule `tokens.ts`
- * already keeps: a token nothing reads is a token nothing can verify, and app
- * mode was carrying two values no fixture could ever show. The mirror is what
- * makes that a two-sided edit — the drift test below reads `styles.css` off disk
- * and reds if either side moves alone.
+ * THIRTEEN NAMES, MATCHING THE PACKAGE EXACTLY — and it took a deletion and one
+ * return to get here. This table carried fourteen while `styles.css` defined
+ * `--nms-card` and `--nms-muted-foreground`, two aliases spec #412 §4.2 minted
+ * for components that had not arrived. Spec #420 S0 deleted both on the rule
+ * `tokens.ts` already keeps: a token nothing reads is a token nothing can
+ * verify, and app mode was carrying two values no fixture could ever show. Spec
+ * #432 §4.1 then moved `Absent` into the package reading
+ * `--nms-muted-foreground`, so that one is back — met precondition, not undone
+ * decision. The mirror is what makes each of those a two-sided edit — the drift
+ * test below reads `styles.css` off disk and reds if either side moves alone.
  *
- * AND BOTH SPELLINGS COME BACK IN WAVE 1 (spec #432 §4.1), which is not the
- * deletion being undone. The rule was never "these two names are wrong", it was
- * "a token nothing reads is a token nothing can verify". `Absent` reads the
- * app's `--muted` and `Card` reads its `--card`; the day each of them enters the
- * package is the day that precondition is met, and the alias comes back in the
- * same slice as the component that reads it, never ahead of it. The argument the
+ * `#9aa1ad` IS `--muted` RESOLVED, and it is the app's most-used grey. The alias
+ * chain is `--nms-muted-foreground: var(--muted)` and `--muted: #9aa1ad`; the
+ * drift test walks it. It is deliberately NOT `#14161c`, the row below — that is
+ * `--recess`, the recessed surface, and the two sitting adjacent here is the
+ * whole shape of the mistake this slice was cut to catch.
+ *
+ * `--nms-card` IS STILL OUT, and its return works the same way: it lands the
+ * day `Card` enters the package reading it, never ahead of it. The argument the
  * drift test records as "the argument that lost" — carry the alias early so app
- * mode is already correct on arrival — is still lost. What changed is the
- * arrival, not the argument. The count moves from twelve to fifteen one
- * component at a time; the exact spellings are reused on purpose, so the
- * vocabulary stays one vocabulary rather than growing a second name per role.
+ * mode is already correct on arrival — is still lost. What changed for
+ * `--nms-muted-foreground` is the arrival, not the argument. The count climbs
+ * from twelve to fifteen one component at a time; the exact spellings are reused
+ * on purpose, so the vocabulary stays one vocabulary rather than growing a
+ * second name per role.
  */
 export const APP_TOKENS: Readonly<Record<string, string>> = {
   "--nms-background": "#0f1115",
   "--nms-foreground": "#e7e9ee",
+  "--nms-muted-foreground": "#9aa1ad",
   "--nms-muted": "#14161c",
   "--nms-border": "#262a33",
   "--nms-input": "#262a33",

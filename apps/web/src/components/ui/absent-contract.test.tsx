@@ -13,11 +13,16 @@
  * rather than left to the call sites that no longer spell it.
  *
  * Everything below is authored. No ledger output has been near this file.
+ *
+ * THE PRIMITIVE MOVED AND THE TEST DID NOT (spec #432 §4.1). `Absent` now ships from
+ * `@numisma/components`, and this file imports it from that specifier rather than from a
+ * path, so what it pins is the SHIPPED surface — the thing five call sites and the
+ * workbench fixture get — instead of a local file that happens to be re-exported.
  */
 import { describe, expect, it } from "vitest";
 
 import { classTokens as tokens, render, screen } from "../../render.testkit.tsx";
-import { Absent } from "./Absent.tsx";
+import { Absent } from "@numisma/components";
 
 describe("Absent", () => {
   it("hides the em dash from assistive technology and exposes the reason", () => {
@@ -37,6 +42,10 @@ describe("Absent", () => {
   });
 
   it("carries `.absent`'s four declarations as utilities, and no longer writes the name", () => {
+    // THE COLOUR IS THE ONE DECLARATION THAT CHANGED SPELLING. A package file may read
+    // no house name, so both reads are `--nms-muted-foreground`, which `styles.css`
+    // aliases onto the app's `--muted`. Same painted grey, reached through the
+    // namespace — and NOT `--nms-muted`, which is the recessed surface.
     const { container } = render(<Absent why="no floor set" />);
 
     // FOUND BY THE EM DASH. The class name is gone (spec #420 slice 8) and the glyph is
@@ -48,7 +57,7 @@ describe("Absent", () => {
       "inline-flex",
       "items-baseline",
       "gap-1.5",
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
     ]) {
       expect(tokens(root!)).toContain(utility);
     }
@@ -66,7 +75,7 @@ describe("Absent", () => {
     for (const utility of [
       "text-[0.72rem]",
       "font-medium",
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
       // `.muted` set `margin: 4px 0 0` — three zeroed edges and one that is not.
       // Preflight is off, so only `mt-1` would leave the UA free on the other three.
       "m-0",
