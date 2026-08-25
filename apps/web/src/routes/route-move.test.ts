@@ -336,6 +336,28 @@ describe("G-D13: the ladder route", () => {
     // bundle, which is the same reasoning the sibling closure check above already runs
     // on — hence the negative lookahead, and hence the two `from`-less forms below,
     // which that lookahead cannot see and which pull the whole engine in regardless.
+    //
+    // ── THE CLAUSE IS `[^;]*?`, NOT `[\s\S]*?`, AND THAT IS THE WHOLE OF IT ─────────
+    // The lookahead only guards the import the match STARTS on. `[\s\S]*?` crosses
+    // newlines, so a match could open on some unrelated import and run on until the
+    // first engine `from` anywhere below it — landing on a type-only ROOT import two
+    // statements down and reporting THAT as a runtime read. The negative lookahead is
+    // silently bypassed whenever it is not the first thing in the match, and the file
+    // named in the failure is not the file with the problem.
+    //
+    // Measured, on `import { cn } from "./x"` above `import type { A } from
+    // "@numisma/engine"` above a genuine `import { evil } from "@numisma/engine"`: the
+    // old clause yielded TWO matches, the crossing one and the real offender, so the
+    // guard reported an erased type import as a bundle hazard. That over-report is why
+    // every package file today writes its engine root type-import FIRST — a convention
+    // nothing states and nothing enforces, adopted to keep this guard quiet rather than
+    // because the order means anything.
+    //
+    // A specifier list holds no `;`, and every import statement ends with one, so
+    // `[^;]*?` cannot leave the statement it opened on. The match is then exactly as
+    // wide as the lookahead's guarantee, the import order convention stops mattering,
+    // and the narrowing can only ever report FEWER things — never fewer offenders,
+    // since a runtime engine import still opens its own match on its own line.
     const packageSrc = join(HERE, "../../../../packages/components/src");
     const files = sourceFiles({ dir: packageSrc, as: "absolute" });
     // FALSE-PASS FLOOR, the same one every sweep in this file carries: "no offender
@@ -346,9 +368,9 @@ describe("G-D13: the ladder route", () => {
       const label = relative(packageSrc, file);
       const source = readFileSync(file, "utf-8");
       for (const match of source.matchAll(
-        /^\s*import\s+(?!type\b)([\s\S]*?)\bfrom\s*["'](@numisma\/engine[^"']*)["']/gm,
+        /^\s*import\s+(?!type\b)[^;]*?\bfrom\s*["'](@numisma\/engine[^"']*)["']/gm,
       )) {
-        expect(pure, `${label} imports ${match[2]} at runtime`).toContain(match[2]);
+        expect(pure, `${label} imports ${match[1]} at runtime`).toContain(match[1]);
       }
       expect(source, `${label} side-effect-imports the engine`).not.toMatch(
         /^\s*import\s*["']@numisma\/engine["']/m,
