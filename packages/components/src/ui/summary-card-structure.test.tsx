@@ -26,7 +26,10 @@
  * the top margin and the alignment. Preflight is off, so the UA's `<dd>` margin is live
  * and `m-0` is as load-bearing as anything beside it.
  *
- * THE SUMMARY IS AUTHORED. No ledger output has been near this file.
+ * THE SUMMARY IS AUTHORED, and it now lives in `summary-card.fixtures.ts` beside the
+ * component rather than in this file (spec #439 §4.3). Same literal, three readers: this
+ * test, the workbench's cosmos fixture, and whatever renders the card next. No ledger
+ * output has been near it.
  */
 import { describe, expect, it } from "vitest";
 
@@ -35,26 +38,10 @@ import {
   render,
   absentSlots,
   screen,
-} from "@numisma/components/testkit/render.testkit.tsx";
-import { CARD_SURFACE } from "@numisma/components";
-import { SummaryCard } from "./SummaryCard.tsx";
-import type { DashboardSummary } from "@numisma/engine";
-
-function cleanSummary(): DashboardSummary {
-  return {
-    fundName: "Test Fund",
-    asOf: "2026-01-05",
-    fundValueUsd: 1000,
-    usdMxn: 18.5,
-    totalUnrealizedPnlUsd: 100,
-    dataSafety: {
-      nonLiveExcluded: 0,
-      invalidExcluded: 0,
-      shortDeferredExcluded: 0,
-      hasWarnings: false,
-    },
-  };
-}
+} from "../testkit/render.testkit";
+import { CARD_SURFACE } from "./card";
+import { SummaryCard } from "./summary-card";
+import { cleanSummary } from "./summary-card.fixtures";
 
 /** Every utility in `expected` is on `element`, one assertion per class. */
 function expectUtilities(element: Element, expected: string[]): void {
@@ -87,7 +74,7 @@ describe("SummaryCard on the shared Card", () => {
     // `.muted` plain — colour and all four margin edges, preflight being off.
     const asOf = screen.getByText(/^as of/);
     expect(asOf.tagName).toBe("P");
-    expectUtilities(asOf, ["text-[var(--muted)]", "m-0", "mt-1"]);
+    expectUtilities(asOf, ["text-[var(--nms-muted-foreground)]", "m-0", "mt-1"]);
   });
 
   it("is the query container the shared 380px breakpoint names", () => {
@@ -152,7 +139,7 @@ describe("SummaryCard on the shared Card", () => {
     );
 
     expectUtilities(screen.getByText("Fund value"), [
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
       "text-[0.8rem]",
     ]);
     expectUtilities(screen.getByText("18.50").closest("dd")!, [
@@ -171,7 +158,7 @@ describe("SummaryCard on the shared Card", () => {
       <SummaryCard summary={cleanSummary()} usdMxn={18.5} fundValueRendered />,
     );
     const pnl = screen.getByText(/^\$100/);
-    expectUtilities(pnl, ["text-[var(--pos)]"]);
+    expectUtilities(pnl, ["text-[var(--nms-pos)]"]);
 
     render(
       <SummaryCard
@@ -180,7 +167,7 @@ describe("SummaryCard on the shared Card", () => {
         fundValueRendered
       />,
     );
-    expectUtilities(screen.getByText(/^-\$100/), ["text-[var(--neg)]"]);
+    expectUtilities(screen.getByText(/^-\$100/), ["text-[var(--nms-neg)]"]);
   });
 
   it("carries both badge arms, and wraps only inside the head", () => {
@@ -196,7 +183,7 @@ describe("SummaryCard on the shared Card", () => {
       "text-[0.78rem]",
       "font-semibold",
       "whitespace-nowrap",
-      "bg-[var(--ok)]",
+      "bg-[var(--nms-ok)]",
       "text-white",
     ]);
     // `.badge`'s `nowrap` was overridden for EXACTLY ONE PLACEMENT and the override is
@@ -216,7 +203,7 @@ describe("SummaryCard on the shared Card", () => {
     // By title, not by text: the badge and the em dash beneath it spell the SAME cause
     // from the same constant, deliberately, so the words are not a unique handle.
     expectUtilities(screen.getByTitle("Withheld or excluded data"), [
-      "bg-[var(--warn)]",
+      "bg-[var(--nms-warn)]",
       "text-white",
       "whitespace-nowrap",
       "[header_&]:whitespace-normal",

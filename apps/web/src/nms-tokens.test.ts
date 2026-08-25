@@ -70,7 +70,7 @@ describe("the app defines every token the package declares", () => {
   it("declares at least as many tokens as the package does", () => {
     // Guards the direction the per-name cases cannot: a token list that shrank
     // to nothing would pass an empty `it.each`.
-    expect(NMS_TOKEN_NAMES.length).toBeGreaterThanOrEqual(15);
+    expect(NMS_TOKEN_NAMES.length).toBeGreaterThanOrEqual(18);
   });
 
   it("defines no --nms-* name the package never declared", () => {
@@ -117,9 +117,11 @@ describe("the app defines every token the package declares", () => {
  * no component in the package read either one; spec #432 §4.1 brought each back
  * in the slice that moved the component reading it, `Absent` and then `Card`,
  * which is the precondition the deletion was about. The block stays an exact
- * mirror of `NMS_TOKEN_NAMES` in both directions — fifteen names now, the two
- * that came back plus `--nms-neg`, which the app never carried before, and both
- * sides moved together on every one.
+ * mirror of `NMS_TOKEN_NAMES` in both directions — eighteen names now. Fifteen
+ * was wave 1's count; spec #439 S1 added `--nms-pos`, `--nms-ok` and
+ * `--nms-warn` when `SummaryCard` crossed reading all three, and every one of
+ * the three had been NAMED in `tokens.ts` and left undeclared until that day.
+ * Both sides moved together on every one.
  *
  * `--nms-muted` IS NOT `--muted`, and the collision of English words is exactly
  * why the prefix exists. shadcn reads `--nms-muted` as a recessed SURFACE
@@ -162,6 +164,12 @@ describe("the app's --nms-* overrides in styles.css", () => {
     // that points one of them somewhere else reds this line instead of passing
     // as a tidy-up.
     ["--nms-neg", "var(--neg)"],
+    // THE CARD'S THREE (spec #439 S1). Aliases like the rest: `--pos`, `--ok` and
+    // `--warn` stay declared exactly once each, in the palette block at the top, and
+    // the case at the bottom of this block is what counts those declarations.
+    ["--nms-pos", "var(--pos)"],
+    ["--nms-ok", "var(--ok)"],
+    ["--nms-warn", "var(--warn)"],
   ])("aliases %s onto %s rather than copying its value", (name, alias) => {
     expect(overrides.get(name)).toBe(alias);
   });
@@ -196,17 +204,6 @@ describe("the app's --nms-* overrides in styles.css", () => {
     // A mechanical rename that welded them would satisfy the line below and red
     // the line above, which is exactly the order those two are written in.
     expect(overrides.get("--nms-muted-foreground")).toBe("var(--muted)");
-  });
-
-  it("leaves --ok, --warn and --pos app-only", () => {
-    // They have no package counterpart. An alias invented for one of them would
-    // hand the package a token nothing in it reads — the mirror image of the
-    // rule `tokens.ts` keeps on its own side.
-    for (const appOnly of ["--ok", "--warn", "--pos"]) {
-      for (const value of overrides.values()) {
-        expect(value).not.toContain(appOnly);
-      }
-    }
   });
 
   it("redefines no existing app palette token — the edit is purely additive", () => {

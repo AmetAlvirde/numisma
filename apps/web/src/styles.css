@@ -61,8 +61,9 @@
    class strings and as `var(--muted)` in the chart's own marks — and
    the surface gets its own minted grey instead. The package's secondary text reaches the
    same grey through `--nms-muted-foreground`, an alias and never a second definition, so
-   an `Absent` rendered from the package paints exactly what it painted from `apps/web`. `--ok`, `--warn`, `--pos` and `--now`
-   have no package counterpart and get no alias; `--now` in particular is the spot colour
+   an `Absent` rendered from the package paints exactly what it painted from `apps/web`. `--now` ALONE has no
+   package counterpart and gets no alias — `--ok`, `--warn` and `--pos` gained theirs when
+   `SummaryCard` crossed reading all three (spec #439 S1). `--now` is the spot colour
    chosen to collide with nothing on the Price Drop Path, and aliasing it onto
    `--nms-primary` would put "where price is now" on every button in the app. */
 :root {
@@ -111,6 +112,17 @@
      control, this one is data, and `--neg` stays declared exactly once so the pair cannot
      drift apart while they mean the same red. */
   --nms-neg: var(--neg);
+  /* THE OTHER SIGN, and the pair the line above was kept separate from
+     `--nms-destructive` in order to have. `SummaryCard` paints a rising unrealized P&L
+     with it, from inside the package, and `SectionTable` and `GlanceCard` render the same
+     string through the constant it exports — three components, one declaration. */
+  --nms-pos: var(--pos);
+  /* THE DATA-SAFETY BADGE'S TWO FILLS, and they are FILLS rather than type colours:
+     `SummaryCard` asserts with them, green when the fold excluded nothing and the marks
+     arrived, amber when it is naming what it could not state. The warn arm is not
+     `--nms-destructive` — nothing failed and nothing is being destroyed. */
+  --nms-ok: var(--ok);
+  --nms-warn: var(--warn);
   --nms-ring: var(--accent);
   /* GEOMETRY, NOT PALETTE, and the one override here that changes a built-in Tailwind
      utility (`rounded-md`) rather than creating one. The package default is 6px; every

@@ -1,6 +1,7 @@
 import type { DashboardSummary } from "@numisma/engine";
 import { formatUsd, formatSignedPercent } from "@numisma/engine/format";
-import { Absent, Card } from "@numisma/components";
+import { Absent } from "./absent";
+import { Card } from "./card";
 
 /**
  * The one cause that can reach this card, stated rather than passed. `Absent` takes the
@@ -41,7 +42,7 @@ export const METRICS_ROW =
   "grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-[10px] @[380px]/metrics-card:block";
 
 /** The label. */
-export const METRICS_TERM = "text-[var(--muted)] text-[0.8rem]";
+export const METRICS_TERM = "text-[var(--nms-muted-foreground)] text-[0.8rem]";
 
 /**
  * The figure: right against the rail at 320px, left under its label above the
@@ -51,8 +52,8 @@ export const METRICS_FIGURE =
   "m-0 text-[1.15rem] font-semibold tabular-nums text-right @[380px]/metrics-card:mt-[2px] @[380px]/metrics-card:text-left";
 
 /** The positive and negative sign colours, the file's two shared one-declaration rules. */
-export const POSITIVE = "text-[var(--pos)]";
-export const NEGATIVE = "text-[var(--neg)]";
+export const POSITIVE = "text-[var(--nms-pos)]";
+export const NEGATIVE = "text-[var(--nms-neg)]";
 
 /**
  * A BADGE IS A WORD, AND A WORD THAT BREAKS STOPS READING AS A CHIP — which is why the
@@ -124,7 +125,7 @@ export function SummaryCard({
               only this call site knows that this card's heading IS `/big-picture`'s
               title rather than a section heading beneath one. */}
           <Card.Title level={1}>{summary.fundName}</Card.Title>
-          <p className="m-0 mt-1 text-[var(--muted)]">as of {summary.asOf}</p>
+          <p className="m-0 mt-1 text-[var(--nms-muted-foreground)]">as of {summary.asOf}</p>
         </div>
         <DataSafetyBadge
           clean={clean}
@@ -194,7 +195,7 @@ function DataSafetyBadge({
 }) {
   if (clean && fundValueRendered) {
     return (
-      <span className={`${BADGE} bg-[var(--ok)] text-white`}>Data OK</span>
+      <span className={`${BADGE} bg-[var(--nms-ok)] text-white`}>Data OK</span>
     );
   }
   const parts: string[] = [];
@@ -219,7 +220,7 @@ function DataSafetyBadge({
   }
   return (
     <span
-      className={`${BADGE} bg-[var(--warn)] text-white`}
+      className={`${BADGE} bg-[var(--nms-warn)] text-white`}
       title="Withheld or excluded data"
     >
       ⚠ {parts.join(" · ")}

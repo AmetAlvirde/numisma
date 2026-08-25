@@ -1,4 +1,3 @@
-import { Absent, Card } from "@numisma/components";
 import { formatUsd } from "@numisma/engine/format";
 import type {
   ChangeSlot,
@@ -9,13 +8,15 @@ import type {
 } from "../glance/verdict.ts";
 import { referenceLabel } from "../glance/verdict.ts";
 import {
+  Absent,
+  Card,
   METRICS_FIGURE,
   METRICS_LIST,
   METRICS_ROW,
   METRICS_TERM,
   NEGATIVE,
   POSITIVE,
-} from "./SummaryCard.tsx";
+} from "@numisma/components";
 
 /**
  * THE CARD IS THE QUERY CONTAINER, not the viewport, so the glance lays itself out the

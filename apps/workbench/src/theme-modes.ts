@@ -84,6 +84,9 @@ export const THEMED_TOKENS: Readonly<Record<string, string>> = {
   "--nms-secondary-foreground": "#f0fff9",
   "--nms-destructive": "#c62828",
   "--nms-neg": "#00e5ff",
+  "--nms-pos": "#b026ff",
+  "--nms-ok": "#00ff4c",
+  "--nms-warn": "#ff00a8",
   "--nms-ring": "#f2a516",
   "--nms-radius-md": "14px",
 };
@@ -97,7 +100,10 @@ export const THEMED_TOKENS: Readonly<Record<string, string>> = {
  * alias chain to meet these literals, rather than comparing alias text that
  * would keep matching while the palette moved underneath it.
  *
- * FIFTEEN NAMES, MATCHING THE PACKAGE EXACTLY, and wave 1's final count. This
+ * EIGHTEEN NAMES, MATCHING THE PACKAGE EXACTLY. Fifteen was wave 1's final
+ * count; spec #439 S1 moved `SummaryCard` into the package reading `--nms-pos`,
+ * `--nms-ok` and `--nms-warn`, and `styles.css` aliased each onto the house name
+ * it already had in the same commit, so the two sides moved together again. This
  * table carried fourteen once before, while `styles.css` defined `--nms-card`
  * and `--nms-muted-foreground`, two aliases spec #412 §4.2 minted for
  * components that had not arrived. Spec #420 S0 deleted both on the rule
@@ -126,6 +132,13 @@ export const THEMED_TOKENS: Readonly<Record<string, string>> = {
  * spellings are reused on purpose, so the vocabulary stays one vocabulary
  * rather than growing a second name per role.
  *
+ * `#46c98b`, `#1f7a4d` AND `#8a5a12` ARE THE CARD'S THREE, and the last two are
+ * FILLS. `--nms-pos` is the rising P&L; `--nms-ok` and `--nms-warn` are the two
+ * arms of the data-safety badge, which is why the fixture has to stage both
+ * arms to show either. In themed mode they are a violet and two neons, loud on
+ * purpose: a fill that does not change when the switcher moves is the loudest
+ * possible way to say a token is not being read.
+ *
  * `#f0736a` IS `--neg` RESOLVED, AND IT APPEARS TWICE. `--nms-destructive` and
  * `--nms-neg` both alias onto `--neg` in `styles.css`, so app mode carries one
  * literal under two names and no guard objects: only themed mode asserts
@@ -148,6 +161,9 @@ export const APP_TOKENS: Readonly<Record<string, string>> = {
   "--nms-secondary-foreground": "#e7e9ee",
   "--nms-destructive": "#f0736a",
   "--nms-neg": "#f0736a",
+  "--nms-pos": "#46c98b",
+  "--nms-ok": "#1f7a4d",
+  "--nms-warn": "#8a5a12",
   "--nms-ring": "#3b6cf0",
   "--nms-radius-md": "8px",
 };

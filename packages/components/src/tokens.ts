@@ -58,9 +58,9 @@
  *
  * `apps/web` owns ten bare palette names. Each has exactly one counterpart in
  * this namespace, and the whole mapping is written here so a component crossing
- * into the package looks the name up rather than choosing it again. Six are
- * declared below; the other four are named and not yet declared, each waiting
- * on the component that first reads it.
+ * into the package looks the name up rather than choosing it again. Nine are
+ * declared below; `--nms-now` alone is named and not yet declared, waiting on
+ * the component that first reads it.
  *
  *     house      package                  status
  *     --bg       --nms-background         declared
@@ -69,15 +69,19 @@
  *     --card     --nms-card               declared
  *     --muted    --nms-muted-foreground   declared
  *     --neg      --nms-neg                declared
- *     --pos      --nms-pos                named; not yet declared (wave 2)
- *     --ok       --nms-ok                 named; not yet declared (wave 2)
- *     --warn     --nms-warn               named; not yet declared (wave 2)
+ *     --pos      --nms-pos                declared
+ *     --ok       --nms-ok                 declared
+ *     --warn     --nms-warn               declared
  *     --now      --nms-now                named; not yet declared (wave 2)
  *
- * NAMING WITHOUT DECLARING IS THE POINT, not a half-measure. Declaring the
- * remaining four now would put four grayscale defaults and four distinct themed
- * values in front of a reviewer for roles nothing in this package renders, which
- * is the state the rule above refuses. Naming them costs nothing and settles the two
+ * NAMING WITHOUT DECLARING IS THE POINT, not a half-measure. Declaring a name
+ * early puts a grayscale default and a distinct themed value in front of a
+ * reviewer for a role nothing in this package renders, which is the state the
+ * rule above refuses. Three of the four made that round trip in spec #439 S1,
+ * when `SummaryCard` arrived reading all three at once: `--nms-pos` on a rising
+ * P&L, `--nms-ok` and `--nms-warn` on the two arms of its data-safety badge.
+ * `--nms-now` stays named and undeclared until `PriceDropPathChart` crosses
+ * reading it. Naming them ahead of that costs nothing and settles the two
  * mappings that are genuinely hard, below, while the argument is still fresh.
  *
  * `--muted` MAPS TO `--nms-muted-foreground`, NEVER TO `--nms-muted`. The
@@ -179,6 +183,21 @@ export const NMS_TOKENS = [
     name: "--nms-neg",
     value: "oklch(0.45 0 0)",
     note: "The negative SIGN of a number — data, not intent. `SnapshotStaleNotice` paints its refusal with it. NOT `--nms-destructive`, the row above, which is the affordance of a button that destroys something: `apps/web` resolves both to one red today, and welding them means the day the money-red wants to soften, or wants a colourblind-safe pairing with `--nms-pos`, every destructive affordance moves with it. Grayscale here makes sign UNREVIEWABLE in grayscale mode, and that is correct: grayscale reviews hierarchy, spacing and state, and sign is reviewed in themed and app mode, which is what those modes are for.",
+  },
+  {
+    name: "--nms-pos",
+    value: "oklch(0.75 0 0)",
+    note: "The positive SIGN of a number, and `--nms-neg`'s pair. `SummaryCard` paints a rising unrealized P&L with it, and `SectionTable` and `GlanceCard` render the same string through the constant it exports. It is data, exactly as the row above is — and the reason that row refused to weld with `--nms-destructive` was so the money-red could pair colourblind-safely with THIS name, which is why the pair only becomes checkable now that both halves exist. Grayscale here for the same reason `--nms-neg` is: sign is reviewed in themed and app mode.",
+  },
+  {
+    name: "--nms-ok",
+    value: "oklch(0.62 0 0)",
+    note: "The all-clear FILL — a badge asserting that the fold excluded nothing and the marks arrived. `SummaryCard`'s data-safety badge, green arm. A fill rather than a type colour, which is what makes it the loudest thing in themed mode when nothing repaints.",
+  },
+  {
+    name: "--nms-warn",
+    value: "oklch(0.52 0 0)",
+    note: "The withheld-or-excluded FILL, `--nms-ok`'s other arm on the same badge. NOT `--nms-destructive`: nothing is being destroyed, and nothing has failed — the card is naming what it could not state. Two arms of one branch, so a fixture has to stage both to show either.",
   },
   {
     name: "--nms-ring",

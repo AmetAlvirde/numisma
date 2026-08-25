@@ -130,8 +130,14 @@ describe("SectionTable on the shared Card", () => {
     // it a positive anchor delta and a negative cost-basis one.
     const up = screen.getByText(/▲/);
     const down = screen.getByText(/▼/);
-    expect(tokens(up)).toContain("text-[var(--pos)]");
-    expect(tokens(down)).toContain("text-[var(--neg)]");
+    // NAMESPACED, WHILE THIS FILE'S OTHER COLOUR STRINGS ARE NOT, and the split is the
+    // point: these two come from `POSITIVE` and `NEGATIVE`, which crossed into
+    // `@numisma/components` with `SummaryCard` (spec #439 S1) and were rewritten there.
+    // Every other read below is `SectionTable`'s own and stays bare until the component
+    // itself crosses. A test asserting the old string here would have gone red on the
+    // exact class, which is this wave's parity evidence.
+    expect(tokens(up)).toContain("text-[var(--nms-pos)]");
+    expect(tokens(down)).toContain("text-[var(--nms-neg)]");
   });
 
   it("keeps the escape hatch on the scroller and the table", () => {

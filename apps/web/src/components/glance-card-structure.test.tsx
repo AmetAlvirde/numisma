@@ -133,14 +133,18 @@ describe("GlanceCard on the shared Card", () => {
     // INVERTED AGAINST THE CLASS NAMES THAT ARE GONE, and unchanged: `.verdict-no` — the
     // settled arm — was `var(--pos)`, and `.verdict-yes`, the arm that needs the operator,
     // was `var(--neg)`. The alarming answer gets the alarming colour.
-    expect(tokens(settled)).toContain("text-[var(--pos)]");
+    // NAMESPACED BECAUSE THE CONSTANT MOVED, not because this component did. `POSITIVE`,
+    // `NEGATIVE` and the four `METRICS_*` strings are `SummaryCard`'s, and `SummaryCard`
+    // crossed into `@numisma/components` in spec #439 S1 reading `--nms-pos`. This card's
+    // OWN `--muted` reads, above and below, stay bare until it crosses too.
+    expect(tokens(settled)).toContain("text-[var(--nms-pos)]");
 
     const alarming = standingVerdict();
     alarming.needsYou = true;
     alarming.sentence = "Reserve is under its floor.";
     render(<GlanceCard verdict={alarming} />);
     expect(tokens(screen.getByText("Reserve is under its floor."))).toContain(
-      "text-[var(--neg)]",
+      "text-[var(--nms-neg)]",
     );
   });
 
@@ -176,7 +180,7 @@ describe("GlanceCard on the shared Card", () => {
       expect(tokens(row)).toContain(utility);
     }
 
-    for (const utility of ["text-[var(--muted)]", "text-[0.8rem]"]) {
+    for (const utility of ["text-[var(--nms-muted-foreground)]", "text-[0.8rem]"]) {
       expect(tokens(screen.getByText("Fund value"))).toContain(utility);
     }
     for (const utility of [
@@ -200,7 +204,7 @@ describe("GlanceCard on the shared Card", () => {
       referenceLabel: "Mon 5 Jan",
     };
     render(<GlanceCard verdict={rising} />);
-    expect(tokens(screen.getByText(/▲/))).toContain("text-[var(--pos)]");
+    expect(tokens(screen.getByText(/▲/))).toContain("text-[var(--nms-pos)]");
 
     const falling = standingVerdict();
     falling.slots.change = {
@@ -209,7 +213,7 @@ describe("GlanceCard on the shared Card", () => {
       referenceLabel: "Mon 5 Jan",
     };
     render(<GlanceCard verdict={falling} />);
-    expect(tokens(screen.getByText(/▼/))).toContain("text-[var(--neg)]");
+    expect(tokens(screen.getByText(/▼/))).toContain("text-[var(--nms-neg)]");
   });
 
   it("still mounts the suppressed change's `Absent`, em dash and stated cause", () => {

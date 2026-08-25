@@ -294,8 +294,18 @@ describe("G-D13: the ladder route", () => {
     const manifest = JSON.parse(
       readFileSync(join(HERE, "../../../../packages/components/package.json"), "utf-8"),
     ) as { dependencies?: Record<string, string>; peerDependencies?: Record<string, string> };
+    //
+    // `@numisma/engine` IS THE ONE ADDITION SO FAR, and it is the exact mutation the
+    // paragraph above named as the dangerous one, made deliberately (spec #439 §4.2).
+    // What makes it safe is not the name but the DEPTH: the package reads the pure
+    // `format` subpath and nothing else, whose own runtime closure is `format.ts` plus
+    // `orders/committed.ts` and reaches no `node:` builtin. That is a claim about where
+    // inside the dependency the package reaches, which this list cannot express — so it
+    // is asserted in the case below, and widening this line without that one would leave
+    // the safety argument resting on nobody.
     expect(Object.keys(manifest.dependencies ?? {}).sort()).toEqual([
       "@base-ui/react",
+      "@numisma/engine",
       "class-variance-authority",
       "clsx",
       "tailwind-merge",

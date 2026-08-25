@@ -2,7 +2,7 @@ import { Absent, Card } from "@numisma/components";
 // The two sign colours, from the card that owns their deleted rule (spec #420 Seam B —
 // a shared rule is converted by the first surface in the migration's order that carries
 // it, wherever its other carriers render).
-import { NEGATIVE, POSITIVE } from "./SummaryCard.tsx";
+import { NEGATIVE, POSITIVE } from "@numisma/components";
 import type { CompositionRow, DashboardSection } from "@numisma/engine";
 import { formatUsd, formatPercent } from "@numisma/engine/format";
 import type {
@@ -15,7 +15,7 @@ import type {
  * THE ESCAPE HATCH, AND THE ONE PLACE A SURFACE IS ALLOWED TO SCROLL SIDEWAYS
  * (spec #420 slice 4). Two components render a table — this one and the DCA card's rung
  * ladder — so the seven strings below are exported and imported rather than spelled
- * twice, the same way `SummaryCard.tsx` holds the metrics grid for its two carriers
+ * twice, the same way `summary-card.tsx` holds the metrics grid for its two carriers
  * (Seam B: a rule written once for two surfaces stays one thing).
  *
  * THE SCROLLER IS THE QUERY CONTAINER, not the card and not the viewport. The judgement

@@ -7,8 +7,8 @@ import {
   Shell,
   SnapshotEmptyNotice,
   SnapshotStaleNotice,
+  SummaryCard,
 } from "@numisma/components";
-import { SummaryCard } from "../components/SummaryCard.tsx";
 import { SectionTable } from "../components/SectionTable.tsx";
 
 /**
