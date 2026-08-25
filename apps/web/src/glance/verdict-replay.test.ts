@@ -32,7 +32,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { loadAnchorFixture } from "../push/anchor-fixture.ts";
-import { computeVerdict, type Verdict } from "./verdict.ts";
+import type { Verdict } from "@numisma/components";
+import { computeVerdict } from "./verdict.ts";
 
 /**
  * The measured *yes* days, by date and by the trigger that TOOK them (`fired[0]`).

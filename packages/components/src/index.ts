@@ -21,6 +21,17 @@ export { Button, buttonVariants } from "./ui/button";
 export { Card, CardTitle, CARD_SURFACE } from "./ui/card";
 export { Crumb } from "./ui/crumb";
 export {
+  GlanceCard,
+  referenceLabel,
+  type ChangeSlot,
+  type FiredTrigger,
+  type FundValueSlot,
+  type ReserveSlot,
+  type SuppressionReason,
+  type TriggerName,
+  type Verdict,
+} from "./ui/glance-card";
+export {
   SectionTable,
   TABLE_CELL,
   TABLE_CELL_NUM,

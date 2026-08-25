@@ -49,7 +49,9 @@ import {
   SUPPRESSION_KEYS,
   type SnapshotAnchor,
 } from "../projection/contract.ts";
-import { referenceLabel, resolveReferenceAnchor } from "./verdict.ts";
+import { resolveReferenceAnchor } from "./verdict.ts";
+// `referenceLabel` moved to `@numisma/components` with the card that renders it
+// (spec #439 §4.1, S3); it is imported below with the four view types.
 
 /**
  * THE VIEW TYPES ARE THE PACKAGE'S, AND THIS MODULE IMPORTS ITS OWN RETURN TYPE BACK
@@ -68,6 +70,7 @@ import { referenceLabel, resolveReferenceAnchor } from "./verdict.ts";
  * NOT re-exported — the table and its structure test were their only readers, and both
  * are on the package side now.
  */
+import { referenceLabel } from "@numisma/components";
 import type {
   BigPictureView,
   RowAbsenceReason,

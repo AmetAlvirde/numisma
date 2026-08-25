@@ -2,11 +2,11 @@ import { Link, createFileRoute } from "@tanstack/react-router";
 import { getDashboard } from "../lib/dashboard.ts";
 import {
   Crumb,
+  GlanceCard,
   Shell,
   SnapshotEmptyNotice,
   SnapshotStaleNotice,
 } from "@numisma/components";
-import { GlanceCard } from "../components/GlanceCard.tsx";
 import { DcaCard } from "../components/DcaCard.tsx";
 import { computeVerdict } from "../glance/verdict.ts";
 import { composeDcaView } from "../glance/dca-view.ts";

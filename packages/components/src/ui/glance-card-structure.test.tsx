@@ -26,10 +26,12 @@
  * assert that both names RESOLVE — jsdom lays nothing out and answers no container query
  * — so the value half is Chrome's, by binary-searching the reflow width.
  *
- * THE VERDICT IS AUTHORED, not composed through `verdict.ts`. This file asserts markup,
- * and `verdict.test.ts` is the oracle for what the fields should contain; a fixture that
- * ran the real derivation would test the derivation twice and pin the markup once. No
- * ledger output has been near this file.
+ * THE VERDICT IS AUTHORED, not composed through `verdict.ts`, and since spec #439 S3 it
+ * lives in `glance-card.fixtures.ts` beside the component rather than in this file. Same
+ * literal, three readers: this test, the workbench's cosmos fixture, and whatever renders
+ * the glance next. `apps/web/src/glance/verdict.test.ts` stays the oracle for what the
+ * fields should contain; a fixture that ran the real derivation would test the derivation
+ * twice and pin the markup once. No ledger output has been near this file.
  */
 import { describe, expect, it } from "vitest";
 
@@ -38,30 +40,10 @@ import {
   render,
   absentSlots,
   screen,
-} from "@numisma/components/testkit/render.testkit.tsx";
-import { CARD_SURFACE } from "@numisma/components";
-import { GlanceCard } from "./GlanceCard.tsx";
-import type { Verdict } from "../glance/verdict.ts";
-
-/** The widest arm: one rendered slot, one suppressed slot with a named reference. */
-function standingVerdict(): Verdict {
-  return {
-    asOf: "2026-01-05",
-    staleDays: 0,
-    needsYou: false,
-    sentence: "Nothing needs you.",
-    fired: [],
-    slots: {
-      fundValue: { rendered: true, usdValue: 1234.5 },
-      change: {
-        rendered: false,
-        referenceLabel: "Mon 5 Jan",
-        suppressedBy: "reference-withheld",
-      },
-      reserve: { rendered: true, percentOfFund: 12.25, floorPct: 10 },
-    },
-  };
-}
+} from "../testkit/render.testkit";
+import { CARD_SURFACE } from "./card";
+import { GlanceCard } from "./glance-card";
+import { standingVerdict } from "./glance-card.fixtures";
 
 describe("GlanceCard on the shared Card", () => {
   it("renders no heading — the verdict sentence opens the card", () => {
@@ -79,11 +61,13 @@ describe("GlanceCard on the shared Card", () => {
       expect(tokens(root)).toContain(utility);
     }
 
-    // `.muted` was `color: var(--muted); margin: 4px 0 0`. Preflight is off, so the
-    // three zeroed edges are as load-bearing as the one that is not.
+    // `.muted` was the recessed type colour plus `margin: 4px 0 0`. Preflight is off, so
+    // the three zeroed edges are as load-bearing as the one that is not. The colour is
+    // `--nms-muted-foreground` since spec #439 S3, which is this card's OWN read rather
+    // than one inherited from a constant `SummaryCard` owns.
     const asOf = screen.getByText(/^as of/);
     expect(asOf.tagName).toBe("P");
-    for (const utility of ["text-[var(--muted)]", "m-0", "mt-1"]) {
+    for (const utility of ["text-[var(--nms-muted-foreground)]", "m-0", "mt-1"]) {
       expect(tokens(asOf)).toContain(utility);
     }
 
@@ -92,7 +76,7 @@ describe("GlanceCard on the shared Card", () => {
     // declarations are on the spans themselves, since the context is static here.
     const reference = screen.getByText(/floor/);
     for (const utility of [
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
       "text-[0.75rem]",
       "font-medium",
       "m-0",
@@ -131,12 +115,11 @@ describe("GlanceCard on the shared Card", () => {
     }
 
     // INVERTED AGAINST THE CLASS NAMES THAT ARE GONE, and unchanged: `.verdict-no` — the
-    // settled arm — was `var(--pos)`, and `.verdict-yes`, the arm that needs the operator,
-    // was `var(--neg)`. The alarming answer gets the alarming colour.
-    // NAMESPACED BECAUSE THE CONSTANT MOVED, not because this component did. `POSITIVE`,
-    // `NEGATIVE` and the four `METRICS_*` strings are `SummaryCard`'s, and `SummaryCard`
-    // crossed into `@numisma/components` in spec #439 S1 reading `--nms-pos`. This card's
-    // OWN `--muted` reads, above and below, stay bare until it crosses too.
+    // settled arm — took the POSITIVE colour, and `.verdict-yes`, the arm that needs the
+    // operator, took the NEGATIVE one. The alarming answer gets the alarming colour.
+    // NEITHER SPELLING IS THIS CARD'S. `POSITIVE`, `NEGATIVE` and the four `METRICS_*`
+    // strings are `SummaryCard`'s and crossed in spec #439 S1; the card's own reads are
+    // the four `--nms-muted-foreground` ones, above and below, which crossed at S3.
     expect(tokens(settled)).toContain("text-[var(--nms-pos)]");
 
     const alarming = standingVerdict();
