@@ -641,13 +641,13 @@ describe("the selected-rung card carries its section as utilities", () => {
 
     expectClasses(price, ["m-0", "mb-2", "text-[1.3rem]", "tabular-nums"]);
     const size = price?.querySelector("span");
-    expectClasses(size, ["text-[var(--muted)]"]);
+    expectClasses(size, ["text-[var(--nms-muted-foreground)]"]);
     // `0.75em`, not `0.75rem`: the unit steps down from the FIGURE it belongs to, so it
     // has to be relative to the price's own size rather than to the root's.
     expectClasses(size?.querySelector("span"), ["text-[0.75em]"]);
     expectClasses(
       [...(price?.children ?? [])].find((child) => child.textContent === "@"),
-      ["text-[var(--muted)]", "opacity-70"],
+      ["text-[var(--nms-muted-foreground)]", "opacity-70"],
     );
   });
 
@@ -671,8 +671,8 @@ describe("the selected-rung card carries its section as utilities", () => {
     const ordinary = panelOf(withSelectedRung(base, { venueResting: false }));
     expectClasses(ordinary.querySelector("p:nth-of-type(2) span"), [
       ...shape,
-      "border-[var(--line)]",
-      "text-[var(--muted)]",
+      "border-[var(--nms-border)]",
+      "text-[var(--nms-muted-foreground)]",
     ]);
 
     // Greyed AND dashed, per G-D12: a declared rung with no order is not a state the
@@ -680,8 +680,8 @@ describe("the selected-rung card carries its section as utilities", () => {
     const unplaced = panelOf(withSelectedRung(base, { notPlaced: true }));
     expectClasses(unplaced.querySelector("p:nth-of-type(2) span"), [
       ...shape,
-      "border-[var(--line)]",
-      "text-[var(--muted)]",
+      "border-[var(--nms-border)]",
+      "text-[var(--nms-muted-foreground)]",
       "border-dashed",
       "opacity-[0.55]",
     ]);
@@ -694,8 +694,8 @@ describe("the selected-rung card carries its section as utilities", () => {
     );
     expectClasses(inferredPill, [
       ...shape,
-      "border-[var(--warn)]",
-      "text-[var(--warn)]",
+      "border-[var(--nms-warn)]",
+      "text-[var(--nms-warn)]",
       "border-dashed",
     ]);
 
@@ -703,8 +703,8 @@ describe("the selected-rung card carries its section as utilities", () => {
     // colour that means FILLED.
     expectClasses(panelOf(base).querySelector("h2 span"), [
       ...shape,
-      "border-[var(--now)]",
-      "text-[var(--now)]",
+      "border-[var(--nms-now)]",
+      "text-[var(--nms-now)]",
     ]);
   });
 
@@ -725,7 +725,7 @@ describe("the selected-rung card carries its section as utilities", () => {
       "@[380px]/fp-selected:grid-cols-[auto_1fr]",
       "@[380px]/fp-selected:gap-y-1",
     ]);
-    expectClasses(panel.querySelector("dt"), ["text-[var(--muted)]"]);
+    expectClasses(panel.querySelector("dt"), ["text-[var(--nms-muted-foreground)]"]);
     // `m-0` because the UA indents a `dd` by 40px and preflight is off.
     expectClasses(panel.querySelector("dd"), [
       "m-0",
@@ -749,10 +749,10 @@ describe("the selected-rung card carries its section as utilities", () => {
       "mt-3",
       "pt-2.5",
       "border-t",
-      "border-t-[var(--line)]",
+      "border-t-[var(--nms-border)]",
       "text-[0.75rem]",
       "leading-[1.5]",
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
     ]);
     expect(classTokens(recorded!)).not.toContain("mt-1");
   });
@@ -1109,7 +1109,7 @@ describe("the chart card carries its section as utilities", () => {
       "flex-none",
       "text-[0.8rem]",
       "tabular-nums",
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
     ]);
   });
 

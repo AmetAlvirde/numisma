@@ -5,7 +5,12 @@ import { formatUsd } from "@numisma/engine/format";
 import { Absent } from "./absent";
 import { Card, CARD_SURFACE } from "./card";
 import type { DcaPositionView } from "./dca-card";
-import type { FillPathRungView, MeasuredFigure } from "./price-drop-path-chart";
+import { COMPACT_USD } from "./price-drop-path";
+import {
+  PriceDropPathChart,
+  type FillPathRungView,
+  type MeasuredFigure,
+} from "./price-drop-path-chart";
 import { NOTICE_CODE } from "./snapshot-notice";
 
 /**
@@ -905,32 +910,496 @@ export function UnrecordedWarnings({ view }: { view: FillPathView }): ReactEleme
 }
 
 /**
+ * THE LADDER'S PRICE SPAN, TAKEN BY EXPLICIT MIN/MAX AND NOT OFF THE ENDS OF THE ARRAY.
+ *
+ * `view.rungs` does arrive sorted DESCENDING by price from `ladder/fill-path-view.ts`, so
+ * `rungs[0]` and `rungs.at(-1)` would be right today — and would silently print the span
+ * backwards the day that sort is changed or a caller passes an unsorted list. `cumulate`
+ * in `./price-drop-path` genuinely cannot avoid depending on that ordering (a running sum
+ * IS an order), so it states the dependency on its own interface and asserts it in a test
+ * instead. This readout has no such excuse: a min/max is order-free, so it takes one and
+ * owes the reader no caveat.
+ *
+ * Absent when there is nothing to span — a single rung is a price, not a range.
+ *
+ * IT WEARS A `~` BECAUSE COMPACT NOTATION ROUNDS HARD. `$47.5K` is a rung the list below
+ * prints as `$47,499.00`, and without the mark the two readings of the same declared
+ * price look like a disagreement rather than a summary.
+ */
+function priceSpan(rungs: readonly FillPathRungView[]): string | undefined {
+  if (rungs.length < 2) return undefined;
+  const prices = rungs.map((rung) => rung.priceUsd);
+  // COMPACT, so the span reads as a span rather than as two long figures — and the SAME
+  // formatter the chart's own axis ticks use, imported rather than declared again, so the
+  // header and the axis directly beneath it cannot print the same price two ways. This
+  // was a byte-identical second `Intl.NumberFormat` with a comment on each half asking
+  // the other not to change.
+  return `~${COMPACT_USD.format(Math.min(...prices))}–${COMPACT_USD.format(
+    Math.max(...prices),
+  )}`;
+}
+
+/**
+ * THE CHART CARD'S SECTION, AS UTILITIES (spec #420 slice 9) — the last surface, and the
+ * one whose deletion leaves `styles.css` holding no rule at all.
+ *
+ * THE HEADING RULE'S THIRD ARM IS HERE, WHICH IS WHAT RETIRES THE RULE. `.fp-chart-card
+ * h2` was grouped with the ladder's two, and each arm was deleted in the commit that
+ * converted the heading it was styling. This is the last of the three, so the constant
+ * stops being the ladder's and becomes the card heading all three read. `m-0 mb-2.5` is
+ * the preflight-off pattern: the UA's own `h2` margin is live, so three edges are zeroed
+ * and one is set.
+ */
+const CARD_HEADING = "m-0 mb-2.5 text-[0.95rem]";
+
+/**
+ * TITLE LEFT, THE LADDER'S PRICE SPAN RIGHT — one row, baseline-aligned so the two read
+ * as a heading and its subject rather than as two stacked labels.
+ *
+ * IT WRAPS RATHER THAN SQUEEZES, and the span is the half that gives way. At 254px the
+ * two total 217px so the row survives as a row; a deeper ladder (`~$1.2M–$2.3M`) would
+ * not, and the choice then is between breaking the TITLE across two lines and dropping
+ * the span to its own. The span keeps the right rail on that second line through its own
+ * `ml-auto` rather than through the row's `justify-between`, which aligns a lone wrapped
+ * item to the start. No breakpoint: this holds at every width, so there is nothing for a
+ * query to ask.
+ *
+ * THE TWO GAP AXES ARE SPELLED SEPARATELY because the deleted rule set them apart:
+ * `gap: 0 10px` is `gap-x-[10px] gap-y-0`, and a single `gap-[10px]` would open a 10px
+ * hole above the wrapped span that the row never had.
+ */
+const CHART_HEAD = "flex flex-wrap items-baseline justify-between gap-x-[10px] gap-y-0";
+/** The title is the half that survives a break, so it grows and may shrink to nothing. */
+const CHART_TITLE = `${CARD_HEADING} flex-auto min-w-0`;
+/**
+ * Quieter than the title: it is the chart's subject, not a second heading. Tabular
+ * figures so the two ends of the span line up as numbers.
+ *
+ * ITS TWO FLEX DECLARATIONS CAME FROM A DESCENDANT RULE (`.fp-chart-head .fp-chart-range`)
+ * and are folded in here rather than split across two strings: the span renders in the
+ * head and nowhere else, so the context the descendant selector was testing for is the
+ * only context there is.
+ */
+const CHART_RANGE = "ml-auto mb-2.5 flex-none text-[0.8rem] tabular-nums text-[var(--nms-muted-foreground)]";
+/**
+ * The chart's accessible substitute, sized as prose rather than as a caption footnote:
+ * for a screen-reader user this sentence IS the chart. `m-0 mt-2.5` because the UA's own
+ * `p` margin is live with preflight off and the deleted rule zeroed three edges of it.
+ */
+const CHART_CAPTION = "m-0 mt-2.5 text-[0.85rem] leading-[1.5]";
+/** The slider stacks under its label; the label's type comes from `TILE_LABEL`. */
+const INSPECT = "mt-3.5 flex flex-col gap-1.5";
+/**
+ * `w-full` IS NOT THE WHOLE STORY FOR A RANGE INPUT. The UA sheet gives it a 2px side
+ * margin, so a full-width slider is 4px wider than the label box around it and the tail
+ * of the track sat under the card's border at 320px. The margin goes, not the width —
+ * and with preflight off that margin is live, so `mx-0` is load-bearing here rather than
+ * a default spelled out for tidiness.
+ */
+const INSPECT_RANGE = "w-full mx-0";
+
+/** Card 2 — the chart, its generated caption, and the inspect slider. */
+export function Chart(): ReactElement {
+  // THE CHART ASKS IN INDEXES, because its inspect control is a range input and a range
+  // is an index. Nothing here converts: the slider reads and writes the index, the
+  // adapter is handed the selected rung's own key, and the provider is the one module
+  // that turns one into the other.
+  const { view, selected, selectedIndex, selectIndex } = useFillPath();
+  const span = priceSpan(view.rungs);
+  return (
+    <Card className="fp-chart-card">
+      {/* THE SPAN SITS OPPOSITE THE TITLE, not in the chart. It is the one number the
+          picture cannot state exactly — an axis tick is a rounded gridline, and the
+          reader who wants "how deep does this ladder go" should not have to measure. */}
+      <div className={CHART_HEAD}>
+        <Card.Title className={CHART_TITLE}>Price Drop Path</Card.Title>
+        {span === undefined ? null : <span className={CHART_RANGE}>{span}</span>}
+      </div>
+      {view.chart ? (
+        <PriceDropPathChart
+          rungs={view.rungs}
+          selectedKey={selected?.key}
+          // A LAST CLOSE IS NOT "NOW". `chart.nowX` is present only when the view
+          // module saw a LIVE reading, so it — not `spotUsd`, which may be a close —
+          // is what decides whether a now-rule is drawn at all.
+          spotUsd={view.chart.nowX === undefined ? undefined : view.spotUsd}
+          // MEASURED, and passed as the `MeasuredFigure` it is rather than as a number
+          // with a fallback: the chart draws its `Deployed` rule only on the `known`
+          // arm, so an unreconciled ladder gets no rule instead of one at zero.
+          deployed={view.deployed}
+        />
+      ) : (
+        <p>
+          <Absent why="this ladder ships no rung sizes — there is no capital curve to plot" />
+        </p>
+      )}
+
+      {/* THE CHART'S ACCESSIBLE SUBSTITUTE (§6.3b) — generated, never hand-written.
+
+          IT IS NOW SCREEN-READER-ONLY, AND THAT IS A SHOW-DON'T-TELL EDIT, NOT A DELETION.
+          Its first clause — "the deepest rung is 6.3× the first" — is a ratio the picture
+          itself now draws: `withRadius` in `PriceDropPathChart` sizes each rung's ring by
+          the AREA of its declared size, so a sighted reader sees the 6.3× before they
+          could have read a sentence about it. Printing both left the card asserting in
+          prose what it was simultaneously demonstrating.
+
+          THE ELEMENT MUST NOT BE DROPPED, THOUGH. The chart above is `aria-hidden` by
+          design and this paragraph is the ONLY form in which its content reaches the
+          accessibility tree; removing the node rather than hiding it visually would take
+          the whole picture away from a screen-reader user to tidy a sighted one's card.
+          `sr-only` is therefore load-bearing here, and it is TAILWIND'S now: spec #420
+          slice 2 deleted the house rule, which said the same thing in the same clip-rect
+          idiom. `display: none` and `visibility: hidden` would remove the node from the
+          tree along with the layout, which is exactly what must not happen to this
+          paragraph. The class is emitted because this line writes it and `@source "./"`
+          scans this file — nothing else in the repo asks for it.
+
+          THE ABSENT ARM IS HIDDEN WITH IT. It stands in the same slot and speaks to the
+          same reader: a sighted user needs no note that a caption they cannot see is
+          unavailable, and its absence is already visible as a chart with no rings. */}
+      <div className="sr-only">
+        {view.caption ? (
+          <p className={CHART_CAPTION}>{view.caption}</p>
+        ) : (
+          <p>
+            <Absent why="the ladder's shape is unavailable" />
+          </p>
+        )}
+      </div>
+
+      {view.rungs.length > 0 ? (
+        <label className={`fp-inspect ${INSPECT}`}>
+          {/* The slider's label wears the tile label's TYPOGRAPHY and none of its rail
+              geometry: `.fp-tile-label` was a type rule and the flex arms lived on the
+              three `>` selectors above it, none of which reached inside `.fp-inspect`. */}
+          <span className={TILE_LABEL}>Inspect rung</span>
+          <input
+            className={INSPECT_RANGE}
+            type="range"
+            min={0}
+            max={view.rungs.length - 1}
+            step={1}
+            value={selectedIndex}
+            onChange={(event) => selectIndex(Number(event.target.value))}
+          />
+        </label>
+      ) : null}
+    </Card>
+  );
+}
+
+/**
+ * THE SELECTED-RUNG CARD'S SECTION, AS UTILITIES (spec #420 slice 8).
+ *
+ * THE CARD IS THE QUERY CONTAINER, not the viewport — the same rule the header card
+ * follows, and one name, which is exactly what Tailwind's named container utility emits.
+ *
+ * THE HEADING RULE WAS SHARED BY THREE CARDS and all three read `CARD_HEADING` now; the
+ * split ended when slice 9 took the chart's arm and the grouped rule went with it.
+ */
+const SELECTED_CARD = "@container/fp-selected";
+/** The heading carries the `next` badge, so it is a baseline row rather than a block. */
+const SELECTED_HEADING = `${CARD_HEADING} flex items-center gap-[10px]`;
+
+/**
+ * THE HEADLINE — the money committed, AT the price it buys at.
+ *
+ * COLOUR ALONE DEMOTES THE SIZE, at the same type size: the two figures are one sentence
+ * and shrinking half of it would break the line's rhythm and its tabular alignment. The
+ * joining word recedes one step further, being the only thing on the line that is not a
+ * number, and the UNIT steps down from the FIGURE — `0.75em`, relative to the price's own
+ * size rather than to the root's — so the eye lands on the amount and reads `USD` second.
+ * No opacity on the unit: it sits inside the muted size already, and stacking the two
+ * dimmed the currency past legibility.
+ */
+const SELECTED_PRICE = "m-0 mb-2 text-[1.3rem] tabular-nums";
+const SELECTED_SIZE = "text-[var(--nms-muted-foreground)]";
+const SELECTED_UNIT = "text-[0.75em]";
+const SELECTED_AT = "text-[var(--nms-muted-foreground)] opacity-70";
+
+/**
+ * THE EXCEPTION SHELF'S ROWS — term left, value against the right rail, until the card is
+ * wide enough for the value to sit beside its term instead. At desk width a right rail
+ * 690px from its label is not an alignment, it is a gap the eye has to cross.
+ *
+ * THE TERMS ARE SIZED TO CONTENT AND THE VALUE COLUMN TAKES THE REMAINDER, which is the
+ * opposite of the header card's `dl`: one value on this list is a sentence rather than a
+ * figure, and sizing it the header's way let that row's max-content eat the whole grid.
+ */
+const DETAIL =
+  "grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 m-0 mt-2.5 text-[0.85rem]" +
+  " @[380px]/fp-selected:grid-cols-[auto_1fr] @[380px]/fp-selected:gap-y-1";
+const DETAIL_TERM = "text-[var(--nms-muted-foreground)]";
+/** `m-0` because the UA indents a `dd` by 40px and preflight is off. */
+const DETAIL_VALUE = "m-0 text-right tabular-nums @[380px]/fp-selected:text-left";
+
+/**
+ * THE PILLS, AS A TOTAL MAP — one tone per exception, never a base plus three overrides.
+ *
+ * The deleted rules WERE a base plus three overrides, and as utilities that is a cascade
+ * a class string cannot express: two unvariant `border-color` utilities on one element
+ * are resolved by Tailwind's emitted order rather than by the order they are written in.
+ * `BADGE_TONE` made the same move one card up and for the same reason.
+ *
+ * WHAT EACH TONE MEANS. Unplaced is greyed AND dashed (G-D12): a declared rung with no
+ * order is not a state the ladder is in, it is one it never entered. Inferred is dashed
+ * in `--nms-warn`, matching the inferred warning above the chart — the same certainty,
+ * the same visual language. Next is `--nms-now` and never `--nms-pos`, because the next
+ * rung is where price is HEADING and green is the colour that means FILLED.
+ */
+const PILL =
+  "rounded-[10px] border px-[7px] py-[2px] text-[0.68rem] font-semibold uppercase tracking-[0.03em]";
+const PILL_TONE = {
+  state: "border-[var(--nms-border)] text-[var(--nms-muted-foreground)]",
+  unplaced: "border-[var(--nms-border)] text-[var(--nms-muted-foreground)] border-dashed opacity-[0.55]",
+  inferred: "border-[var(--nms-warn)] text-[var(--nms-warn)] border-dashed",
+  next: "border-[var(--nms-now)] text-[var(--nms-now)]",
+} as const;
+const PILLS = "flex flex-wrap items-center gap-1.5 m-0";
+
+/**
+ * THE COMPLETENESS LINE — quiet, and ruled off from the `State` row above it, because it
+ * is the caveat ON that row rather than another fact about the rung.
+ *
+ * 12px, not the 4px this paragraph carried from slice 2's shared-vocabulary conversion:
+ * the deleted rule set its own top margin and, being unlayered, won. Both edges of the
+ * hairline are here — a half-reproduced border is a rule that never goes away.
+ */
+const RECORDED =
+  "m-0 mt-3 pt-2.5 border-t border-t-[var(--nms-border)] text-[0.75rem] leading-[1.5] text-[var(--nms-muted-foreground)]";
+
+/** Card 3 — everything known about the one rung under inspection. */
+export function SelectedRung(): ReactElement {
+  const { view, selected: rung } = useFillPath();
+  if (rung === undefined) {
+    return (
+      <Card>
+        <Card.Title>Selected rung</Card.Title>
+        <p>
+          <Absent why="this ladder declares no rungs" />
+        </p>
+      </Card>
+    );
+  }
+  return (
+    // THE ONE CARD THAT IS STILL SPELLED OUT, and the reason is on the element rather
+    // than in it. `Card` emits a `<section>` carrying a class string and nothing else —
+    // spec #403's Seam C fixes that signature, and this panel needs `aria-live="polite"`
+    // ON THE SECTION, because a live region is announced from the element that carries
+    // it and moving it to a child changes what a screen reader says when selection
+    // changes. Widening the primitive to pass one attribute through for one caller is a
+    // knob bought for a single site; the panel keeps its own element instead, exactly as
+    // the two `fp-warn` paragraphs and the `role="alert"` banner below do.
+    <section className={`${CARD_SURFACE} ${SELECTED_CARD}`} aria-live="polite">
+      {/* THE BADGE RIDES THE HEADING, because "next" answers WHICH RUNG THIS IS — the
+          same question the heading asks — and not what state it is in. Down among the
+          pills it read as one status among several; up here it qualifies the identity
+          it belongs to, and the pill row below is left holding only exceptions. */}
+      <h2 className={SELECTED_HEADING}>
+        Rung {rung.ladderIndex} of {view.rungs.length}
+        {rung.isNext ? (
+          <span className={`${PILL} ${PILL_TONE.next}`}>next</span>
+        ) : null}
+      </h2>
+      <RungHeadline rung={rung} />
+      <Pills rung={rung} />
+      {/* THE LIST IS NOW THE EXCEPTION SHELF, AND USUALLY RENDERS NOTHING. It held three
+          rows and two of them were restatements: `Declared size` moved up into the
+          headline, and `State` printed in full paragraph form the same word the pill
+          directly above it already carries. What is left is the one fact that is only
+          ever present when something is IRREGULAR — so the `dl` is conditional rather
+          than empty, since an empty definition list is a labelled box promising detail
+          it does not have. */}
+      {rung.placedAtUsd === undefined ? null : (
+        <dl className={DETAIL}>
+          <dt className={DETAIL_TERM}>Order placed at</dt>
+          {/* A DECLARED join whose order sits elsewhere is honored AND flagged: the
+              operator said these belong together, and they do — at a different price. */}
+          <dd className={DETAIL_VALUE}>
+            {formatUsd(rung.placedAtUsd)}{" "}
+            <span className="m-0 mt-1 text-[var(--nms-muted-foreground)]">differs from the declared rung</span>
+          </dd>
+        </dl>
+      )}
+      <RecordedThrough view={view} />
+    </section>
+  );
+}
+
+/** The two figures that describe a rung, in the sentence an operator would actually say:
+ *  the money committed, AT the price it buys at. They were a heading and a `dl` row apart,
+ *  which made a reader assemble the one thought the card exists to deliver — and gave the
+ *  price the accent, though the price is the axis the whole surface is already organized
+ *  by and the SIZE is what distinguishes this rung from its neighbours.
+ *
+ *  ── NO `$`, BECAUSE `USD` IS ALREADY THERE ────────────────────────────────────────────
+ *  One unit mark for one currency. `$149.96 USD @ $57,500` stamps the same fact three
+ *  times; the suffix carries it once and the `@` reads as the preposition it is.
+ *
+ *  ── CENTS SURVIVE WHEN THERE ARE CENTS ────────────────────────────────────────────────
+ *  The price is written with `maximumFractionDigits: 2` and NO minimum, so a whole rung
+ *  prints `57,500` exactly as intended while a `$57,499.50` rung prints `57,499.5` rather
+ *  than being silently rounded into a price no order was placed at. The rung list below
+ *  prints the same price to the cent, and the two must not disagree.
+ *
+ *  A v4 SNAPSHOT CARRIES NO SIZE, and there is no sentence to make without it — so that
+ *  arm falls back to the price alone, the accent this line had before. */
+const SIZE_PLAIN = new Intl.NumberFormat("en-US", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+const PRICE_PLAIN = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
+
+function RungHeadline({ rung }: { rung: FillPathRungView }) {
+  if (rung.sizeUsd === undefined) {
+    return <p className={SELECTED_PRICE}>{formatUsd(rung.priceUsd)}</p>;
+  }
+  return (
+    <p className={SELECTED_PRICE}>
+      {/* THE PRICE TAKES THE ACCENT, NOT THE SIZE. This card is one stop on a ladder and
+          the ladder's axis is PRICE — it is what the chart above plots vertically, what
+          the rung list is ordered by, and the number the operator is deciding against.
+          The size is what happens WHEN price gets here; it reads second by design. */}
+      <span className={SELECTED_SIZE}>
+        {SIZE_PLAIN.format(rung.sizeUsd)} <span className={SELECTED_UNIT}>USD</span>{" "}
+      </span>
+      <span className={SELECTED_AT}>@</span> {PRICE_PLAIN.format(rung.priceUsd)}
+    </p>
+  );
+}
+
+/**
+ * THE COMPLETENESS LINE — how much of reality these states have seen. The date is the
+ * anchor's own `asOf`, passed through by the view module: the boundary of what this row
+ * could have known. No clock is read anywhere on this page, the `dca` branch carries no
+ * date of its own (three invariants depend on that), and no fill timestamp is on the wire.
+ *
+ * ── IT IS ONE CLAIM NOW, AND THE SECOND ONE IS SHOWN INSTEAD OF TOLD ──────────────────
+ * This used to spell out both ways the card can be behind reality (G-D5c): filled after
+ * the cutoff, and filled but NEVER recorded. The second is now carried by
+ * `UnrecordedWarnings` — a banner that fires with a COUNT on exactly the snapshots where
+ * it is true, rather than a standing caveat printed under every rung on every ladder
+ * whether or not anything is missing. A warning that is always on the screen is one the
+ * operator stops reading, which is the failure mode the sentence was written to avoid.
+ *
+ * THE DATE STAYS ISO. `26/08/10` is unreadable without knowing which of three orders it
+ * is in, and this surface is operated from a `DD/MM` locale where it would parse as 26
+ * August 2010. `2026-08-10` is the same length and cannot be misread.
+ */
+function RecordedThrough({ view }: { view: FillPathView }) {
+  return (
+    <p className={RECORDED}>
+      {/* NO `<strong>` ON THE DATE. The paragraph is painted in the secondary
+          colour because the whole sentence
+          is a provenance footnote, and bolding the date inside it pulled the loudest
+          thing on the card down to its quietest line — the reader's eye landed on a
+          cutoff before it landed on the rung. It is a boundary, not a headline. */}
+      Fills recorded at {view.recordedThrough}
+    </p>
+  );
+}
+
+/**
+ * The pills — now the surface's EXCEPTION ROW, not its status row. Everything that
+ * survives here is a fact the card cannot state any other way; the ordinary case renders
+ * no pills at all.
+ *
+ * ── "NEXT" IMPLIES "WAITING", AND THE VIEW MODULE GUARANTEES IT ───────────────────────
+ * `fill-path-view.ts` picks `nextRung` from `wireRungs.find(rung => isWaiting(rung) && …)`,
+ * so a rung cannot be next without being waiting. Printing both put the card's own
+ * inference on screen beside its premise. The badge moved up to the heading and the
+ * redundant pill is dropped.
+ *
+ * DROPPED ONLY ON THE VENUE'S RESTING STATE, THOUGH — never on `isNext` alone. A next rung
+ * may still be `declared — not placed`, `cancelled — fills recorded against it`, partly
+ * filled, or `fill state unavailable` on an unreconciled snapshot. None of those is implied
+ * by "next", and all of them still print. `venueResting` is the narrow claim; `isNext`
+ * alone would have been the wrong one and would have swallowed an unplaced next rung's
+ * whole warning.
+ *
+ * IT IS A FACT, NOT THE WORDS (#306). This used to read `rung.label === "waiting"` — a
+ * comparison against a string the ENGINE authored, in another package, whose rewording
+ * would have re-enabled the pill silently with every test still green. `stateCopy` is
+ * rendered here and compared nowhere; see `ladder/rung-state-copy.ts`.
+ *
+ * ── "MATCHED BY PRICE" IS GONE ────────────────────────────────────────────────────────
+ * It is the join's provenance — that this rung was tied to its order by price rather than
+ * by a carried id. On a WAITING rung there is nothing joined yet for the provenance to be
+ * about, so it printed under almost every rung on the ladder and said nothing about any
+ * of them. The rung list below still carries it per row, where a reader comparing rungs
+ * can see which ones differ; on the single-rung card it was ambient.
+ */
+function Pills({ rung }: { rung: FillPathRungView }) {
+  // The state pill is suppressed exactly when the heading's `next` badge already said it.
+  const stateIsRedundant = rung.isNext && rung.venueResting;
+  const pills = [
+    rung.notPlaced ? (
+      <span key="state" className={`${PILL} ${PILL_TONE.unplaced}`}>
+        declared — not placed
+      </span>
+    ) : stateIsRedundant ? null : (
+      <span key="state" className={`${PILL} ${PILL_TONE.state}`}>
+        {rung.stateCopy}
+      </span>
+    ),
+    rung.pricePassedUnconfirmed ? (
+      <span key="unconfirmed" className={`${PILL} ${PILL_TONE.inferred}`}>
+        waiting · price passed, unconfirmed
+      </span>
+    ) : null,
+    rung.filledPercent === undefined ? null : (
+      <span key="partial" className={`${PILL} ${PILL_TONE.state}`}>
+        partly filled · {rung.filledPercent}%
+      </span>
+    ),
+  ].filter((pill) => pill !== null);
+
+  // An empty pill row is still a row: it holds its own margin and opens a gap under the
+  // headline that reads as something failing to load. The ordinary rung has no pills.
+  if (pills.length === 0) return null;
+  return <p className={PILLS}>{pills}</p>;
+}
+
+/**
  * ── THE TRANSITIONAL SUBPATH SURFACE (spec #439 S6, removed at S9) ───────────────────
  *
- * `TILE_LABEL` is exported from this MODULE and is deliberately absent from
- * `src/index.ts`. `apps/web/src/components/FillPath.tsx` reads it at
- * `@numisma/components/ui/fill-path.tsx` for `Chart`'s inspect-slider label, which waits
- * for S8, and the import dies with the last unmoved part rather than becoming public
- * surface someone has to unpublish later. `tokens.ts` and `ui/price-drop-path.ts` set the
- * same precedent; the exports map already carries `"./*"`.
+ * The names below are exported from this MODULE and are deliberately absent from
+ * `src/index.ts`. `apps/web/src/components/FillPath.tsx` reads them at
+ * `@numisma/components/ui/fill-path.tsx` because the last part — `RungList`, with
+ * `RowState` and `FillPathCards` — is still over there, and the import dies with that
+ * part rather than becoming public surface someone has to unpublish later. `tokens.ts`
+ * and `ui/price-drop-path.ts` set the same precedent; the exports map already carries
+ * `"./*"`.
  *
- * S7 RETIRED SEVEN NAMES FROM THE APP'S IMPORT — the six #447 tabulates, `Figure`,
- * `Expectation`, `formatUnits`, `STACKED_LABEL`, `TILE_VALUE` and `SPOT_LABEL`, plus
- * `RAIL`, which that table missed and which `SPOT` composes from. Every one of them
- * crossed for a component that has now landed here, so each came off the app's line in
- * the same diff that moved its caller. A stale name on that line is a name this package
- * can never make private again, which is why they go one slice at a time rather than in a
- * sweep at S9.
+ * FIVE VOCABULARY NAMES, AND EVERY ONE IS READ BY THE LIST. `CARD_HEADING` is the
+ * heading rule all three ladder cards read and `RungList`'s `Rungs` title is the third;
+ * `PILL` and `PILL_TONE` are rendered by the panel's `next` badge, by `Pills` and by
+ * `RowState`'s two qualifier pills; `SIZE_PLAIN` and `PRICE_PLAIN` are the two
+ * formatters the panel's headline and the rung rows both use, and the header and the
+ * list must not print the same price two ways. They cross rather than being duplicated
+ * for exactly that reason.
+ *
+ * `TILE_LABEL` CAME OFF THIS LINE AT S8 and is module-private again beside `RAIL_LABEL`,
+ * `TILE` and `TILE_ABSENT`: its last app-side consumer was `Chart`'s inspect-slider
+ * label, which moved with `Chart`. S7 retired seven names the same way — `Figure`,
+ * `Expectation`, `formatUnits`, `STACKED_LABEL`, `TILE_VALUE`, `SPOT_LABEL` and `RAIL`.
+ * Every one of them crossed for a component that has now landed here, so each came off
+ * the app's line in the same diff that moved its caller. A stale name on that line is a
+ * name this package can never make private again, which is why they go one slice at a
+ * time rather than in a sweep at S9.
  *
  * `Figure`, `Expectation` and `formatUnits` stay MODULE exports without being on that
  * line: `apps/workbench/src/ui/fill-path.fixture.tsx` mounts all three directly.
  *
- * `Header`, `TornActBanner` and `UnrecordedWarnings` are named exports above and are
- * likewise absent from the index: publishing a bare capitalized function there makes
- * `fixture-coverage.test.ts` demand a fixture for it, and the per-part fixtures this wave
- * writes are a deliberate choice rather than a guard obligation.
+ * `Header`, `Chart`, `SelectedRung`, `TornActBanner` and `UnrecordedWarnings` are named
+ * exports above and are likewise absent from the index: publishing a bare capitalized
+ * function there makes `fixture-coverage.test.ts` demand a fixture for it, and the
+ * per-part fixtures this wave writes are a deliberate choice rather than a guard
+ * obligation.
  *
- * `RAIL_LABEL`, `TILE` and `TILE_ABSENT` are module-private because nothing outside this
- * file reads them, today or transitionally.
+ * `RAIL_LABEL`, `TILE`, `TILE_ABSENT`, `TILE_LABEL` and every string only one card reads
+ * are module-private because nothing outside this file reads them, today or
+ * transitionally.
  */
-export { TILE_LABEL };
+export { CARD_HEADING, PILL, PILL_TONE, PRICE_PLAIN, SIZE_PLAIN };
