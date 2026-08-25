@@ -276,10 +276,24 @@ describe("G-D13: the ladder route", () => {
     // this list is narrow about. THAT DEPENDENCY LIST IS ASSERTED BELOW rather than
     // argued here, because the walk stops at the package boundary and would not see it
     // change.
+    // `@numisma/components/ui/price-drop-path.ts` IS THE FOURTH, AND IT IS THE SAFEST
+    // ENTRY ON THIS LIST (spec #439 S5). `FillPath.tsx` imports `COMPACT_USD` from it at
+    // runtime — the one compact-USD formatter the fill path has, shared by the chart's
+    // axis ticks, its spot label and the header card's price span. The module has NO
+    // IMPORTS AT ALL: it is arithmetic, seven geometry types and one module-scope
+    // `Intl.NumberFormat` pinned to `en-US`. It reaches no `node:` builtin because it
+    // reaches nothing, which is the same property that made the engine's two pure
+    // subpaths safe, held more strictly.
+    //
+    // A SUBPATH RATHER THAN THE CURATED INDEX, deliberately: `index.ts` names its
+    // exports one at a time, so putting a formatter and three geometry helpers on it
+    // would tell every future reader they are public API. `tokens.ts` set that
+    // precedent, and the exports map already carries `"./*"`.
     const allowed = [
       "@numisma/engine/format",
       "@numisma/engine/calendar",
       "@numisma/components",
+      "@numisma/components/ui/price-drop-path.ts",
     ];
     for (const file of closure) {
       const source = readFileSync(join(HERE, "..", file), "utf-8");

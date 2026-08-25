@@ -42,7 +42,11 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { composeFillPathPage, type FillPathView } from "./fill-path-view.ts";
-import { cumulate, splitAt, withRadius } from "./price-drop-path.ts";
+import {
+  cumulate,
+  splitAt,
+  withRadius,
+} from "@numisma/components/ui/price-drop-path.ts";
 import {
   LADDER_FIXTURE_NAMES,
   STARTED_LADDER_FIXTURES,

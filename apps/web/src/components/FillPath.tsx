@@ -7,7 +7,7 @@ import type {
   FillPathView,
   MeasuredFigure,
 } from "../ladder/fill-path-view.ts";
-import { COMPACT_USD } from "../ladder/price-drop-path.ts";
+import { COMPACT_USD } from "@numisma/components/ui/price-drop-path.ts";
 import { PriceDropPathChart } from "./PriceDropPathChart.tsx";
 import { Card, CARD_SURFACE, NOTICE_CODE } from "@numisma/components";
 
@@ -784,7 +784,7 @@ function UnrecordedWarnings({ view }: { view: FillPathView }) {
  * `view.rungs` does arrive sorted DESCENDING by price from `ladder/fill-path-view.ts`, so
  * `rungs[0]` and `rungs.at(-1)` would be right today — and would silently print the span
  * backwards the day that sort is changed or a caller passes an unsorted list. `cumulate`
- * in `ladder/price-drop-path.ts` genuinely cannot avoid depending on that ordering (a
+ * in `@numisma/components/ui/price-drop-path.ts` genuinely cannot avoid depending on that ordering (a
  * running sum IS an order), so it states the dependency on its own interface and asserts
  * it in a test instead. This readout has no such excuse: a
  * min/max is order-free, so it takes one and owes the reader no caveat.

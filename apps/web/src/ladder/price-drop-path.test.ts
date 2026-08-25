@@ -81,7 +81,7 @@ import {
   type CumulatedRung,
   type PlottableRung,
   type RungPoint,
-} from "./price-drop-path.ts";
+} from "@numisma/components/ui/price-drop-path.ts";
 
 /** A rung as the chart's caller hands it over: size present, filled decided upstream. */
 function rung(

@@ -19,7 +19,8 @@
  *  1. THE LADDER IS PLOTTABLE. Every rung handed over carries a declared `sizeUsd`
  *     (`PlottableRung` requires it, so a v4 rung cannot be passed at all), there are at
  *     least two of them at at least two distinct prices, and the largest declared size is
- *     positive. The gate that decides this lives in `fill-path-view.ts` and is spec
+ *     positive. The gate that decides this lives in the caller's own view module —
+ *     `apps/web`'s `ladder/fill-path-view.ts` — and is spec
  *     #285's to finish; this module trusts it and states what it trusts.
  *  2. SPOT IS LIVE OR ABSENT. `spotMarkFor` draws a rule that claims to know where price
  *     is NOW, so a last close must arrive as `undefined` rather than as a number — see
@@ -105,8 +106,9 @@ export interface RungPoint extends CumulatedRung {
  * rather than the rising height of separate points.
  *
  * THE ORDER IS DECIDED IN ANOTHER MODULE AND THIS SUM DEPENDS ON IT (precondition 3).
- * `rungs` arrive already sorted DESCENDING by price by `ladder/fill-path-view.ts`
- * (`wireRungs.sort((a, b) => b.priceUsd - a.priceUsd)`), which is the order a FALLING
+ * `rungs` arrive already sorted DESCENDING by price by the caller — `apps/web`'s
+ * `ladder/fill-path-view.ts` (`wireRungs.sort((a, b) => b.priceUsd - a.priceUsd)`),
+ * which is the order a FALLING
  * price walks them in — so accumulating in array order is accumulating down the ladder.
  * Nothing here re-sorts: a second ordering would be a second opinion about which way the
  * ladder runs, and the two would drift. The dependency is asserted as its own subject in

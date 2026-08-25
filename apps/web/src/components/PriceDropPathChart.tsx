@@ -12,7 +12,7 @@ import {
   withRadius,
   type DeployedMark,
   type RungPoint,
-} from "../ladder/price-drop-path.ts";
+} from "@numisma/components/ui/price-drop-path.ts";
 
 /**
  * THE PRICE DROP PATH, DRAWN BY TANSTACK CHARTS (ADR-018).
@@ -20,10 +20,10 @@ import {
  * ── THIS FILE IS MARKS AND A DEFINITION; THE ARITHMETIC IS NEXT DOOR ─────────────────
  * Every quantity the picture stands on — the running total, the ring radius, the split
  * index, the now rule's clamp and the one compact-USD formatter — lives in
- * `ladder/price-drop-path.ts`, which is pure, coverage-visible and tested. Read that
- * module for WHY each number is the number it is, and for the three preconditions this
- * component's props are required to satisfy (a plottable ladder, LIVE-only spot, rungs
- * descending by price). What is left here is which mark draws what, and why.
+ * `@numisma/components/ui/price-drop-path.ts`, which is pure, coverage-visible and
+ * tested. Read that module for WHY each number is the number it is, and for the three
+ * preconditions this component's props are required to satisfy (a plottable ladder,
+ * LIVE-only spot, rungs descending by price). What is left here is which mark draws what, and why.
  *
  * A LINE, BECAUSE THE LINE IS THE ARGUMENT. The ladder's convexity — that each rung
  * buys more than the last, and by how much it accelerates — lives in the SLOPE between
