@@ -1,19 +1,25 @@
 import { useEffect } from "react";
-import { FillPathProvider, useFillPathSelection } from "@numisma/components";
+import {
+  FillPathCards,
+  FillPathProvider,
+  useFillPathSelection,
+} from "@numisma/components";
 import {
   Chart,
   Expectation,
   Figure,
   formatUnits,
   Header,
+  RungList,
   SelectedRung,
   TornActBanner,
   UnrecordedWarnings,
 } from "@numisma/components/ui/fill-path.tsx";
-import type { FillPathView } from "@numisma/components";
+import type { FillPathRungView, FillPathView } from "@numisma/components";
 import {
   dayZeroView,
   outOfOrderView,
+  overfilledView,
   partlyWalkedView,
   placedAtMismatchView,
   runglessView,
@@ -28,8 +34,8 @@ import {
 } from "@numisma/components/ui/fill-path.fixtures.ts";
 
 /**
- * THE FILL PATH'S FIRST THREE CARDS, ITS SELECTION SEAM, AND THE SHARED HELPERS
- * (spec #439 S6, S7 and S8).
+ * THE FILL PATH, WHOLE — ITS FOUR CARDS, ITS SELECTION SEAM, ITS SHARED HELPERS AND THE
+ * PAGE THEY COMPOSE INTO (spec #439 S6 through S9).
  *
  * A PROVIDER PAINTS NOTHING, which is the whole difficulty of staging a seam slice. So
  * this fixture does two separate jobs and they are deliberately not mixed:
@@ -113,6 +119,35 @@ import {
  * selection while it is mounted is the observation: press a rung and the panel follows.
  * That is the seam's round trip and the panel's `aria-live` in one row.
  *
+ * ── THE RUNG LIST, AND THE WHOLE PAGE (spec #439 S9) ────────────────────────────────
+ * SIX TOKENS REACH THE LIST and all six must visibly move between app mode and themed
+ * mode, INCLUDING THE TWO THAT ONLY EVER APPEAR INSIDE A `color-mix()`. The row's own
+ * text and its focus ring read `--nms-foreground`; the tint map mixes `--nms-pos` and
+ * `--nms-now` into `--nms-background`; the edge map mixes the same two into
+ * `--nms-border`; the gutter, the size figure, a never-placed price, the sub-status and
+ * the orphan line all read `--nms-muted-foreground`.
+ *
+ * WHAT TO LOOK FOR IN APP MODE, which is what `apps/web` paints today reached through the
+ * new spelling: the row rests on `#0f1115`, tints toward `#46c98b` when filled and
+ * `#e07a4f` when next, edges in `#262a33`, and rings in `#e7e9ee` when selected. A TINT
+ * THAT PAINTS NOTHING AT ALL is the failure this row exists to show: a `color-mix()` with
+ * one undefined argument computes to transparent while the rule sits present and correct
+ * in the stylesheet, so a filled row that looks exactly like a waiting one means half a
+ * mix was missed rather than that the tint is subtle.
+ *
+ * SELECTION IS A RING AND NEVER A FILL, which is why it is staged on a row that is
+ * already tinted: a background swap would fight the state tint and could make a waiting
+ * rung look filled while the operator inspected it.
+ *
+ * A RUNG THAT IS `next` AND PARTLY FILLED PRINTS `partly filled · 40%` TWICE — the
+ * sub-line beneath `next` and the partial pill beside it. Visible on `partly-walked`'s
+ * rung 4. That is what this card has always done; spec #439 is behaviour-preserving, so
+ * it crossed unchanged and it is NOT a regression this wave introduced.
+ *
+ * `FillPathCards` IS THE WHOLE PAGE IN ONE FRAME, in all four ladder states, and it is
+ * the first time anyone outside the app has been able to look at it. That is what this
+ * wave was for.
+ *
  * SYNTHESIZED. The view comes from `fill-path.fixtures.ts` beside the component, derived
  * from a hand-written app fixture whose own tests say so. Nothing here imports from
  * `apps/web`, which `seam-isolation.test.ts` holds, and no real transaction has been
@@ -183,6 +218,48 @@ function BothWidths({ view, children }: { view: FillPathView; children: React.Re
 }
 
 const CHIP_STATES = ["pending", "active", "ended", "unreadable"] as const;
+
+/**
+ * ONE RUNG WITH ITS SIZE GENUINELY ABSENT — the key deleted, never set to `undefined`.
+ * The package sets `exactOptionalPropertyTypes` and the two are different types; only
+ * absence is what a v4 snapshot carrying no rung sizes composes to. The row then prints
+ * the em dash and its stated cause and KEEPS the `@ price` beside it, so it still says
+ * which rung is missing the figure. There is no branch that could print a `0` here.
+ */
+function withSizelessRung(view: FillPathView, index: number): FillPathView {
+  return {
+    ...view,
+    rungs: view.rungs.map((rung, at) => {
+      if (at !== index) return rung;
+      const copy: Record<string, unknown> = { ...rung };
+      delete copy["sizeUsd"];
+      return copy as unknown as FillPathRungView;
+    }),
+  };
+}
+
+/**
+ * THE PAGE AT A WIDTH, AND NO PROVIDER. `FillPathCards` mounts `FillPathProvider` itself
+ * — that is what makes it the house arrangement rather than four parts a caller wires —
+ * so this wrapper only decides how wide the cards are allowed to be. `CardAt` would nest
+ * a second provider around the one already inside.
+ */
+function PageAt({ view, width }: { view: FillPathView; width: 320 | 560 }) {
+  return (
+    <div style={{ width, maxWidth: "100%" }}>
+      <FillPathCards view={view} />
+    </div>
+  );
+}
+
+/** A list mounted with one rung already selected, through the published `select`. */
+function ListOpenedOn({ rungKey }: { rungKey: string }) {
+  const { select } = useFillPathSelection();
+  useEffect(() => {
+    select(rungKey);
+  }, [rungKey, select]);
+  return <RungList />;
+}
 
 
 /**
@@ -464,6 +541,98 @@ export default {
         <BothWidths view={runglessView()}>
           <SelectedRung />
         </BothWidths>
+      </Row>
+    </div>
+  ),
+
+  "the rung list, every tint and every edge": (
+    <div>
+      <Row
+        title="the ladder, at both widths"
+        note="Three tints and three edges across eight rows: `--nms-pos` mixed in on the three filled rungs, `--nms-now` on rung 4 which price reaches next, bare `--nms-background` on the rest, and the two deepest rungs DASHED because they were declared and never placed. All four status tones are here too — muted on the never-placed pair, `--nms-now` on rung 4, `--nms-pos` on the filled three, and NOTHING on the ordinary waiting rungs, whose status inherits the row's colour and whose empty arm in the tone map is deliberate. At 320px the qualifier pills take a full-width line of their own; past 380px they sit in their cell. Rung 4 prints `partly filled · 40%` twice, as the sub-line and as the pill — pre-existing, and left alone."
+      >
+        <BothWidths view={partlyWalkedView()}>
+          <RungList />
+        </BothWidths>
+      </Row>
+      <Row
+        title="the fourth edge — a ring on a row that is already tinted"
+        note="Selection moves the border to `--nms-foreground` and adds a 1px `box-shadow` in the same colour, and touches the background of NOTHING: the filled rung below keeps its green tint under the ring. A fill here would fight the state tint and could make a waiting rung read as filled while the operator inspected it. The shadow is written as an arbitrary property rather than `shadow-[…]`, because Tailwind's shadow utility composes with its ring and inset variables and the computed value would stop being the deleted rule's."
+      >
+        <CardAt view={partlyWalkedView()} width={560}>
+          <ListOpenedOn rungKey="fixture-rung-1" />
+        </CardAt>
+      </Row>
+      <Row
+        title="a never-placed rung, and the same rung selected"
+        note="Rungs 7 and 8 are the pair: declared, never placed, dashed, with the price itself muted. On the right, rung 7 is the one under inspection and its dash goes SOLID — which is what the deleted rule's `border-style: solid` did. The muting stays; only the border style and the ring move."
+      >
+        <CardAt view={partlyWalkedView()} width={560}>
+          <RungList />
+        </CardAt>
+        <CardAt view={partlyWalkedView()} width={560}>
+          <ListOpenedOn rungKey="fixture-rung-7" />
+        </CardAt>
+      </Row>
+      <Row
+        title="a rung whose size the snapshot does not carry"
+        note="The em dash and its cause, never a `0`: a rung with no recorded size has not declared zero capital. The `@ price` stays beside it, so the row still says which rung is missing the figure."
+      >
+        <BothWidths view={withSizelessRung(partlyWalkedView(), 4)}>
+          <RungList />
+        </BothWidths>
+      </Row>
+      <Row
+        title="the orphan line, present and absent"
+        note="`overfilled` carries two recorded lots no declared rung explains and prints the line with 12px of its own top margin; `partly-walked` carries none and prints nothing. A COUNT, never the lots — the conclusion crosses the wire and the position data does not. Every rung is filled above, so this is also the only state where the tint map's `next` arm is absent from the whole ladder."
+      >
+        <CardAt view={overfilledView()} width={560}>
+          <RungList />
+        </CardAt>
+        <CardAt view={partlyWalkedView()} width={560}>
+          <RungList />
+        </CardAt>
+      </Row>
+    </div>
+  ),
+
+  "the whole page, all four ladder states": (
+    <div>
+      <Row
+        title="day zero"
+        note="`FillPathCards` — the house arrangement, and the only thing the two ladder routes mount. Six children in the order U's 320px rework fixed: the torn banner, the header, the unrecorded warnings, the chart, the selected-rung panel, the list. Nothing is filled yet, so the header takes the projection layout and every row is waiting."
+      >
+        <div className="flex flex-wrap items-start gap-6">
+          <PageAt view={dayZeroView()} width={320} />
+          <PageAt view={dayZeroView()} width={560} />
+        </div>
+      </Row>
+      <Row
+        title="partly walked"
+        note="The widest state: three filled rungs, one partly filled and next, two waiting, two declared and never placed. Tab down the ladder and the panel above follows — every row selects on FOCUS as well as on click, which is the substitute route ADR-019 chose instead of a navigable chart."
+      >
+        <div className="flex flex-wrap items-start gap-6">
+          <PageAt view={partlyWalkedView()} width={320} />
+          <PageAt view={partlyWalkedView()} width={560} />
+        </div>
+      </Row>
+      <Row
+        title="out of order"
+        note="Fills scattered UP the ladder rather than walked down it. The list reads the same rungs the chart draws, and the two must not say different things about any one of them — that shared three-colour key is the whole reason the tint reuses the chart's palette and no other."
+      >
+        <div className="flex flex-wrap items-start gap-6">
+          <PageAt view={outOfOrderView()} width={320} />
+          <PageAt view={outOfOrderView()} width={560} />
+        </div>
+      </Row>
+      <Row
+        title="overfilled"
+        note="Every rung filled, the bar at 100%, nothing waiting, and two orphan lots under the ladder. Spot is below the deepest rung, so no rung is next and the chart's now-rule sits at the right edge."
+      >
+        <div className="flex flex-wrap items-start gap-6">
+          <PageAt view={overfilledView()} width={320} />
+          <PageAt view={overfilledView()} width={560} />
+        </div>
       </Row>
     </div>
   ),

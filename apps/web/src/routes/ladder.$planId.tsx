@@ -3,11 +3,11 @@ import { getDashboard } from "../lib/dashboard.ts";
 import {
   CARD_SURFACE,
   Crumb,
+  FillPathCards,
   Shell,
   SnapshotEmptyNotice,
   SnapshotStaleNotice,
 } from "@numisma/components";
-import { FillPathCards } from "../components/FillPath.tsx";
 import { composeFillPathPage } from "../ladder/fill-path-view.ts";
 import { useBinanceSpotUsd } from "../lib/binance-spot.ts";
 import type { SnapshotAnchor } from "../projection/contract.ts";

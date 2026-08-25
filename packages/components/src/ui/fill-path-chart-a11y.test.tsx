@@ -14,6 +14,11 @@
  * reviewer of every future diff, so removing it breaks nothing anyone can see while
  * severing the chart's only route into the accessibility tree.
  *
+ * IT MOVED INTO THE PACKAGE AT SPEC #439 S9, with the component it mounts. Its view is
+ * now an authored literal from `fill-path.fixtures.ts` rather than a value composed
+ * through `apps/web`, which a package test cannot reach — see the third case's own
+ * docblock for what that costs and where the cost was paid.
+ *
  * THE CHART IS MOUNTED FOR REAL. No mock stands in for `@tanstack/charts`: a stand-in
  * cannot answer "is anything inside this subtree focusable", and that question is the one
  * that catches a future library upgrade mounting a focusable surface. The harness stubs
@@ -32,30 +37,9 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { render } from "@numisma/components/testkit/render.testkit.tsx";
-import { FillPathCards } from "./FillPath.tsx";
-import { composeFillPathPage } from "../ladder/fill-path-view.ts";
-import { convexityCaption } from "../ladder/convexity-caption.ts";
-import { ladderFixture } from "../ladder/started-ladder.fixtures.ts";
-
-/**
- * The view under test, composed the way the route composes it — through the real
- * `composeFillPathPage`, off an AUTHORED fixture. No ledger output has ever been near
- * this file; `started-ladder.fixtures.ts` is hand-written and its own tests say so.
- *
- * `partly-walked` is the fixture with something on every arm: filled rungs and waiting
- * rungs, so the legend draws both swatches, and a live spot, so the now-rule draws too.
- * The widest picture is the one worth asserting is unreachable.
- */
-function partlyWalkedView() {
-  const fixture = ladderFixture("partly-walked");
-  if (fixture === undefined) throw new Error("fixture `partly-walked` is gone");
-  const page = composeFillPathPage(fixture.anchor, fixture.planId, fixture.spot);
-  if (page.status !== "ok") {
-    throw new Error(`fixture composed to \`${page.status}\`, not a page`);
-  }
-  return page.view;
-}
+import { render } from "../testkit/render.testkit";
+import { FillPathCards } from "./fill-path";
+import { partlyWalkedView } from "./fill-path.fixtures";
 
 /**
  * The tabbable selector, spelled once. `[tabindex="-1"]` is excluded on purpose: a
@@ -90,28 +74,39 @@ describe("the fill-path chart's accessibility contract (ADR-019)", () => {
     expect(chart?.querySelector('[tabindex="-1"]')).not.toBeNull();
   });
 
-  it("renders the generated caption as the chart's screen-reader substitute", () => {
+  /**
+   * ── WHAT THIS CASE PROVES CHANGED AT SPEC #439 S9, AND THE CHANGE IS REAL ─────────
+   *
+   * It used to recompute the caption by calling `convexityCaption` from
+   * `apps/web/src/ladder/` over the view's own rungs and compare the two. That proved
+   * the caption is GENERATED from the data the chart is drawn from — a literal here
+   * would have been the hand-maintained chart description ADR-019 exists to forbid,
+   * smuggled in as a test expectation, drifting from the picture while staying green.
+   *
+   * This file now lives in the package and cannot call that function. It asserts against
+   * `view.caption`, and the view is an authored fixture, so `view.caption` IS a literal.
+   * What survives here is the COMPONENT-LEVEL claim, which is the one this file is the
+   * right place for: the chart renders the field it was handed rather than inventing
+   * prose of its own.
+   *
+   * THE PROPERTY THE OLD DOCBLOCK WAS PROTECTING MOVED, IT WAS NOT DROPPED. That the
+   * caption is generated from the rungs is pinned by
+   * `apps/web/src/ladder/fill-path-fixture-equivalence.test.ts`, which deep-compares
+   * every authored fixture against `composeFillPathPage` — caption included, on all four
+   * ladder states. Without this paragraph the next reader sees exactly the regression the
+   * old docblock forbade.
+   */
+  it("renders the caption it was handed as the chart's screen-reader substitute", () => {
     const view = partlyWalkedView();
     const { container } = render(<FillPathCards view={view} />);
 
-    // ASSERTED AGAINST THE GENERATED VALUE, NEVER AGAINST A LITERAL. A literal here would
-    // be the hand-maintained chart description ADR-019 exists to forbid, smuggled in as a
-    // test expectation: it would drift from the data the chart is drawn from, and the
-    // test would keep passing while it did.
-    const expected = convexityCaption({
-      rungs: view.rungs.map((rung) => ({
-        priceUsd: rung.priceUsd,
-        ...(rung.sizeUsd === undefined ? {} : { sizeUsd: rung.sizeUsd }),
-        waiting: rung.waiting,
-      })),
-      ...(view.figures?.waitingDeclaredUsd === undefined
-        ? {}
-        : { waitingDeclaredUsd: view.figures.waitingDeclaredUsd }),
-    });
-    expect(expected).toBeTypeOf("string");
+    // OFF THE VIEW, NEVER OFF A STRING WRITTEN HERE. Reading `view.caption` is what makes
+    // this a claim about the component: a sentence typed into this file would pass
+    // against a card that ignored the field and printed its own.
+    expect(view.caption).toBeTypeOf("string");
 
     const substitute = container.querySelector(".sr-only");
     expect(substitute).not.toBeNull();
-    expect(substitute?.textContent).toBe(expected);
+    expect(substitute?.textContent).toBe(view.caption);
   });
 });

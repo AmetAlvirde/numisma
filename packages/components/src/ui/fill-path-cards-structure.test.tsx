@@ -23,8 +23,8 @@
  * behavior-preserving conversion — a red-first test here would have to assert markup
  * nobody wants changed.
  *
- * The fixture is authored. `started-ladder.fixtures.ts` is hand-written and its own tests
- * say so; no ledger output has been near this file.
+ * The fixture is authored. `fill-path.fixtures.ts` was transcribed from a hand-written
+ * app fixture whose own tests say so; no ledger output has been near this file.
  */
 import { describe, expect, it } from "vitest";
 
@@ -35,31 +35,21 @@ import {
   renderedClassNames,
   absentSlots,
   screen,
-} from "@numisma/components/testkit/render.testkit.tsx";
-import { FillPath, FillPathCards } from "./FillPath.tsx";
-import { composeFillPathPage } from "../ladder/fill-path-view.ts";
-import type { FillPathView } from "../ladder/fill-path-view.ts";
-import { ladderFixture } from "../ladder/started-ladder.fixtures.ts";
-// `FillPathProvider` crossed into the package at spec #439 S6, ahead of the parts this
-// file mounts around it. The file itself stays here until S9: it reaches every view
-// through `composeFillPathPage(ladderFixture(name))`, which a package test cannot do.
-import { CARD_SURFACE, FillPathProvider, NOTICE_CODE } from "@numisma/components";
-
-/** One fixture, composed through the real view module — never a hand-built view object. */
-function viewOf(name: "partly-walked" | "day-zero"): FillPathView {
-  const fixture = ladderFixture(name);
-  if (fixture === undefined) throw new Error(`fixture \`${name}\` is gone`);
-  const page = composeFillPathPage(fixture.anchor, fixture.planId, fixture.spot);
-  if (page.status !== "ok") {
-    throw new Error(`fixture composed to \`${page.status}\`, not a page`);
-  }
-  return page.view;
-}
-
-/** The widest fixture: filled rungs, waiting rungs and a live spot, so every card draws. */
-function partlyWalkedView(): FillPathView {
-  return viewOf("partly-walked");
-}
+} from "../testkit/render.testkit";
+import { CARD_SURFACE } from "./card";
+// THE WHOLE CARD SHELL IS ON THIS SIDE NOW (spec #439 S9). The file mounted four parts
+// and `FillPathCards` from `apps/web` while the last of them was still over there; the
+// rung list crossed at S9, `apps/web/src/components/` stopped existing, and this file
+// landed beside what it asserts about.
+import { FillPath, FillPathCards, FillPathProvider } from "./fill-path";
+import type { FillPathView } from "./fill-path";
+// THE VIEWS ARE AUTHORED LITERALS RATHER THAN COMPOSED VALUES, which is the one thing
+// this file gave up to cross: `composeFillPathPage(ladderFixture(name))` is unreachable
+// from the package (§4.3). The literals are not taken on trust —
+// `apps/web/src/ladder/fill-path-fixture-equivalence.test.ts` deep-compares both of the
+// two read here against what the composer emits.
+import { dayZeroView, partlyWalkedView } from "./fill-path.fixtures";
+import { NOTICE_CODE } from "./snapshot-notice";
 
 /** The header alone, so an assertion about it names one card's markup and not four. */
 function renderHeader(view: FillPathView) {
@@ -372,7 +362,7 @@ describe("the header card carries its section as utilities", () => {
   });
 
   it("gives day zero its hero and its two quieter projections", () => {
-    const { container } = renderHeader(viewOf("day-zero"));
+    const { container } = renderHeader(dayZeroView());
     const expected = container.querySelectorAll("section > div")[1];
     const hero = expected?.firstElementChild;
     const quiet = expected?.lastElementChild;
@@ -848,7 +838,7 @@ describe("the rung list carries its section as utilities", () => {
       "py-3",
       "border",
       "rounded-xl",
-      "text-[var(--text)]",
+      "text-[var(--nms-foreground)]",
       // A button's font is the UA's until something says otherwise, and no utility spells
       // the `font` shorthand.
       "[font:inherit]",
@@ -862,11 +852,11 @@ describe("the rung list carries its section as utilities", () => {
       "@[380px]/fp-list:gap-x-3",
       "@[380px]/fp-list:gap-y-3",
     ]);
-    // NEUTRAL, DELIBERATELY: `--pos` here would ring a waiting rung in the colour that
-    // means filled the moment a keyboard reached it.
+    // NEUTRAL, DELIBERATELY: `--nms-pos` here would ring a waiting rung in the colour
+    // that means filled the moment a keyboard reached it.
     expectClasses(rows[0], [
       "focus-visible:outline-2",
-      "focus-visible:outline-[var(--text)]",
+      "focus-visible:outline-[var(--nms-foreground)]",
       "focus-visible:outline-offset-2",
     ]);
   });
@@ -885,9 +875,9 @@ describe("the rung list carries its section as utilities", () => {
     // the price for the eye.
     expect(backgrounds).toEqual(
       new Set([
-        "bg-[var(--bg)]",
-        "bg-[color-mix(in_srgb,var(--pos)_12%,var(--bg))]",
-        "bg-[color-mix(in_srgb,var(--now)_14%,var(--bg))]",
+        "bg-[var(--nms-background)]",
+        "bg-[color-mix(in_srgb,var(--nms-pos)_12%,var(--nms-background))]",
+        "bg-[color-mix(in_srgb,var(--nms-now)_14%,var(--nms-background))]",
       ]),
     );
     // Every row carries exactly one of them; a row with two would be a race.
@@ -915,8 +905,8 @@ describe("the rung list carries its section as utilities", () => {
       fireEvent.click(rows[index]!);
       const selected = classTokens(rows[index]!);
 
-      expect(selected).toContain("[box-shadow:0_0_0_1px_var(--text)]");
-      expect(selected).toContain("border-[var(--text)]");
+      expect(selected).toContain("[box-shadow:0_0_0_1px_var(--nms-foreground)]");
+      expect(selected).toContain("border-[var(--nms-foreground)]");
       // SELECTION FORCES THE BORDER SOLID, which is what the deleted rule did — a
       // selected never-placed rung stops being dashed while it is under inspection.
       expect(selected).toContain("border-solid");
@@ -934,7 +924,9 @@ describe("the rung list carries its section as utilities", () => {
       // `border-style: dashed` is the WHOLE signal that a rung was never placed (G-D12):
       // not a state the ladder is in, one it never entered.
       expect(classTokens(row)).toContain("border-dashed");
-      expectClasses(row.children[1]?.querySelector("span"), ["text-[var(--muted)]"]);
+      expectClasses(row.children[1]?.querySelector("span"), [
+        "text-[var(--nms-muted-foreground)]",
+      ]);
     }
     for (const row of rows.filter((_, index) => !view.rungs[index]!.notPlaced)) {
       expect(classTokens(row)).toContain("border-solid");
@@ -950,7 +942,7 @@ describe("the rung list carries its section as utilities", () => {
       "text-[0.78rem]",
       "font-semibold",
       "tracking-[0.03em]",
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
       "@[380px]/fp-list:self-auto",
     ]);
     expectClasses(figures, ["grid", "gap-px", "min-w-0"]);
@@ -964,7 +956,7 @@ describe("the rung list carries its section as utilities", () => {
     // WEIGHT AND COLOUR BOTH, unlike the inspect card's colour-only demotion: a list row
     // is read at a glance rather than as a sentence, and 700-weight grey still reads loud.
     const size = price?.firstElementChild;
-    expectClasses(size, ["font-normal", "text-[var(--muted)]"]);
+    expectClasses(size, ["font-normal", "text-[var(--nms-muted-foreground)]"]);
     expectClasses(
       [...(size?.children ?? [])].find((span) => span.textContent === "@"),
       ["opacity-70"],
@@ -1013,9 +1005,12 @@ describe("the rung list carries its section as utilities", () => {
     for (const [index, rung] of view.rungs.entries()) {
       const status = rows[index]?.children[2]?.children[0];
       if (status === undefined) continue;
-      if (rung.notPlaced) expect(toneOf(rows[index]!)).toEqual(["text-[var(--muted)]"]);
-      else if (rung.isNext) expect(toneOf(rows[index]!)).toEqual(["text-[var(--now)]"]);
-      else if (rung.filled) expect(toneOf(rows[index]!)).toEqual(["text-[var(--pos)]"]);
+      if (rung.notPlaced)
+        expect(toneOf(rows[index]!)).toEqual(["text-[var(--nms-muted-foreground)]"]);
+      else if (rung.isNext)
+        expect(toneOf(rows[index]!)).toEqual(["text-[var(--nms-now)]"]);
+      else if (rung.filled)
+        expect(toneOf(rows[index]!)).toEqual(["text-[var(--nms-pos)]"]);
       // The ordinary rung's status inherits the row's own colour, as it did when it had
       // no rule of its own; a `text-` utility here would be a declaration the file never
       // carried.
@@ -1055,7 +1050,12 @@ describe("the rung list carries its section as utilities", () => {
       paragraph.textContent?.includes("that no declared rung explains"),
     );
 
-    expectClasses(orphans, ["m-0", "mt-3", "text-[0.8rem]", "text-[var(--muted)]"]);
+    expectClasses(orphans, [
+      "m-0",
+      "mt-3",
+      "text-[0.8rem]",
+      "text-[var(--nms-muted-foreground)]",
+    ]);
     expect(classTokens(orphans!)).not.toContain("mt-1");
   });
 });

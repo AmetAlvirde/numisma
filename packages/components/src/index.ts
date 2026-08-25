@@ -28,20 +28,35 @@ export {
   type DcaView,
 } from "./ui/dca-card";
 /**
- * THE SELECTION SEAM, AND WHAT IS DELIBERATELY NOT HERE (spec #439 S6).
+ * THE FILL PATH, WHOLE (spec #439 S9), AND WHAT IS STILL DELIBERATELY NOT HERE.
  *
- * `useFillPath` is published because the four `FillPath` parts still live in
- * `apps/web` and read this provider across the boundary until S9. It is
- * lowercase, so `fixture-coverage.test.ts` demands no fixture for it. Once S9
- * lands it is published surface with no caller outside the package, and wave 3
- * decides whether to withdraw it.
+ * `FillPathCards` is the house arrangement and the only thing the two ladder
+ * routes mount; `FillPath` is the frozen object its four parts hang off, so a
+ * caller can arrange them differently. The object is not a function, so
+ * `fixture-coverage.test.ts` skips it; `FillPathCards` is a capitalized
+ * function, so the guard demands a fixture for it and the workbench carries one.
  *
- * `Figure`, `Expectation`, `formatUnits` and the class strings the unmoved parts
- * also read are NOT here on purpose. They cross by subpath —
- * `@numisma/components/ui/fill-path.tsx` — so that import dies at S9 instead of
- * becoming public API.
+ * THE FOUR PARTS THEMSELVES ARE NOT NAMED HERE. `Header`, `Chart`,
+ * `SelectedRung` and `RungList` are module exports of `./ui/fill-path`, reached
+ * through `FillPath` at every call site. Publishing them here would turn four
+ * more capitalized functions into fixture obligations for a surface the object
+ * already gives out.
+ *
+ * `useFillPath` was published at S6 because the parts still lived in `apps/web`
+ * and read this provider across the boundary. They do not any more: it is now
+ * published surface with no caller outside the package, and wave 3 decides
+ * whether to withdraw it. `useFillPathSelection` has one — the workbench's
+ * selection probe.
+ *
+ * `Figure`, `Expectation`, `formatUnits` and the module's class strings are NOT
+ * here on purpose. The subpath they used to cross by,
+ * `@numisma/components/ui/fill-path.tsx`, died with
+ * `apps/web/src/components/FillPath.tsx` at S9 rather than becoming public API,
+ * which is what crossing by subpath bought.
  */
 export {
+  FillPath,
+  FillPathCards,
   FillPathProvider,
   useFillPath,
   useFillPathSelection,

@@ -133,7 +133,9 @@ describe("D11: the route move", () => {
  *  - added a `beforeLoad` that fetches the Binance URL on the route → "keeps the spot
  *    fetch to ONE call site" red, naming the route file. Right reason: that is the
  *    helpful move into a loader the 451 comment exists to stop.
- *  - added a SIDE-EFFECT `import "@numisma/engine";` to `FillPath.tsx`, and separately a
+ *  - added a SIDE-EFFECT `import "@numisma/engine";` to `FillPath.tsx` (deleted at spec
+ *    #439 S9 — the file that holds the fill path today is the package's own
+ *    `ui/fill-path.tsx`, swept by the last case in this file), and separately a
  *    dynamic `import("@numisma/engine")` to `convexity-caption.ts` → the same test red,
  *    once each, naming the file. Right reason: neither form has a `from` clause, so the
  *    specifier matcher could not see them while both pull the engine into the bundle.
@@ -276,40 +278,30 @@ describe("G-D13: the ladder route", () => {
     // this list is narrow about. THAT DEPENDENCY LIST IS ASSERTED BELOW rather than
     // argued here, because the walk stops at the package boundary and would not see it
     // change.
-    // `@numisma/components/ui/price-drop-path.ts` IS THE FOURTH, AND IT IS THE SAFEST
-    // ENTRY ON THIS LIST (spec #439 S5). `FillPath.tsx` imports `COMPACT_USD` from it at
-    // runtime — the one compact-USD formatter the fill path has, shared by the chart's
-    // axis ticks, its spot label and the header card's price span. The module has NO
-    // IMPORTS AT ALL: it is arithmetic, seven geometry types and one module-scope
-    // `Intl.NumberFormat` pinned to `en-US`. It reaches no `node:` builtin because it
-    // reaches nothing, which is the same property that made the engine's two pure
-    // subpaths safe, held more strictly.
+    // ── THE LIST IS BACK TO THREE (spec #439 S9) ─────────────────────────────────────
+    // BOTH SUBPATH ENTRIES CAME OFF IN THIS ONE DIFF, and both for the same reason: the
+    // file that imported them is `apps/web/src/components/FillPath.tsx`, which S9
+    // deleted along with the directory it lived in.
     //
-    // A SUBPATH RATHER THAN THE CURATED INDEX, deliberately: `index.ts` names its
-    // exports one at a time, so putting a formatter and three geometry helpers on it
-    // would tell every future reader they are public API. `tokens.ts` set that
-    // precedent, and the exports map already carries `"./*"`.
-    // `@numisma/components/ui/fill-path.tsx` IS THE FIFTH, AND IT IS TRANSITIONAL —
-    // SPEC #439 S9 REMOVES IT (added by S6). The fill path's selection seam and its three
-    // shared helpers crossed into the package ahead of the six components that read them,
-    // so `components/FillPath.tsx` imports `Figure`, `Expectation`, `formatUnits` and the
-    // five class strings from the module directly rather than from the curated index.
-    // A subpath rather than the index for the reason the entry above gives: `index.ts`
-    // names its exports one at a time, and publishing a class string would tell every
-    // future reader it is public API. The import dies with the last part S9 moves, and
-    // THIS LINE GOES WITH IT — a fifth entry left standing here is a transitional
-    // arrangement that reads as permanent.
+    // `@numisma/components/ui/fill-path.tsx` stood here from S6 to S8 while the fill
+    // path's selection seam and its shared helpers were in the package and the cards
+    // that read them were not: `FillPath.tsx` imported ten names from the module
+    // directly rather than from the curated index, precisely so the arrangement would
+    // die rather than become public API. `@numisma/components/ui/price-drop-path.ts`
+    // arrived at S5 for `COMPACT_USD`, the one compact-USD formatter the fill path has;
+    // the chart, the spot label and the header card's price span all read it from
+    // INSIDE the package now, where this walk cannot see it and does not need to.
     //
-    // Safe on the same footing as the package specifier above and no new footing at all:
-    // `ui/fill-path.tsx` is inside `@numisma/components`, whose whole dependency list is
-    // pinned by the case below, and it imports React, the pure `@numisma/engine/format`
-    // subpath and two sibling components. No `node:` builtin is reachable from it.
+    // LEFT STANDING, EITHER WOULD PERMANENTLY ALLOW A SUBPATH NOTHING IMPORTS, and the
+    // next reader would have no way to tell whether that was deliberate. The one
+    // remaining app-side reader of `price-drop-path.ts` is
+    // `ladder/started-ladder.fixtures.test.ts`, which is not in any route's runtime
+    // closure — so re-adding either entry is a decision someone makes on purpose, with
+    // this paragraph in front of them.
     const allowed = [
       "@numisma/engine/format",
       "@numisma/engine/calendar",
       "@numisma/components",
-      "@numisma/components/ui/price-drop-path.ts",
-      "@numisma/components/ui/fill-path.tsx",
     ];
     for (const file of closure) {
       const source = readFileSync(join(HERE, "..", file), "utf-8");
