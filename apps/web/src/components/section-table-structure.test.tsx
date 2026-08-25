@@ -29,7 +29,7 @@ import {
   render,
   absentSlots,
   screen,
-} from "../render.testkit.tsx";
+} from "@numisma/components/testkit/render.testkit.tsx";
 import { CARD_SURFACE } from "@numisma/components";
 import { SectionTable } from "./SectionTable.tsx";
 import type { DashboardSection } from "@numisma/engine";

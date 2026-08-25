@@ -1,5 +1,5 @@
 /**
- * EVERY RENDER TEST HERE DECLARES ITS OWN ENVIRONMENT — the guard that makes ADR-022's
+ * EVERY RENDER TEST IN THIS REPO DECLARES ITS OWN ENVIRONMENT — the guard that makes ADR-022's
  * per-file jsdom ruling checkable.
  *
  * ── WHAT IS BEING GUARDED ────────────────────────────────────────────────────────────
@@ -12,7 +12,7 @@
  * matches no project's `include`.
  *
  * ── WHY A SOURCE SCAN AND NOT A RUNTIME CHECK ────────────────────────────────────────
- * "Every `*.test.tsx` under `apps/web/src` declares jsdom" is a claim about files that do
+ * "Every `*.test.tsx` in this repo declares jsdom" is a claim about files that do
  * not exist yet, which no assertion inside a running test can make: a file missing its
  * docblock is not collected into any environment where a check could look for it. It is
  * the same shape of claim, held by the same instrument, as `route-move.test.ts` and
@@ -24,6 +24,14 @@
  * rather than the docblock, so it costs a debugging session the first time somebody meets
  * it, and it only fires once the new file is run. This test names the file and the fix.
  *
+ * ── IT SCANS FROM THE REPO ROOT, NOT FROM `apps/web/src` ─────────────────────────────
+ * The walker's own default is the repo root and this guard takes it (spec #439 §4.4).
+ * Render tests live in `packages/components/src` too now, and a package render test
+ * missing its docblock would fail at its first `render()` with `document is not defined`
+ * and no guard would name the cause. Membership did not change on the day the argument
+ * was dropped — every `*.test.tsx` in the repo was under `apps/web/src` — which is
+ * exactly why widening it then cost nothing.
+ *
  * ── THE DOCBLOCK MUST BE FIRST ───────────────────────────────────────────────────────
  * Vitest reads the environment comment out of the file's leading docblock, so a comment
  * that has drifted below an import is INERT and looks identical to a correct one in a
@@ -32,13 +40,9 @@
  * Every value below is authored. Nothing here reads product data.
  */
 import { readFileSync } from "node:fs";
-import { dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { sourceFiles } from "../../../ops/testkit/repo-sources.testkit.js";
-
-const HERE = dirname(fileURLToPath(import.meta.url));
 
 /** The exact line, spelled once. `vitest` matches `@vitest-environment <name>`. */
 const DOCBLOCK = "// @vitest-environment jsdom";
@@ -62,7 +66,6 @@ function declaresJsdomBeforeAnyCode(source: string): boolean {
 }
 
 const renderTests = sourceFiles({
-  dir: HERE,
   as: "absolute",
   extensions: [".tsx"],
 }).filter((file) => file.endsWith(".test.tsx"));

@@ -56,7 +56,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { fireEvent, render, userEvent, within } from "../render.testkit.tsx";
+import { fireEvent, render, userEvent, within } from "@numisma/components/testkit/render.testkit.tsx";
 import {
   FillPath,
   FillPathCards,

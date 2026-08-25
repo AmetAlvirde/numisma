@@ -37,7 +37,7 @@ import {
   classTokens as tokens,
   render,
   renderedClassNames,
-} from "../../render.testkit.tsx";
+} from "@numisma/components/testkit/render.testkit.tsx";
 
 /**
  * Mount one crumb whose slot builds a plain anchor at `href`, and hand back both

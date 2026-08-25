@@ -1,11 +1,13 @@
 /**
- * THE RENDER-TEST HARNESS — Seam A of spec #403, bought by ADR-022.
+ * THE RENDER-TEST HARNESS — Seam A of spec #403, bought by ADR-022, and a package
+ * module since spec #439 §4.4.
  *
  * ── ONE MODULE OWNS REACT TESTING LIBRARY ────────────────────────────────────────────
  * Every render test imports `render`, the queries and `userEvent` FROM HERE and from
  * nowhere else. RTL is imported at exactly one path in this repo, so the day the harness
  * changes — a provider wrapper, a different cleanup rule, another browser stub — there is
- * one file to change and no sweep to run.
+ * one file to change and no sweep to run. That claim is a docblock claim and spec #439
+ * §4.4 rules it stays one: no test asserts it, and none should be added to.
  *
  * ── CLEANUP IS THIS MODULE'S JOB, NOT A SETUP FILE'S ─────────────────────────────────
  * The root vitest config does not enable `globals`, so RTL's own auto-cleanup — which
@@ -19,13 +21,23 @@
  * It attaches PER FILE, through a `// @vitest-environment jsdom` docblock at the top of
  * each `*.test.tsx`. Not at the root, and not through a projects split — see spec #403 §3
  * and ADR-022. `jsdom-docblock-guard.test.ts` is what makes that claim checkable: a
- * missing docblock is otherwise a `document is not defined` at the first `render()`.
+ * missing docblock is otherwise a `document is not defined` at the first `render()`. That
+ * guard scans from the REPO ROOT, which is what reaches the render tests in this package.
  *
- * ── THIS FILE IS PRODUCTION SOURCE TO THE SCANS ──────────────────────────────────────
- * `route-move.test.ts` and `rung-state-seam.test.ts` exclude `*.test.tsx` only, so a
- * `.testkit.tsx` file is a source file as far as they are concerned. Nothing here may
- * spell rung-state copy or the venue-axis predicate they census. Keep this module free of
- * domain vocabulary: it knows about the DOM, not about ladders.
+ * ── IT REACHES NO FILESYSTEM, AND THAT IS THE PRECONDITION ───────────────────────────
+ * This module used to export the Tailwind teardown's per-slice evidence — nine deleted-
+ * class lists, a stylesheet parser and the terminal assertion — and read
+ * `apps/web/src/styles.css` through `node:fs` to do it. `styles-css-end-state.test.ts`
+ * subsumed every one of those assertions at merge, so they were retired (spec #439 §4.4)
+ * and the three `node:` imports went with them. A harness that reads one app's stylesheet
+ * off disk cannot live in a package; this one imports no `node:` builtin at all.
+ *
+ * ── IT KNOWS ABOUT THE DOM, NOT ABOUT LADDERS ────────────────────────────────────────
+ * Nothing here may spell domain vocabulary. The scans that used to enforce that
+ * (`route-move.test.ts`, `rung-state-seam.test.ts`) walk `apps/web/src` and no longer
+ * reach this file, so the rule is now held by review rather than by a guard. It is the
+ * same rule and it is worth keeping: a harness that knows what a rung is has stopped
+ * being a harness.
  */
 import type { ReactElement } from "react";
 import { afterEach } from "vitest";
@@ -110,7 +122,7 @@ export function render(ui: ReactElement) {
  * `<div class="card"><svg class="chart-surface"/></div>` returned `[{}, "card"]`, the
  * `Set` stopped deduping (every SVG element contributes a distinct object) and a failing
  * diff printed `{}` instead of the class that broke. `getAttribute` answers the same
- * question for both namespaces. `render.testkit.test.tsx` pins it.
+ * question for both namespaces. `render.testkit.test.tsx`, beside it, pins it.
  */
 export function classCensus(root: Element): string[] {
   const attributes = [root, ...root.querySelectorAll("[class]")].map(

@@ -23,7 +23,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { classCensus, render } from "./render.testkit.tsx";
+import { classCensus, render } from "./render.testkit";
 
 describe("classCensus", () => {
   it("reads SVG class attributes as strings, like every other element's", () => {

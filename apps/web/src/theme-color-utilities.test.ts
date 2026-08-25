@@ -29,6 +29,13 @@ import { describe, expect, it } from "vitest";
  * lost: `styles.css` is the one place colour is defined either way, and D5 mints
  * no new tokens to make this read shorter.
  *
+ * WHAT THIS NOW WATCHES IS ROUTE MARKUP, NOT COMPONENT MARKUP (spec #439 §4.5). The
+ * seven components that used to sit under `src/components` are moving into
+ * `@numisma/components` one slice at a time, and each one leaves this scan as it goes.
+ * The rule has not changed; the tree it applies to has. What is left when the wave lands
+ * is `router.tsx`, `routes/__root.tsx` and the five route files — which is exactly where
+ * `text-muted` can still be typed by hand.
+ *
  * PACKAGE SOURCE IS EXEMPT BY CONSTRUCTION, not by an exception list. It lives
  * outside the tree scanned below, and `bg-primary` on the package `Button` is
  * exactly right there — that is the vocabulary those utilities belong to.
@@ -113,7 +120,14 @@ describe("no theme colour utility in app code", () => {
     // Guards the guard. A walker that stopped returning files — a moved tree, a
     // renamed extension — would pass every case below over an empty list and
     // report the strongest possible green for having looked at nothing.
-    expect(appComponents.length).toBeGreaterThan(10);
+    //
+    // THE FLOOR IS THE WAVE'S END STATE, SET ONCE (spec #439 §4.5). This is a
+    // false-pass floor, not a census: its job is to prove the walk still returns
+    // files. The count falls monotonically from fifteen to seven as the domain
+    // migration moves each component out, so a floor true at seven is true at every
+    // step in between — and the alternative was five separate edits to one number,
+    // each of which reads in review as somebody weakening a guard.
+    expect(appComponents.length).toBeGreaterThan(6);
   });
 
   it.each(appComponents.map((path) => relative(SRC, path)))(

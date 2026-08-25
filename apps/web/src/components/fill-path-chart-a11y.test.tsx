@@ -32,7 +32,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { render } from "../render.testkit.tsx";
+import { render } from "@numisma/components/testkit/render.testkit.tsx";
 import { FillPathCards } from "./FillPath.tsx";
 import { composeFillPathPage } from "../ladder/fill-path-view.ts";
 import { convexityCaption } from "../ladder/convexity-caption.ts";

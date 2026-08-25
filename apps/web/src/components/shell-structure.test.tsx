@@ -16,7 +16,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { classTokens as tokens, render } from "../render.testkit.tsx";
+import { classTokens as tokens, render } from "@numisma/components/testkit/render.testkit.tsx";
 import { Shell } from "./Shell.tsx";
 
 describe("Shell", () => {

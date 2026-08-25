@@ -38,7 +38,7 @@ import {
   render,
   absentSlots,
   screen,
-} from "../render.testkit.tsx";
+} from "@numisma/components/testkit/render.testkit.tsx";
 import { CARD_SURFACE } from "@numisma/components";
 import { GlanceCard } from "./GlanceCard.tsx";
 import type { Verdict } from "../glance/verdict.ts";

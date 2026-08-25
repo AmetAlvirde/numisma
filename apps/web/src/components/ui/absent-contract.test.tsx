@@ -21,7 +21,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { classTokens as tokens, render, screen } from "../../render.testkit.tsx";
+import { classTokens as tokens, render, screen } from "@numisma/components/testkit/render.testkit.tsx";
 import { Absent } from "@numisma/components";
 
 describe("Absent", () => {

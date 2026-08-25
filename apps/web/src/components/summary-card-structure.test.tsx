@@ -35,7 +35,7 @@ import {
   render,
   absentSlots,
   screen,
-} from "../render.testkit.tsx";
+} from "@numisma/components/testkit/render.testkit.tsx";
 import { CARD_SURFACE } from "@numisma/components";
 import { SummaryCard } from "./SummaryCard.tsx";
 import type { DashboardSummary } from "@numisma/engine";

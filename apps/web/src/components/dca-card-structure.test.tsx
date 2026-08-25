@@ -46,7 +46,7 @@ import {
   render,
   absentSlots,
   screen,
-} from "../render.testkit.tsx";
+} from "@numisma/components/testkit/render.testkit.tsx";
 import { CARD_SURFACE } from "@numisma/components";
 import { DcaCard } from "./DcaCard.tsx";
 import type { DcaView } from "../glance/dca-view.ts";

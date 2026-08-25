@@ -35,7 +35,7 @@ import {
   renderedClassNames,
   absentSlots,
   screen,
-} from "../render.testkit.tsx";
+} from "@numisma/components/testkit/render.testkit.tsx";
 import { FillPath, FillPathCards, FillPathProvider } from "./FillPath.tsx";
 import { composeFillPathPage } from "../ladder/fill-path-view.ts";
 import type { FillPathView } from "../ladder/fill-path-view.ts";
