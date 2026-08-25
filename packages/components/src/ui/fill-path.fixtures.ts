@@ -13,30 +13,36 @@ import type { FillPathView } from "./fill-path";
  *
  * DERIVED ONCE, MECHANICALLY, FROM `apps/web/src/ladder/started-ladder.fixtures.ts` as
  * `composeFillPathPage` emits it. That is what §4.3 sanctions and it is not the same as
- * guessing: what is NOT fine is leaving the literal unpinned, and spec #439 S9's
- * equivalence test is what pins it — one composed value per ladder state, deep-compared
- * against the package fixture claiming to be that state. Until S9 lands, a field that
- * drifts here is caught only by the type, so keep the shape honest by hand.
+ * guessing: what is NOT fine is leaving the literal unpinned, and
+ * `apps/web/src/ladder/fill-path-fixture-equivalence.test.ts` is what pins it — one
+ * composed value per ladder state, deep-compared against the package fixture claiming to
+ * be that state. It lives over there because it is the one place both `composeFillPathPage`
+ * and this file are reachable at once. A field that drifts here now reds that test by
+ * name; edit a literal below and run it.
  *
- * THREE STATES. `partly-walked` is the widest — filled rungs, waiting rungs, two
- * never-placed rungs, a live spot and a next rung that is NOT index zero, which is the
- * only arrangement that can tell a derived default from a seeded one. `day-zero` arrived
+ * FOUR STATES, AND ONLY THESE FOUR GO TO THE EQUIVALENCE TEST. `partly-walked` is the
+ * widest — filled rungs, waiting rungs, two never-placed rungs, a live spot and a next
+ * rung that is NOT index zero, which is the only arrangement that can tell a derived
+ * default from a seeded one. `day-zero` arrived
  * with the header card (S7) because it is the only state that reaches the PROJECTION
  * layout, and the switch between the two layouts is `view.expected` rather than "are the
  * measured figures absent" — a distinction no single fixture can show. `out-of-order`
  * arrived with the chart and the selected-rung panel (S8), because it is the state whose
  * fills are scattered UP the ladder rather than walked down it, and the chart draws that
- * shape while no other fixture can. S9 adds `overfilled`, the fourth and last.
+ * shape while no other fixture can. `overfilled` arrived with the rung list (S9), the
+ * fourth and last: it is the only state with an orphan-lot line to draw, the only one
+ * whose progress bar is full, and the only one with no `isNext` rung at all.
  *
  * ── LADDER STATES ARE AUTHORED; FIELD-LEVEL ARMS ARE DERIVED ─────────────────────────
  * The derivations at the foot of this file — a missing orders sidecar, the three spot
  * arms, the two torn readings, the two unrecorded warnings, the declared-price mismatch,
  * the single-rung ladder and the ladder with no rungs at all — are NOT ladder states and
  * must not be authored as if they were. No `started-ladder` fixture composes to any of
- * them, so S9's equivalence test has nothing to compare them against, and a fifth
- * authored literal claiming to be a state production cannot produce is exactly what that
- * test exists to catch. Each one takes a composed state and moves the one field that
- * decides the arm, which is what the app-side structure test already does.
+ * them, so the equivalence test has nothing to compare them against, and HANDING ONE TO
+ * IT IS A RED THAT CANNOT BE FIXED BY EDITING THE FIXTURE — a fifth authored literal
+ * claiming to be a state production cannot produce is exactly what that test exists to
+ * catch. Each one takes a composed state and moves the ONE field that decides the arm,
+ * which is what the structure test's own `without` helper does beside it.
  *
  * SYNTHESIZED. Every price, size, key and total below comes from a hand-written app
  * fixture whose own tests say so. No ledger output, no plans sidecar and no real
@@ -444,6 +450,107 @@ export function outOfOrderView(): FillPathView {
     caption:
       "Buys grow as price falls: the deepest rung is 5.5\u00d7 the first; $2,600 of the $3,100 still waiting sits below the ladder's midpoint, $36,000.",
     spotUsd: 31000,
+    spotUnavailable: false,
+    spotLoading: false,
+    recordedThrough: "2026-08-12",
+  };
+}
+
+/**
+ * AN OVERFILLED LADDER — every rung filled, and two recorded lots no rung explains.
+ *
+ * THE FOURTH AND LAST STATE, and the one that closes the set S9's equivalence test
+ * compares. It reaches three things no other fixture does: `figures.split` is
+ * `nothing-waiting`, so the header card's waiting block prints its emptiest arm;
+ * `progress` is 8 of 8 at 100%, so the bar is full rather than partial; and
+ * `orphanLots` is 2, which is the only authored state where the rung list's orphan
+ * line renders at all. Every other state carries a zero there and draws nothing.
+ *
+ * NO RUNG IS `isNext`, WHICH IS NOT AN OVERSIGHT. Spot is $20,800, below the deepest
+ * rung's $22,000, so price has passed the whole ladder and there is no rung it reaches
+ * next — `chart.nowX` sits at the right edge. That is the arrangement the tint map's
+ * `next` arm and the status map's `next` arm are BOTH absent from, and a fixture set
+ * whose every state carried a next rung could not show that either map has a default.
+ *
+ * THE CAPTION IS THE SHORT FORM. `convexityCaption` appends its waiting-weight clause
+ * only when something is still waiting; nothing is, so the sentence stops after the
+ * convexity ratio. That clause's presence is decided by the data the chart is drawn
+ * from, which is what the equivalence test pins.
+ */
+export function overfilledView(): FillPathView {
+  return {
+    planId: "facade00-0000-4000-8000-000000000004",
+    positionId: "fixture:overfilled",
+    title: "fixture:overfilled",
+    state: "active",
+    reconciled: true,
+    deployed: { known: true, value: 5525 },
+    unitsAcquired: { known: true, value: 0.146169 },
+    avgEntry: { known: true, value: 37798.71 },
+    notStarted: false,
+    figures: {
+      waitingDeclaredUsd: 0,
+      waitingRestingUsd: 0,
+      neverPlacedUsd: 0,
+      split: "nothing-waiting",
+    },
+    rungs: [
+      rung(
+        { index: 1, priceUsd: 50000, sizeUsd: 200, stateCopy: "filled" },
+        { filled: true, venueAxis: "filled", bookAxis: "recorded" },
+      ),
+      rung(
+        { index: 2, priceUsd: 46000, sizeUsd: 250, stateCopy: "filled" },
+        { filled: true, venueAxis: "filled", bookAxis: "recorded" },
+      ),
+      rung(
+        { index: 3, priceUsd: 42000, sizeUsd: 300, stateCopy: "filled" },
+        { filled: true, venueAxis: "filled", bookAxis: "recorded" },
+      ),
+      rung(
+        { index: 4, priceUsd: 38000, sizeUsd: 400, stateCopy: "filled" },
+        { filled: true, venueAxis: "filled", bookAxis: "recorded" },
+      ),
+      rung(
+        { index: 5, priceUsd: 34000, sizeUsd: 500, stateCopy: "filled" },
+        { filled: true, venueAxis: "filled", bookAxis: "recorded" },
+      ),
+      rung(
+        { index: 6, priceUsd: 30000, sizeUsd: 650, stateCopy: "filled" },
+        { filled: true, venueAxis: "filled", bookAxis: "recorded" },
+      ),
+      rung(
+        { index: 7, priceUsd: 26000, sizeUsd: 850, stateCopy: "filled" },
+        { filled: true, venueAxis: "filled", bookAxis: "recorded" },
+      ),
+      rung(
+        { index: 8, priceUsd: 22000, sizeUsd: 1100, stateCopy: "filled" },
+        { filled: true, venueAxis: "filled", bookAxis: "recorded" },
+      ),
+    ],
+    orphanLots: 2,
+    tornActs: { status: "clear" },
+    warnings: { filledNotRecorded: 0, pricePassedNoFill: 0 },
+    progress: { filledRungs: 8, totalRungs: 8, percent: 100 },
+    chart: {
+      width: 320,
+      height: 120,
+      points:
+        "10,90.55 51.1,86.18 92.19,81.82 133.29,73.09 174.38,64.36 215.48,51.27 256.58,33.82 297.67,12",
+      circles: [
+        { key: "fixture-rung-1", cx: 10, cy: 90.55, filled: true, next: false },
+        { key: "fixture-rung-2", cx: 51.1, cy: 86.18, filled: true, next: false },
+        { key: "fixture-rung-3", cx: 92.19, cy: 81.82, filled: true, next: false },
+        { key: "fixture-rung-4", cx: 133.29, cy: 73.09, filled: true, next: false },
+        { key: "fixture-rung-5", cx: 174.38, cy: 64.36, filled: true, next: false },
+        { key: "fixture-rung-6", cx: 215.48, cy: 51.27, filled: true, next: false },
+        { key: "fixture-rung-7", cx: 256.58, cy: 33.82, filled: true, next: false },
+        { key: "fixture-rung-8", cx: 297.67, cy: 12, filled: true, next: false },
+      ],
+      nowX: 310,
+    },
+    caption: "Buys grow as price falls: the deepest rung is 5.5× the first.",
+    spotUsd: 20800,
     spotUnavailable: false,
     spotLoading: false,
     recordedThrough: "2026-08-12",
