@@ -58,31 +58,32 @@
  *
  * `apps/web` owns ten bare palette names. Each has exactly one counterpart in
  * this namespace, and the whole mapping is written here so a component crossing
- * into the package looks the name up rather than choosing it again. Nine are
- * declared below; `--nms-now` alone is named and not yet declared, waiting on
- * the component that first reads it.
+ * into the package looks the name up rather than choosing it again. All ten are
+ * declared below, and the vocabulary this table has carried since wave 1 is
+ * closed.
  *
- *     house      package                  status
- *     --bg       --nms-background         declared
- *     --text     --nms-foreground         declared
- *     --line     --nms-border             declared
- *     --card     --nms-card               declared
- *     --muted    --nms-muted-foreground   declared
- *     --neg      --nms-neg                declared
- *     --pos      --nms-pos                declared
- *     --ok       --nms-ok                 declared
- *     --warn     --nms-warn               declared
- *     --now      --nms-now                named; not yet declared (wave 2)
+ *     house      package
+ *     --bg       --nms-background
+ *     --text     --nms-foreground
+ *     --line     --nms-border
+ *     --card     --nms-card
+ *     --muted    --nms-muted-foreground
+ *     --neg      --nms-neg
+ *     --pos      --nms-pos
+ *     --ok       --nms-ok
+ *     --warn     --nms-warn
+ *     --now      --nms-now
  *
- * NAMING WITHOUT DECLARING IS THE POINT, not a half-measure. Declaring a name
- * early puts a grayscale default and a distinct themed value in front of a
- * reviewer for a role nothing in this package renders, which is the state the
- * rule above refuses. Three of the four made that round trip in spec #439 S1,
- * when `SummaryCard` arrived reading all three at once: `--nms-pos` on a rising
- * P&L, `--nms-ok` and `--nms-warn` on the two arms of its data-safety badge.
- * `--nms-now` stays named and undeclared until `PriceDropPathChart` crosses
- * reading it. Naming them ahead of that costs nothing and settles the two
- * mappings that are genuinely hard, below, while the argument is still fresh.
+ * NAMING BEFORE DECLARING WAS THE POINT, not a half-measure, and the status
+ * column that recorded it has done its job and gone. Declaring a name early puts
+ * a grayscale default and a distinct themed value in front of a reviewer for a
+ * role nothing in this package renders, which is the state the rule above
+ * refuses. All four names made the round trip in spec #439: three in S1, when
+ * `SummaryCard` arrived reading them at once — `--nms-pos` on a rising P&L,
+ * `--nms-ok` and `--nms-warn` on the two arms of its data-safety badge — and
+ * `--nms-now` in S5, when `PriceDropPathChart` crossed reading it three times.
+ * Naming them ahead of that cost nothing and settled the two mappings that are
+ * genuinely hard, below, while the argument was still fresh.
  *
  * `--muted` MAPS TO `--nms-muted-foreground`, NEVER TO `--nms-muted`. The
  * English collides and the roles do not: `--nms-muted` is a recessed SURFACE
@@ -198,6 +199,11 @@ export const NMS_TOKENS = [
     name: "--nms-warn",
     value: "oklch(0.52 0 0)",
     note: "The withheld-or-excluded FILL, `--nms-ok`'s other arm on the same badge. NOT `--nms-destructive`: nothing is being destroyed, and nothing has failed — the card is naming what it could not state. Two arms of one branch, so a fixture has to stage both to show either.",
+  },
+  {
+    name: "--nms-now",
+    value: "oklch(0.68 0 0)",
+    note: "WHERE PRICE IS NOW — the level a trading chart draws its last price at, and the third of the three state colours the Price Drop Path shares with the rung list beside it. `PriceDropPathChart` reads it three times: the horizontal spot rule, the end-anchored label that says what the rule is, and the `Now` legend swatch. It is the one name in this table with no near neighbour, chosen to collide with `--nms-pos` (the filled path), `--nms-muted-foreground` (the waiting path) and `--nms-neg` alike — a spot level is a neutral fact, and painting it in the loss colour would say something the price has not said. Grayscale here makes \"now\" unreviewable in grayscale mode, which is correct and is the same call `--nms-neg` records: grayscale reviews hierarchy, spacing and state.",
   },
   {
     name: "--nms-ring",
