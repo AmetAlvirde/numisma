@@ -34,72 +34,33 @@
  */
 import type { DcaPositionRow, SnapshotAnchor } from "../projection/contract.ts";
 import { needsRecording, venueFilled } from "../ladder/fill-path-view.ts";
-
 /**
- * THE ALERT LINE'S THREE COUNTS (spec #285 G-D13, slice #289) — what the card says
- * before the operator taps it: `8 rungs · 4 filled · ⚠ 1 needs recording`.
+ * THE CARD'S SHAPE IS THE PACKAGE'S, AND THIS MODULE IMPORTS ITS OWN RETURN TYPE BACK
+ * (spec #439 §4.1, S4). All four names used to be declared here; they are declared in
+ * `@numisma/components`'s `ui/dca-card.tsx` now, beside the component that renders
+ * them.
  *
- * COUNTS, NOT AMOUNTS. The card still shows no capital figure of any kind, for the
- * reason its own header gives: day zero must render `pending`, never `$0`. A count of
- * rungs is a cardinality and carries no such trap.
+ * THE CONSUMER DEFINES THE INTERFACE, which is the standard direction and also the only
+ * one that lets a cosmos fixture build a `DcaView` literal without importing `apps/web`
+ * — `seam-isolation.test.ts` forbids that outright. Every line of `composeDcaView` stays
+ * here, and nothing about what it emits changed.
+ *
+ * IT IS NOT A COPY WAITING TO DRIFT, because the arrow points both ways: this module
+ * RETURNS the package's `DcaView`, so a field added on either side stops compiling at
+ * the assignments below. The two fields the package had to SPELL — `state` and `kind`,
+ * indexed accesses into `DcaPositionRow`, which stays here because 34 files including
+ * all of `push/` read it — get the same treatment for free: `composeDcaView` assigns
+ * `position.state` and spreads `position.kind` straight into a `DcaPositionView`, so a
+ * fifth state or a third kind on the wire reds THIS file, in front of the author who
+ * has to decide what the card says about it.
+ *
+ * THREE NAMES, NOT FOUR. `DcaRungView` is the package's too and this module has no
+ * lexical use for it: it is reached through `DcaPositionView["rungs"]`, so the sort
+ * below is already checked against it. Importing a fourth name to read as complete
+ * would be an unused binding, and this file's whole argument is that the check lands
+ * where a reader can act on it.
  */
-export interface DcaAlertView {
-  rungs: number;
-  /** Rungs the VENUE reports filled — the walk so far, as the venue sees it. */
-  filled: number;
-  /** Filled at the venue with no lot recorded. The only thing here that needs action. */
-  needsRecording: number;
-}
-
-/** One rung, ready to render — the price axis and nothing else, as it arrives. */
-export interface DcaRungView {
-  priceUsd: number;
-}
-
-/** One position's plan, shaped so the card branches on data rather than on absence. */
-export interface DcaPositionView {
-  positionId: string;
-  state: DcaPositionRow["state"];
-  /** Present on `pending`/`active` rows only, exactly as the wire has it. */
-  kind?: DcaPositionRow["kind"];
-  /**
-   * The declared rungs, DESCENDING by price — and ALWAYS an array, empty where the
-   * wire has no `rungs` key at all. That normalization is the point: a `dcaTime` plan
-   * and an ended ladder are different FACTS, carried by `state` and `kind`, and the
-   * card should read them there rather than inferring them from a missing key.
-   */
-  rungs: readonly DcaRungView[];
-  /**
-   * THE LADDER'S DURABLE IDENTITY, carried so the card can be the TAP TARGET for
-   * `/ladder/$planId`. Absent on a v4 row, which is exactly why the card branches on it
-   * rather than assuming a link is always available.
-   *
-   * A JOIN KEY, NEVER A LABEL. It goes into the `to`/`params` of a link and nowhere
-   * else; nothing renders it as a name.
-   */
-  planId?: string;
-  /**
-   * The alert counts, PRESENT ONLY WHEN THE ROW RECONCILED. An unreconciled row (a v4
-   * anchor, an unreadable orders sidecar) has no `figures`, and rendering `0 filled`
-   * for it would state a measurement nobody took — the same absent-not-zero discipline
-   * the rest of this increment runs on. The card renders the plan without an alert.
-   */
-  alert?: DcaAlertView;
-}
-
-export interface DcaView {
-  /**
-   * The loader's whole-file failure, raised to the one boolean the card renders. An
-   * unreadable file and a file that declares no plan both produce zero positions, and
-   * they must NOT render the same empty — that is the entire reason `source` is on
-   * the wire.
-   */
-  unreadable: boolean;
-  /** One entry per declared position, in the wire's own first-mention order. */
-  positions: readonly DcaPositionView[];
-  /** The COUNT of unreadable lines that named no position. Never their content. */
-  unattributable: number;
-}
+import type { DcaAlertView, DcaPositionView, DcaView } from "@numisma/components";
 
 /**
  * Compose everything the DCA card needs for `latest`.
@@ -112,7 +73,12 @@ export function composeDcaView(latest: SnapshotAnchor): DcaView {
   return {
     unreadable: dca.source === "unreadable",
     unattributable: dca.unattributable,
-    positions: dca.positions.map((position) => ({
+    // ANNOTATED PER POSITION, not left to the return type alone (spec #439 §4.1, S4).
+    // The package spells `state` and `kind` out because `DcaPositionRow` cannot move,
+    // and the latch on that is the assignment below. A `DcaView` return type checks it
+    // too, but the error surfaces on the whole object literal; the annotation here puts
+    // it on the row whose wire field grew a member.
+    positions: dca.positions.map((position): DcaPositionView => ({
       positionId: position.positionId,
       state: position.state,
       ...(position.kind === undefined ? {} : { kind: position.kind }),

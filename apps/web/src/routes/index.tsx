@@ -2,12 +2,12 @@ import { Link, createFileRoute } from "@tanstack/react-router";
 import { getDashboard } from "../lib/dashboard.ts";
 import {
   Crumb,
+  DcaCard,
   GlanceCard,
   Shell,
   SnapshotEmptyNotice,
   SnapshotStaleNotice,
 } from "@numisma/components";
-import { DcaCard } from "../components/DcaCard.tsx";
 import { computeVerdict } from "../glance/verdict.ts";
 import { composeDcaView } from "../glance/dca-view.ts";
 import type { SnapshotAnchor } from "../projection/contract.ts";
@@ -100,7 +100,25 @@ function GlanceView({
       >
         Big picture →
       </Crumb>
-      <DcaCard view={dca} />
+      {/*
+        THE TAP-THROUGH TO THE LADDER IS BUILT HERE, NOT IN THE CARD (spec #439 §4.6).
+        `DcaCard` crossed into `@numisma/components` and the package has no router, so
+        it owns the anchor's classes and hands them out with the `planId` it holds the
+        only copy of. The `to` is a LITERAL and the route tree is in scope in this file,
+        which is what keeps TanStack's own check on the destination — an adapter taking
+        `to: string` would have thrown that away and shipped the first typo.
+
+        The slot is OPTIONAL and this is the only caller that passes one. A row with no
+        `planId` still renders the unlinked paragraph, exactly as it did before the move.
+      */}
+      <DcaCard
+        view={dca}
+        renderLink={({ className, children, planId }) => (
+          <Link className={className} to="/ladder/$planId" params={{ planId }}>
+            {children}
+          </Link>
+        )}
+      />
     </Shell>
   );
 }

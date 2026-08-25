@@ -21,6 +21,13 @@ export { Button, buttonVariants } from "./ui/button";
 export { Card, CardTitle, CARD_SURFACE } from "./ui/card";
 export { Crumb } from "./ui/crumb";
 export {
+  DcaCard,
+  type DcaAlertView,
+  type DcaPositionView,
+  type DcaRungView,
+  type DcaView,
+} from "./ui/dca-card";
+export {
   GlanceCard,
   referenceLabel,
   type ChangeSlot,

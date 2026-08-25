@@ -23,122 +23,82 @@
  * of its own: its colour used to be a base plus two overrides and is now a total map, so
  * the arm that was answered by the base is the one a conversion drops silently.
  *
- * A ROUTER FOR ONE CASE, AND ONLY ONE. The tap-through renders only where the wire
- * supplies a `planId`, so a plan without one exercises the whole card outside a router
- * context and four of the five cases take that path. The fifth mounts a throwaway router
- * because slice 6 converted the anchor itself. The link's `to` and `params` are pinned by
- * `route-move.test.ts`'s regexes, which this increment does not edit — that test is the
- * oracle for the link, this file for markup.
+ * ── NO ROUTER, ANYWHERE IN THIS FILE (spec #439 §4.6, S4) ───────────────────────────
+ * It used to mount one: four `@tanstack/react-router` imports built a throwaway route
+ * tree for the single case where the anchor renders. All four are gone, and that is what
+ * makes this file portable at all — the package cannot depend on a router, and
+ * `route-move.test.ts`'s dependency pin asserts its manifest exactly.
+ *
+ * The tap-through leaves through `renderLink` now, so the anchor arm is a SLOT arm: the
+ * test passes a plain `<a>` and asserts the classes the package handed it. `to` and
+ * `params` moved to `routes/index.tsx` with the slot, and `route-move.test.ts` reads them
+ * there — that test is still the oracle for the link, this file for markup.
  *
  * THE PLANS ARE AUTHORED. No ledger output, and no plans-sidecar content, has been near
- * this file — the card renders counts, never lines, and neither does its fixture.
+ * this file — the card renders counts, never lines, and neither does its fixture. The
+ * literals live in `dca-card.fixtures.ts` beside the component, where the workbench
+ * fixture reads the same ones.
  */
+import type { ReactNode } from "react";
 import { describe, expect, it } from "vitest";
-import {
-  RouterProvider,
-  createMemoryHistory,
-  createRootRoute,
-  createRouter,
-} from "@tanstack/react-router";
 
 import {
   classTokens as tokens,
   render,
   absentSlots,
   screen,
-} from "@numisma/components/testkit/render.testkit.tsx";
-import { CARD_SURFACE } from "@numisma/components";
-import { DcaCard } from "./DcaCard.tsx";
-import type { DcaView } from "../glance/dca-view.ts";
-
-/** An in-force ladder with rungs, an alert, and something needing recording. */
-function ladderView(): DcaView {
-  return {
-    unreadable: false,
-    unattributable: 0,
-    positions: [
-      {
-        positionId: "test-ladder",
-        state: "active",
-        kind: "dcaLadder",
-        rungs: [{ priceUsd: 900 }, { priceUsd: 800 }],
-        alert: { rungs: 2, filled: 1, needsRecording: 1 },
-      },
-    ],
-  };
-}
-
-/** A cadence plan: honestly rungless, no alert, so the absence copy is what renders. */
-function cadenceView(): DcaView {
-  return {
-    unreadable: false,
-    unattributable: 0,
-    positions: [
-      { positionId: "test-cadence", state: "pending", kind: "dcaTime", rungs: [] },
-    ],
-  };
-}
-
-/** The unreadable file — which is never "no plans declared", and says so. */
-function unreadableView(): DcaView {
-  return { unreadable: true, unattributable: 2, positions: [] };
-}
+} from "../testkit/render.testkit";
+import { CARD_SURFACE } from "./card";
+import { DcaCard } from "./dca-card";
+import type { DcaView } from "./dca-card";
+import {
+  bareView,
+  cadenceView,
+  ladderView,
+  ladderWithPlanId,
+  unreadableView,
+} from "./dca-card.fixtures";
 
 /**
- * A row in one of the two states the wire ships bare: `{ positionId, state }` and no plan
- * body at all. Both exist so the state badge can be walked on every arm rather than on
- * the one the live ledger happens to be in — the two colours slice 6 deleted were
- * OVERRIDES of a base, and the conversion replaced that cascade with a total map, so the
- * arms that used to be answered by the base are exactly the ones a partial map would drop.
+ * Every arm of the state badge, and the colour the deleted rules gave each one.
+ *
+ * NAMESPACED WITH THE COMPONENT (spec #439 §3.2, S4). Four of this card's ten reads are
+ * here, and rewriting `STATE_TONE` without rewriting these four leaves a red naming the
+ * exact string — which is this wave's parity evidence. Not loosened to a substring.
  */
-function bareView(state: "ended" | "unreadable"): DcaView {
-  return {
-    unreadable: false,
-    unattributable: 0,
-    positions: [{ positionId: `test-${state}`, state, rungs: [] }],
-  };
-}
-
-/** Every arm of the state badge, and the colour the deleted rules gave each one. */
 const STATE_COLOURS = [
-  ["pending", "text-[var(--muted)]"],
-  ["active", "text-[var(--pos)]"],
-  ["ended", "text-[var(--muted)]"],
-  ["unreadable", "text-[var(--warn)]"],
+  ["pending", "text-[var(--nms-muted-foreground)]"],
+  ["active", "text-[var(--nms-pos)]"],
+  ["ended", "text-[var(--nms-muted-foreground)]"],
+  ["unreadable", "text-[var(--nms-warn)]"],
 ] as const;
 
-/** The same ladder, with the one field that turns the alert line into a tap target. */
-function ladderWithPlanId(): DcaView {
-  const view = ladderView();
-  return {
-    ...view,
-    positions: [{ ...view.positions[0]!, planId: "test-plan" }],
-  };
-}
-
 /**
- * Mount the card inside a throwaway router, for the one arm that needs one.
+ * The slot the app passes, reduced to what a package test can mount: a plain anchor.
  *
- * The docblock above is right that a plan WITHOUT a `planId` exercises the whole card
- * outside a router, and that stays the default here — four of the five cases below take
- * it. But slice 6 converted the anchor itself, and an anchor that never mounts is an
- * anchor no assertion can reach. The route tree is authored for this test and is not the
- * app's; `route-move.test.ts` remains the oracle for where the link points.
+ * THE `href` IS `#` AND IS NEVER ASSERTED. It is there because an anchor without one is
+ * `generic` to the accessibility tree, not `link`, and the tap target being reachable by
+ * role is half of what the alert line is for. Where the anchor actually GOES is
+ * `routes/index.tsx`'s decision, and `route-move.test.ts` reads the `to` and the `params`
+ * there — this file asserts only what the package handed over.
  *
- * AWAITED, because a TanStack router resolves its first match asynchronously: the
- * container is empty on the synchronous return.
+ * `seen` IS THE HALF THAT MATTERS. The classes reach the DOM whether or not the slot got
+ * the `planId`, so the anchor alone cannot prove the widening landed; capturing the
+ * argument is what does.
  */
-async function renderWithRouter(view: DcaView) {
-  const rootRoute = createRootRoute({ component: () => <DcaCard view={view} /> });
-  const router = createRouter({
-    routeTree: rootRoute,
-    history: createMemoryHistory({ initialEntries: ["/"] }),
-  });
-  // The router's own type is registered against the app's route tree; this authored tree
-  // is not that tree, which is the one place a test-local router has to say so.
-  const result = render(<RouterProvider router={router as never} />);
-  await screen.findByRole("link");
-  return result;
+function linkSlot(seen: { planId?: string }) {
+  return ({ className, children, planId }: {
+    className: string;
+    children: ReactNode;
+    planId: string;
+  }) => {
+    seen.planId = planId;
+    return (
+      <a className={className} href="#">
+        {children}
+      </a>
+    );
+  };
 }
 
 describe("DcaCard on the shared Card", () => {
@@ -162,10 +122,10 @@ describe("DcaCard on the shared Card", () => {
     const { container } = render(<DcaCard view={unreadableView()} />);
 
     // The unreadable arm is the narrowest: one paragraph, and the whole of what this
-    // card had to convert. `.muted` was `color: var(--muted); margin: 4px 0 0`, and
+    // card had to convert. `.muted` set the recessed text colour and `margin: 4px 0 0`, and
     // preflight is off, so `mt-1` alone would leave the UA's `p` margin on three edges.
     const paragraph = container.querySelector("p")!;
-    for (const utility of ["text-[var(--muted)]", "m-0", "mt-1"]) {
+    for (const utility of ["text-[var(--nms-muted-foreground)]", "m-0", "mt-1"]) {
       expect(tokens(paragraph)).toContain(utility);
     }
   });
@@ -195,11 +155,11 @@ describe("DcaCard on the shared Card", () => {
 
     const rung = screen.getByRole("columnheader", { name: "Rung" });
     const price = screen.getByRole("columnheader", { name: "Limit price" });
-    // NAMESPACED HERE WHILE THIS CARD IS STILL IN `apps/web`, because the string is not
-    // this card's to write: the header cell comes from `TABLE_HEAD_CELL`, which crossed
-    // into `@numisma/components` with `SectionTable` (spec #439 S2) and was rewritten
-    // there. Rewriting the constant without rewriting this line leaves a red naming the
-    // exact class, which is the wave's parity evidence. The card itself follows in #444.
+    // NOT THIS CARD'S STRING TO WRITE, and not S4's to re-decide: the header cell comes
+    // from `TABLE_HEAD_CELL`, which crossed with `SectionTable` in spec #439 S2 and was
+    // rewritten there. This line was namespaced in that slice, while the card still sat
+    // in `apps/web`, and it is left exactly as it stands — the card reads the six table
+    // constants as siblings now and decides none of their colour.
     for (const utility of ["px-[10px]", "py-2", "border-b", "border-[var(--nms-border)]"]) {
       expect(tokens(rung)).toContain(utility);
       expect(tokens(price)).toContain(utility);
@@ -283,10 +243,10 @@ describe("DcaCard on the shared Card", () => {
 
   it("carries the alert line's box and its warn span's own colour", () => {
     render(<DcaCard view={ladderView()} />);
-    // This view supplies no `planId`, so the alert renders as prose and the whole card
-    // mounts outside a router — the arm the docblock above describes. Reached through the
-    // plan block rather than by text: the line and the span inside it share every word,
-    // so a text query cannot say which of the two it found.
+    // This view supplies no `planId`, so the alert renders as prose — one of the two
+    // absences that reach that arm, the other being an absent slot, which the case below
+    // covers. Reached through the plan block rather than by text: the line and the span
+    // inside it share every word, so a text query cannot say which of the two it found.
     const plan = screen.getByText("in force").parentElement!.parentElement!;
     const alert = plan.querySelectorAll("p")[1]!;
     expect(alert.textContent).toContain("needs recording");
@@ -294,24 +254,27 @@ describe("DcaCard on the shared Card", () => {
     for (const utility of ["m-0", "mb-2", "text-[0.85rem]"]) {
       expect(tokens(alert)).toContain(utility);
     }
-    expect(tokens(alert.querySelector("span")!)).toContain("text-[var(--neg)]");
+    expect(tokens(alert.querySelector("span")!)).toContain("text-[var(--nms-neg)]");
   });
 
-  it("gives the tap target its box, its colour and a decoration on both states", async () => {
+  it("gives the tap target its box, its colour and a decoration on both states", () => {
     // THE KEYBOARD RING IS NOT ASSERTED HERE AND CANNOT BE. The deleted rule underlined
     // on `:focus-visible` and never touched `outline`; the ring is the user agent's, live
     // because preflight is off, and jsdom computes no cascade and paints no focus. What
     // this end holds is that the underline came across on BOTH states as variants — which
     // outrank the base by specificity rather than by emitted order — and that no utility
     // here suppresses an outline. Chrome, after a real Tab, holds the ring itself.
-    const { container } = await renderWithRouter(ladderWithPlanId());
-    const link = await screen.findByRole("link");
+    const seen: { planId?: string } = {};
+    const { container } = render(
+      <DcaCard view={ladderWithPlanId()} renderLink={linkSlot(seen)} />,
+    );
+    const link = screen.getByRole("link");
 
     for (const utility of [
       "inline-block",
       "px-0",
       "py-1",
-      "text-[var(--text)]",
+      "text-[var(--nms-foreground)]",
       "no-underline",
       "hover:underline",
       "focus-visible:underline",
@@ -324,6 +287,52 @@ describe("DcaCard on the shared Card", () => {
     // The line still wraps the link rather than being replaced by it.
     expect(link.parentElement?.tagName).toBe("P");
     expect(container.querySelectorAll("a")).toHaveLength(1);
+  });
+
+  it("renders the anchor THROUGH the slot, with no router in the tree", () => {
+    // WHAT THE MOVE BOUGHT (spec #439 §4.6, S4). This card used to import `<Link>` and
+    // this file used to build a throwaway router to mount it. Neither exists now: the
+    // package hands the slot a class string and the view's `planId`, the caller returns
+    // whatever anchor it likes, and nothing in this tree knows what a route is.
+    //
+    // THE `planId` IS THE WIDENING AND IT IS CHECKED BY CAPTURE, not by the DOM. The
+    // classes arrive whether or not the slot was handed an id, so an anchor carrying
+    // `ALERT_LINK` proves only half of it. `ladderWithPlanId()` is the one fixture that
+    // supplies the field, and `test-plan` is the value the card holds the only copy of.
+    const seen: { planId?: string } = {};
+    render(<DcaCard view={ladderWithPlanId()} renderLink={linkSlot(seen)} />);
+
+    expect(seen.planId).toBe("test-plan");
+    const link = screen.getByRole("link");
+    // The arrow is the PACKAGE's here, unlike `Crumb`'s: one destination, one direction,
+    // and it sits inside the link with the alert text as one sentence. So it renders
+    // where the link renders and nowhere else, which is what the case below pins.
+    expect(link.textContent).toContain("→");
+    expect(link.textContent).toContain("needs recording");
+    // The id is a JOIN KEY, never a label. It reaches the slot and no rendered text.
+    expect(link.textContent).not.toContain("test-plan");
+  });
+
+  it("renders the REAL unlinked arm when no slot is passed", () => {
+    // OPTIONAL IS THE BETTER HALF, and this is the case that says why. `Crumb`'s fixture
+    // has to supply a dead `<a href="#">` because a crumb with no link is not a state the
+    // app produces. This card's IS one: `planId` is absent on every v4 row, and the alert
+    // has always rendered as a plain paragraph there. So an absent slot degrades to a
+    // state production emits, not to a stub — same counts, same box, no anchor, no arrow.
+    const { container } = render(<DcaCard view={ladderWithPlanId()} />);
+
+    expect(container.querySelectorAll("a")).toHaveLength(0);
+    const plan = screen.getByText("in force").parentElement!.parentElement!;
+    const alert = plan.querySelectorAll("p")[1]!;
+
+    expect(alert.tagName).toBe("P");
+    for (const utility of ["m-0", "mb-2", "text-[0.85rem]"]) {
+      expect(tokens(alert)).toContain(utility);
+    }
+    expect(alert.textContent).toContain("2 rungs · 1 filled");
+    expect(alert.textContent).toContain("needs recording");
+    // The arrow lives inside the link, so it must not survive the link's absence.
+    expect(alert.textContent).not.toContain("→");
   });
 
   it("still mounts each rungless arm's `Absent`, em dash and stated cause", () => {

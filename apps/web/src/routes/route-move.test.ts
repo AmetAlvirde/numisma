@@ -65,7 +65,14 @@ describe("D11: the route move", () => {
     // AS JSX, for the reason the G-D13 half of this file spells out: the import line
     // alone satisfies a bare `/DcaCard/`, so the card can be deleted with this green.
     expect(index).toMatch(/<DcaCard/);
-    expect(index).toMatch(/components\/DcaCard\.tsx/);
+    // FROM THE PACKAGE, BY NAME (spec #439 S4). The card crossed into
+    // `@numisma/components` and the relative path this used to read is gone. Named inside
+    // the import block for `SHELL_FROM_PACKAGE`'s reason: a bare
+    // `/@numisma\/components/` matches every route in this directory and asserts nothing
+    // about where the card comes from.
+    expect(index).toMatch(
+      /import \{[^}]*\bDcaCard\b[^}]*\} from "@numisma\/components"/s,
+    );
   });
 
   it("does NOT duplicate the DCA card onto `/big-picture`", () => {
@@ -115,9 +122,11 @@ describe("D11: the route move", () => {
  * operator judges the layout by opening the phone.
  *
  * ── MUTATION CHECK (performed 2026-08-11) ───────────────────────────────────────────
- *  - changed `DcaCard.tsx`'s `to="/ladder/$planId"` to `to="/"` → "DcaCard is the one
+ *  - changed the tap-through's `to="/ladder/$planId"` to `to="/"` → "DcaCard is the one
  *    tap target for the ladder" red. Right reason: the card stopped being the way in,
- *    and the route would be reachable only by typing a UUID.
+ *    and the route would be reachable only by typing a UUID. (Performed against
+ *    `DcaCard.tsx`; the destination lives in `index.tsx`'s `renderLink` slot since spec
+ *    #439 S4 and the case reads it there.)
  *  - added a `reconcileFillPath` VALUE import from `@numisma/engine` to the route →
  *    "the ladder surfaces import no engine VALUE" red. Right reason: a value import is
  *    exactly what would put the engine in the browser bundle.
@@ -168,9 +177,23 @@ describe("G-D13: the ladder route", () => {
   it("makes DcaCard the one tap target for the ladder", () => {
     // The route is reached by TAPPING, never by typing a UUID, so the link is the only
     // way in and losing it would strand the whole surface.
-    const card = readFileSync(join(HERE, "../components/DcaCard.tsx"), "utf-8");
-    expect(card).toMatch(/to=["']\/ladder\/\$planId["']/);
-    expect(card).toMatch(/params=\{\{\s*planId\s*\}\}/);
+    //
+    // READ OFF `index.tsx`, NOT OFF THE CARD (spec #439 S4). This used to
+    // `readFileSync` `../components/DcaCard.tsx`, which now throws ENOENT — loud, and
+    // useless, because a filesystem error says nothing about the app. The card moved into
+    // `@numisma/components`, which has no router, so it hands its anchor's classes and the
+    // view's `planId` out through a slot and the destination is written at the call site.
+    //
+    // THE ASSERTION IS STRONGER HERE. `index.tsx` is where the generated route tree is in
+    // scope, so it is where TanStack checks `to` and where a typo in a route path would
+    // otherwise ship. A link-adapter context normalising every destination to
+    // `to: string` would have moved this claim somewhere nothing could check it.
+    const index = read("index.tsx");
+    expect(index).toMatch(/to=["']\/ladder\/\$planId["']/);
+    expect(index).toMatch(/params=\{\{\s*planId\s*\}\}/);
+    // Inside the slot, not loose on the page: the `<Link>` is the card's tap-through and
+    // nothing else on `/` points at the ladder.
+    expect(index).toMatch(/renderLink=\{/);
   });
 
   it("keeps the DCA card on `/` — the ladder route did not move it", () => {
