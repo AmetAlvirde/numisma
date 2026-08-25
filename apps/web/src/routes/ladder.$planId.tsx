@@ -1,9 +1,9 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { getDashboard } from "../lib/dashboard.ts";
-import { Shell } from "../components/Shell.tsx";
 import {
   CARD_SURFACE,
   Crumb,
+  Shell,
   SnapshotEmptyNotice,
   SnapshotStaleNotice,
 } from "@numisma/components";

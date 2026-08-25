@@ -16,8 +16,8 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { classTokens as tokens, render } from "@numisma/components/testkit/render.testkit.tsx";
-import { Shell } from "./Shell.tsx";
+import { classTokens as tokens, render } from "../testkit/render.testkit";
+import { Shell } from "./shell";
 
 describe("Shell", () => {
   it("still renders one `main` around whatever it is handed", () => {

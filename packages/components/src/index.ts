@@ -20,6 +20,7 @@ export { Absent } from "./ui/absent";
 export { Button, buttonVariants } from "./ui/button";
 export { Card, CardTitle, CARD_SURFACE } from "./ui/card";
 export { Crumb } from "./ui/crumb";
+export { Shell } from "./ui/shell";
 export {
   NOTICE_CODE,
   SnapshotEmptyNotice,

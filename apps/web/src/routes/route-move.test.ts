@@ -40,6 +40,17 @@ import { sourceFiles } from "../../../../ops/testkit/repo-sources.testkit.js";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const read = (file: string) => readFileSync(join(HERE, file), "utf-8");
 
+/**
+ * `Shell` reached BY NAME out of the package, not merely mentioned.
+ *
+ * A bare `/@numisma\/components/` would match every route in this directory and
+ * assert nothing about the chrome; naming the binding inside the import block is
+ * what makes this a claim about where `Shell` comes from. Paired everywhere it is
+ * used with `not.toMatch(/function Shell\(/)`, which is the half that forbids a
+ * second copy.
+ */
+const SHELL_FROM_PACKAGE = /import \{[^}]*\bShell\b[^}]*\} from "@numisma\/components"/s;
+
 describe("D11: the route move", () => {
   it("serves the glance at `/` — the verdict, not the composition tables", () => {
     const index = read("index.tsx");
@@ -78,9 +89,12 @@ describe("D11: the route move", () => {
 
   it("shares ONE Shell between both surfaces", () => {
     // Two copies would drift, and the whole point of a move is that there is one
-    // page's worth of chrome, not two.
+    // page's worth of chrome, not two. `Shell` moved into `@numisma/components`
+    // (spec #439), so the import is a PACKAGE specifier now — and the second
+    // assertion is the half that actually forbids a second copy, wherever the
+    // first one lives.
     for (const file of ["index.tsx", "big-picture.tsx"]) {
-      expect(read(file), file).toMatch(/components\/Shell\.tsx/);
+      expect(read(file), file).toMatch(SHELL_FROM_PACKAGE);
       expect(read(file), file).not.toMatch(/function Shell\(/);
     }
   });
@@ -174,7 +188,7 @@ describe("G-D13: the ladder route", () => {
 
   it("shares the same ONE Shell as the other two surfaces", () => {
     const ladder = read("ladder.$planId.tsx");
-    expect(ladder).toMatch(/components\/Shell\.tsx/);
+    expect(ladder).toMatch(SHELL_FROM_PACKAGE);
     expect(ladder).not.toMatch(/function Shell\(/);
   });
 
