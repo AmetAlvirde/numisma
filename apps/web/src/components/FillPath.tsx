@@ -1,5 +1,4 @@
-import { createContext, useContext, useState } from "react";
-import type { ReactElement, ReactNode } from "react";
+import type { ReactElement } from "react";
 import { formatUsd } from "@numisma/engine/format";
 import {
   Absent,
@@ -7,8 +6,39 @@ import {
   CARD_SURFACE,
   NOTICE_CODE,
   PriceDropPathChart,
+  useFillPath,
+  FillPathProvider,
 } from "@numisma/components";
 import { COMPACT_USD } from "@numisma/components/ui/price-drop-path.ts";
+/**
+ * ── THE TRANSITIONAL SUBPATH IMPORT (spec #439 S6, and it dies at S9) ────────────────
+ *
+ * The selection seam and the three shared helpers moved into the package; the six
+ * components below did not, and they read what the helpers dragged across with them.
+ * `FillPathProvider` and `useFillPath` come from the curated index above, because the
+ * ladder route's runtime closure already allows the bare `@numisma/components` specifier
+ * and because those two are the seam itself. EVERYTHING ON THIS LINE IS DIFFERENT: these
+ * are internals of `ui/fill-path.tsx` with no business on the package's public surface,
+ * so they cross by subpath and the whole import disappears when S9 takes the last part,
+ * rather than leaving names someone has to unpublish later.
+ *
+ * EIGHT NAMES, NOT THE SEVEN THE SLICE BRIEF TABULATES. The brief's table misses `RAIL`,
+ * which `SPOT` below composes from — `SpotReadout` is S7's, and until it moves, the
+ * string it reads has to reach it. The other seven are the brief's: `Figure` and
+ * `Expectation` for `Header` and `ExpectedRow`, `formatUnits` for both, `TILE_LABEL` for
+ * `ExpectedRow`'s hero label and `Chart`'s inspect label, `STACKED_LABEL` and
+ * `TILE_VALUE` for `Waiting`, and `SPOT_LABEL` for `SpotReadout`.
+ */
+import {
+  Expectation,
+  Figure,
+  formatUnits,
+  RAIL,
+  SPOT_LABEL,
+  STACKED_LABEL,
+  TILE_LABEL,
+  TILE_VALUE,
+} from "@numisma/components/ui/fill-path.tsx";
 import type {
   FillPathRungView,
   FillPathView,
@@ -139,35 +169,6 @@ const BADGE_TONE: Record<FillPathView["state"], string> = {
   unreadable: "text-[var(--warn)]",
 };
 
-/** The narrow row every data block on this card is: label left, figure hard right. */
-const RAIL = "flex flex-wrap items-baseline justify-end gap-x-[10px] gap-y-0 m-0 min-w-0";
-
-/**
- * THE LABEL IS THE ONLY THING THAT GIVES. `flex-[1_1_0]` — a ZERO basis, not `auto` — is
- * what makes "Expected average entry" wrap to two lines instead of shoving its figure
- * onto a line of its own: the label is prose and survives a break, the number is the
- * thing being aligned and must not leave the rail.
- */
-const TILE_LABEL =
-  "text-[0.7rem] font-semibold uppercase tracking-[0.04em] text-[var(--muted)]";
-const RAIL_LABEL = `${TILE_LABEL} flex-[1_1_0] min-w-0`;
-/** Spot keeps its right alignment when the card reflows; the tiles turn left. */
-const SPOT_LABEL = `${RAIL_LABEL} @[380px]/fp-header:flex-none`;
-const STACKED_LABEL = `${SPOT_LABEL} @[380px]/fp-header:text-left`;
-
-const TILE =
-  `${RAIL} @[380px]/fp-header:flex-col @[380px]/fp-header:items-stretch` +
-  " @[380px]/fp-header:justify-start @[380px]/fp-header:gap-x-0 @[380px]/fp-header:gap-y-[2px]";
-const TILE_VALUE =
-  "flex-none text-right text-[1.05rem] tabular-nums @[380px]/fp-header:text-left";
-/**
- * An absent figure carries a CAUSE, and the cause is longer than any price. It wraps
- * under its em dash at the right rail rather than widening the row, and follows the tile
- * back to the left edge when the card reflows.
- */
-const TILE_ABSENT =
-  "flex-wrap justify-end text-right @[380px]/fp-header:justify-start @[380px]/fp-header:text-left";
-
 /**
  * SPOT IS CONTEXT, NOT THE ANSWER. It reads in `--muted` like every other reference
  * figure on the card, which leaves Waiting as the one accented number.
@@ -242,197 +243,17 @@ const EXPECTED = "mb-[14px]";
 const HERO = "flex flex-col gap-px mb-3";
 const HERO_VALUE =
   "text-[1.75rem] font-bold leading-[1.15] tracking-[-0.01em] tabular-nums";
-/**
- * A PROJECTION READS QUIETER THAN A MEASUREMENT, in two ways at once. `--muted` is the
- * colour every other unmeasured thing on this page already uses, and 0.95rem is the step
- * down `.fp-tiles-quiet .fp-tile-value` used to make. That rule was a CONTEXT — a
- * descendant selector on the wrapper — and it collapses into this one string because
- * `Expectation` is the only thing that ever rendered inside that wrapper. Both sizes are
- * spelled once, never as a base plus an override: `TILE_VALUE`'s 1.05rem and this
- * 0.95rem are unvariant `font-size` utilities and would race each other on one element.
- */
-const EXPECTED_VALUE =
-  "flex-none text-right text-[0.95rem] tabular-nums text-[var(--muted)] @[380px]/fp-header:text-left";
-
-/** One measured tile: the figure, or the named reason there is none. Never a `$0`. */
-function Figure({
-  label,
-  figure,
-  render = formatUsd,
-}: {
-  label: string;
-  figure: MeasuredFigure;
-  render?: (value: number) => string;
-}) {
-  return (
-    <div className={TILE}>
-      <span className={STACKED_LABEL}>{label}</span>
-      {figure.known ? (
-        <strong className={TILE_VALUE}>{render(figure.value)}</strong>
-      ) : (
-        <Absent why={figure.why} className={TILE_ABSENT} />
-      )}
-    </div>
-  );
-}
 
 /**
- * ONE PROJECTED TILE. Deliberately NOT `<Figure>`: it takes a bare number, because an
- * expectation is not a `MeasuredFigure` and must never reach a slot that promises one.
- * The label carries "Expected" for the operator; the separate component and the separate
- * type carry it for the next person editing this file.
+ * THE PARTS, ATTACHED AS PLAIN PROPERTIES (grill D4, the same shape `Card` uses).
+ * `FillPath.RungList` is the call-site vocabulary, and mounting one property on its own
+ * is how each card's half of the accessibility contract is asserted without its three
+ * siblings standing in for it.
  *
- * THE `~` IS PRINTED HERE AND NOT PASSED IN, so it cannot be forgotten at a call site.
- * This is the component that renders projections, so every projection wears the mark by
- * construction — see this file's header for what the mark claims.
- */
-function Expectation({
-  label,
-  value,
-  render = formatUsd,
-}: {
-  label: string;
-  value: number;
-  render?: (value: number) => string;
-}) {
-  return (
-    <div className={TILE}>
-      <span className={STACKED_LABEL}>{label}</span>
-      <strong className={EXPECTED_VALUE}>~{render(value)}</strong>
-    </div>
-  );
-}
-
-/** Units render to 8 places at most — a satoshi is the smallest thing there is. */
-function formatUnits(value: number): string {
-  return `${value.toFixed(8).replace(/0+$/, "").replace(/\.$/, "")} BTC`;
-}
-
-/**
- * ── SEAM E: ONE SELECTION, FOUR CARDS, AND THE PROVIDER THAT OWNS BOTH ITS SHAPES ────
- *
- * Everything the four parts share. `view` rides along with the selection because a part
- * that reads its selection from context and its data from a prop is still a part its
- * parent has to assemble, and assembling it was the coupling this seam deleted.
- *
- * THE PROVIDER OWNS THE KEY↔INDEX TRANSLATION, WHICH IS THE WHOLE POINT (grill D3). The
- * chart is a `<input type="range">` and a range is an INDEX — that is not a modelling
- * choice, it is what the element is. The rung list is a list of keyed rungs. Selection
- * therefore has two natural spellings and something has to reconcile them; before this
- * slice it was `FillPathCards`' JSX, translating index to key on the way down and key to
- * index on the way back, which is why the two cards took two different prop pairs. Now
- * exactly one module converts, both directions are next to each other, and each part asks
- * in the only terms it has.
- *
- * `selectIndex` IS INTERNAL AND `select` IS NOT. `useFillPathSelection` — the published
- * hook, spec #403 Seam E — hands out `select(key)` and nothing else, because a key is the
- * stable identity of a rung and an index is an artifact of the slider. The index setter
- * stays inside this file, used by the one part that has an index to give.
- */
-type FillPathSelection = {
-  view: FillPathView;
-  selected: FillPathRungView | undefined;
-  selectedIndex: number;
-  select: (key: string) => void;
-  selectIndex: (index: number) => void;
-};
-
-const SelectionContext = createContext<FillPathSelection | undefined>(undefined);
-
-/** The context, or a loud failure. Read by the parts; never exported. */
-function useFillPath(): FillPathSelection {
-  const selection = useContext(SelectionContext);
-  if (selection === undefined) {
-    // A part mounted outside the provider would otherwise render an empty card and look
-    // like a data problem. It is a composition problem, and it says so.
-    throw new Error("a fill-path part was rendered outside `FillPathProvider`");
-  }
-  return selection;
-}
-
-/**
- * THE ONE PIECE OF STATE ON THIS PAGE: which rung the operator is inspecting. It is a UI
- * affordance and not a fact about the fund, which is why it lives here and every other
- * value on the page arrives already decided from `ladder/fill-path-view.ts`.
- *
- * STATE AND DERIVATION, AND NO EFFECT. The default — the rung price will reach next,
- * falling back to the top of the ladder when there is no live spot — is derived on every
- * render from the view rather than written into state when the view arrives. An effect
- * that seeded state from a prop would render one frame with the wrong rung selected and
- * would need a second effect to notice the view changing underneath it.
- */
-export function FillPathProvider({
-  view,
-  children,
-}: {
-  view: FillPathView;
-  children?: ReactNode;
-}): ReactElement {
-  const [selectedKey, setSelectedKey] = useState<string | undefined>(undefined);
-
-  const fallback = view.rungs.find((rung) => rung.isNext) ?? view.rungs[0];
-  const selected =
-    view.rungs.find((rung) => rung.key === selectedKey) ?? fallback;
-  const selectedIndex = selected
-    ? view.rungs.findIndex((rung) => rung.key === selected.key)
-    : 0;
-
-  return (
-    <SelectionContext.Provider
-      value={{
-        view,
-        selected,
-        selectedIndex,
-        select: setSelectedKey,
-        // THE OTHER HALF OF THE TRANSLATION, and the only place it is spelled. An index
-        // past the end selects nothing rather than throwing: a range whose `max` and
-        // whose rung count disagree is a bug, but not one worth crashing the page over.
-        selectIndex: (index) => setSelectedKey(view.rungs[index]?.key),
-      }}
-    >
-      {children}
-    </SelectionContext.Provider>
-  );
-}
-
-/**
- * WHAT A PART KNOWS ABOUT THE SELECTION (spec #403 Seam E). The chart reads
- * `selectedIndex`, the list reads `selected` and calls `select`, and neither one asks a
- * parent to convert between them.
- *
- * ── ITS ONLY CONSUMER TODAY IS ITS TEST, AND THAT IS THE CHOICE, NOT AN OVERSIGHT ────
- * The four parts below read `useFillPath` instead. Not because this shape is wrong for
- * them, but because it is deliberately NARROWER than any of them needs: every part also
- * reads `view` — the card that is the page's title, the panel that counts rungs, the list
- * that renders them — and `Chart` needs `selectIndex` as well. A part consuming this hook
- * would call the internal one beside it for the rest, which is two reads of one context
- * to satisfy a signature.
- *
- * The alternative was to delete it and let Seam E be `useFillPath` until the workbench
- * needs the narrow shape. It stays because the shape is the seam's stated contract: what
- * a component outside this module is allowed to know about the selection is these three
- * fields and NOT `view`, which is exactly the boundary the workbench's fixtures will
- * mount against. Publishing the narrow surface is what keeps `view` from leaking into the
- * next consumer's props by default.
- *
- * What that costs — a published surface with no in-tree caller — is paid off in
- * `fill-path-selection.test.tsx`, which exercises it as a consumer would: the exact three
- * fields, and a selection made through `select` that the parts mounted beside it see.
- */
-export function useFillPathSelection(): {
-  selected: FillPathRungView | undefined;
-  selectedIndex: number;
-  select: (key: string) => void;
-} {
-  const { selected, selectedIndex, select } = useFillPath();
-  return { selected, selectedIndex, select };
-}
-
-/**
- * THE PARTS, ATTACHED AS PLAIN PROPERTIES AND NAMED-EXPORTED (grill D4, the same shape
- * `Card` uses). `FillPath.RungList` is the call-site vocabulary; the named exports are
- * what a per-part test mounts on its own, which is how each card's half of the
- * accessibility contract is asserted without its three siblings standing in for it.
+ * THEY ARE NOT NAMED-EXPORTED, AND NEVER WERE. This docblock claimed they are until spec
+ * #439 S6 read it against the code: each part is a bare `function Header()` attached as a
+ * property below, and the frozen object is the only export. A per-part test reaches
+ * `FillPath.Header`, which is what it has always done.
  *
  * There is no `FillPath` component: the fill path is a composition, and the composition
  * with the house arrangement already has a name — `FillPathCards`, below.

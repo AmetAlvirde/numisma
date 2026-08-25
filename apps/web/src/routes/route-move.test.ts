@@ -289,11 +289,27 @@ describe("G-D13: the ladder route", () => {
     // exports one at a time, so putting a formatter and three geometry helpers on it
     // would tell every future reader they are public API. `tokens.ts` set that
     // precedent, and the exports map already carries `"./*"`.
+    // `@numisma/components/ui/fill-path.tsx` IS THE FIFTH, AND IT IS TRANSITIONAL —
+    // SPEC #439 S9 REMOVES IT (added by S6). The fill path's selection seam and its three
+    // shared helpers crossed into the package ahead of the six components that read them,
+    // so `components/FillPath.tsx` imports `Figure`, `Expectation`, `formatUnits` and the
+    // five class strings from the module directly rather than from the curated index.
+    // A subpath rather than the index for the reason the entry above gives: `index.ts`
+    // names its exports one at a time, and publishing a class string would tell every
+    // future reader it is public API. The import dies with the last part S9 moves, and
+    // THIS LINE GOES WITH IT — a fifth entry left standing here is a transitional
+    // arrangement that reads as permanent.
+    //
+    // Safe on the same footing as the package specifier above and no new footing at all:
+    // `ui/fill-path.tsx` is inside `@numisma/components`, whose whole dependency list is
+    // pinned by the case below, and it imports React, the pure `@numisma/engine/format`
+    // subpath and two sibling components. No `node:` builtin is reachable from it.
     const allowed = [
       "@numisma/engine/format",
       "@numisma/engine/calendar",
       "@numisma/components",
       "@numisma/components/ui/price-drop-path.ts",
+      "@numisma/components/ui/fill-path.tsx",
     ];
     for (const file of closure) {
       const source = readFileSync(join(HERE, "..", file), "utf-8");

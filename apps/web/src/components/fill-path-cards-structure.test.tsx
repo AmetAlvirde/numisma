@@ -36,11 +36,14 @@ import {
   absentSlots,
   screen,
 } from "@numisma/components/testkit/render.testkit.tsx";
-import { FillPath, FillPathCards, FillPathProvider } from "./FillPath.tsx";
+import { FillPath, FillPathCards } from "./FillPath.tsx";
 import { composeFillPathPage } from "../ladder/fill-path-view.ts";
 import type { FillPathView } from "../ladder/fill-path-view.ts";
 import { ladderFixture } from "../ladder/started-ladder.fixtures.ts";
-import { CARD_SURFACE, NOTICE_CODE } from "@numisma/components";
+// `FillPathProvider` crossed into the package at spec #439 S6, ahead of the parts this
+// file mounts around it. The file itself stays here until S9: it reaches every view
+// through `composeFillPathPage(ladderFixture(name))`, which a package test cannot do.
+import { CARD_SURFACE, FillPathProvider, NOTICE_CODE } from "@numisma/components";
 
 /** One fixture, composed through the real view module — never a hand-built view object. */
 function viewOf(name: "partly-walked" | "day-zero"): FillPathView {
@@ -283,11 +286,18 @@ describe("the header card carries its section as utilities", () => {
     ]);
     // The zero basis is what lets a two-word label wrap instead of pushing its figure
     // off the rail, so it is asserted rather than left to read as decoration.
+    //
+    // `--nms-muted-foreground` RATHER THAN `--muted` BECAUSE THE STRING MOVED (spec #439
+    // S6). `TILE_LABEL` now lives in `@numisma/components/ui/fill-path.tsx` and reads
+    // inside the package's namespace, which `apps/web` aliases onto its own `--muted`.
+    // Same painted grey, reached through the new name — and this assertion is the parity
+    // evidence for that, which is why it names the class exactly rather than matching a
+    // substring of it.
     expectClasses(tile?.querySelector("span"), [
       "text-[0.7rem]",
       "uppercase",
       "tracking-[0.04em]",
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
       "flex-[1_1_0]",
       "min-w-0",
       "@[380px]/fp-header:flex-none",
@@ -381,10 +391,11 @@ describe("the header card carries its section as utilities", () => {
     // what the deleted `.fp-expected .fp-tiles` context rule did.
     expectClasses(quiet, ["grid", "grid-cols-1", "mb-0"]);
     // A projection reads quieter in two ways at once, and the size is the half that had
-    // been a descendant selector rather than a class of its own.
+    // been a descendant selector rather than a class of its own. The colour is the
+    // second of `ui/fill-path.tsx`'s two reads (spec #439 S6); see the tile label above.
     expectClasses(quiet?.firstElementChild?.querySelector("strong"), [
       "text-[0.95rem]",
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
       "tabular-nums",
     ]);
   });

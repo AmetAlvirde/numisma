@@ -27,6 +27,25 @@ export {
   type DcaRungView,
   type DcaView,
 } from "./ui/dca-card";
+/**
+ * THE SELECTION SEAM, AND WHAT IS DELIBERATELY NOT HERE (spec #439 S6).
+ *
+ * `useFillPath` is published because the four `FillPath` parts still live in
+ * `apps/web` and read this provider across the boundary until S9. It is
+ * lowercase, so `fixture-coverage.test.ts` demands no fixture for it. Once S9
+ * lands it is published surface with no caller outside the package, and wave 3
+ * decides whether to withdraw it.
+ *
+ * `Figure`, `Expectation`, `formatUnits` and the class strings the unmoved parts
+ * also read are NOT here on purpose. They cross by subpath —
+ * `@numisma/components/ui/fill-path.tsx` — so that import dies at S9 instead of
+ * becoming public API.
+ */
+export {
+  FillPathProvider,
+  useFillPath,
+  useFillPathSelection,
+} from "./ui/fill-path";
 export type {
   ChartCircle,
   ChartGeometry,

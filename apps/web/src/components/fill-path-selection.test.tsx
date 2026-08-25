@@ -57,15 +57,29 @@
 import { describe, expect, it } from "vitest";
 
 import { fireEvent, render, userEvent, within } from "@numisma/components/testkit/render.testkit.tsx";
-import {
-  FillPath,
-  FillPathCards,
-  FillPathProvider,
-  useFillPathSelection,
-} from "./FillPath.tsx";
+import { FillPath, FillPathCards } from "./FillPath.tsx";
 import { composeFillPathPage } from "../ladder/fill-path-view.ts";
 import { ladderFixture } from "../ladder/started-ladder.fixtures.ts";
-import { CARD_SURFACE } from "@numisma/components";
+/**
+ * THE SEAM COMES FROM THE PACKAGE NOW, AND THE PARTS STILL DO NOT (spec #439 S6).
+ *
+ * That split is this file's whole evidentiary value for the slice: every case below —
+ * the live-panel contract, the Tab walk down the ladder, the slider's index round trip
+ * and the chart's selection mark — runs against a provider that lives in
+ * `@numisma/components` while the four parts it coordinates are still in `apps/web` and
+ * can no longer see it. A package-side test could not say that at this point, because
+ * there is nothing in the package for the provider to coordinate yet.
+ *
+ * The file stays in `apps/web` and moves at S9. It builds every view through
+ * `composeFillPathPage(ladderFixture(name))`, which spec #439 §4.3 states plainly a
+ * package test cannot do, and its first two describe blocks mount four parts and
+ * `FillPathCards`, none of which is in the package until then.
+ */
+import {
+  CARD_SURFACE,
+  FillPathProvider,
+  useFillPathSelection,
+} from "@numisma/components";
 
 /** The widest fixture: filled rungs, waiting rungs and a live spot, so every card draws. */
 function partlyWalkedView() {
