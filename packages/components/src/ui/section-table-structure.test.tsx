@@ -19,8 +19,11 @@
  * different value cell, and a new class name introduced on either would be invisible
  * to the anchored arm alone.
  *
- * THE ROWS ARE AUTHORED. `row-view.test.ts` stays the oracle for every derived value;
- * this file pins markup and nothing else. No ledger output has been near it.
+ * THE ROWS ARE AUTHORED, and since spec #439 S2 they live in `section-table.fixtures.ts`
+ * beside the component rather than in this file. Same literals, three readers: this test,
+ * the workbench's cosmos fixture, and whatever renders the table next.
+ * `apps/web/src/glance/row-view.test.ts` stays the oracle for every derived value; this
+ * file pins markup and nothing else. No ledger output has been near it.
  */
 import { describe, expect, it } from "vitest";
 
@@ -29,63 +32,10 @@ import {
   render,
   absentSlots,
   screen,
-} from "@numisma/components/testkit/render.testkit.tsx";
-import { CARD_SURFACE } from "@numisma/components";
-import { SectionTable } from "./SectionTable.tsx";
-import type { DashboardSection } from "@numisma/engine";
-import type { BigPictureView } from "../glance/row-view.ts";
-
-function section(): DashboardSection {
-  return {
-    id: "portfolios",
-    title: "Portfolios",
-    rows: [
-      {
-        id: "row-a",
-        kind: "portfolio",
-        label: "Alpha",
-        usdValue: 600,
-        percentOfFund: 60,
-      },
-      {
-        id: "row-b",
-        kind: "portfolio",
-        label: "Beta",
-        usdValue: 400,
-        percentOfFund: 40,
-      },
-    ],
-  };
-}
-
-/** Both deltas render on `row-a`; `row-b` is suppressed with a named cause. */
-function anchoredView(): BigPictureView {
-  return {
-    reference: { asOf: "2026-01-01", label: "Thu 1 Jan" },
-    costBasisLabel: "cost basis",
-    percentOfFundRendered: true,
-    fundValueRendered: true,
-    rows: new Map([
-      [
-        "row-a",
-        {
-          rendered: true,
-          vsAnchor: { rendered: true, usdValue: 25, percent: 4.35 },
-          vsCostBasis: { rendered: true, usdValue: -10, percent: -1.64 },
-        },
-      ],
-      [
-        "row-b",
-        {
-          rendered: false,
-          suppressedBy: "unexpected-absence" as const,
-          vsAnchor: { rendered: false, suppressedBy: "no-earlier-anchor" as const },
-          vsCostBasis: { rendered: false, suppressedBy: "no-cost-basis" as const },
-        },
-      ],
-    ]),
-  };
-}
+} from "../testkit/render.testkit";
+import { CARD_SURFACE } from "./card";
+import { SectionTable } from "./section-table";
+import { anchoredView, section } from "./section-table.fixtures";
 
 describe("SectionTable on the shared Card", () => {
   it("renders the section title as an h2", () => {
@@ -115,7 +65,7 @@ describe("SectionTable on the shared Card", () => {
     const suffix = screen
       .getAllByText(/%$/)
       .find((element) => element.tagName === "SPAN")!;
-    for (const utility of ["text-[var(--muted)]", "m-0", "mt-1"]) {
+    for (const utility of ["text-[var(--nms-muted-foreground)]", "m-0", "mt-1"]) {
       expect(tokens(suffix)).toContain(utility);
     }
   });
@@ -130,12 +80,14 @@ describe("SectionTable on the shared Card", () => {
     // it a positive anchor delta and a negative cost-basis one.
     const up = screen.getByText(/▲/);
     const down = screen.getByText(/▼/);
-    // NAMESPACED, WHILE THIS FILE'S OTHER COLOUR STRINGS ARE NOT, and the split is the
-    // point: these two come from `POSITIVE` and `NEGATIVE`, which crossed into
-    // `@numisma/components` with `SummaryCard` (spec #439 S1) and were rewritten there.
-    // Every other read below is `SectionTable`'s own and stays bare until the component
-    // itself crosses. A test asserting the old string here would have gone red on the
-    // exact class, which is this wave's parity evidence.
+    // THESE TWO ARRIVED ALREADY NAMESPACED and the other four did not, which is the whole
+    // reason the slice brief enumerates the component's reads over the FILE'S OWN TEXT
+    // rather than over what a reviewer sees on screen: `POSITIVE` and `NEGATIVE` crossed
+    // with `SummaryCard` in spec #439 S1 and were rewritten there, so the strings below
+    // appear nowhere in `section-table.tsx`. The four that are its own were rewritten in
+    // S2, in lockstep with the component. A test left asserting an old string goes red on
+    // the exact class, which is this wave's parity evidence — never loosened to a
+    // substring to get past it.
     expect(tokens(up)).toContain("text-[var(--nms-pos)]");
     expect(tokens(down)).toContain("text-[var(--nms-neg)]");
   });
@@ -184,8 +136,8 @@ describe("SectionTable on the shared Card", () => {
       "px-[10px]",
       "py-2",
       "border-b",
-      "border-[var(--line)]",
-      "text-[var(--muted)]",
+      "border-[var(--nms-border)]",
+      "text-[var(--nms-muted-foreground)]",
       "text-[0.78rem]",
       "uppercase",
       "tracking-[0.04em]",
@@ -205,7 +157,7 @@ describe("SectionTable on the shared Card", () => {
     const cells = screen.getAllByRole("cell");
     const labelCell = cells.find((cell) => cell.textContent === "Alpha")!;
     const usdCell = labelCell.nextElementSibling!;
-    for (const utility of ["px-[10px]", "py-2", "border-b", "border-[var(--line)]"]) {
+    for (const utility of ["px-[10px]", "py-2", "border-b", "border-[var(--nms-border)]"]) {
       expect(tokens(labelCell)).toContain(utility);
       expect(tokens(usdCell)).toContain(utility);
     }

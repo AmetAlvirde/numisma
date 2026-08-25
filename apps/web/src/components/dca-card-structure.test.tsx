@@ -195,7 +195,12 @@ describe("DcaCard on the shared Card", () => {
 
     const rung = screen.getByRole("columnheader", { name: "Rung" });
     const price = screen.getByRole("columnheader", { name: "Limit price" });
-    for (const utility of ["px-[10px]", "py-2", "border-b", "border-[var(--line)]"]) {
+    // NAMESPACED HERE WHILE THIS CARD IS STILL IN `apps/web`, because the string is not
+    // this card's to write: the header cell comes from `TABLE_HEAD_CELL`, which crossed
+    // into `@numisma/components` with `SectionTable` (spec #439 S2) and was rewritten
+    // there. Rewriting the constant without rewriting this line leaves a red naming the
+    // exact class, which is the wave's parity evidence. The card itself follows in #444.
+    for (const utility of ["px-[10px]", "py-2", "border-b", "border-[var(--nms-border)]"]) {
       expect(tokens(rung)).toContain(utility);
       expect(tokens(price)).toContain(utility);
     }

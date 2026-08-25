@@ -4,12 +4,12 @@ import { composeBigPicture } from "../glance/row-view.ts";
 import { getDashboard } from "../lib/dashboard.ts";
 import {
   Crumb,
+  SectionTable,
   Shell,
   SnapshotEmptyNotice,
   SnapshotStaleNotice,
   SummaryCard,
 } from "@numisma/components";
-import { SectionTable } from "../components/SectionTable.tsx";
 
 /**
  * `/big-picture` — the composition dashboard, MOVED here from `/` (D11), behavior

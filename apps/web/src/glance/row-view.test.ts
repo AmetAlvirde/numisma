@@ -271,7 +271,7 @@ describe("the /big-picture wiring", () => {
   });
 
   it("renders absence through the em dash, never a zero", () => {
-    const table = read("components/SectionTable.tsx");
+    const table = read("../../../packages/components/src/ui/section-table.tsx");
     expect(table).toMatch(/—/);
     expect(table).toMatch(/rowView\.rendered/);
     // The reference is rendered in the header, so it is stated and not implied.

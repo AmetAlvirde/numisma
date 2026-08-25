@@ -1,18 +1,21 @@
 import { Link } from "@tanstack/react-router";
 import { formatUsd } from "@numisma/engine/format";
-import { Absent, Card } from "@numisma/components";
-import type { DcaPositionView, DcaView } from "../glance/dca-view.ts";
 // The table surface, from the component that owns its deleted element rules (spec #420
 // Seam B — the first surface in the migration's order converts every carrier, wherever
 // it renders). The rung ladder is a table on the same terms as the composition one.
+// `SectionTable` crossed into the package in spec #439 S2 and took the six strings with
+// it; this card follows in #444 and reaches them by package specifier until then.
 import {
+  Absent,
+  Card,
   TABLE_CELL,
   TABLE_CELL_NUM,
   TABLE_HEAD_CELL,
   TABLE_HEAD_CELL_NUM,
   TABLE_SCROLL,
   TABLE_SURFACE,
-} from "./SectionTable.tsx";
+} from "@numisma/components";
+import type { DcaPositionView, DcaView } from "../glance/dca-view.ts";
 
 /**
  * THE DCA CARD (spec #277, D4/D6) — the declared accumulation plan, on the phone.

@@ -20,6 +20,19 @@ export { Absent } from "./ui/absent";
 export { Button, buttonVariants } from "./ui/button";
 export { Card, CardTitle, CARD_SURFACE } from "./ui/card";
 export { Crumb } from "./ui/crumb";
+export {
+  SectionTable,
+  TABLE_CELL,
+  TABLE_CELL_NUM,
+  TABLE_HEAD_CELL,
+  TABLE_HEAD_CELL_NUM,
+  TABLE_SCROLL,
+  TABLE_SURFACE,
+  type BigPictureView,
+  type RowAbsenceReason,
+  type RowDelta,
+  type RowView,
+} from "./ui/section-table";
 export { Shell } from "./ui/shell";
 export {
   METRICS_FIGURE,

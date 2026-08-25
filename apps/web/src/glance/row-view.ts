@@ -52,76 +52,28 @@ import {
 import { referenceLabel, resolveReferenceAnchor } from "./verdict.ts";
 
 /**
- * Why a row, or one of its deltas, is absent. Every absence NAMES its cause, exactly
- * as the header's does: "the number is missing" and "the number is missing BECAUSE
- * the feed did not run" are different amounts of information.
+ * THE VIEW TYPES ARE THE PACKAGE'S, AND THIS MODULE IMPORTS ITS OWN RETURN TYPE BACK
+ * (spec #439 §4.1, S2). `BigPictureView` and its three-name closure used to be declared
+ * here; they are declared in `@numisma/components`'s `ui/section-table.tsx` now, beside
+ * the component that renders them.
  *
- * `unexpected-absence` and `reference-withheld` are deliberately the same words the
- * header uses (`SuppressionReason` in `verdict.ts`) — the same cause at a different
- * altitude, not a parallel vocabulary. The two that are new are genuinely new:
- * `no-cost-basis` is a reference this row never had, and `no-reference-row` is a row
- * the reference anchor never had.
+ * THE CONSUMER DEFINES THE INTERFACE, which is the standard direction and also the only
+ * one that lets a cosmos fixture build a `BigPictureView` literal without importing
+ * `apps/web` — `seam-isolation.test.ts` forbids that outright. Every line of
+ * `composeBigPicture` stays here, and nothing about what it emits changed.
  *
- * `no-fund-value` is the PAGE-LEVEL cause, and it is the only one here that is not
- * about the row. A `% of fund` cell in a row whose own mark arrived perfectly well is
- * blank because the DENOMINATOR is missing, not because the row is — so saying "no
- * current mark" there states a cause that is false of that row. An absence earns its
- * place by carrying diagnostic information; one carrying wrong information is worse
- * than a bare em dash.
+ * IT IS NOT A COPY WAITING TO DRIFT, because the arrow points both ways: this function
+ * RETURNS the package's type, so a field added on either side stops compiling at the
+ * assignments below rather than diverging silently. These four names are imported and
+ * NOT re-exported — the table and its structure test were their only readers, and both
+ * are on the package side now.
  */
-export type RowAbsenceReason =
-  | "unexpected-absence"
-  | "reference-withheld"
-  | "no-earlier-anchor"
-  | "no-reference-row"
-  | "no-cost-basis"
-  | "no-fund-value";
-
-/** A delta that renders, or an absence that names its cause. */
-export interface RowDelta {
-  rendered: boolean;
-  /** The difference in USD against the reference. */
-  usdValue?: number;
-  /** The same difference as a percentage OF THE REFERENCE. */
-  percent?: number;
-  suppressedBy?: RowAbsenceReason;
-}
-
-/** One composition row's renderability and its two deltas. */
-export interface RowView {
-  /** False when the push named this row in `glance.suppressed` (slice #151). */
-  rendered: boolean;
-  suppressedBy?: RowAbsenceReason;
-  /** Against the resolved anchor date. */
-  vsAnchor: RowDelta;
-  /** Against the row's own cost basis. */
-  vsCostBasis: RowDelta;
-}
-
-export interface BigPictureView {
-  /**
-   * The date reference, named. Absent only on the genesis anchor — and then the
-   * surface says nothing rather than inventing one: never claim a date you don't
-   * have (V3).
-   */
-  reference?: { asOf: string; label: string };
-  /** The other reference kind's name. A constant, but it is RENDERED, not implied. */
-  costBasisLabel: string;
-  /** False when NAV is suppressed — see this module's header. */
-  percentOfFundRendered: boolean;
-  /**
-   * False when NAV is suppressed — the SLOT this time, not the column.
-   *
-   * A SIBLING of {@link BigPictureView.percentOfFundRendered}, never a synonym: they
-   * read the same key today by coincidence of cause, not of meaning. One governs the
-   * fund value itself, the other a column of ratios that merely share its
-   * denominator. Kept apart so the first cause that takes one without the other finds
-   * two facts to move rather than one overloaded boolean.
-   */
-  fundValueRendered: boolean;
-  /** Keyed by `CompositionRow.id`, one entry per row the anchor carries. */
-  rows: ReadonlyMap<string, RowView>;
-}
+import type {
+  BigPictureView,
+  RowAbsenceReason,
+  RowDelta,
+  RowView,
+} from "@numisma/components";
 
 /** The label the cost-basis reference renders under. */
 export const COST_BASIS_LABEL = "cost basis";
