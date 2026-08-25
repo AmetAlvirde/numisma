@@ -27,6 +27,15 @@ export {
   type DcaRungView,
   type DcaView,
 } from "./ui/dca-card";
+export type {
+  ChartCircle,
+  ChartGeometry,
+  ExpectedFigures,
+  FillPathFigures,
+  FillPathView,
+  TornActReading,
+  WaitingSplit,
+} from "./ui/fill-path";
 export {
   GlanceCard,
   referenceLabel,
