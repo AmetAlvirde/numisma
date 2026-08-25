@@ -19,13 +19,16 @@
  * half of that, so the stale variant's census is now the successor shape (Seam E) —
  * per class, `toContain` — and carries the two utilities that replaced `.error`.
  *
- * ── IT STAYS IN `apps/web` AND IMPORTS THE SHIPPED SURFACE (spec #432 §4.6) ──────────
- * The notices now live in `packages/components`; this file did not follow them, because
- * it renders through `../../render.testkit.tsx`, whose header states RTL is imported at
- * exactly one path in this repo, and the package has neither RTL nor jsdom. Importing
- * from `"@numisma/components"` rather than a relative path is the better half of that
- * accident: the copy is asserted against the surface consumers actually get, so an export
- * dropped from `index.ts` reds here rather than passing against a file still on disk.
+ * ── IT FOLLOWED THE NOTICES (spec #432 §4.6; spec #439 §4.4) ─────────────────────────
+ * For a wave this file stayed behind in `apps/web`, because the render harness read one
+ * app's stylesheet off disk and could not live in a package, and the package had neither
+ * RTL nor jsdom. All three of those are false now: the harness sits at
+ * `../testkit/render.testkit`, RTL is a package devDependency, and jsdom attaches through
+ * the docblock at the top of this file. So the criterion is the plain one — a component
+ * test goes to the package with its component — and the import is a relative specifier
+ * like everything else here. The shipped surface is held from the other side:
+ * `fixture-coverage.test.ts` reads `index.ts` at runtime, so an export dropped from it
+ * reds there.
  *
  * The version numbers here are authored, and deliberately not the real schema window —
  * the primitive renders whatever the route hands it, and pinning today's numbers would
@@ -38,13 +41,13 @@ import {
   render,
   renderedClassNames,
   screen,
-} from "@numisma/components/testkit/render.testkit.tsx";
+} from "../testkit/render.testkit";
+import { CARD_SURFACE } from "./card";
 import {
-  CARD_SURFACE,
   NOTICE_CODE,
   SnapshotEmptyNotice,
   SnapshotStaleNotice,
-} from "@numisma/components";
+} from "./snapshot-notice";
 
 /** JSX collapses its own newlines; the DOM keeps them. Compare on words. */
 function text(node: Element): string {

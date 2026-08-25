@@ -178,7 +178,8 @@ export function renderedClassNames(root: Element): Set<string> {
  * em dash and a stated cause belong would keep every one of those assertions green.
  *
  * So the witness moves to the marker the primitive still writes. `Absent` — shipped from
- * `@numisma/components` since spec #432 §4.1, and formerly `ui/Absent.tsx` here — renders
+ * this package since spec #432 §4.1, and formerly `apps/web/src/components/ui/Absent.tsx` —
+ * renders
  * a decorative `<span aria-hidden="true">—</span>` beside the cause; that glyph is what
  * `absent-contract.test.tsx` pins, and it is the stable handle now that the class is
  * gone. Returns the primitive's outer `<span>`, in document order.
