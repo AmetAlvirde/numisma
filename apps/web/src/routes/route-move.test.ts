@@ -308,6 +308,46 @@ describe("G-D13: the ladder route", () => {
       "react-dom",
     ]);
   });
+
+  it("holds `@numisma/components` to the engine's PURE SUBPATHS, root type-imports aside", () => {
+    // THE CLAIM THE PIN ABOVE CANNOT MAKE (spec #439 §4.2). The pin says WHICH names the
+    // package may depend on; it says nothing about WHERE in a dependency the package
+    // reaches, and the closure walk beside it stops at the package boundary and never
+    // traverses it. So `@numisma/engine` sitting in that manifest is safe only while
+    // every runtime read inside `packages/components/src` lands on `/format` or
+    // `/calendar` — two leaf modules whose own closure is `format.ts` plus
+    // `orders/committed.ts` and reaches no `node:` builtin. One `from "@numisma/engine"`
+    // in a component and `node:os`/`node:path` are in the browser bundle with every
+    // other assertion in this file green.
+    //
+    // WRITTEN AGAINST RUNTIME IMPORTS, AND THE ROOT IS ALLOWED TO BE TYPE-IMPORTED.
+    // `summary-card.tsx` reads `DashboardSummary`, and the engine ROOT is the only place
+    // it is exported from. A type-only import erases at compile time and reaches no
+    // bundle, which is the same reasoning the sibling closure check above already runs
+    // on — hence the negative lookahead, and hence the two `from`-less forms below,
+    // which that lookahead cannot see and which pull the whole engine in regardless.
+    const packageSrc = join(HERE, "../../../../packages/components/src");
+    const files = sourceFiles({ dir: packageSrc, as: "absolute" });
+    // FALSE-PASS FLOOR, the same one every sweep in this file carries: "no offender
+    // found" is also what a sweep over zero files returns.
+    expect(files.length, "the subpath sweep scanned no package source").toBeGreaterThan(0);
+    const pure = ["@numisma/engine/format", "@numisma/engine/calendar"];
+    for (const file of files) {
+      const label = relative(packageSrc, file);
+      const source = readFileSync(file, "utf-8");
+      for (const match of source.matchAll(
+        /^\s*import\s+(?!type\b)([\s\S]*?)\bfrom\s*["'](@numisma\/engine[^"']*)["']/gm,
+      )) {
+        expect(pure, `${label} imports ${match[2]} at runtime`).toContain(match[2]);
+      }
+      expect(source, `${label} side-effect-imports the engine`).not.toMatch(
+        /^\s*import\s*["']@numisma\/engine["']/m,
+      );
+      expect(source, `${label} dynamically imports the engine`).not.toMatch(
+        /\bimport\s*\(\s*["']@numisma\/engine["']/,
+      );
+    }
+  });
 });
 
 /**
