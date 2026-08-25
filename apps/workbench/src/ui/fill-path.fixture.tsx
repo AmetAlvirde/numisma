@@ -3,12 +3,26 @@ import {
   Expectation,
   Figure,
   formatUnits,
+  Header,
+  TornActBanner,
+  UnrecordedWarnings,
 } from "@numisma/components/ui/fill-path.tsx";
-import { partlyWalkedView } from "@numisma/components/ui/fill-path.fixtures.ts";
+import type { FillPathView } from "@numisma/components";
+import {
+  dayZeroView,
+  partlyWalkedView,
+  spotLastCloseView,
+  spotLoadingView,
+  spotMissingView,
+  tornOutstandingView,
+  tornUncheckedView,
+  unreadableSidecarView,
+  unrecordedWarningsView,
+} from "@numisma/components/ui/fill-path.fixtures.ts";
 
 /**
- * THE FILL PATH'S SELECTION SEAM, AND THE TWO COLOUR READS THAT CAME WITH IT
- * (spec #439 S6).
+ * THE FILL PATH'S HEADER CARD, ITS SELECTION SEAM, AND THE SHARED HELPERS
+ * (spec #439 S6 and S7).
  *
  * A PROVIDER PAINTS NOTHING, which is the whole difficulty of staging a seam slice. So
  * this fixture does two separate jobs and they are deliberately not mixed:
@@ -47,11 +61,29 @@ import { partlyWalkedView } from "@numisma/components/ui/fill-path.fixtures.ts";
  * cause rather than as a missing number. No `$0` is reachable in any mode — `Figure`'s
  * absent arm carries a cause string and never a zero.
  *
- * THE TILES REFLOW AGAINST A CONTAINER NAMED BY A CARD THIS FIXTURE DOES NOT MOUNT.
- * `@[380px]/fp-header:` variants are reads of `fp-header`, which `FillPath.Header`
- * declares and which is still in `apps/web` until S7. So the tiles here stay in their
- * narrow form at every width, on purpose: the wide form is S7's fixture to stage, and
- * faking the container would stage a layout no card produces.
+ * ── THE HEADER CARD, AND WHAT S7 ADDED (spec #439 S7) ────────────────────────────────
+ * `Header` declares `@container/fp-header`, which is the container every
+ * `@[380px]/fp-header:` variant in the module reads. S6's helper row below could only
+ * show the narrow form, because the card that names the container was still in
+ * `apps/web`; the header rows above it are the first thing in this repo that can stage
+ * the WIDE reflow, and they stage it against the real card rather than faking the name.
+ * The two widths sit side by side for exactly that reason.
+ *
+ * SEVEN TOKENS REACH THIS CARD, and every one of them must visibly move between app mode
+ * and themed mode: `--nms-muted-foreground` (the chip's `pending` and `ended` arms, the
+ * rung count, the spot figure and its note, the sidecar sentence, the unchecked line, the
+ * inferred warning's text), `--nms-pos` (the `in force` chip, the progress fill),
+ * `--nms-warn` (the `unreadable` chip, the inferred warning's edge), `--nms-border` (the
+ * progress track, the rule under spot, the rule above the waiting block), `--nms-neg`
+ * (the torn banner's border and headline, the certain warning's edge), `--nms-card` (the
+ * banner's fill) and `--nms-foreground` (the sentence inside the banner).
+ *
+ * WHAT TO LOOK FOR IN APP MODE, which is what `apps/web` paints today reached through the
+ * new spelling: the chip is `#9aa1ad` when pending, `#46c98b` when in force and `#8a5a12`
+ * when unreadable; the progress track is `#262a33` under a `#46c98b` fill; the torn
+ * banner is `#f0736a` on `#181b22` with an `#e7e9ee` sentence inside it. A chip that
+ * stayed grey on `in force` would mean the total map lost an arm, which is the one failure
+ * a base-plus-override cascade could produce and a total map cannot.
  *
  * SYNTHESIZED. The view comes from `fill-path.fixtures.ts` beside the component, derived
  * from a hand-written app fixture whose own tests say so. Nothing here imports from
@@ -79,6 +111,36 @@ function Row({
 }
 
 const VIEW = partlyWalkedView();
+
+/**
+ * THE CARD, MOUNTED AT A WIDTH. `Header` reads its own container, so the only thing that
+ * decides which layout paints is how wide the card is allowed to be — 320px is the phone
+ * the surface is judged on, and anything past 380px is the desk. Both are staged because
+ * the reflow is a real branch and a fixture that showed one of them would review half a
+ * card.
+ */
+function HeaderAt({ view, width }: { view: FillPathView; width: 320 | 560 }) {
+  return (
+    <div style={{ width, maxWidth: "100%" }}>
+      <FillPathProvider view={view}>
+        <Header />
+      </FillPathProvider>
+    </div>
+  );
+}
+
+/** The same card at both widths, so the 380px reflow is one glance rather than two. */
+function BothWidths({ view }: { view: FillPathView }) {
+  return (
+    <div className="flex flex-wrap items-start gap-6">
+      <HeaderAt view={view} width={320} />
+      <HeaderAt view={view} width={560} />
+    </div>
+  );
+}
+
+const CHIP_STATES = ["pending", "active", "ended", "unreadable"] as const;
+
 
 /**
  * THE SEAM, MOUNTED AS A CONSUMER WOULD MOUNT IT.
@@ -133,6 +195,94 @@ export default {
         <SelectionProbe />
       </Row>
     </FillPathProvider>
+  ),
+
+  "the header card, both layouts": (
+    <div>
+      <Row
+        title="the projection layout — day zero"
+        note="`view.expected` is set, so Waiting steps out of the tile grid as the hero and the two projections read quieter in colour AND in size. The progress bar is at zero and still drawn: a bar at zero reads as absence, which is the truth here. The chip is `pending`, which is NOT an alarm colour — a declared ladder awaiting its first fill is the normal starting state."
+      >
+        <BothWidths view={dayZeroView()} />
+      </Row>
+      <Row
+        title="the measured layout — partly walked"
+        note="Three measured tiles, the bar at 38%, then the waiting block on the rail. The switch between this and the row above is `view.expected` alone; the card never asks whether the measured figures are absent."
+      >
+        <BothWidths view={partlyWalkedView()} />
+      </Row>
+      <Row
+        title="the measured layout with no orders sidecar"
+        note="`figures` is ABSENT, and this is the distinction one fixture cannot show: all three measured figures are missing here too, and the card still takes the measured layout, because nothing has been established about whether this ladder started. Waiting prints the em dash and its cause — never `$0`."
+      >
+        <BothWidths view={unreadableSidecarView()} />
+      </Row>
+    </div>
+  ),
+
+  "the state chip, all four arms": (
+    <div>
+      <Row
+        title="a total map, one colour per state"
+        note="`pending` and `ended` read `--nms-muted-foreground`, `in force` reads `--nms-pos`, `unreadable` reads `--nms-warn`. The chip's edge is `border-current`, so text and border move together. Two of these four never had a rule of their own before the teardown and were painted by a base that is gone — an arm rendering in the inherited text colour is what a lost map entry looks like."
+      >
+        {CHIP_STATES.map((state) => (
+          <HeaderAt key={state} view={{ ...dayZeroView(), state }} width={560} />
+        ))}
+      </Row>
+    </div>
+  ),
+
+  "spot, all three arms": (
+    <div>
+      <Row
+        title="a live price"
+        note="The figure reads `--nms-muted-foreground` and the note beside it says `live`. Spot is context, not the answer, which is what leaves Waiting as the one accented number on the card."
+      >
+        <BothWidths view={partlyWalkedView()} />
+      </Row>
+      <Row
+        title="still reading"
+        note="`spotLoading`. An em dash and a stated cause, the same treatment every other missing figure on the page gets. There is no arm here that can print a number the page does not have."
+      >
+        <BothWidths view={spotLoadingView()} />
+      </Row>
+      <Row
+        title="the fetch failed, and nothing was seen earlier"
+        note="`spotUsd` genuinely absent. The second em dash, with `live price unavailable` as its cause."
+      >
+        <BothWidths view={spotMissingView()} />
+      </Row>
+      <Row
+        title="a last close, said to be one"
+        note="A price the session saw earlier, rendered with `last close · live price unavailable` beside it. It must never read as `live`: the chart's now-rule is decided off a live reading only, and this note is the whole of what stops the two being confused."
+      >
+        <BothWidths view={spotLastCloseView()} />
+      </Row>
+    </div>
+  ),
+
+  "the banner and the warnings": (
+    <div>
+      <Row
+        title="a torn act outstanding"
+        note="A `role=alert` block, `--nms-neg` on both the border and the headline, `--nms-card` behind them, and the sentence inside stepped back to `--nms-foreground` so the block does not shout in one colour. The surface is spelled out on this element rather than composed from `CARD_SURFACE`: the shared string draws the ordinary hairline and this edge is the alarm red, and two unvariant `border-color` utilities would race."
+      >
+        <TornActBanner view={tornOutstandingView()} />
+      </Row>
+      <Row
+        title="nobody looked"
+        note="`unchecked` — a quiet line, because silence would claim a check that never ran. All four margin edges are zeroed, which is the deleted rule reproduced."
+      >
+        <TornActBanner view={tornUncheckedView()} />
+      </Row>
+      <Row
+        title="two certainties, one surface"
+        note="Both paragraphs are card-surfaced and only the left edge differs: solid `--nms-neg` for a fact the venue reported, dashed `--nms-warn` for an inference off spot. The dash is on that ONE edge — `border-dashed` would dash the card's other three, and the difference between a fact and a guess must not spill onto the surface they share."
+      >
+        <UnrecordedWarnings view={unrecordedWarningsView()} />
+      </Row>
+    </div>
   ),
 
   "the shared helpers": (
