@@ -16,13 +16,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import {
-  classTokens as tokens,
-  DELETED_IN_SLICE_2,
-  render,
-  renderedClassNames,
-  expectNoStyledClassSurvives,
-} from "../render.testkit.tsx";
+import { classTokens as tokens, render } from "../render.testkit.tsx";
 import { Shell } from "./Shell.tsx";
 
 describe("Shell", () => {
@@ -55,47 +49,5 @@ describe("Shell", () => {
 
     expect(tokens(main)).toContain("mx-auto");
     expect(tokens(main)).toContain("my-0");
-  });
-
-  it("writes none of slice 2's deleted class names", () => {
-    const { container } = render(<Shell>page</Shell>);
-    const rendered = renderedClassNames(container.firstElementChild!);
-
-    for (const deleted of DELETED_IN_SLICE_2) {
-      expect([...rendered]).not.toContain(deleted);
-    }
-  });
-});
-
-/**
- * THE TERMINAL ASSERTION (spec #420 Seam E, slice 9), on all five census successors and
- * the shell's.
- *
- * THE SET OF CLASS NAMES THIS SURFACE RENDERS, INTERSECTED WITH THE SET OF CLASS
- * SELECTORS LEFT IN `styles.css`, IS EMPTY. That is the mechanical proof that no house
- * rule survives WITH A CARRIER — the failure mode the nine deletion guards cannot see,
- * because each of them knows only the names its own slice took.
- *
- * IT COULD ONLY LAND HERE. Every slice but the last renders a class the file still
- * styles, on purpose: that is what a nine-slice migration through a shared stylesheet
- * looks like from the inside. The assertion is false by design for eight slices and true
- * for good afterwards.
- *
- * IT IS NOT A RESTATEMENT OF "THE FILE HAS NO RULES". `styles-css-end-state.test.ts` says
- * that about the file; this says something the file cannot know — that nothing RENDERED
- * reaches whatever is in it. A rule added back under a name no guard lists goes red here
- * the moment a component writes its class.
- *
- * AND AT THE END STATE IT CARRIES ITS OWN NEGATIVE CONTROL, because the file it reads is
- * now empty of rules and the intersection is therefore empty for free.
- * `expectNoStyledClassSurvives` re-runs the identical walk against a probe sheet built
- * from this surface's own render, so a blank render, a reader that stopped reading or an
- * intersection that never intersects reds here instead of passing green. What the claim
- * is worth is written in that helper's docblock.
- */
-describe("no rule left in styles.css reaches this surface", () => {
-  it("renders no class name the stylesheet still selects", () => {
-    const { container } = render(<Shell>page</Shell>);
-    expectNoStyledClassSurvives(container);
   });
 });

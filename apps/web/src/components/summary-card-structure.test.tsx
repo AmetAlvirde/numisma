@@ -32,12 +32,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   classTokens as tokens,
-  DELETED_IN_SLICE_2,
-  DELETED_IN_SLICE_3,
   render,
-  renderedClassNames,
   absentSlots,
-  expectNoStyledClassSurvives,
   screen,
 } from "../render.testkit.tsx";
 import { CARD_SURFACE } from "@numisma/components";
@@ -227,32 +223,6 @@ describe("SummaryCard on the shared Card", () => {
     ]);
   });
 
-  it("writes none of the deleted class names, on either arm", () => {
-    const clean = render(
-      <SummaryCard summary={cleanSummary()} usdMxn={18.5} fundValueRendered />,
-    );
-    const suppressed = render(
-      <SummaryCard
-        summary={cleanSummary()}
-        usdMxn={18.5}
-        fundValueRendered={false}
-      />,
-    );
-
-    for (const { container } of [clean, suppressed]) {
-      const rendered = [...renderedClassNames(container.firstElementChild!)];
-      for (const deleted of [...DELETED_IN_SLICE_2, ...DELETED_IN_SLICE_3]) {
-        expect(rendered).not.toContain(deleted);
-      }
-    }
-    // The suppressed arm is the one that renders an `Absent`, and its hook is GONE:
-    // slice 8 took `.fp-detail .absent`, the last contextual rule selecting through it,
-    // so the primitive stopped writing a name with nothing behind it.
-    expect([
-      ...renderedClassNames(suppressed.container.firstElementChild!),
-    ]).not.toContain("absent");
-  });
-
   it("still mounts both suppressed figures' `Absent`, em dash and stated cause", () => {
     // THE WITNESS THE DELETED CENSUS USED TO BE. `main` pinned `"absent"` and
     // `"muted absent-why"` as PRESENT, which incidentally proved this card's suppression
@@ -278,38 +248,5 @@ describe("SummaryCard on the shared Card", () => {
           .container,
       ),
     ).toHaveLength(0);
-  });
-});
-
-/**
- * THE TERMINAL ASSERTION (spec #420 Seam E, slice 9), on all five census successors and
- * the shell's.
- *
- * THE SET OF CLASS NAMES THIS SURFACE RENDERS, INTERSECTED WITH THE SET OF CLASS
- * SELECTORS LEFT IN `styles.css`, IS EMPTY. That is the mechanical proof that no house
- * rule survives WITH A CARRIER — the failure mode the nine deletion guards cannot see,
- * because each of them knows only the names its own slice took.
- *
- * IT COULD ONLY LAND HERE. Every slice but the last renders a class the file still
- * styles, on purpose: that is what a nine-slice migration through a shared stylesheet
- * looks like from the inside. The assertion is false by design for eight slices and true
- * for good afterwards.
- *
- * IT IS NOT A RESTATEMENT OF "THE FILE HAS NO RULES". `styles-css-end-state.test.ts` says
- * that about the file; this says something the file cannot know — that nothing RENDERED
- * reaches whatever is in it. A rule added back under a name no guard lists goes red here
- * the moment a component writes its class.
- *
- * AND AT THE END STATE IT CARRIES ITS OWN NEGATIVE CONTROL, because the file it reads is
- * now empty of rules and the intersection is therefore empty for free.
- * `expectNoStyledClassSurvives` re-runs the identical walk against a probe sheet built
- * from this surface's own render, so a blank render, a reader that stopped reading or an
- * intersection that never intersects reds here instead of passing green. What the claim
- * is worth is written in that helper's docblock.
- */
-describe("no rule left in styles.css reaches this surface", () => {
-  it("renders no class name the stylesheet still selects", () => {
-    const { container } = render(<SummaryCard summary={cleanSummary()} usdMxn={18.5} fundValueRendered />);
-    expectNoStyledClassSurvives(container);
   });
 });

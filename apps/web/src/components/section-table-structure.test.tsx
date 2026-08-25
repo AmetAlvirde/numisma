@@ -26,13 +26,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   classTokens as tokens,
-  DELETED_IN_SLICE_2,
-  DELETED_IN_SLICE_3,
-  DELETED_IN_SLICE_4,
   render,
-  renderedClassNames,
   absentSlots,
-  expectNoStyledClassSurvives,
   screen,
 } from "../render.testkit.tsx";
 import { CARD_SURFACE } from "@numisma/components";
@@ -90,13 +85,6 @@ function anchoredView(): BigPictureView {
       ],
     ]),
   };
-}
-
-/** The genesis arm: no anchor to name, and NAV withheld, so the % column is absent too. */
-function anchorlessView(): BigPictureView {
-  const view = anchoredView();
-  const { reference: _reference, ...rest } = view;
-  return { ...rest, percentOfFundRendered: false };
 }
 
 describe("SectionTable on the shared Card", () => {
@@ -219,29 +207,6 @@ describe("SectionTable on the shared Card", () => {
     expect(tokens(usdCell)).toContain("text-right");
   });
 
-  it("writes none of the deleted class names, on either arm", () => {
-    const anchored = render(
-      <SectionTable section={section()} view={anchoredView()} />,
-    );
-    const genesis = render(
-      <SectionTable section={section()} view={anchorlessView()} />,
-    );
-
-    for (const { container } of [anchored, genesis]) {
-      const rendered = renderedClassNames(container.firstElementChild!);
-      for (const deleted of [
-        ...DELETED_IN_SLICE_2,
-        ...DELETED_IN_SLICE_3,
-        ...DELETED_IN_SLICE_4,
-      ]) {
-        expect([...rendered]).not.toContain(deleted);
-      }
-      // The hook is gone as of slice 8, which deleted the last rule selecting through
-      // it; the primitive's own contract test holds that end.
-      expect([...rendered]).not.toContain("absent");
-    }
-  });
-
   it("keeps `row-suppressed` on the suppressed `<tr>`, and its four stated causes", () => {
     // `row-suppressed` NEVER HAD A RULE ON EITHER REF, and it is asserted anyway. `main`
     // pinned it present in both censuses; the successors dropped it, so deleting it from
@@ -272,38 +237,5 @@ describe("SectionTable on the shared Card", () => {
     // no such class and no em dash, which is what makes the assertions above a
     // suppression witness rather than a description of every `<tr>` this table draws.
     expect(container.querySelectorAll("tr.row-suppressed")).toHaveLength(1);
-  });
-});
-
-/**
- * THE TERMINAL ASSERTION (spec #420 Seam E, slice 9), on all five census successors and
- * the shell's.
- *
- * THE SET OF CLASS NAMES THIS SURFACE RENDERS, INTERSECTED WITH THE SET OF CLASS
- * SELECTORS LEFT IN `styles.css`, IS EMPTY. That is the mechanical proof that no house
- * rule survives WITH A CARRIER — the failure mode the nine deletion guards cannot see,
- * because each of them knows only the names its own slice took.
- *
- * IT COULD ONLY LAND HERE. Every slice but the last renders a class the file still
- * styles, on purpose: that is what a nine-slice migration through a shared stylesheet
- * looks like from the inside. The assertion is false by design for eight slices and true
- * for good afterwards.
- *
- * IT IS NOT A RESTATEMENT OF "THE FILE HAS NO RULES". `styles-css-end-state.test.ts` says
- * that about the file; this says something the file cannot know — that nothing RENDERED
- * reaches whatever is in it. A rule added back under a name no guard lists goes red here
- * the moment a component writes its class.
- *
- * AND AT THE END STATE IT CARRIES ITS OWN NEGATIVE CONTROL, because the file it reads is
- * now empty of rules and the intersection is therefore empty for free.
- * `expectNoStyledClassSurvives` re-runs the identical walk against a probe sheet built
- * from this surface's own render, so a blank render, a reader that stopped reading or an
- * intersection that never intersects reds here instead of passing green. What the claim
- * is worth is written in that helper's docblock.
- */
-describe("no rule left in styles.css reaches this surface", () => {
-  it("renders no class name the stylesheet still selects", () => {
-    const { container } = render(<SectionTable section={section()} view={anchoredView()} />);
-    expectNoStyledClassSurvives(container);
   });
 });

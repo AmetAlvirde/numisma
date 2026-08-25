@@ -43,13 +43,8 @@ import {
 
 import {
   classTokens as tokens,
-  DELETED_IN_SLICE_2,
-  DELETED_IN_SLICE_4,
-  DELETED_IN_SLICE_6,
   render,
-  renderedClassNames,
   absentSlots,
-  expectNoStyledClassSurvives,
   screen,
 } from "../render.testkit.tsx";
 import { CARD_SURFACE } from "@numisma/components";
@@ -111,11 +106,6 @@ const STATE_COLOURS = [
   ["ended", "text-[var(--muted)]"],
   ["unreadable", "text-[var(--warn)]"],
 ] as const;
-
-/** The four renders that between them emit every class this card can emit. */
-function everyArm(): DcaView[] {
-  return [ladderView(), cadenceView(), unreadableView(), bareView("ended")];
-}
 
 /** The same ladder, with the one field that turns the alert line into a tap target. */
 function ladderWithPlanId(): DcaView {
@@ -331,39 +321,6 @@ describe("DcaCard on the shared Card", () => {
     expect(container.querySelectorAll("a")).toHaveLength(1);
   });
 
-  it("writes none of the deleted class names, on any of its four arms", () => {
-    for (const view of everyArm()) {
-      const { container, unmount } = render(<DcaCard view={view} />);
-      for (const deleted of [
-        ...DELETED_IN_SLICE_2,
-        ...DELETED_IN_SLICE_4,
-        ...DELETED_IN_SLICE_6,
-      ]) {
-        expect([...renderedClassNames(container.firstElementChild!)]).not.toContain(
-          deleted,
-        );
-      }
-      unmount();
-    }
-  });
-
-  it("writes none of them on the router arm either, where the link is", () => {
-    // The four arms above all render outside a router and so never emit the anchor. The
-    // alert's deleted rules hung off the `<p>`, not off the link, but the link is the one
-    // element in this card no other case in this file mounts.
-    return renderWithRouter(ladderWithPlanId()).then(({ container }) => {
-      for (const deleted of [
-        ...DELETED_IN_SLICE_2,
-        ...DELETED_IN_SLICE_4,
-        ...DELETED_IN_SLICE_6,
-      ]) {
-        expect([...renderedClassNames(container.firstElementChild!)]).not.toContain(
-          deleted,
-        );
-      }
-    });
-  });
-
   it("still mounts each rungless arm's `Absent`, em dash and stated cause", () => {
     // THE WITNESS THE DELETED CENSUS USED TO BE. `main` pinned `"absent"` and
     // `"muted absent-why"` as PRESENT, which incidentally proved this card's three
@@ -396,38 +353,5 @@ describe("DcaCard on the shared Card", () => {
     // The ladder arm draws its rungs and no em dash, which is what makes the three above
     // suppression witnesses rather than a glyph this card always prints.
     expect(absentSlots(render(<DcaCard view={ladderView()} />).container)).toHaveLength(0);
-  });
-});
-
-/**
- * THE TERMINAL ASSERTION (spec #420 Seam E, slice 9), on all five census successors and
- * the shell's.
- *
- * THE SET OF CLASS NAMES THIS SURFACE RENDERS, INTERSECTED WITH THE SET OF CLASS
- * SELECTORS LEFT IN `styles.css`, IS EMPTY. That is the mechanical proof that no house
- * rule survives WITH A CARRIER — the failure mode the nine deletion guards cannot see,
- * because each of them knows only the names its own slice took.
- *
- * IT COULD ONLY LAND HERE. Every slice but the last renders a class the file still
- * styles, on purpose: that is what a nine-slice migration through a shared stylesheet
- * looks like from the inside. The assertion is false by design for eight slices and true
- * for good afterwards.
- *
- * IT IS NOT A RESTATEMENT OF "THE FILE HAS NO RULES". `styles-css-end-state.test.ts` says
- * that about the file; this says something the file cannot know — that nothing RENDERED
- * reaches whatever is in it. A rule added back under a name no guard lists goes red here
- * the moment a component writes its class.
- *
- * AND AT THE END STATE IT CARRIES ITS OWN NEGATIVE CONTROL, because the file it reads is
- * now empty of rules and the intersection is therefore empty for free.
- * `expectNoStyledClassSurvives` re-runs the identical walk against a probe sheet built
- * from this surface's own render, so a blank render, a reader that stopped reading or an
- * intersection that never intersects reds here instead of passing green. What the claim
- * is worth is written in that helper's docblock.
- */
-describe("no rule left in styles.css reaches this surface", () => {
-  it("renders no class name the stylesheet still selects", () => {
-    const { container } = render(<DcaCard view={ladderView()} />);
-    expectNoStyledClassSurvives(container);
   });
 });

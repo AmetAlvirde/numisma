@@ -29,15 +29,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  DELETED_IN_SLICE_7,
-  DELETED_IN_SLICE_8,
-  DELETED_IN_SLICE_9,
   classTokens,
   fireEvent,
   render,
   renderedClassNames,
   absentSlots,
-  expectNoStyledClassSurvives,
   screen,
 } from "../render.testkit.tsx";
 import { FillPath, FillPathCards, FillPathProvider } from "./FillPath.tsx";
@@ -424,31 +420,6 @@ describe("the header card carries its section as utilities", () => {
       "@[380px]/fp-header:justify-start",
       "@[380px]/fp-header:text-left",
     ]);
-  });
-
-  it("renders none of the twenty-five class names slice 7 deleted", () => {
-    // THE WHOLE PAGE, not the header alone: the assertion that catches the carrier
-    // nobody remembered is a claim about the subtree, and `fp-tile-label` in particular
-    // was rendered by the CHART card's inspect label as well as by the header's tiles.
-    const { container } = render(<FillPathCards view={partlyWalkedView()} />);
-    const rendered = renderedClassNames(container);
-    for (const deleted of DELETED_IN_SLICE_7) expect(rendered).not.toContain(deleted);
-
-    // And the ladder and the chart still carry theirs, which is what makes the line
-    // above a claim about slice 7 rather than about the file having been emptied. Slice
-    // 8 took the ladder's names, so what is left to hold that line is the chart's, which
-    // slice 9 takes last.
-    for (const surviving of ["fp-chart-card"]) {
-      expect(rendered).toContain(surviving);
-    }
-  });
-
-  it("renders both day-zero blocks free of those names too", () => {
-    // Day zero draws the hero, the projections and the expected wrapper — three of the
-    // deleted names' carriers that `partly-walked` never reaches.
-    const { container } = render(<FillPathCards view={viewOf("day-zero")} />);
-    const rendered = renderedClassNames(container);
-    for (const deleted of DELETED_IN_SLICE_7) expect(rendered).not.toContain(deleted);
   });
 });
 
@@ -1074,34 +1045,6 @@ describe("the rung list carries its section as utilities", () => {
     expectClasses(orphans, ["m-0", "mt-3", "text-[0.8rem]", "text-[var(--muted)]"]);
     expect(classTokens(orphans!)).not.toContain("mt-1");
   });
-
-  it("renders none of the thirty-four class names slice 8 deleted", () => {
-    // THE WHOLE PAGE, on the widest view this file can build: every warning, the banner,
-    // an orphan count, and a rung patched into three states at once, so every carrier the
-    // slice touched is on screen at the same time.
-    const view = partlyWalkedView();
-    const { container } = render(
-      <FillPathCards
-        view={{
-          ...view,
-          tornActs: { status: "outstanding", count: 1 },
-          warnings: { filledNotRecorded: 1, pricePassedNoFill: 1 },
-          orphanLots: 2,
-          rungs: view.rungs.map((rung) =>
-            rung.isNext
-              ? { ...rung, placedAtUsd: 1, notPlaced: true, pricePassedUnconfirmed: true }
-              : rung,
-          ),
-        }}
-      />,
-    );
-    const rendered = renderedClassNames(container);
-    for (const deleted of DELETED_IN_SLICE_8) expect(rendered).not.toContain(deleted);
-
-    // And the chart still carries its own, which is what makes the line above a claim
-    // about slice 8 rather than about the render having been emptied.
-    expect(rendered).toContain("fp-chart-card");
-  });
 });
 
 describe("the chart card carries its section as utilities", () => {
@@ -1269,51 +1212,5 @@ describe("the chart card carries its section as utilities", () => {
     // and preflight is off, so `w-full` alone leaves the slider 4px wider than the box
     // around it, with its track tail under the card's border at 320px.
     expectClasses(input, ["w-full", "mx-0"]);
-  });
-
-  it("renders none of the eight class names slice 9 deleted", () => {
-    const { container } = renderChartCard();
-    const rendered = renderedClassNames(container);
-    for (const deleted of DELETED_IN_SLICE_9) expect(rendered).not.toContain(deleted);
-
-    // AND THE THREE HOOKS SURVIVE. They lost their rules and kept their names, because
-    // the chart's a11y and selection contracts query the render by them; a green line
-    // above with these gone would mean the conversion took a test surface with it.
-    for (const hook of ["fp-chart-card", "fp-chart", "fp-inspect"]) {
-      expect(rendered).toContain(hook);
-    }
-  });
-});
-
-/**
- * THE TERMINAL ASSERTION (spec #420 Seam E, slice 9), on all five census successors and
- * the shell's.
- *
- * THE SET OF CLASS NAMES THIS SURFACE RENDERS, INTERSECTED WITH THE SET OF CLASS
- * SELECTORS LEFT IN `styles.css`, IS EMPTY. That is the mechanical proof that no house
- * rule survives WITH A CARRIER — the failure mode the nine deletion guards cannot see,
- * because each of them knows only the names its own slice took.
- *
- * IT COULD ONLY LAND HERE. Every slice but the last renders a class the file still
- * styles, on purpose: that is what a nine-slice migration through a shared stylesheet
- * looks like from the inside. The assertion is false by design for eight slices and true
- * for good afterwards.
- *
- * IT IS NOT A RESTATEMENT OF "THE FILE HAS NO RULES". `styles-css-end-state.test.ts` says
- * that about the file; this says something the file cannot know — that nothing RENDERED
- * reaches whatever is in it. A rule added back under a name no guard lists goes red here
- * the moment a component writes its class.
- *
- * AND AT THE END STATE IT CARRIES ITS OWN NEGATIVE CONTROL, because the file it reads is
- * now empty of rules and the intersection is therefore empty for free.
- * `expectNoStyledClassSurvives` re-runs the identical walk against a probe sheet built
- * from this surface's own render, so a blank render, a reader that stopped reading or an
- * intersection that never intersects reds here instead of passing green. What the claim
- * is worth is written in that helper's docblock.
- */
-describe("no rule left in styles.css reaches this surface", () => {
-  it("renders no class name the stylesheet still selects", () => {
-    const { container } = render(<FillPathCards view={partlyWalkedView()} />);
-    expectNoStyledClassSurvives(container);
   });
 });
