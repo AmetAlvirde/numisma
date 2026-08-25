@@ -122,9 +122,14 @@ function rungRows(container: Element): HTMLButtonElement[] {
  * that was handed to it — a test that re-read `selectedKey` would be asserting the
  * expression it is supposed to be checking.
  *
- * The selection mark is the only `circle` on the chart filled with `--text`: every rung
- * ring is hollow (`--card`) and the halo beneath the disc is the page background
- * (`--bg`). `PriceDropPathChart` says why those three fills are what they are. The
+ * The selection mark is the only `circle` on the chart filled with the neutral ink: every
+ * rung ring is hollow, filled with the card's own surface so the line reads through it,
+ * and the halo beneath the disc is the page background, punching a clear hole so the disc
+ * lands on empty space. Three fills, three roles, and `PriceDropPathChart` says why each
+ * is what it is. THE SPELLINGS ARE THE PACKAGE'S since the chart crossed into
+ * `@numisma/components` (spec #439 S5) — `--nms-foreground`, `--nms-card` and
+ * `--nms-background`, which `styles.css` aliases onto the same three house colours, so
+ * the painted picture is unchanged and only the query below moved. The
  * adapter carries the datum's own `key` at the end of the element's `data-ts-key`, which
  * is what lets this name a RUNG rather than a coordinate — a pixel assertion would be
  * meaningless anyway, since jsdom lays every element out at zero.
@@ -134,7 +139,7 @@ function rungRows(container: Element): HTMLButtonElement[] {
  */
 function chartSelectionKey(container: Element): string {
   const discs = [
-    ...container.querySelectorAll('.fp-chart circle[fill="var(--text)"]'),
+    ...container.querySelectorAll('.fp-chart circle[fill="var(--nms-foreground)"]'),
   ];
   if (discs.length !== 1) {
     throw new Error(`the chart drew ${discs.length} selection discs, not exactly one`);

@@ -340,13 +340,33 @@ describe("G-D13: the ladder route", () => {
     // inside the dependency the package reaches, which this list cannot express — so it
     // is asserted in the case below, and widening this line without that one would leave
     // the safety argument resting on nobody.
+    //
+    // `@tanstack/charts` IS THE SECOND, and it is a WORKSPACE MOVE rather than a new
+    // third-party bet (spec #439 S5). `apps/web` already depends on it directly at
+    // exactly `0.11.0`, and it already ships to the browser through the ladder route,
+    // because `PriceDropPathChart` has drawn the Price Drop Path with it since ADR-018.
+    // Moving the component into the package moved the manifest line under it; nothing new
+    // reaches the bundle, and the version matching the app's exactly is what makes that a
+    // checkable statement rather than a hope. That is a stronger argument than any prose
+    // about the library's own `node:` reach could be, because it does not depend on
+    // reading the library at all.
     expect(Object.keys(manifest.dependencies ?? {}).sort()).toEqual([
       "@base-ui/react",
       "@numisma/engine",
+      "@tanstack/charts",
       "class-variance-authority",
       "clsx",
       "tailwind-merge",
     ]);
+    // AND AT THE APP'S OWN VERSION, which is the half the key list cannot say. A range
+    // here, or a bump on one side only, would put two copies of the chart library in the
+    // ladder route's bundle with every assertion above still green.
+    const webManifest = JSON.parse(
+      readFileSync(join(HERE, "../../package.json"), "utf-8"),
+    ) as { dependencies?: Record<string, string> };
+    expect(manifest.dependencies?.["@tanstack/charts"]).toBe(
+      webManifest.dependencies?.["@tanstack/charts"],
+    );
     // Peers count the same: a peer is resolved out of the app's own tree and bundled just
     // as a dependency is, so this is where the same addition would go to avoid the list
     // above. React and React DOM the app already ships.

@@ -29,6 +29,7 @@
   --nms-pos: oklch(0.75 0 0);
   --nms-ok: oklch(0.62 0 0);
   --nms-warn: oklch(0.52 0 0);
+  --nms-now: oklch(0.68 0 0);
   --nms-ring: oklch(0.708 0 0);
   --nms-radius-md: 0.375rem;
 }

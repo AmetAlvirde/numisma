@@ -211,5 +211,7 @@
   --color-ok: var(--nms-ok);
   --color-warn: var(--nms-warn);
 
+  --color-now: var(--nms-now);
+
   --radius-md: var(--nms-radius-md);
 }

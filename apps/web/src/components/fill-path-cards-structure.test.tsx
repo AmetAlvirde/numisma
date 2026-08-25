@@ -1113,9 +1113,12 @@ describe("the chart card carries its section as utilities", () => {
       "max-w-[500px]",
       "mx-auto",
       // `currentColor` IS THE CHART LIBRARY'S THEME for axes, ticks, grid and titles, so
-      // these two are guide legibility rather than label styling.
+      // these two are guide legibility rather than label styling. The grey is reached
+      // through the package's namespace now that the chart renders from
+      // `@numisma/components` (spec #439 S5); `styles.css` aliases
+      // `--nms-muted-foreground` onto `--muted`, so the painted value is unchanged.
       "text-[10px]",
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
     ]);
     // The hook survives its rule: `fill-path-chart-a11y.test.tsx` queries this wrapper.
     expect(wrapper?.getAttribute("aria-hidden")).toBe("true");
@@ -1137,7 +1140,7 @@ describe("the chart card carries its section as utilities", () => {
       "gap-x-[14px]",
       "gap-y-1",
       "text-[0.72rem]",
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
     ]);
     for (const entry of legend!.querySelectorAll("li")) {
       expectClasses(entry, ["flex", "items-center", "gap-1.5"]);
@@ -1161,13 +1164,13 @@ describe("the chart card carries its section as utilities", () => {
       "w-[18px]",
       "border-t-2",
       "[border-top-style:solid]",
-      "border-t-[var(--pos)]",
+      "border-t-[var(--nms-pos)]",
     ]);
     expectClasses(waiting, [
       "w-[18px]",
       "border-t-2",
       "[border-top-style:dashed]",
-      "border-t-[var(--muted)]",
+      "border-t-[var(--nms-muted-foreground)]",
     ]);
     // THE NOW SWATCH IS A HORIZONTAL RULE, matching the picture: price is the y axis, so
     // spot is a price LEVEL. It stays distinguishable from `waiting` on colour and on
@@ -1176,7 +1179,7 @@ describe("the chart card carries its section as utilities", () => {
       "w-[18px]",
       "border-t-2",
       "[border-top-style:solid]",
-      "border-t-[var(--now)]",
+      "border-t-[var(--nms-now)]",
     ]);
 
     // THE STYLE IS PER EDGE AND MUST STAY THERE. `border-dashed` sets `border-style` on

@@ -43,7 +43,7 @@ import { APP_TOKENS, THEME_MODES } from "./theme-modes.ts";
  * pass while the palette moved underneath it, which is the exact rot this test
  * exists to catch.
  *
- * ── NAME-FOR-NAME, WHICH IS NOW EIGHTEEN ON BOTH SIDES ────────────────────
+ * ── NAME-FOR-NAME, WHICH IS NOW NINETEEN ON BOTH SIDES ────────────────────
  *
  * This test mirrors whatever `styles.css` declares, rather than scoping itself
  * to `NMS_TOKEN_NAMES`, and that is still the contract #418 asked for. What
@@ -74,12 +74,14 @@ import { APP_TOKENS, THEME_MODES } from "./theme-modes.ts";
  * carries it because something does. Both sides moved together on every one, so
  * the two numbers agreed at each step and agreed at fifteen.
  *
- * WAVE 2 TAKES IT TO EIGHTEEN, three at once. `SummaryCard` crossed in spec
- * #439 S1 reading `--nms-pos` on a rising P&L and `--nms-ok`/`--nms-warn` on the
- * two arms of its data-safety badge, and `styles.css` aliased each onto the
- * house colour it already had in the same commit. All three had been NAMED in
- * `tokens.ts` since wave 1 and left undeclared on the rule above — the round
- * trip again, and the fourth name, `--nms-now`, is still waiting on the chart.
+ * WAVE 2 TAKES IT TO NINETEEN, in two steps. `SummaryCard` crossed in spec #439
+ * S1 reading `--nms-pos` on a rising P&L and `--nms-ok`/`--nms-warn` on the two
+ * arms of its data-safety badge; `PriceDropPathChart` crossed in S5 reading
+ * `--nms-now` three times, on the spot rule, its label and the `Now` legend
+ * swatch. `styles.css` aliased each onto the house colour it already had in the
+ * same commit. All four had been NAMED in `tokens.ts` since wave 1 and left
+ * undeclared on the rule above — the round trip again, four for four, and the
+ * ten-name house vocabulary that table has carried since wave 1 is closed.
  *
  * ONE APP VALUE NOW ANSWERS TO TWO NAMES. `styles.css` aliases both
  * `--nms-destructive` and `--nms-neg` onto `--neg`, so the per-value cases below

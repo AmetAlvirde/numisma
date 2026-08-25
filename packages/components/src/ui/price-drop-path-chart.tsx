@@ -2,7 +2,6 @@ import { useMemo } from "react";
 import { defineChart, dot, lineY, ruleX, ruleY, text } from "@tanstack/charts";
 import { scaleLinear } from "@tanstack/charts/scales/linear";
 import { Chart } from "@tanstack/charts/react";
-import type { FillPathRungView, MeasuredFigure } from "../ladder/fill-path-view.ts";
 import {
   COMPACT_USD,
   cumulate,
@@ -12,7 +11,117 @@ import {
   withRadius,
   type DeployedMark,
   type RungPoint,
-} from "@numisma/components/ui/price-drop-path.ts";
+} from "./price-drop-path";
+
+/**
+ * A measured figure, or the named reason there is none. Never a zero standing in.
+ *
+ * DECLARED HERE, IMPORTED BACK BY `apps/web` (spec #439 §4.1). The type belongs to the
+ * component that renders it, and the `known: false` arm carrying a CAUSE rather than a
+ * zero is the whole of it: the deployed rule below reduces the figure to its PRESENCE
+ * before handing it to `deployedMarkFor`, because a reason is a view concept and the
+ * pure module has no business with it. A figure that arrived as `0` instead would draw
+ * a rule at the left edge and claim the fund had measurably spent nothing.
+ */
+export type MeasuredFigure =
+  | { known: true; value: number }
+  | { known: false; why: string };
+
+/**
+ * THE TWO WIRE AXES, SPELLED RATHER THAN IMPORTED.
+ *
+ * `apps/web`'s `projection/contract.ts` declares `DcaWireVenueAxis` and
+ * `DcaWireBookAxis`, and it does not move — a package that imported them would import
+ * `apps/web`. Spelling them here is not a silent drift risk: `composeFillPathPage`
+ * assigns the wire's own axis values into a `FillPathRungView`, so a fifth venue axis
+ * added to the contract stops that assignment compiling, in `apps/web`, on the function
+ * whose author has to decide what the picture says about it.
+ */
+type WireVenueAxis = "not-placed" | "resting" | "partly-filled" | "filled";
+type WireBookAxis = "not-recorded" | "partly-recorded" | "recorded";
+
+/** One rung, decided. Every flag below is a fact the component renders, not re-derives. */
+export interface FillPathRungView {
+  /** The wire's own rung id where there is one; otherwise a positional stand-in. */
+  key: string;
+  /** 1-based position AS RENDERED, counting down the ladder. Not the plan's rung id. */
+  ladderIndex: number;
+  priceUsd: number;
+  sizeUsd?: number;
+  /**
+   * THE STATE WORDS, AUTHORED ON THIS SIDE — `rungStateCopy`'s output, from the two axes
+   * (see `apps/web`'s `ladder/rung-state-copy.ts` for why the engine's `label` is not
+   * read here).
+   *
+   * IT IS COPY, AND NOTHING BRANCHES ON IT. Every component that used to compare it now
+   * reads a fact beside it — `venueResting`, `notPlaced`, `filledPercent`. The field is
+   * named for what it is so that a comparison against it reads as the mistake it is.
+   */
+  stateCopy: string;
+  venueAxis?: WireVenueAxis;
+  bookAxis?: WireBookAxis;
+  /**
+   * THE VENUE FILLED THIS RUNG — decided here, and nowhere else on the web side.
+   *
+   * This is the one state the fill path's three-colour key turns on: the solid segment,
+   * the filled dot, the `Filled` legend entry and the tinted row all read it, and a
+   * picture that disagreed with its own legend about which rung filled would be the
+   * surface contradicting its own caption. `venueAxis === "filled"` was spelled at six
+   * sites before this field existed; it is now spelled once, by `venueFilled`.
+   *
+   * `venueAxis` IS OPTIONAL ON THIS CONTRACT, AND ITS ABSENCE MEANS NEVER PLACED
+   * (absence rule 1) — so the undefined arm is `false`. A rung no order ever joined has
+   * not filled, and neither has a rung whose fill state is unavailable: `true` here is
+   * only ever the venue's own positive statement, never an inference from a gap.
+   */
+  filled: boolean;
+  /** No order ever joined this rung — absence rule 1. */
+  notPlaced: boolean;
+  /** An order is still claiming capital at the venue for this rung. */
+  resting: boolean;
+  /**
+   * THE VENUE IS HOLDING AN ORDER AND HAS CONSUMED NOTHING — `venueAxis === "resting"`,
+   * decided here, and the FACT the two components branch on where they used to compare
+   * the engine's `waiting` literal.
+   *
+   * NOT THE SAME QUESTION AS `resting` ABOVE, and the pair is why this field exists.
+   * `resting` is "the order still claims capital", which a PARTLY FILLED rung also does;
+   * this is "the venue has said nothing about it yet", which is the ladder's ordinary
+   * state and the one the surface prints as an empty state column. Suppressing on
+   * `resting` would blank the column on a rung that is 40% filled.
+   *
+   * Absence of `venueAxis` is `false`, both times: a rung no order joined is not resting,
+   * and a rung whose fill state is unavailable is not a rung the venue is holding.
+   */
+  venueResting: boolean;
+  /** Unfilled at the venue: what `waitingDeclaredUsd` is summed over. */
+  waiting: boolean;
+  /** SPOT-DEPENDENT: the first rung a falling price would reach. */
+  isNext: boolean;
+  /** SPOT-DEPENDENT: resting, and price has already traded through it. */
+  pricePassedUnconfirmed: boolean;
+  /** The venue says filled; the book has no lot for it. A call to action. */
+  filledAtVenueNotRecorded: boolean;
+  /**
+   * The join was inferred (`joinProvenance === "price-matched"`), not declared.
+   *
+   * NOTHING RENDERS THIS, AND THAT IS DELIBERATE (M5.3, spec #302 §5). This doc used to
+   * call it "the surface showing its own confidence", which read as a claim that the rung
+   * list draws it; `RowState`'s own header, written in the same commit, says the opposite
+   * and is the one that is true — a price-matched join is how a limit ladder NORMALLY
+   * reconciles, so marking it marked the ordinary case with nothing to compare against.
+   * What the mark was guarding survives as `declaredPriceMismatch` on the inspect card.
+   *
+   * THE FIELD STAYS ANYWAY (D7, standing AAR call): it is a decided conclusion the UI has
+   * chosen not to draw, and unpicking a view module for a presentation call would be the
+   * wrong layer to edit. A reader looking for its render site should stop looking.
+   */
+  matchedByPrice: boolean;
+  /** A declared join whose order sits at a different price. Honored, and flagged. */
+  placedAtUsd?: number;
+  /** MEASURED `consumed / placed` as whole percent — only on a partly-filled rung. */
+  filledPercent?: number;
+}
 
 /**
  * THE PRICE DROP PATH, DRAWN BY TANSTACK CHARTS (ADR-018).
@@ -20,10 +129,10 @@ import {
  * ── THIS FILE IS MARKS AND A DEFINITION; THE ARITHMETIC IS NEXT DOOR ─────────────────
  * Every quantity the picture stands on — the running total, the ring radius, the split
  * index, the now rule's clamp and the one compact-USD formatter — lives in
- * `@numisma/components/ui/price-drop-path.ts`, which is pure, coverage-visible and
- * tested. Read that module for WHY each number is the number it is, and for the three
- * preconditions this component's props are required to satisfy (a plottable ladder,
- * LIVE-only spot, rungs descending by price). What is left here is which mark draws what, and why.
+ * `./price-drop-path`, which is pure, coverage-visible and tested. Read that module for
+ * WHY each number is the number it is, and for the three preconditions this component's
+ * props are required to satisfy (a plottable ladder, LIVE-only spot, rungs descending by
+ * price). What is left here is which mark draws what, and why.
  *
  * A LINE, BECAUSE THE LINE IS THE ARGUMENT. The ladder's convexity — that each rung
  * buys more than the last, and by how much it accelerates — lives in the SLOPE between
@@ -126,18 +235,22 @@ const ASPECT_RATIO = 1.25 / 1;
  * rendering a phone-sized picture in the middle of a wide card, and this chart's whole
  * subject is the SHAPE of a curve. The phone never reached either cap.
  *
- * `text-[var(--muted)]` IS THE CHART'S THEME, not a label colour. TanStack Charts paints
- * its axes, ticks, grid and titles with `currentColor` rather than shipping a palette, so
- * the wrapper's colour is what makes the guides legible on the dark palette; `text-[10px]`
- * is the tick size for the same reason. Per-mark paint is named below, from the same
- * house variables.
+ * THE WRAPPER'S TEXT COLOUR IS THE CHART'S WHOLE THEME, not a label colour, and the
+ * secondary-text grey below is set for that job rather than for any type on screen.
+ * TanStack Charts paints its axes, ticks, grid and titles with `currentColor` rather than
+ * shipping a palette, so the wrapper's colour is what makes the guides legible;
+ * `text-[10px]` is the tick size for the same reason. The role is named here and not the
+ * spelling: a docblock that pins a class string is a docblock that goes stale on the next
+ * rename, and the argument is about `currentColor` and guide legibility, which no
+ * spelling changes. Per-mark paint is named below, from the same namespace.
  *
  * THE CLASS NAME STAYS AND THE RULE DOES NOT. `fp-chart` selects nothing in `styles.css`
  * any more; it is the hook `fill-path-chart-a11y.test.tsx` and the selection tests query
  * the wrapper by, and deleting it would take a presentation contract's only handle with
  * it.
  */
-const CHART_BOX = "block w-full max-w-[500px] mx-auto text-[10px] text-[var(--muted)]";
+const CHART_BOX =
+  "block w-full max-w-[500px] mx-auto text-[10px] text-[var(--nms-muted-foreground)]";
 
 /**
  * THE KEY TO THE PICTURE, AS UTILITIES. The `<ul>` carries the UA's own list padding and
@@ -147,7 +260,7 @@ const CHART_BOX = "block w-full max-w-[500px] mx-auto text-[10px] text-[var(--mu
  */
 const LEGEND =
   "m-0 mt-1.5 flex flex-wrap gap-x-[14px] gap-y-1 p-0 list-none" +
-  " text-[0.72rem] text-[var(--muted)]";
+  " text-[0.72rem] text-[var(--nms-muted-foreground)]";
 const LEGEND_ENTRY = "flex items-center gap-1.5";
 /**
  * EACH SWATCH IS A TOTAL MAP, not a base plus two overrides.
@@ -175,9 +288,10 @@ const LEGEND_ENTRY = "flex items-center gap-1.5";
  * and for the same reason.
  */
 const SWATCH = "w-[18px] border-t-2";
-const SWATCH_FILLED = `${SWATCH} [border-top-style:solid] border-t-[var(--pos)]`;
-const SWATCH_WAITING = `${SWATCH} [border-top-style:dashed] border-t-[var(--muted)]`;
-const SWATCH_NOW = `${SWATCH} [border-top-style:solid] border-t-[var(--now)]`;
+const SWATCH_FILLED = `${SWATCH} [border-top-style:solid] border-t-[var(--nms-pos)]`;
+const SWATCH_WAITING =
+  `${SWATCH} [border-top-style:dashed] border-t-[var(--nms-muted-foreground)]`;
+const SWATCH_NOW = `${SWATCH} [border-top-style:solid] border-t-[var(--nms-now)]`;
 
 /** The dash the WAITING segment and its legend swatch share. One constant, so the
  *  picture and the key that explains it cannot drift apart. */
@@ -302,14 +416,14 @@ export function PriceDropPathChart({
         lineY(dashed, {
           x: "cumulativeUsd",
           y: "priceUsd",
-          stroke: "var(--muted)",
+          stroke: "var(--nms-muted-foreground)",
           strokeWidth: 1.5,
           strokeDasharray: WAITING_DASH,
         }),
         lineY(solid, {
           x: "cumulativeUsd",
           y: "priceUsd",
-          stroke: "var(--pos)",
+          stroke: "var(--nms-pos)",
           strokeWidth: 1.75,
         }),
         // THE "NOW" RULE, AND THE LABEL THAT SAYS WHAT IT IS. HORIZONTAL, at the spot
@@ -321,10 +435,10 @@ export function PriceDropPathChart({
         // SOLID, AND IN ITS OWN COLOUR. It used to be a white DASHED rule standing next
         // to a grey DASHED path, which is the worst pairing in the picture: the same
         // stroke style meaning two unrelated things. Now the only dashed thing on the
-        // chart is "waiting", and `--now` belongs to nothing else.
+        // chart is "waiting", and the spot colour belongs to nothing else.
         ruleY(spotRow, {
           y: "priceUsd",
-          stroke: "var(--now)",
+          stroke: "var(--nms-now)",
           strokeWidth: 1.5,
         }),
         text(spotRow, {
@@ -333,7 +447,7 @@ export function PriceDropPathChart({
           x: () => xEnd,
           y: "priceUsd",
           text: () => spotMark!.label,
-          fill: "var(--now)",
+          fill: "var(--nms-now)",
           fontSize: 10,
           // END-ANCHORED AT THE RIGHT EDGE, where a trading chart prints its last price.
           // The label runs back into the plot from there rather than off it.
@@ -362,28 +476,28 @@ export function PriceDropPathChart({
         // every nudge, so no arm of this mark can leave the plot the way it used to. There
         // is no branch here: the marks read what the module decided.
         //
-        // NEUTRAL INK, NOT `--pos`. This rule used to be drawn in the SAME green as the
-        // filled path, the filled dot, the `Filled` legend swatch and the filled row tint
-        // — a fifth job for a colour whose one job is "this rung filled". The picture and
-        // the list share exactly THREE state colours (`--pos` filled, `--muted` waiting,
-        // `--now` where price is) and add no fourth, so `Deployed` cannot have a hue at
-        // all without either inventing a state or borrowing one. It takes `--text`
-        // instead: the chart's non-state ink, already spent on the selection disc for the
-        // same reason, brighter than the `--muted` guides it must not be mistaken for and
-        // theme-defined rather than a literal, so it stays legible wherever the palette
-        // goes. The rule is a MEASUREMENT the chart annotates itself with, and neutral ink
-        // is what that reads as.
+        // NEUTRAL INK, NOT THE FILLED GREEN. This rule used to be drawn in the SAME green
+        // as the filled path, the filled dot, the `Filled` legend swatch and the filled row
+        // tint — a fifth job for a colour whose one job is "this rung filled". The picture
+        // and the list share exactly THREE state colours (`--nms-pos` filled,
+        // `--nms-muted-foreground` waiting, `--nms-now` where price is) and add no fourth,
+        // so `Deployed` cannot have a hue at all without either inventing a state or
+        // borrowing one. It takes `--nms-foreground` instead: the chart's non-state ink,
+        // already spent on the selection disc for the same reason, brighter than the guides
+        // it must not be mistaken for, and theme-defined rather than a literal, so it stays
+        // legible wherever the palette goes. The rule is a MEASUREMENT the chart annotates
+        // itself with, and neutral ink is what that reads as.
         ruleX(deployedRow, {
           x: "x",
-          stroke: "var(--text)",
+          stroke: "var(--nms-foreground)",
           // THINNER THAN THE "NOW" RULE, which stays the loudest annotation on the picture
           // at 1.5px in a saturated hue: deployed is a standing fact about the past, "now"
           // is the mark the operator reads the chart against.
           //
-          // THE OPACITY IS SET AGAINST THE AXIS SPINE, NOT PICKED. `--text` is the
-          // brightest token in the palette, so it needs holding back — but the first
-          // attempt (0.4) landed it DIMMER than the `--muted` spines and gridlines the
-          // library draws in `currentColor`, and a mark quieter than the frame it stands in
+          // THE OPACITY IS SET AGAINST THE AXIS SPINE, NOT PICKED. `--nms-foreground` is
+          // the brightest token in the palette, so it needs holding back — but the first
+          // attempt (0.4) landed it DIMMER than the spines and gridlines the library draws
+          // in `currentColor`, and a mark quieter than the frame it stands in
           // reads as part of the frame. 0.7 puts it just past the spine: unmistakably a
           // drawn mark, still plainly quieter than the now rule and the selection disc.
           strokeWidth: 1,
@@ -398,7 +512,7 @@ export function PriceDropPathChart({
           // travels on the mark instead of being re-made here.
           y: "y",
           text: (mark: DeployedMark) => mark.label,
-          fill: "var(--text)",
+          fill: "var(--nms-foreground)",
           fontSize: 10,
           fontWeight: 600,
           anchor: (mark: DeployedMark) => mark.anchor,
@@ -422,8 +536,8 @@ export function PriceDropPathChart({
             y: "priceUsd",
             key: "key",
             r: "radiusPx",
-            fill: "var(--card)",
-            stroke: "var(--muted)",
+            fill: "var(--nms-card)",
+            stroke: "var(--nms-muted-foreground)",
             strokeWidth: 1.5,
           },
         ),
@@ -434,8 +548,8 @@ export function PriceDropPathChart({
             y: "priceUsd",
             key: "key",
             r: "radiusPx",
-            fill: "var(--card)",
-            stroke: "var(--pos)",
+            fill: "var(--nms-card)",
+            stroke: "var(--nms-pos)",
             strokeWidth: 1.75,
           },
         ),
@@ -462,8 +576,8 @@ export function PriceDropPathChart({
           y: "priceUsd",
           key: "key",
           r: (point: RungPoint) => point.radiusPx + 4,
-          fill: "var(--bg)",
-          stroke: "var(--bg)",
+          fill: "var(--nms-background)",
+          stroke: "var(--nms-background)",
           strokeWidth: 2,
         }),
         dot(selected, {
@@ -471,8 +585,8 @@ export function PriceDropPathChart({
           y: "priceUsd",
           key: "key",
           r: (point: RungPoint) => point.radiusPx + 1,
-          fill: "var(--text)",
-          stroke: "var(--bg)",
+          fill: "var(--nms-foreground)",
+          stroke: "var(--nms-background)",
           strokeWidth: 1.5,
         }),
       ],

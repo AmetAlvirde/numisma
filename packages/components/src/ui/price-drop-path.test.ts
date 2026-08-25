@@ -1,5 +1,5 @@
 /**
- * `ladder/price-drop-path` — the Price Drop Path's quantitative logic, tested (spec #302
+ * `ui/price-drop-path` — the Price Drop Path's quantitative logic, tested (spec #302
  * slices A and C, T1–T4 and T6).
  *
  * WHY THESE FOUR FUNCTIONS ARE TESTED AND THE CHART IS STILL NOT. The chart is
@@ -81,7 +81,7 @@ import {
   type CumulatedRung,
   type PlottableRung,
   type RungPoint,
-} from "@numisma/components/ui/price-drop-path.ts";
+} from "./price-drop-path";
 
 /** A rung as the chart's caller hands it over: size present, filled decided upstream. */
 function rung(
@@ -379,12 +379,13 @@ describe("deployedMarkFor — a MEASURED rule on a DECLARED axis (T6)", () => {
 });
 
 /**
- * THE ONE BRANCH OF THE CHART A TEST CAN SEE WITHOUT A HARNESS (finding on PR #308).
+ * THE ONE CLAIM ABOUT THE CHART A RENDER CANNOT MAKE (finding on PR #308).
  *
- * `PriceDropPathChart` cannot be rendered by any test in this repo (D1, deferred —
- * `docs/coverage-rationale.md` §6), and its legend is plain JSX rather than a chart mark,
- * so no pure module holds it. What CAN be read is the source, the way
- * `rung-state-seam.test.ts` reads its own: whether each entry is GATED at all.
+ * The legend is plain JSX rather than a chart mark, so no pure module holds it, and the
+ * rule below is about the SHAPE of the markup rather than about any one drawn state: a
+ * render shows which entries a given ladder printed, never whether an entry could have
+ * printed unconditionally. So the source is read, the way `rung-state-seam.test.ts`
+ * reads its own: whether each entry is GATED at all.
  *
  * THE RULE THE CHART SET FOR ITSELF is that each entry appears only when the thing it
  * explains is on screen — `Filled` on `anyFilled`, `Now` on a known spot. `Waiting` shipped
@@ -399,7 +400,7 @@ describe("deployedMarkFor — a MEASURED rule on a DECLARED axis (T6)", () => {
  */
 describe("the chart's legend gates every entry on the mark it explains", () => {
   const source = readFileSync(
-    join(dirname(fileURLToPath(import.meta.url)), "..", "components", "PriceDropPathChart.tsx"),
+    join(dirname(fileURLToPath(import.meta.url)), "price-drop-path-chart.tsx"),
     "utf8",
   );
 

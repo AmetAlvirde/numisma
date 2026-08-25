@@ -59,13 +59,24 @@
  */
 import type {
   DcaPositionRow,
-  DcaWireBookAxis,
   DcaWireRung,
-  DcaWireVenueAxis,
   SnapshotAnchor,
 } from "../projection/contract.ts";
 import { convexityCaption } from "./convexity-caption.ts";
 import { rungStateCopy } from "./rung-state-copy.ts";
+
+/**
+ * DECLARED BY THE PACKAGE, IMPORTED BACK HERE (spec #439 §4.1, S5). Both types moved to
+ * `PriceDropPathChart`, the component that renders them, and this module composes into
+ * them rather than owning them. `FillPathRungView.venueAxis` and `.bookAxis` are spelled
+ * out over there rather than importing `projection/contract.ts`, which never moves — and
+ * `composeFillPathPage` below assigns the wire's own axis values into that shape, so a
+ * fifth venue axis on the contract stops compiling HERE, in the function whose author has
+ * to decide what the picture says about it.
+ */
+import type { FillPathRungView, MeasuredFigure } from "@numisma/components";
+
+export type { FillPathRungView, MeasuredFigure };
 
 /**
  * What the caller knows about spot right now. THREE arms, because "still loading" and
@@ -76,11 +87,6 @@ export type SpotReading =
   | { status: "live"; priceUsd: number }
   /** The fetch failed. `lastCloseUsd` is the last price this session actually saw. */
   | { status: "unavailable"; lastCloseUsd?: number };
-
-/** A measured figure, or the named reason there is none. Never a zero standing in. */
-export type MeasuredFigure =
-  | { known: true; value: number }
-  | { known: false; why: string };
 
 /**
  * WHAT THE DECLARED LADDER WOULD ACQUIRE IF IT WERE WALKED — an INTENTION, and a
@@ -116,88 +122,6 @@ export type TornActReading =
   | { status: "outstanding"; count: number }
   | { status: "clear" }
   | { status: "unchecked" };
-
-/** One rung, decided. Every flag below is a fact the component renders, not re-derives. */
-export interface FillPathRungView {
-  /** The wire's own rung id where there is one; otherwise a positional stand-in. */
-  key: string;
-  /** 1-based position AS RENDERED, counting down the ladder. Not the plan's rung id. */
-  ladderIndex: number;
-  priceUsd: number;
-  sizeUsd?: number;
-  /**
-   * THE STATE WORDS, AUTHORED ON THIS SIDE — `rungStateCopy`'s output, from the two axes
-   * (see `ladder/rung-state-copy.ts` for why the engine's `label` is not read here).
-   *
-   * IT IS COPY, AND NOTHING BRANCHES ON IT. Every component that used to compare it now
-   * reads a fact beside it — `venueResting`, `notPlaced`, `filledPercent`. The field is
-   * named for what it is so that a comparison against it reads as the mistake it is.
-   */
-  stateCopy: string;
-  venueAxis?: DcaWireVenueAxis;
-  bookAxis?: DcaWireBookAxis;
-  /**
-   * THE VENUE FILLED THIS RUNG — decided here, and nowhere else on the web side.
-   *
-   * This is the one state the fill path's three-colour key turns on: the solid segment,
-   * the filled dot, the `Filled` legend entry and the tinted row all read it, and a
-   * picture that disagreed with its own legend about which rung filled would be the
-   * surface contradicting its own caption. `venueAxis === "filled"` was spelled at six
-   * sites before this field existed; it is now spelled once, by `venueFilled`.
-   *
-   * `venueAxis` IS OPTIONAL ON THIS CONTRACT, AND ITS ABSENCE MEANS NEVER PLACED
-   * (absence rule 1) — so the undefined arm is `false`. A rung no order ever joined has
-   * not filled, and neither has a rung whose fill state is unavailable: `true` here is
-   * only ever the venue's own positive statement, never an inference from a gap.
-   */
-  filled: boolean;
-  /** No order ever joined this rung — absence rule 1. */
-  notPlaced: boolean;
-  /** An order is still claiming capital at the venue for this rung. */
-  resting: boolean;
-  /**
-   * THE VENUE IS HOLDING AN ORDER AND HAS CONSUMED NOTHING — `venueAxis === "resting"`,
-   * decided here, and the FACT the two components branch on where they used to compare
-   * the engine's `waiting` literal.
-   *
-   * NOT THE SAME QUESTION AS `resting` ABOVE, and the pair is why this field exists.
-   * `resting` is "the order still claims capital", which a PARTLY FILLED rung also does;
-   * this is "the venue has said nothing about it yet", which is the ladder's ordinary
-   * state and the one the surface prints as an empty state column. Suppressing on
-   * `resting` would blank the column on a rung that is 40% filled.
-   *
-   * Absence of `venueAxis` is `false`, both times: a rung no order joined is not resting,
-   * and a rung whose fill state is unavailable is not a rung the venue is holding.
-   */
-  venueResting: boolean;
-  /** Unfilled at the venue: what `waitingDeclaredUsd` is summed over. */
-  waiting: boolean;
-  /** SPOT-DEPENDENT: the first rung a falling price would reach. */
-  isNext: boolean;
-  /** SPOT-DEPENDENT: resting, and price has already traded through it. */
-  pricePassedUnconfirmed: boolean;
-  /** The venue says filled; the book has no lot for it. A call to action. */
-  filledAtVenueNotRecorded: boolean;
-  /**
-   * The join was inferred (`joinProvenance === "price-matched"`), not declared.
-   *
-   * NOTHING RENDERS THIS, AND THAT IS DELIBERATE (M5.3, spec #302 §5). This doc used to
-   * call it "the surface showing its own confidence", which read as a claim that the rung
-   * list draws it; `RowState`'s own header, written in the same commit, says the opposite
-   * and is the one that is true — a price-matched join is how a limit ladder NORMALLY
-   * reconciles, so marking it marked the ordinary case with nothing to compare against.
-   * What the mark was guarding survives as `declaredPriceMismatch` on the inspect card.
-   *
-   * THE FIELD STAYS ANYWAY (D7, standing AAR call): it is a decided conclusion the UI has
-   * chosen not to draw, and unpicking a view module for a presentation call would be the
-   * wrong layer to edit. A reader looking for its render site should stop looking.
-   */
-  matchedByPrice: boolean;
-  /** A declared join whose order sits at a different price. Honored, and flagged. */
-  placedAtUsd?: number;
-  /** MEASURED `consumed / placed` as whole percent — only on a partly-filled rung. */
-  filledPercent?: number;
-}
 
 export interface ChartCircle {
   key: string;

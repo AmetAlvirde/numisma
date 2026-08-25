@@ -61,11 +61,17 @@
    class strings and as `var(--muted)` in the chart's own marks — and
    the surface gets its own minted grey instead. The package's secondary text reaches the
    same grey through `--nms-muted-foreground`, an alias and never a second definition, so
-   an `Absent` rendered from the package paints exactly what it painted from `apps/web`. `--now` ALONE has no
-   package counterpart and gets no alias — `--ok`, `--warn` and `--pos` gained theirs when
-   `SummaryCard` crossed reading all three (spec #439 S1). `--now` is the spot colour
-   chosen to collide with nothing on the Price Drop Path, and aliasing it onto
-   `--nms-primary` would put "where price is now" on every button in the app. */
+   an `Absent` rendered from the package paints exactly what it painted from `apps/web`.
+
+   EVERY HOUSE COLOUR NOW HAS A PACKAGE COUNTERPART. `--ok`, `--warn` and `--pos` gained
+   theirs when `SummaryCard` crossed reading all three (spec #439 S1), and `--now` gained
+   `--nms-now` when `PriceDropPathChart` crossed reading it three times (S5). That last
+   one closes a paragraph this block carried for two waves, and the argument it made was
+   never an argument against giving the spot colour a package name — it was an argument
+   against WELDING it onto an existing one. `--now` is the colour chosen to collide with
+   nothing on the Price Drop Path, and aliasing it onto `--nms-primary` would have put
+   "where price is now" on every button in the app. `--nms-now` is the name that honours
+   that: its own row, aliased onto its own house colour, reaching nothing else. */
 :root {
   /* MINTED, because the app had no such colours. `--accent` is not a new decision so
      much as an existing one promoted: `.auth-card button` painted this exact blue from
@@ -123,6 +129,13 @@
      `--nms-destructive` — nothing failed and nothing is being destroyed. */
   --nms-ok: var(--ok);
   --nms-warn: var(--warn);
+  /* THE SPOT LEVEL, and the one alias in this block whose house colour exists for a
+     single picture. `PriceDropPathChart` reads it three times from inside the package —
+     the horizontal rule at spot, the end-anchored label beside it and the `Now` legend
+     swatch — and it is the third of the three state colours the chart shares with the
+     rung list below it. See this block's header for why it is its own name rather than
+     `--nms-primary` wearing a second hat. */
+  --nms-now: var(--now);
   --nms-ring: var(--accent);
   /* GEOMETRY, NOT PALETTE, and the one override here that changes a built-in Tailwind
      utility (`rounded-md`) rather than creating one. The package default is 6px; every

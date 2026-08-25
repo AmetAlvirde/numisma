@@ -87,6 +87,7 @@ export const THEMED_TOKENS: Readonly<Record<string, string>> = {
   "--nms-pos": "#b026ff",
   "--nms-ok": "#00ff4c",
   "--nms-warn": "#ff00a8",
+  "--nms-now": "#7cff00",
   "--nms-ring": "#f2a516",
   "--nms-radius-md": "14px",
 };
@@ -100,10 +101,11 @@ export const THEMED_TOKENS: Readonly<Record<string, string>> = {
  * alias chain to meet these literals, rather than comparing alias text that
  * would keep matching while the palette moved underneath it.
  *
- * EIGHTEEN NAMES, MATCHING THE PACKAGE EXACTLY. Fifteen was wave 1's final
+ * NINETEEN NAMES, MATCHING THE PACKAGE EXACTLY. Fifteen was wave 1's final
  * count; spec #439 S1 moved `SummaryCard` into the package reading `--nms-pos`,
- * `--nms-ok` and `--nms-warn`, and `styles.css` aliased each onto the house name
- * it already had in the same commit, so the two sides moved together again. This
+ * `--nms-ok` and `--nms-warn`, and S5 moved `PriceDropPathChart` in reading
+ * `--nms-now`. `styles.css` aliased each onto the house name it already had in
+ * the same commit, so the two sides moved together every time. This
  * table carried fourteen once before, while `styles.css` defined `--nms-card`
  * and `--nms-muted-foreground`, two aliases spec #412 §4.2 minted for
  * components that had not arrived. Spec #420 S0 deleted both on the rule
@@ -139,6 +141,14 @@ export const THEMED_TOKENS: Readonly<Record<string, string>> = {
  * purpose: a fill that does not change when the switcher moves is the loudest
  * possible way to say a token is not being read.
  *
+ * `#e07a4f` IS `--now` RESOLVED, and it is the only value in this table that
+ * belongs to one picture. The chart draws the spot rule, its end-anchored label
+ * and the `Now` legend swatch with it, and nothing else in the app reads the
+ * house colour it aliases. In themed mode it is a chartreuse, which is loud on
+ * purpose for the reason the block above gives: this is the mint spec #439 S5
+ * carried, and the gate check that cleared the chart for the workbench painted
+ * these strokes INVISIBLE precisely because no `--nms-` name backed them yet.
+ *
  * `#f0736a` IS `--neg` RESOLVED, AND IT APPEARS TWICE. `--nms-destructive` and
  * `--nms-neg` both alias onto `--neg` in `styles.css`, so app mode carries one
  * literal under two names and no guard objects: only themed mode asserts
@@ -164,6 +174,7 @@ export const APP_TOKENS: Readonly<Record<string, string>> = {
   "--nms-pos": "#46c98b",
   "--nms-ok": "#1f7a4d",
   "--nms-warn": "#8a5a12",
+  "--nms-now": "#e07a4f",
   "--nms-ring": "#3b6cf0",
   "--nms-radius-md": "8px",
 };

@@ -39,6 +39,11 @@ export {
   type Verdict,
 } from "./ui/glance-card";
 export {
+  PriceDropPathChart,
+  type FillPathRungView,
+  type MeasuredFigure,
+} from "./ui/price-drop-path-chart";
+export {
   SectionTable,
   TABLE_CELL,
   TABLE_CELL_NUM,
