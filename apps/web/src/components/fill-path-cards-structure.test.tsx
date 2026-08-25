@@ -210,10 +210,10 @@ describe("the header card carries its section as utilities", () => {
     // to name its colour or the chip renders in the inherited text colour.
     const base = partlyWalkedView();
     const tones: [FillPathView["state"], string][] = [
-      ["pending", "text-[var(--muted)]"],
-      ["active", "text-[var(--pos)]"],
-      ["ended", "text-[var(--muted)]"],
-      ["unreadable", "text-[var(--warn)]"],
+      ["pending", "text-[var(--nms-muted-foreground)]"],
+      ["active", "text-[var(--nms-pos)]"],
+      ["ended", "text-[var(--nms-muted-foreground)]"],
+      ["unreadable", "text-[var(--nms-warn)]"],
     ];
     for (const [state, tone] of tones) {
       const { container, unmount } = renderHeader({ ...base, state });
@@ -242,7 +242,7 @@ describe("the header card carries its section as utilities", () => {
       "justify-end",
       "pb-[10px]",
       "border-b",
-      "border-b-[var(--line)]",
+      "border-b-[var(--nms-border)]",
       "mb-3",
       "@[380px]/fp-header:flex-col",
       "@[380px]/fp-header:items-end",
@@ -254,13 +254,13 @@ describe("the header card carries its section as utilities", () => {
     expectClasses(spot?.querySelector("strong"), [
       "text-[1.05rem]",
       "tabular-nums",
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
     ]);
     expectClasses(spot?.querySelector("span:last-of-type"), [
       "m-0",
       "mt-1",
       "text-[0.7rem]",
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
     ]);
   });
 
@@ -320,9 +320,9 @@ describe("the header card carries its section as utilities", () => {
       "h-1.5",
       "overflow-hidden",
       "rounded-[3px]",
-      "bg-[var(--line)]",
+      "bg-[var(--nms-border)]",
     ]);
-    expectClasses(track?.firstElementChild, ["h-full", "bg-[var(--pos)]"]);
+    expectClasses(track?.firstElementChild, ["h-full", "bg-[var(--nms-pos)]"]);
     // THE WIDTH IS AN INLINE STYLE AND STAYS ONE. It is a measurement, and there is no
     // utility for "whatever fraction this ladder happens to be at".
     expect(track?.firstElementChild?.getAttribute("style")).toMatch(/width:/);
@@ -332,7 +332,7 @@ describe("the header card carries its section as utilities", () => {
       "m-0",
       "mt-1.5",
       "text-[0.78rem]",
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
     ]);
   });
 
@@ -345,7 +345,7 @@ describe("the header card carries its section as utilities", () => {
       "justify-end",
       "gap-x-[10px]",
       "border-t",
-      "border-t-[var(--line)]",
+      "border-t-[var(--nms-border)]",
       "pt-3",
       "@[380px]/fp-header:flex-col",
       "@[380px]/fp-header:items-stretch",
@@ -367,7 +367,7 @@ describe("the header card carries its section as utilities", () => {
       "mt-1",
       "text-[0.78rem]",
       "text-pretty",
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
     ]);
   });
 
@@ -450,33 +450,35 @@ describe("the torn banner and the two warnings carry their rules as utilities", 
     return { ...partlyWalkedView(), tornActs: { status: "outstanding", count: 2 } };
   }
 
-  it("paints the banner in `--neg` and keeps it an alert", () => {
+  it("paints the banner in the alarm colour and keeps it an alert", () => {
     const { container } = render(<FillPathCards view={tornView()} />);
     const banner = container.querySelector('[role="alert"]');
 
     // The surface is spelled out on this one element rather than composed from
-    // `CARD_SURFACE`, because the banner's border is `--neg` and the shared string's is
-    // `--line`: two unvariant `border-color` utilities would race. Asserted from both
-    // ends — the colour that must be there, and the one that must not.
+    // `CARD_SURFACE`, because the banner's border is the alarm red and the shared
+    // string's is the ordinary hairline: two unvariant `border-color` utilities would
+    // race. Asserted from both ends — the colour that must be there, and the one that
+    // must not.
     expectClasses(banner, [
       "rounded-xl",
       "border",
-      "border-[var(--neg)]",
-      "bg-[var(--card)]",
+      "border-[var(--nms-neg)]",
+      "bg-[var(--nms-card)]",
       "p-4",
-      "text-[var(--neg)]",
+      "text-[var(--nms-neg)]",
     ]);
-    expect(classTokens(banner!)).not.toContain("border-[var(--line)]");
+    expect(classTokens(banner!)).not.toContain("border-[var(--nms-border)]");
     expect(banner?.tagName).toBe("DIV");
     expect(banner?.getAttribute("role")).toBe("alert");
 
-    // The sentence under the heading steps back to `--text`: it is prose inside a block
-    // painted `--neg`, and reading it in the alarm colour makes the whole card shout.
+    // The sentence under the heading steps back to the ordinary foreground: it is prose
+    // inside a block painted in the alarm colour, and reading it in that colour too makes
+    // the whole card shout.
     expectClasses(banner?.querySelector("p"), [
       "m-0",
       "mt-1.5",
       "text-[0.85rem]",
-      "text-[var(--text)]",
+      "text-[var(--nms-foreground)]",
     ]);
   });
 
@@ -515,7 +517,7 @@ describe("the torn banner and the two warnings carry their rules as utilities", 
       paragraph.textContent?.includes("were not checked for this snapshot"),
     );
 
-    expectClasses(line, ["m-0", "text-[0.8rem]", "text-[var(--muted)]"]);
+    expectClasses(line, ["m-0", "text-[0.8rem]", "text-[var(--nms-muted-foreground)]"]);
     expect(classTokens(line!)).not.toContain("mt-1");
   });
 
@@ -550,7 +552,7 @@ describe("the torn banner and the two warnings carry their rules as utilities", 
         "border-l-4",
       ]);
     }
-    expectClasses(certain, ["border-l-[var(--neg)]"]);
+    expectClasses(certain, ["border-l-[var(--nms-neg)]"]);
     expect(classTokens(certain!)).not.toContain("[border-left-style:dashed]");
 
     // THE DASH IS ONE EDGE, NOT FOUR. `border-dashed` would dash the card's other three
@@ -558,9 +560,9 @@ describe("the torn banner and the two warnings carry their rules as utilities", 
     // the difference between the two certainties is the whole reason these paragraphs
     // look different, and it must not spill onto the surface they share.
     expectClasses(inferred, [
-      "border-l-[var(--warn)]",
+      "border-l-[var(--nms-warn)]",
       "[border-left-style:dashed]",
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
     ]);
   });
 

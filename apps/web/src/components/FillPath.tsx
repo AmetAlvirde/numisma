@@ -4,7 +4,6 @@ import {
   Absent,
   Card,
   CARD_SURFACE,
-  NOTICE_CODE,
   PriceDropPathChart,
   useFillPath,
   FillPathProvider,
@@ -13,31 +12,27 @@ import { COMPACT_USD } from "@numisma/components/ui/price-drop-path.ts";
 /**
  * ── THE TRANSITIONAL SUBPATH IMPORT (spec #439 S6, and it dies at S9) ────────────────
  *
- * The selection seam and the three shared helpers moved into the package; the six
- * components below did not, and they read what the helpers dragged across with them.
- * `FillPathProvider` and `useFillPath` come from the curated index above, because the
- * ladder route's runtime closure already allows the bare `@numisma/components` specifier
- * and because those two are the seam itself. EVERYTHING ON THIS LINE IS DIFFERENT: these
- * are internals of `ui/fill-path.tsx` with no business on the package's public surface,
- * so they cross by subpath and the whole import disappears when S9 takes the last part,
- * rather than leaving names someone has to unpublish later.
+ * The seam, the shared helpers and — since S7 — the header card all live in the package;
+ * the parts below do not, and they read what those moves left behind. `FillPathProvider`
+ * and `useFillPath` come from the curated index above, because the ladder route's runtime
+ * closure already allows the bare `@numisma/components` specifier and because those two
+ * are the seam itself. EVERYTHING ON THIS LINE IS DIFFERENT: these are internals of
+ * `ui/fill-path.tsx` with no business on the package's public surface, so they cross by
+ * subpath and the whole import disappears when S9 takes the last part, rather than leaving
+ * names someone has to unpublish later.
  *
- * EIGHT NAMES, NOT THE SEVEN THE SLICE BRIEF TABULATES. The brief's table misses `RAIL`,
- * which `SPOT` below composes from — `SpotReadout` is S7's, and until it moves, the
- * string it reads has to reach it. The other seven are the brief's: `Figure` and
- * `Expectation` for `Header` and `ExpectedRow`, `formatUnits` for both, `TILE_LABEL` for
- * `ExpectedRow`'s hero label and `Chart`'s inspect label, `STACKED_LABEL` and
- * `TILE_VALUE` for `Waiting`, and `SPOT_LABEL` for `SpotReadout`.
+ * FOUR NAMES, DOWN FROM EIGHT. S7 moved `Header` into the package and took
+ * `SpotReadout`, `ExpectedRow`, `Waiting`, `TornActBanner` and `UnrecordedWarnings` with
+ * it, which retired `Figure`, `Expectation`, `formatUnits`, `RAIL`, `SPOT_LABEL`,
+ * `STACKED_LABEL` and `TILE_VALUE` from this line in the same diff. What is left is the
+ * three elements `FillPathCards` and the frozen object still assemble from over there,
+ * and `TILE_LABEL`, which `Chart`'s inspect-slider label reads until S8.
  */
 import {
-  Expectation,
-  Figure,
-  formatUnits,
-  RAIL,
-  SPOT_LABEL,
-  STACKED_LABEL,
+  Header,
   TILE_LABEL,
-  TILE_VALUE,
+  TornActBanner,
+  UnrecordedWarnings,
 } from "@numisma/components/ui/fill-path.tsx";
 import type {
   FillPathRungView,
@@ -104,156 +99,21 @@ import type {
  */
 
 /**
- * ── THE HEADER CARD'S SECTION, AS UTILITIES (spec #420 slice 7) ──────────────────────
- *
- * `styles.css` opened the fill path with about three hundred lines covering this one
- * card: an identity row, a state chip, a spot reading, three tiles, a progress bar, the
- * waiting block, day zero's hero and TWO `@container fp-header` blocks reflowing most of
- * it at 380px. Every declaration in that section is now one of the strings below, and
- * `fill-path-header-section-deleted.test.ts` holds the other end.
- *
- * ── THE CONTAINER IS THE CARD, NOT THE VIEWPORT, AND KEEPS ITS ONE NAME ──────────────
- * `container: fp-header / inline-size` is a shorthand with a single name, which is
- * exactly what Tailwind's NAMED container utility emits, so `@container/fp-header` is a
- * literal translation here. The glance card's pair had to be split into a bare
- * `@container` plus an arbitrary `container-name` because the shorthand carries only
- * what it is given and that card needed two names; this one needed one.
- *
- * ── THE RAIL IS THE SHAPE, AND THREE BLOCKS SHARE IT ─────────────────────────────────
- * Spot, a tile and the waiting block are the SAME row at 320px — label left, figure hard
- * right, one line each — and all three turn into a stacked block at 380px of CARD width.
- * `RAIL` is that shared narrow form; each block adds what it alone declared. Composing
- * rather than repeating is what keeps the three from drifting apart at one edge, which is
- * what the deleted rules' shared selector lists were doing.
- *
- * ── WHERE A SHORTHAND SITS BESIDE ITS OWN LONGHAND ───────────────────────────────────
- * `m-0 mb-3` and `m-0 mt-1.5` are the preflight-off pattern every converted surface in
- * this app uses: the UA margins on `p` are live, so a rule that said `margin: 0 0 12px`
- * has to zero three edges and set one, and Tailwind sorts the shorthand ahead of the
- * longhand so the specific edge wins. Two utilities setting the SAME property would be a
- * coin toss instead — see `BADGE_TONE` below, which is a total map for that reason.
- */
-const HEADER_CARD = "@container/fp-header";
-const HEADER_TITLE = "m-0 text-[1.15rem] wrap-anywhere";
-const HEADER_HEAD =
-  "block @[380px]/fp-header:flex @[380px]/fp-header:flex-wrap @[380px]/fp-header:items-baseline @[380px]/fp-header:justify-between @[380px]/fp-header:gap-x-4 @[380px]/fp-header:gap-y-0";
-const HEADER_ID =
-  "flex flex-wrap items-baseline gap-x-2 gap-y-1 min-w-0 mb-[10px] @[380px]/fp-header:flex-[1_1_180px]";
-
-/**
- * THE STATE, AS A TAG — a chip rather than bare text, because it sits beside a heading
- * and needs an edge to stop reading as part of the title.
- *
- * `border-current` IS THE WHOLE POINT OF SPLITTING THE COLOUR OUT. The deleted rule drew
- * `1px solid currentColor`, so the chip's edge is whatever its text is, and the three
- * tones below each move both at once.
- */
-const BADGE =
-  "flex-none rounded-[999px] border border-current px-[7px] py-[2px] text-[0.65rem] font-semibold uppercase leading-[1.4] tracking-[0.05em]";
-
-/**
- * ONE COLOUR REACHES THE CHIP, AND WHICH ONE IS A FACT ABOUT THIS MAP.
- *
- * The deleted rules were a base that painted `--muted` and two overrides that repainted
- * it. As utilities that is a cascade this string cannot express: two unvariant `color`
- * utilities on one element are resolved by Tailwind's EMITTED order, not by the order
- * they are written in. A total map has no override to lose. `DcaCard`'s state word made
- * the same move for the same reason, and the semantics are deliberately identical —
- * `pending` is NOT an alarm colour, because a declared ladder awaiting its first fill is
- * the normal starting state; `unreadable` is the only one that wants the eye.
- */
-const BADGE_TONE: Record<FillPathView["state"], string> = {
-  pending: "text-[var(--muted)]",
-  active: "text-[var(--pos)]",
-  ended: "text-[var(--muted)]",
-  unreadable: "text-[var(--warn)]",
-};
-
-/**
- * SPOT IS CONTEXT, NOT THE ANSWER. It reads in `--muted` like every other reference
- * figure on the card, which leaves Waiting as the one accented number.
- *
- * At 380px it becomes the corner figure again — label over value, right-aligned, no rule
- * under it — which is why the border and the padding both have an arm that removes them.
- */
-const SPOT =
-  `${RAIL} mb-3 pb-[10px] border-b border-b-[var(--line)]` +
-  " @[380px]/fp-header:flex-col @[380px]/fp-header:items-end @[380px]/fp-header:gap-x-0" +
-  " @[380px]/fp-header:gap-y-px @[380px]/fp-header:pb-0 @[380px]/fp-header:border-b-0" +
-  " @[380px]/fp-header:text-right";
-const SPOT_VALUE = "flex-none text-right text-[1.05rem] tabular-nums text-[var(--muted)]";
-const SPOT_NOTE = "m-0 mt-1 text-[0.7rem] text-[var(--muted)]";
-/** Spot's own reflow already right-aligns the block, so this one has no wide arm. */
-const SPOT_ABSENT = "flex-wrap justify-end text-right";
-
-/**
- * One column of rows at 320px; a real grid of tiles once the CARD is wide enough.
- *
- * `grid-cols-1` IS NOT LITERALLY THE DELETED `grid-template-columns: 1fr`, and here it
- * cannot differ. `1fr` is `minmax(auto, 1fr)`, whose automatic minimum is the item's
- * min-content contribution; `grid-cols-1` emits `repeat(1, minmax(0, 1fr))`, which has no
- * such floor. The two part company only when a tile's min-content exceeds the card
- * interior — measured in Chrome at 320px, with `min-width: auto` forced onto a tile and a
- * 363px unbreakable token in it: `1fr` grows the track to 363.008px, `minmax(0,1fr)`
- * holds 254px.
- *
- * Every tile carries `min-w-0`, which is `TILE`'s reproduction of the `min-width: 0` the
- * deleted `.fp-spot, .fp-tile` rule declared. That zeroes the automatic minimum, so the
- * `auto` half of `minmax(auto, 1fr)` was already 0 on the pre-slice tree. The
- * substitution is inert by construction, not merely unobserved: measured at 254px of card
- * interior the real tiles' widest min-content is 97.82px, and both track definitions
- * resolve to the same 254px track.
- */
-const TILES =
-  "grid grid-cols-1 gap-2" +
-  " @[380px]/fp-header:grid-cols-[repeat(auto-fit,minmax(130px,1fr))] @[380px]/fp-header:gap-3";
-
-/**
- * A BAR AT ZERO READS AS ABSENCE, which is the truth on day zero — so the track is always
- * drawn and the fill is allowed to be 0 wide. The fill's WIDTH stays an inline style: it
- * is a measurement, not a design decision, and there is no utility for "whatever fraction
- * this ladder happens to be at".
- */
-const PROGRESS = "m-0 mb-[14px]";
-const PROGRESS_TRACK = "h-1.5 overflow-hidden rounded-[3px] bg-[var(--line)]";
-const PROGRESS_FILL = "h-full bg-[var(--pos)]";
-const PROGRESS_NOTE = "m-0 mt-1.5 text-[0.78rem] text-[var(--muted)]";
-
-/**
- * The measured-layout waiting block takes the SAME row shape as the tiles above it, with
- * its sentence breaking to a full-width line under both. `flex-[1_0_100%]` is what forces
- * that break, so the sentence never tries to share the rail with the number it explains.
- */
-const WAITING =
-  "flex flex-wrap items-baseline justify-end gap-x-[10px] border-t border-t-[var(--line)] pt-3" +
-  " @[380px]/fp-header:flex-col @[380px]/fp-header:items-stretch" +
-  " @[380px]/fp-header:justify-start @[380px]/fp-header:gap-y-[2px]";
-const WAITING_SUB =
-  "flex-[1_0_100%] m-0 mt-1 text-[0.78rem] text-pretty text-[var(--muted)]";
-
-/**
- * DAY ZERO'S BLOCK — a headline figure and two quiet projections under it.
- *
- * THE HERO STEPS OUT OF THE RAIL, label above rather than beside: the rail is for the
- * reference rows and leaving it is half of what makes this figure read first. The other
- * half is size — `--muted` alone lost to the projections, whose strings are simply
- * longer, so the projections step DOWN in size as well as being muted.
- */
-const EXPECTED = "mb-[14px]";
-const HERO = "flex flex-col gap-px mb-3";
-const HERO_VALUE =
-  "text-[1.75rem] font-bold leading-[1.15] tracking-[-0.01em] tabular-nums";
-
-/**
  * THE PARTS, ATTACHED AS PLAIN PROPERTIES (grill D4, the same shape `Card` uses).
  * `FillPath.RungList` is the call-site vocabulary, and mounting one property on its own
  * is how each card's half of the accessibility contract is asserted without its three
  * siblings standing in for it.
  *
- * THEY ARE NOT NAMED-EXPORTED, AND NEVER WERE. This docblock claimed they are until spec
- * #439 S6 read it against the code: each part is a bare `function Header()` attached as a
- * property below, and the frozen object is the only export. A per-part test reaches
- * `FillPath.Header`, which is what it has always done.
+ * ASSEMBLED FROM BOTH SIDES, AND ONLY UNTIL S9. `Header` is a named export of
+ * `@numisma/components/ui/fill-path.tsx` as of spec #439 S7; `Chart`, `SelectedRung` and
+ * `RungList` are still bare functions in this file, attached as properties below. That
+ * mixed assembly is the visible shape of the transition and it is temporary by
+ * construction: it cannot survive S9, which deletes the file it lives in. A per-part test
+ * reaches `FillPath.Header`, which is what it has always done.
+ *
+ * THE THREE THAT ARE STILL LOCAL ARE NOT NAMED-EXPORTED. This docblock claimed all four
+ * were until spec #439 S6 read it against the code, and the frozen object is this file's
+ * only export of a part.
  *
  * There is no `FillPath` component: the fill path is a composition, and the composition
  * with the house arrangement already has a name — `FillPathCards`, below.
@@ -285,321 +145,6 @@ export function FillPathCards({ view }: { view: FillPathView }): ReactElement {
       <FillPath.SelectedRung />
       <FillPath.RungList />
     </FillPathProvider>
-  );
-}
-
-/**
- * ABOVE EVERYTHING, AND RED (G-D7/G-D12). The copy states the literal truth rather than
- * a severity: `record-fill` REFUSES to record anything while a torn act is outstanding,
- * so the operator is not being warned, they are being told why the next thing they try
- * will not work.
- *
- * ABSENCE IS NOT THE ALL-CLEAR (absence rule 3). A row that could not check says so, in
- * a quiet line — silence there would claim a check that never ran.
- */
-/**
- * THE ONE CARD-SURFACED ELEMENT THAT SPELLS THE SURFACE ITSELF (spec #420 slice 8).
- *
- * Everything else that is painted like a card imports `CARD_SURFACE` and adds to it. This
- * banner cannot, because the deleted rule repainted the border: the shared string carries
- * `border-[var(--line)]` and the banner's edge is `--neg`, and two unvariant
- * `border-color` utilities on one element are resolved by Tailwind's EMITTED order rather
- * than by the order they are written in. That is the same cascade `BADGE_TONE` is a total
- * map to avoid, one property along. Written out once, with the border it actually wants.
- *
- * SPELLING THE SURFACE OUT DOES NOT BUY OUT THE DESCENDANT RULES. `.notice code` reached
- * the `<code>` in the sentence below and is a separate deletion; dropping `notice` here
- * takes the chip with it unless the chip carries `NOTICE_CODE` itself, which it does.
- * The other three carriers of that rule import the same constant.
- */
-const TORN =
-  "rounded-xl border border-[var(--neg)] bg-[var(--card)] p-4 text-[var(--neg)]";
-/**
- * THE SENTENCE STEPS BACK TO `--text`. It is prose inside a block painted in the alarm
- * colour, and reading it in that colour too makes the whole card shout instead of the one
- * line that is the alarm.
- */
-const TORN_BODY = "m-0 mt-1.5 text-[0.85rem] text-[var(--text)]";
-/**
- * `margin: 0`, ALL FOUR EDGES. The deleted rule zeroed the margin outright and, being
- * unlayered, beat the `mt-1` this paragraph carried from slice 2's shared-vocabulary
- * conversion. Reproducing the rule means dropping that `mt-1`; keeping it would open a
- * 4px gap nothing has ever rendered.
- */
-const UNCHECKED = "m-0 text-[0.8rem] text-[var(--muted)]";
-
-function TornActBanner({ view }: { view: FillPathView }) {
-  if (view.tornActs.status === "outstanding") {
-    return (
-      <div className={TORN} role="alert">
-        <strong>
-          {view.tornActs.count} torn fill{" "}
-          {view.tornActs.count === 1 ? "act" : "acts"} outstanding
-        </strong>
-        <p className={TORN_BODY}>
-          Recording is blocked until this is repaired —{" "}
-          <code className={NOTICE_CODE}>pnpm orders:fill</code>{" "}
-          will refuse while a half-written act is open. Repair it at the desk.
-        </p>
-      </div>
-    );
-  }
-  if (view.tornActs.status === "unchecked") {
-    return (
-      <p className={UNCHECKED}>
-        Torn fill acts were not checked for this snapshot — this is NOT "none
-        outstanding".
-      </p>
-    );
-  }
-  return null;
-}
-
-/**
- * Card 1 — the figures and the progress bar.
- *
- * ── TWO LAYOUTS, AND THE VIEW MODULE PICKS WHICH ────────────────────────────────────
- * ONCE ANYTHING HAS FILLED the card is exactly what it always was: three measured tiles,
- * then the progress bar, then the waiting block. BEFORE anything has filled those three
- * tiles are three copies of `— no fill recorded yet`, which is three rows of layout
- * spent saying one thing, so the card projects instead: Waiting (already the honest
- * substitute for Deployed on day zero) beside what the DECLARED ladder would acquire.
- *
- * THE SWITCH IS `view.expected`, decided in `ladder/fill-path-view.ts`, and this file
- * asks rather than re-derives. It is emphatically NOT "are the measured figures absent":
- * a ladder whose orders sidecar could not be read has all three absent too, and it gets
- * the ORIGINAL layout, because nothing about it has been established — least of all that
- * it has not started. Projecting onto that row would print a confident number beside the
- * sentence saying nothing could be checked.
- */
-function Header() {
-  const { view } = useFillPath();
-  // `expected` is only ever set on a reconciled row, so `figures` is present with it;
-  // pairing them here is what lets the row below take both non-optional.
-  const projection =
-    view.expected !== undefined && view.figures !== undefined
-      ? { expected: view.expected, figures: view.figures }
-      : undefined;
-
-  return (
-    <Card className={HEADER_CARD}>
-      {/* WHAT THIS IS, AND WHERE PRICE IS — the two things the operator reads before
-          anything else, on one row. Spot used to sit in the provenance footer, four
-          cards down, which put the only number that moves while you look at it below
-          every number that does not. */}
-      <div className={HEADER_HEAD}>
-        <div className={HEADER_ID}>
-          {/* `level={1}` IS NOT DECORATION. This card's heading is the PAGE's heading,
-              which only the call site knows; `Card.Title` defaults to 2, and a page
-              whose deepest heading is an `h2` reads as a document with no title to
-              everything that navigates by headings. */}
-          <Card.Title level={1} className={HEADER_TITLE}>
-            {view.title}
-          </Card.Title>
-          {/* THE STATE IS A BADGE, NOT A SENTENCE. It used to ride a `Price ladder ·
-              pending · all figures in USD` sub-line, which spent two rows of a 320px
-              card on one word the operator actually reads. The kind is already told by
-              the ladder below, and every figure on this card carries its own `$` or its
-              own unit, so the currency note was restating what the numbers say. */}
-          <span className={`${BADGE} ${BADGE_TONE[view.state]}`}>
-            {view.state === "active" ? "in force" : view.state}
-          </span>
-        </div>
-        <SpotReadout view={view} />
-      </div>
-
-      {projection ? (
-        <ExpectedRow expected={projection.expected} figures={projection.figures} />
-      ) : (
-        <div className={`${TILES} mb-[14px]`}>
-          <Figure label="Deployed" figure={view.deployed} />
-          <Figure
-            label="Units acquired"
-            figure={view.unitsAcquired}
-            render={formatUnits}
-          />
-          <Figure label="Average entry" figure={view.avgEntry} />
-        </div>
-      )}
-
-      {view.progress ? (
-        <div className={PROGRESS}>
-          {/* A BAR AT ZERO IS THE TRUTH and stays: it reads as absence, which is what
-              day zero is. A zero-dollar figure would read as a measurement instead. */}
-          <div
-            className={PROGRESS_TRACK}
-            role="img"
-            aria-label={`${view.progress.filledRungs} of ${view.progress.totalRungs} rungs filled`}
-          >
-            <div
-              className={PROGRESS_FILL}
-              style={{ width: `${view.progress.percent}%` }}
-            />
-          </div>
-          <p className={PROGRESS_NOTE}>
-            {view.progress.filledRungs} of {view.progress.totalRungs} rungs walked
-          </p>
-        </div>
-      ) : null}
-
-      {projection ? null : <Waiting figures={view.figures} />}
-    </Card>
-  );
-}
-
-/**
- * SPOT, IN THE CORNER OF THE CARD THAT NAMES THE LADDER.
- *
- * THREE ARMS, NOT TWO, because "reading spot…" and "the fetch failed" are different
- * things to tell an operator and neither of them is a price. Both absences render as the
- * em-dash and a cause, the same treatment every other missing figure on this page gets;
- * there is no arm here that can print a number the page does not have.
- *
- * A LAST CLOSE IS SHOWN, AND SAID TO BE ONE. When the fetch failed but the session saw a
- * price earlier, that price still helps — it is roughly where the market is — so it
- * renders, with `last close · live price unavailable` beside it. What it must never do is
- * pass for `· live`, because the whole `next` marker downstream is decided off a LIVE
- * reading only (see `chart.nowX` at the chart call site).
- *
- * NO `~` ON EITHER. A spot reading is a price the venue printed, exact to the cent as
- * received; the chart's rounded copy of it wears the tilde instead.
- */
-function SpotReadout({ view }: { view: FillPathView }) {
-  return (
-    <p className={SPOT}>
-      <span className={SPOT_LABEL}>Spot</span>
-      {view.spotLoading ? (
-        <Absent why="reading spot…" className={SPOT_ABSENT} />
-      ) : view.spotUsd === undefined ? (
-        <Absent why="live price unavailable" className={SPOT_ABSENT} />
-      ) : (
-        <>
-          <strong className={SPOT_VALUE}>{formatUsd(view.spotUsd)}</strong>
-          <span className={SPOT_NOTE}>
-            {view.spotUnavailable ? "last close · live price unavailable" : "live"}
-          </span>
-        </>
-      )}
-    </p>
-  );
-}
-
-/**
- * DAY ZERO'S ROW — Waiting, and the two figures the declared ladder is AIMING at.
- *
- * WAITING IS THE MEASURED ONE and keeps its place first: it is a real total off a
- * reconciliation that ran. The two beside it are projections off rungs the operator
- * DECLARED — no order and no lot is involved — which is why they render through
- * `Expectation` and not `Figure`, and why both labels lead with "Expected".
- *
- * THE SPLIT SENTENCE IS GONE FROM THIS CARD. It used to sit under the row and say whether
- * the waiting capital was actually encumbered at the venue — `all-resting`, `partly-
- * unplaced`, `all-filled`. The card is now one accented number and its references, and a
- * paragraph reintroduced the crowding that shape exists to remove. `figures.split` is
- * still computed and tested in `ladder/fill-path-view.ts`, so the fact is available to
- * whatever surface wants to carry it; nothing renders it today.
- */
-function ExpectedRow({
-  expected,
-  figures,
-}: {
-  expected: NonNullable<FillPathView["expected"]>;
-  figures: NonNullable<FillPathView["figures"]>;
-}) {
-  return (
-    <div className={EXPECTED}>
-      {/* WAITING IS THE PROTAGONIST and is built to look like it: out of the tile grid
-          entirely, label over figure, at the card's largest type. The two projections
-          below it stay in the row form at a smaller size — muted alone did not carry
-          the hierarchy, because the projected strings are the LONGEST on the card and
-          at equal size length reads as importance. */}
-      <div className={HERO}>
-        <span className={TILE_LABEL}>Waiting</span>
-        <strong className={HERO_VALUE}>{formatUsd(figures.waitingDeclaredUsd)}</strong>
-      </div>
-      <div className={`${TILES} mb-0`}>
-        <Expectation label="Expected units" value={expected.units} render={formatUnits} />
-        <Expectation label="Expected average entry" value={expected.avgEntryUsd} />
-      </div>
-    </div>
-  );
-}
-
-/**
- * THE WAITING CAPITAL, on a ladder that has already started.
- *
- * ABSENT `figures` IS NOT `$0`. It means the orders sidecar could not be read, so there
- * is no waiting total to state; the em-dash and its cause are the same treatment the
- * three measured figures get one row up. That sentence STAYS — it is the cause attached
- * to its own em dash, not a footnote about the number, and it is the only prose left on
- * this card.
- */
-function Waiting({ figures }: { figures: FillPathView["figures"] }) {
-  if (figures === undefined) {
-    return (
-      <div className={WAITING}>
-        <span className={STACKED_LABEL}>Waiting</span>
-        <strong className={TILE_VALUE}>—</strong>
-        <p className={WAITING_SUB}>
-          The orders sidecar could not be read for this ladder, so nothing here is a
-          measurement — this is NOT "nothing is waiting".
-        </p>
-      </div>
-    );
-  }
-  return (
-    <div className={WAITING}>
-      <span className={STACKED_LABEL}>Waiting</span>
-      <strong className={TILE_VALUE}>{formatUsd(figures.waitingDeclaredUsd)}</strong>
-    </div>
-  );
-}
-
-/**
- * Between header and chart (G-D12), and VISUALLY DISTINCT because their certainties
- * differ. `filled at venue — not recorded` is a FACT the venue reported. `price passed,
- * no fill recorded` is INFERRED from spot: price traded through a resting order and the
- * venue has not said anything, which usually means nothing happened. Rendering them the
- * same would teach the operator to treat a certainty like a guess.
- */
-/**
- * TWO CERTAINTIES, ONE SURFACE, AND ONE EDGE BETWEEN THEM.
- *
- * Both paragraphs are card-surfaced, so `CARD_SURFACE` rides along and only the left
- * border differs. Every declaration that differs is a LONGHAND on purpose: `border-l-4`
- * beats the shared string's shorthand width and `border-l-[…]` beats its shorthand
- * colour, which is the one ordering Tailwind does guarantee.
- *
- * THE DASH IS ONE EDGE, NOT FOUR. `border-dashed` sets `border-style` on every side and
- * would dash the card's other three; the arbitrary property puts it on the left alone.
- * The difference between a venue fact and a guess is the whole reason these two look
- * different, and it must not spill onto the surface they share.
- */
-const WARN = `${CARD_SURFACE} m-0 text-[0.85rem] leading-[1.45]`;
-const WARN_CERTAIN = `${WARN} border-l-4 border-l-[var(--neg)]`;
-const WARN_INFERRED = `${WARN} border-l-4 border-l-[var(--warn)] [border-left-style:dashed] text-[var(--muted)]`;
-
-function UnrecordedWarnings({ view }: { view: FillPathView }) {
-  return (
-    <>
-      {view.warnings.filledNotRecorded > 0 ? (
-        <p className={WARN_CERTAIN}>
-          <span aria-hidden="true">⚠ </span>
-          {view.warnings.filledNotRecorded} filled at the venue —{" "}
-          {view.warnings.filledNotRecorded === 1 ? "it is" : "they are"} not recorded.
-          The venue reported this; the fund's book has no lot for it.
-        </p>
-      ) : null}
-      {view.warnings.pricePassedNoFill > 0 ? (
-        <p className={WARN_INFERRED}>
-          <span aria-hidden="true">⚠ </span>
-          {view.warnings.pricePassedNoFill} resting{" "}
-          {view.warnings.pricePassedNoFill === 1 ? "rung has" : "rungs have"} had price
-          pass through with no fill recorded. Inferred from spot, not reported by the
-          venue — check before acting.
-        </p>
-      ) : null}
-    </>
   );
 }
 
