@@ -18,10 +18,22 @@ import type { FillPathView } from "./fill-path";
  * against the package fixture claiming to be that state. Until S9 lands, a field that
  * drifts here is caught only by the type, so keep the shape honest by hand.
  *
- * ONE STATE FOR NOW. `partly-walked` is the widest — filled rungs, waiting rungs, two
+ * TWO STATES. `partly-walked` is the widest — filled rungs, waiting rungs, two
  * never-placed rungs, a live spot and a next rung that is NOT index zero, which is the
- * only arrangement that can tell a derived default from a seeded one. S7 to S9 add
- * `day-zero`, `out-of-order` and `overfilled` as the components that render them arrive.
+ * only arrangement that can tell a derived default from a seeded one. `day-zero` arrived
+ * with the header card (S7) because it is the only state that reaches the PROJECTION
+ * layout, and the switch between the two layouts is `view.expected` rather than "are the
+ * measured figures absent" — a distinction no single fixture can show. S8 and S9 add
+ * `out-of-order` and `overfilled` as the components that render them arrive.
+ *
+ * ── LADDER STATES ARE AUTHORED; FIELD-LEVEL ARMS ARE DERIVED ─────────────────────────
+ * The derivations at the foot of this file — a missing orders sidecar, the three spot
+ * arms, the two torn readings, the two unrecorded warnings — are NOT ladder states and
+ * must not be authored as if they were. No `started-ladder` fixture composes to any of
+ * them, so S9's equivalence test has nothing to compare them against, and a fifth
+ * authored literal claiming to be a state production cannot produce is exactly what that
+ * test exists to catch. Each one takes a composed state and moves the one field that
+ * decides the arm, which is what the app-side structure test already does.
  *
  * SYNTHESIZED. Every price, size, key and total below comes from a hand-written app
  * fixture whose own tests say so. No ledger output, no plans sidecar and no real
@@ -188,5 +200,184 @@ export function partlyWalkedView(): FillPathView {
     spotUnavailable: false,
     spotLoading: false,
     recordedThrough: "2026-08-12",
+  };
+}
+
+/**
+ * A LADDER ON DAY ZERO — eight rungs declared, every one of them resting, nothing filled.
+ *
+ * THE ONLY STATE THAT REACHES THE PROJECTION LAYOUT, which is why it arrives with the
+ * header card. `reconciled` is true and `notStarted` is true: a reconciliation RAN and
+ * found nothing, which is what lets the card project. That is a different fact from
+ * "the three measured figures are absent" — a ladder whose orders sidecar could not be
+ * read has all three absent too and gets the measured layout, because nothing about it
+ * has been established. `unreadableSidecarView()` below is that ladder, and the two
+ * beside each other are the whole reason this slice authored a second state.
+ *
+ * THE PROGRESS BAR IS AT ZERO AND THE BAR IS STILL DRAWN. A bar at zero reads as absence,
+ * which is the truth here; a zero-dollar figure would read as a measurement.
+ *
+ * SPOT IS ABOVE THE LADDER at $52,400, over the top rung's $50,000, so `chart.nowX` sits
+ * at the left edge. That is what a declared ladder looks like before price has come to
+ * it, and it is the arrangement `partly-walked` cannot show.
+ */
+export function dayZeroView(): FillPathView {
+  return {
+    planId: "facade00-0000-4000-8000-000000000001",
+    positionId: "fixture:day-zero",
+    title: "fixture:day-zero",
+    state: "pending",
+    reconciled: true,
+    deployed: { known: false, why: "no fill recorded yet" },
+    unitsAcquired: { known: false, why: "no fill recorded yet" },
+    avgEntry: { known: false, why: "no fill recorded yet" },
+    notStarted: true,
+    // THE FULL FLOAT, TRANSCRIBED RATHER THAN ROUNDED. `avgEntryUsd` is total declared
+    // USD ÷ expected units — a size-weighted harmonic mean, which is why it does not land
+    // on a round figure — and S9's equivalence test is a deep compare against exactly
+    // what `composeFillPathPage` emits. A tidied literal here reds it.
+    expected: { units: 0.14616881225294204, avgEntryUsd: 29075.96999998512 },
+    figures: {
+      waitingDeclaredUsd: 4250,
+      waitingRestingUsd: 4250,
+      neverPlacedUsd: 0,
+      split: "all-resting",
+    },
+    rungs: [
+      rung(
+        { index: 1, priceUsd: 50000, sizeUsd: 200, stateCopy: "waiting" },
+        {
+          resting: true,
+          venueResting: true,
+          waiting: true,
+          isNext: true,
+          venueAxis: "resting",
+          bookAxis: "not-recorded",
+        },
+      ),
+      ...(
+        [
+          [2, 46000, 250],
+          [3, 42000, 300],
+          [4, 38000, 400],
+          [5, 34000, 500],
+          [6, 30000, 650],
+          [7, 26000, 850],
+          [8, 22000, 1100],
+        ] as const
+      ).map(([index, priceUsd, sizeUsd]) =>
+        rung(
+          { index, priceUsd, sizeUsd, stateCopy: "waiting" },
+          {
+            resting: true,
+            venueResting: true,
+            waiting: true,
+            venueAxis: "resting",
+            bookAxis: "not-recorded",
+          },
+        ),
+      ),
+    ],
+    orphanLots: 0,
+    tornActs: { status: "clear" },
+    warnings: { filledNotRecorded: 0, pricePassedNoFill: 0 },
+    progress: { filledRungs: 0, totalRungs: 8, percent: 0 },
+    chart: {
+      width: 320,
+      height: 120,
+      points:
+        "33.68,90.55 73.16,86.18 112.63,81.82 152.11,73.09 191.58,64.36 231.05,51.27 270.53,33.82 310,12",
+      circles: [
+        { key: "fixture-rung-1", cx: 33.68, cy: 90.55, filled: false, next: true },
+        { key: "fixture-rung-2", cx: 73.16, cy: 86.18, filled: false, next: false },
+        { key: "fixture-rung-3", cx: 112.63, cy: 81.82, filled: false, next: false },
+        { key: "fixture-rung-4", cx: 152.11, cy: 73.09, filled: false, next: false },
+        { key: "fixture-rung-5", cx: 191.58, cy: 64.36, filled: false, next: false },
+        { key: "fixture-rung-6", cx: 231.05, cy: 51.27, filled: false, next: false },
+        { key: "fixture-rung-7", cx: 270.53, cy: 33.82, filled: false, next: false },
+        { key: "fixture-rung-8", cx: 310, cy: 12, filled: false, next: false },
+      ],
+      nowX: 10,
+    },
+    caption:
+      "Buys grow as price falls: the deepest rung is 5.5× the first; $3,100 of the $4,250 still waiting sits below the ladder's midpoint, $36,000.",
+    spotUsd: 52400,
+    spotUnavailable: false,
+    spotLoading: false,
+    recordedThrough: "2026-08-12",
+  };
+}
+
+/**
+ * ── THE FIELD-LEVEL ARMS (spec #439 S7) ─────────────────────────────────────────────
+ *
+ * Not ladder states. Each one takes a composed state and moves the ONE field that decides
+ * an arm, because no `started-ladder` fixture reaches these: every one of them is a ladder
+ * that reconciled with a live spot and a clear torn reading, by design. Authoring them as
+ * states would put four more literals in front of S9's equivalence test claiming to be
+ * something production cannot produce.
+ */
+
+/**
+ * DELETES A KEY RATHER THAN SETTING IT `undefined`, and the package's
+ * `exactOptionalPropertyTypes` is why: `{ ...view, figures: undefined }` is a different
+ * type from a view that never carried the key, and only the latter is what the composer's
+ * absent arm produces. The cast is confined to this one helper.
+ */
+function without(view: FillPathView, key: keyof FillPathView): FillPathView {
+  const copy: Record<string, unknown> = { ...view };
+  delete copy[key];
+  return copy as unknown as FillPathView;
+}
+
+/**
+ * THE ORDERS SIDECAR COULD NOT BE READ — `figures` absent, which is absence rule 2 held
+ * all the way to the render. `Waiting` prints the em dash and the cause sentence, NOT
+ * `$0`, and the card keeps the MEASURED layout: `expected` is absent here too, so nothing
+ * has been established about whether this ladder started.
+ */
+export function unreadableSidecarView(): FillPathView {
+  return without(partlyWalkedView(), "figures");
+}
+
+/** Spot is still being read. The first of `SpotReadout`'s three arms, and an em dash. */
+export function spotLoadingView(): FillPathView {
+  return { ...partlyWalkedView(), spotLoading: true };
+}
+
+/** The fetch failed and the session never saw a price. The second arm, also an em dash. */
+export function spotMissingView(): FillPathView {
+  return { ...without(partlyWalkedView(), "spotUsd"), spotUnavailable: true };
+}
+
+/**
+ * A LAST CLOSE, SAID TO BE ONE. The fetch failed but the session saw a price earlier, so
+ * the price renders with `last close · live price unavailable` beside it. It must never
+ * pass for `· live`: the chart's now-rule is decided off a live reading only.
+ */
+export function spotLastCloseView(): FillPathView {
+  return { ...partlyWalkedView(), spotUnavailable: true };
+}
+
+/** A torn act is open, so `record-fill` will refuse. The banner's `role="alert"` arm. */
+export function tornOutstandingView(): FillPathView {
+  return { ...partlyWalkedView(), tornActs: { status: "outstanding", count: 2 } };
+}
+
+/** Nobody looked. The quiet line, because silence would claim a check that never ran. */
+export function tornUncheckedView(): FillPathView {
+  return { ...partlyWalkedView(), tornActs: { status: "unchecked" } };
+}
+
+/**
+ * BOTH UNRECORDED WARNINGS AT ONCE, which is the only way to see that they look
+ * different. `filledNotRecorded` is a fact the venue reported; `pricePassedNoFill` is
+ * inferred from spot. One solid left edge, one dashed, and the dash is on that edge
+ * alone.
+ */
+export function unrecordedWarningsView(): FillPathView {
+  return {
+    ...partlyWalkedView(),
+    warnings: { filledNotRecorded: 1, pricePassedNoFill: 2 },
   };
 }
