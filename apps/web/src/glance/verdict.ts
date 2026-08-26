@@ -64,6 +64,7 @@ import type {
   TriggerName,
   Verdict,
 } from "@numisma/components";
+import { NAV_MOVE_THRESHOLD_PCT } from "./nav-move-threshold.ts";
 import { addDays, asOfSortKey, calendarDateOf, daysBetween } from "../projection/as-of.ts";
 
 /* ────────────────────────────── the four triggers ─────────────────────────────── */
@@ -117,22 +118,17 @@ export const VENUE_DARK_MIN_DAYS = 1;
 export const RESERVE_FLOOR_WIRE_KEY = "glance.reserveTargetPct" as const;
 
 /**
- * `navMove` — 1.5% against the NAMED reference, UNSCALED.
+ * `navMove`'s threshold lives in its OWN IMPORT-FREE MODULE and is re-exported here
+ * (spec #439 review finding 5).
  *
- * THE HONEST CAVEAT, written down here rather than discovered later: this is a
- * per-STEP test, not a per-day one. When the nearest anchor is a multi-day step the
- * rule is LESS SENSITIVE per day — a 1.4% drift over three days is silent where the
- * same drift in one day would also be silent, but a genuinely eventful three-day
- * stretch can hide under one threshold. Acceptable now that launchd anchors daily and
- * the step is one day; the sparse stretch (06-26 → 06-30, and 07-03's three-day step
- * back to 06-30) is historical only.
- *
- * 1.5% picks the tails of the measured month honestly: it took three of the 28
- * anchored days it was chosen against and left 25. The measured day-over-day range that justifies the
- * choice is deliberately not quoted here — this repository is public, and the range
- * is the fund's best and worst days. It is recorded in the private notes vault.
+ * `push/fixture-synthesis.ts` takes this one constant and nothing else out of
+ * `glance/`, and taking it from this file put `@numisma/components` — and through the
+ * curated index, React and `@tanstack/charts` — on the unattended daily backfill's
+ * import graph. `./nav-move-threshold.ts` has no imports at all, so the push tree
+ * reads the number without reading this file. The re-export is what keeps every
+ * reader on this side unchanged; the rule and its caveat are documented there.
  */
-export const NAV_MOVE_THRESHOLD_PCT = 1.5;
+export { NAV_MOVE_THRESHOLD_PCT };
 
 /**
  * PRECEDENCE — `freshness > feedGap > venueDark > reserveFloor > navMove`, ranked by

@@ -176,7 +176,7 @@ import type {
   SnapshotAnchor,
 } from "../projection/contract.ts";
 import { fundIdOf } from "../projection/contract.ts";
-import { NAV_MOVE_THRESHOLD_PCT } from "../glance/verdict.ts";
+import { NAV_MOVE_THRESHOLD_PCT } from "../glance/nav-move-threshold.ts";
 
 /** The round, obviously fictional NAV the synthetic series starts at. */
 export const SYNTHETIC_START_NAV = 100_000;
