@@ -55,7 +55,7 @@ import {
 import type { FillPathView } from "@numisma/components";
 
 import { composeFillPathPage } from "./fill-path-view.ts";
-import { ladderFixture } from "./started-ladder.fixtures.ts";
+import { LADDER_FIXTURE_NAMES, ladderFixture } from "./started-ladder.fixtures.ts";
 
 /**
  * The four pairs, named on both sides. The state name is what `ladderFixture` looks up
@@ -87,12 +87,17 @@ describe("the package's fill-path fixtures are what the composer emits", () => {
     // leaves this file green while a package literal goes unpinned, which is the exact
     // failure the file exists to prevent. `started-ladder.fixtures.ts` is the source of
     // truth for how many states there are.
-    expect(STATES.map(([name]) => name)).toEqual([
-      "day-zero",
-      "partly-walked",
-      "out-of-order",
-      "overfilled",
-    ]);
+    //
+    // AGAINST `LADDER_FIXTURE_NAMES`, NOT A SECOND LITERAL (spec #439 review finding 8).
+    // Spelling the four names again here compared one hardcoded list against another,
+    // which catches a DROPPED `STATES` entry and nothing else — author a fifth
+    // `started-ladder` fixture and a fifth package literal for it and this file stayed
+    // green while that literal went unpinned, the one direction the paragraph above
+    // claims to hold. `LADDER_FIXTURE_NAMES` is derived from `STARTED_LADDER_FIXTURES`,
+    // so both directions red now. Order is asserted too: these are `.map`ped off the
+    // same authored array the route reads, so a reordering that broke the pairing is a
+    // fact worth seeing rather than a detail to sort away.
+    expect(STATES.map(([name]) => name)).toEqual([...LADDER_FIXTURE_NAMES]);
   });
 
   it.each(STATES)("composes `%s` to the literal beside the component", (name, authored) => {
