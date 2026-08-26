@@ -98,6 +98,19 @@ describe("the sign-in submit button", () => {
     ).toBe("submit");
   });
 
+  it("is not the only button on the form, and the other one never submits it", async () => {
+    // The show/hide toggle sits inside the `<form>`, so a plain `<button>` with no
+    // `type` would submit it on every click — the mirror image of the trap the comment
+    // above this button in `login.tsx` records. It is the package `Button`, whose Base
+    // UI primitive defaults to `type="button"`, and it says so anyway.
+    await renderLoginPage();
+    const toggle = screen.getByRole("button", { name: "Show password" });
+
+    expect(toggle.getAttribute("type")).toBe("button");
+    expect(toggle.getAttribute("data-slot")).toBe("button");
+    expect(screen.getByRole("button", { name: "Sign in" })).not.toBe(toggle);
+  });
+
   it("goes disabled with the pending copy once the request is in flight", async () => {
     signInEmail.mockClear();
     await renderLoginPage();
@@ -110,5 +123,56 @@ describe("the sign-in submit button", () => {
     const pending = await screen.findByRole("button", { name: "Signing in…" });
     expect((pending as HTMLButtonElement).disabled).toBe(true);
     expect(signInEmail).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * THE PASSWORD TOGGLE, AND THE ONE WAY IT FAILS SILENTLY (spec #451 S5).
+ *
+ * A show/hide toggle that REMOUNTS the field instead of swapping its `type` loses what
+ * was typed, and it loses it at the moment the operator reached for the toggle because
+ * they were unsure what they had typed. Nothing about the page looks wrong afterwards:
+ * an empty password field is exactly what an empty password field looks like. So the
+ * claim below is not "the type changed" but "the value survived a round trip", asserted
+ * by typing once and toggling twice.
+ *
+ * `aria-pressed` is the state channel. The visible word changes too, and the accessible
+ * name contains it, so a voice-control user can say either half of what they see.
+ *
+ * The toggle lives in the ROUTE, not in `@numisma/components`. There is one password
+ * field in this app; it becomes a package primitive when there are two.
+ */
+describe("the show/hide password toggle", () => {
+  it("swaps the field's type and carries the pressed state", async () => {
+    await renderLoginPage();
+    const user = userEvent.setup();
+    const field = screen.getByLabelText("Password");
+
+    expect(field.getAttribute("type")).toBe("password");
+    const show = screen.getByRole("button", { name: "Show password" });
+    expect(show.getAttribute("aria-pressed")).toBe("false");
+
+    await user.click(show);
+
+    expect(field.getAttribute("type")).toBe("text");
+    const hide = screen.getByRole("button", { name: "Hide password" });
+    expect(hide.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("keeps the typed value across the swap, and across the swap back", async () => {
+    await renderLoginPage();
+    const user = userEvent.setup();
+    const field = screen.getByLabelText("Password") as HTMLInputElement;
+
+    await user.type(field, "authored-secret");
+    expect(field.value).toBe("authored-secret");
+
+    await user.click(screen.getByRole("button", { name: "Show password" }));
+    expect(field.value).toBe("authored-secret");
+    expect(field.getAttribute("type")).toBe("text");
+
+    await user.click(screen.getByRole("button", { name: "Hide password" }));
+    expect(field.value).toBe("authored-secret");
+    expect(field.getAttribute("type")).toBe("password");
   });
 });
