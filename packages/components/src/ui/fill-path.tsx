@@ -511,7 +511,7 @@ const BADGE_TONE: Record<FillPathView["state"], string> = {
   pending: "text-[var(--nms-muted-foreground)]",
   active: "text-[var(--nms-pos)]",
   ended: "text-[var(--nms-muted-foreground)]",
-  unreadable: "text-[var(--nms-warn)]",
+  unreadable: "text-[var(--nms-caution)]",
 };
 
 /**
@@ -636,7 +636,7 @@ const UNCHECKED = "m-0 text-[0.8rem] text-[var(--nms-muted-foreground)]";
  */
 const WARN = `${CARD_SURFACE} m-0 text-[0.85rem] leading-[1.45]`;
 const WARN_CERTAIN = `${WARN} border-l-4 border-l-[var(--nms-neg)]`;
-const WARN_INFERRED = `${WARN} border-l-4 border-l-[var(--nms-warn)] [border-left-style:dashed] text-[var(--nms-muted-foreground)]`;
+const WARN_INFERRED = `${WARN} border-l-4 border-l-[var(--nms-caution)] [border-left-style:dashed] text-[var(--nms-muted-foreground)]`;
 
 /**
  * Card 1 — the figures and the progress bar.
@@ -1143,7 +1143,7 @@ const DETAIL_VALUE = "m-0 text-right tabular-nums @[380px]/fp-selected:text-left
  *
  * WHAT EACH TONE MEANS. Unplaced is greyed AND dashed (G-D12): a declared rung with no
  * order is not a state the ladder is in, it is one it never entered. Inferred is dashed
- * in `--nms-warn`, matching the inferred warning above the chart — the same certainty,
+ * in `--nms-caution`, matching the inferred warning above the chart — the same certainty,
  * the same visual language. Next is `--nms-now` and never `--nms-pos`, because the next
  * rung is where price is HEADING and green is the colour that means FILLED.
  */
@@ -1152,7 +1152,7 @@ const PILL =
 const PILL_TONE = {
   state: "border-[var(--nms-border)] text-[var(--nms-muted-foreground)]",
   unplaced: "border-[var(--nms-border)] text-[var(--nms-muted-foreground)] border-dashed opacity-[0.55]",
-  inferred: "border-[var(--nms-warn)] text-[var(--nms-warn)] border-dashed",
+  inferred: "border-[var(--nms-caution)] text-[var(--nms-caution)] border-dashed",
   next: "border-[var(--nms-now)] text-[var(--nms-now)]",
 } as const;
 const PILLS = "flex flex-wrap items-center gap-1.5 m-0";

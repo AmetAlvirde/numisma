@@ -98,6 +98,10 @@ const THEME_COLOR_NAMES = [
   "pos",
   "ok",
   "warn",
+  // Spec #451 S3's mint, listed in the same slice that maps it. Adding the
+  // name here TIGHTENS this guard rather than satisfying it: `text-caution` in
+  // app code is now a hit, which is the whole reason the list exists.
+  "caution",
   "now",
 ];
 

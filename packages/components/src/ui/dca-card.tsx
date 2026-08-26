@@ -300,7 +300,7 @@ const STATE_TONE: Record<DcaPositionView["state"], string> = {
   pending: "text-[var(--nms-muted-foreground)]",
   active: "text-[var(--nms-pos)]",
   ended: "text-[var(--nms-muted-foreground)]",
-  unreadable: "text-[var(--nms-warn)]",
+  unreadable: "text-[var(--nms-caution)]",
 };
 
 /** What kind of plan this is, where the wire names one. */

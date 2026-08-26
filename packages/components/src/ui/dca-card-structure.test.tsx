@@ -70,7 +70,7 @@ const STATE_COLOURS = [
   ["pending", "text-[var(--nms-muted-foreground)]"],
   ["active", "text-[var(--nms-pos)]"],
   ["ended", "text-[var(--nms-muted-foreground)]"],
-  ["unreadable", "text-[var(--nms-warn)]"],
+  ["unreadable", "text-[var(--nms-caution)]"],
 ] as const;
 
 /**

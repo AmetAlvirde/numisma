@@ -203,7 +203,7 @@ describe("the header card carries its section as utilities", () => {
       ["pending", "text-[var(--nms-muted-foreground)]"],
       ["active", "text-[var(--nms-pos)]"],
       ["ended", "text-[var(--nms-muted-foreground)]"],
-      ["unreadable", "text-[var(--nms-warn)]"],
+      ["unreadable", "text-[var(--nms-caution)]"],
     ];
     for (const [state, tone] of tones) {
       const { container, unmount } = renderHeader({ ...base, state });
@@ -550,7 +550,7 @@ describe("the torn banner and the two warnings carry their rules as utilities", 
     // the difference between the two certainties is the whole reason these paragraphs
     // look different, and it must not spill onto the surface they share.
     expectClasses(inferred, [
-      "border-l-[var(--nms-warn)]",
+      "border-l-[var(--nms-caution)]",
       "[border-left-style:dashed]",
       "text-[var(--nms-muted-foreground)]",
     ]);
@@ -676,7 +676,7 @@ describe("the selected-rung card carries its section as utilities", () => {
       "opacity-[0.55]",
     ]);
 
-    // Dashed in `--nms-warn`, matching the inferred warning above the chart — the same
+    // Dashed in `--nms-caution`, matching the inferred warning above the chart — the same
     // certainty, the same visual language.
     const inferred = panelOf(withSelectedRung(base, { pricePassedUnconfirmed: true }));
     const inferredPill = [...inferred.querySelectorAll("p:nth-of-type(2) span")].find(
@@ -684,8 +684,8 @@ describe("the selected-rung card carries its section as utilities", () => {
     );
     expectClasses(inferredPill, [
       ...shape,
-      "border-[var(--nms-warn)]",
-      "text-[var(--nms-warn)]",
+      "border-[var(--nms-caution)]",
+      "text-[var(--nms-caution)]",
       "border-dashed",
     ]);
 

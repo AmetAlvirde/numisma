@@ -85,6 +85,25 @@
  * Naming them ahead of that cost nothing and settled the two mappings that are
  * genuinely hard, below, while the argument was still fresh.
  *
+ * TWENTY NAMES, AND THE TWENTIETH HAS NO ROW IN THAT TABLE. `--nms-caution` is
+ * spec #451 S3's mint, and the table above is closed because it maps the ten
+ * bare names `apps/web` declared before the package existed. `--nms-caution`
+ * has no such counterpart: the app had no colour for "the reading is withheld,
+ * said as type", because it had been saying it in `--warn`, which is a fill.
+ * `apps/web` mints `--caution` beside `--accent` and `--recess` and aliases onto
+ * it, which is the same shape those two already have.
+ *
+ * SIX DEFAULTS BELOW MOVED IN THAT SLICE, and every one of them moved because
+ * the guard measured it rather than because anyone looked at it. ADR-026 binds
+ * this package as well as the app, `ops/components/contrast.test.ts` checks
+ * these values as one of its two palettes, and the base mode is what an
+ * unconfigured consumer renders on a real screen. `--nms-pos`, `--nms-now` and
+ * `--nms-ok` failed SC 1.4.3 as type or under type; `--nms-ring` and
+ * `--nms-input` failed SC 1.4.11 as a focus indicator and a field edge. Each row
+ * records its own old value and its own reason. What did NOT change is what
+ * grayscale mode is for: sign was never reviewable here and still is not, and
+ * darkening a number's colour does not make it one.
+ *
  * `--muted` MAPS TO `--nms-muted-foreground`, NEVER TO `--nms-muted`. The
  * English collides and the roles do not: `--nms-muted` is a recessed SURFACE
  * (Button's `ghost` and `outline` hover), the app's `--muted` is secondary TEXT.
@@ -148,12 +167,12 @@ export const NMS_TOKENS = [
   {
     name: "--nms-border",
     value: "oklch(0.922 0 0)",
-    note: "Hairline between surfaces. Button `outline`'s edge.",
+    note: "Hairline between surfaces. Button `outline`'s edge. IT KEPT ITS VALUE while `--nms-input` below moved, and the split is ADR-026's sentence: a hairline drawn for texture is not a boundary, the line a field is identified by is. `contrast.ts` carries this pair as a named exclusion so the difference is written down rather than inferred from which name a value happened to land on.",
   },
   {
     name: "--nms-input",
-    value: "oklch(0.922 0 0)",
-    note: "Field edge and dark-mode field fill on Button `outline`.",
+    value: "oklch(0.6 0 0)",
+    note: "Field edge and dark-mode field fill on Button `outline`. LIFTED OFF THE HAIRLINE'S VALUE by spec #451 S3, which is the same edit `apps/web` makes to its own palette in the same slice: at the border's grey this token measured 1.21:1 against a card and SC 1.4.11 wants 3:1 for the boundary that tells a user where a control is. `--nms-border` keeps the old value because a hairline drawn for texture is not that boundary.",
   },
   {
     name: "--nms-primary",
@@ -187,28 +206,33 @@ export const NMS_TOKENS = [
   },
   {
     name: "--nms-pos",
-    value: "oklch(0.75 0 0)",
-    note: "The positive SIGN of a number, and `--nms-neg`'s pair. `SummaryCard` paints a rising unrealized P&L with it, and `SectionTable` and `GlanceCard` render the same string through the constant it exports. It is data, exactly as the row above is — and the reason that row refused to weld with `--nms-destructive` was so the money-red could pair colourblind-safely with THIS name, which is why the pair only becomes checkable now that both halves exist. Grayscale here for the same reason `--nms-neg` is: sign is reviewed in themed and app mode.",
+    value: "oklch(0.5 0 0)",
+    note: "The positive SIGN of a number, and `--nms-neg`'s pair. `SummaryCard` paints a rising unrealized P&L with it, and `SectionTable` and `GlanceCard` render the same string through the constant it exports. It is data, exactly as the row above is — and the reason that row refused to weld with `--nms-destructive` was so the money-red could pair colourblind-safely with THIS name, which is why the pair only becomes checkable now that both halves exist. Grayscale here for the same reason `--nms-neg` is: sign is reviewed in themed and app mode. DARKENED by spec #451 S3: at the old value it measured 2.13:1 as type on the base mode's card and failed SC 1.4.3. Sign stays UNREVIEWABLE in grayscale, which was never what the old value bought — it only made the number hard to read as well.",
   },
   {
     name: "--nms-ok",
-    value: "oklch(0.62 0 0)",
-    note: "The all-clear FILL — a badge asserting that the fold excluded nothing and the marks arrived. `SummaryCard`'s data-safety badge, green arm. A fill rather than a type colour, which is what makes it the loudest thing in themed mode when nothing repaints.",
+    value: "oklch(0.46 0 0)",
+    note: "The all-clear FILL — a badge asserting that the fold excluded nothing and the marks arrived. `SummaryCard`'s data-safety badge, green arm. A fill rather than a type colour, which is what makes it the loudest thing in themed mode when nothing repaints. DARKENED by spec #451 S3: it is a fill under `text-white`, and white on the old value reached 3.64:1 where SC 1.4.3 wants 4.5. The badge's label is the thing being read, so the fill is what moves.",
   },
   {
     name: "--nms-warn",
     value: "oklch(0.52 0 0)",
-    note: "The withheld-or-excluded FILL, `--nms-ok`'s other arm on the same badge. NOT `--nms-destructive`: nothing is being destroyed, and nothing has failed — the card is naming what it could not state. Two arms of one branch, so a fixture has to stage both to show either.",
+    note: "The withheld-or-excluded FILL, `--nms-ok`'s other arm on the same badge. NOT `--nms-destructive`: nothing is being destroyed, and nothing has failed — the card is naming what it could not state. Two arms of one branch, so a fixture has to stage both to show either. A FILL AND ONLY A FILL since spec #451 S3: white on it clears 4.5:1, the same colour as type on a card reached 2.91:1, and the text job left for the row below.",
+  },
+  {
+    name: "--nms-caution",
+    value: "oklch(0.48 0 0)",
+    note: "The withheld-or-excluded reading, AS TYPE — `DcaCard`'s `unreadable` sidecar, the fill path's `unreadable` row tone, and the `inferred` pill with its dashed left rule. It is `--nms-warn`'s meaning at a value a card can carry, and it is in the `pos`/`neg`/`now` family, which is already \"a data colour that sits on a card as text\". NOT `--nms-warn-foreground`: under the shadcn convention `--nms-primary-foreground` and `--nms-secondary-foreground` follow, `X-foreground` is the text that sits ON an `X` fill, and here that colour is white. A name meaning \"warn used as text\" in that slot would read as its own opposite, inside a namespace whose whole argument is that a name may not mean two things.",
   },
   {
     name: "--nms-now",
-    value: "oklch(0.68 0 0)",
-    note: "WHERE PRICE IS NOW — the level a trading chart draws its last price at, and the third of the three state colours the Price Drop Path shares with the rung list beside it. `PriceDropPathChart` reads it three times: the horizontal spot rule, the end-anchored label that says what the rule is, and the `Now` legend swatch. It is the one name in this table with no near neighbour, chosen to collide with `--nms-pos` (the filled path), `--nms-muted-foreground` (the waiting path) and `--nms-neg` alike — a spot level is a neutral fact, and painting it in the loss colour would say something the price has not said. Grayscale here makes \"now\" unreviewable in grayscale mode, which is correct and is the same call `--nms-neg` records: grayscale reviews hierarchy, spacing and state.",
+    value: "oklch(0.54 0 0)",
+    note: "WHERE PRICE IS NOW — the level a trading chart draws its last price at, and the third of the three state colours the Price Drop Path shares with the rung list beside it. `PriceDropPathChart` reads it three times: the horizontal spot rule, the end-anchored label that says what the rule is, and the `Now` legend swatch. It is the one name in this table with no near neighbour, chosen to collide with `--nms-pos` (the filled path), `--nms-muted-foreground` (the waiting path) and `--nms-neg` alike — a spot level is a neutral fact, and painting it in the loss colour would say something the price has not said. Grayscale here makes \"now\" unreviewable in grayscale mode, which is correct and is the same call `--nms-neg` records: grayscale reviews hierarchy, spacing and state. DARKENED by spec #451 S3 for the reason `--nms-pos` above is: 2.76:1 as type on the base mode's card fails SC 1.4.3, and a spot level nobody can read is a neutral fact nobody gets.",
   },
   {
     name: "--nms-ring",
-    value: "oklch(0.708 0 0)",
-    note: "Focus ring. The one token whose absence is a keyboard-accessibility defect.",
+    value: "oklch(0.62 0 0)",
+    note: "Focus ring. The one token whose absence is a keyboard-accessibility defect. DARKENED by spec #451 S3: at the old value the ring measured 2.48:1 against a card and failed SC 1.4.11, so the row above was true in a second way nobody had measured — a ring that renders and cannot be seen is the same keyboard defect as a ring that does not render.",
   },
   {
     name: "--nms-radius-md",
