@@ -109,7 +109,7 @@ These are the seams most likely to be misread from the tree alone:
 
 ## Decisions
 
-Twenty-four ADRs, indexed with current status in
+Twenty-six ADRs, indexed with current status in
 [`context/adr/INDEX.md`](../context/adr/INDEX.md). The ones that explain the
 most structure:
 
@@ -129,6 +129,9 @@ most structure:
 - **ADR-023** / **ADR-024** cover the component layer: a package that ships unbuilt
   TSX and owns a `--nms-*` token spec whose values each consumer supplies, and a
   standalone react-cosmos workbench that is the second such consumer.
+- **ADR-026** — WCAG 2.2 AA is the conformance target. It is what turns a
+  palette value from taste into something a test can fail on, and
+  `packages/components/src/contrast.ts` is where the pairs it binds are listed.
 
 ADR bodies are **historical records**: they are not rewritten when a decision
 later changes. Status changes are recorded in the header and in dated status-update
@@ -145,7 +148,8 @@ pnpm verify       # typecheck → test → smoke:startup, the full gate
 pnpm coverage     # the measured Node-side number
 ```
 
-The tree carries **166 test files** as of this writing. No pass/skip count is
+The tree carries **213 test files** as of this writing, counted as `*.test.ts`
+and `*.test.tsx` on disk, skipped ones included. No pass/skip count is
 recorded here on purpose: the last one this map printed went stale within days
 and was believed anyway. Run the suite. Two families of skip are expected and
 are not failures — the Postgres integration suites opt out unless
