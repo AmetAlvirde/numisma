@@ -343,10 +343,11 @@ that matters for steps 6 and 7 and for `BETTER_AUTH_URL`.
 
 **CORRECTED — the previous version's Plan A ("change the password via the
 running app's sign-in + change-password UI") points at a UI that does not
-exist. The app has seven routes: `__root`, `api/auth/$`, `index` (`/`, the
+exist. The app has six routes: `__root`, `api/auth/$`, `index` (`/`, the
 glance triage surface), `big-picture` (`/big-picture`, the composition
-dashboard, moved here by D11), `ladder.$planId` (the fill path), the dev-only
-`ladder-fixture.$state`, and `login`. There is no change-password screen and
+dashboard, moved here by D11), `ladder.$planId` (the fill path), and `login`.
+The dev-only `ladder-fixture.$state` was a seventh until spec #451 S4 deleted
+it; nothing replaced it. There is no change-password screen and
 no client call to one. Check `apps/web/src/routeTree.gen.ts` if that ever
 looks out of date.**
 

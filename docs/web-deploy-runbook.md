@@ -114,7 +114,7 @@ in is itself what needs `AUTH_DATABASE_URL`. This is designed behavior, not an
 incident and not a regression.
 
 The app's actual route table (`apps/web/src/routeTree.gen.ts`) is `/`,
-`/login`, `/big-picture`, `/ladder/$planId`, `/ladder-fixture/$state`, and the
+`/login`, `/big-picture`, `/ladder/$planId`, and the
 `/api/auth/$` splat — there is no `/dashboard` route (the dashboard renders at
 `/big-picture`, the glance at `/`) and no `/api/health` route. Measured on a
 live preview with empty env, 2026-07-25, before the two ladder routes existed:
@@ -125,11 +125,18 @@ live preview with empty env, 2026-07-25, before the two ladder routes existed:
 | `/api/auth/get-session`, `/api/auth/session` (matched by `/api/auth/$`) | `302` redirect |
 
 `/ladder/$planId` is session-gated by the same loader as the two above, so it
-behaves as they do. `/ladder-fixture/$state` is dev-only: outside
-`import.meta.env.DEV` its loader returns `disabled`, so on a preview or
-production build it renders a "Fixtures are a development surface" card and
-reaches nothing. The fixture module is dynamically imported inside that
-branch, so the build drops it rather than shipping it unreachable.
+behaves as they do.
+
+**The `/ladder-fixture/$state` check is withdrawn, not replaced.** Spec #451 S4
+deleted that route. It was the one route worth hitting on a preview that proved
+something the other four cannot, that a dev-only surface stays shut in a
+production build, and no surviving route makes that claim, so there is nothing
+here to substitute. What proves it now is not a smoke check at all:
+`apps/web/src/client-bundle.integration.test.ts` scans the built
+`.vercel/output/static` assets for started-ladder fixture values and fails if
+any reach the bundle, and `started-ladder.fixtures.test.ts` fails if any file
+under `src/routes/` imports the fixtures. Both run in CI before a deploy, which
+is earlier than this table could ever have caught it.
 
 **No 500s.** Unauthenticated traffic is redirected before anything touches the
 database, so there is no error to see — which is exactly why the green-looking
