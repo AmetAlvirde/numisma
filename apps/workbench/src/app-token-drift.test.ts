@@ -12,7 +12,7 @@ import {
   resolveVarChain,
 } from "../../../ops/components/css-custom-properties.ts";
 
-import { APP_TOKENS, THEME_MODES } from "./theme-modes.ts";
+import { APP_TOKENS, GRAYSCALE_TOKENS, THEME_MODES } from "./theme-modes.ts";
 
 /**
  * THE DRIFT TEST (spec #412 §5 Seam D; issue #418 acceptance).
@@ -185,4 +185,163 @@ describe("the three modes", () => {
       NMS_TOKENS.map((token) => [token.name, token.value]),
     );
   });
+});
+
+/* ── THE GRAYSCALE STATE FAMILY, AND WHY IT GETS A DISTINCTNESS GUARD ───────
+ *
+ * Themed mode has had one since #418 and the base mode had none, which is the
+ * wrong way round for the one question grayscale mode exists to answer. Themed
+ * mode's distinctness is about VISIBILITY: a token whose colour does not appear
+ * when the switcher moves is a token nothing renders. Grayscale mode's is about
+ * READING: it is the mode a reviewer judges hierarchy, spacing and STATE in, and
+ * two states one hundredth of L apart are the same colour on a screen.
+ *
+ * IT WENT RED ON ARRIVAL, against a collision `tokens.ts` had already written
+ * down and left unguarded. Spec #451 S3 darkened six defaults for contrast and
+ * landed `--nms-ok` at L 0.46, one hundredth from `--nms-destructive` and
+ * `--nms-neg` at 0.45. The row for that token recorded the fact and said
+ * "nothing catches it". This is what catches it.
+ *
+ * SCOPED TO THE STATE FAMILY, NOT TO ALL TWENTY NAMES. These seven are the
+ * names that carry a meaning a reader has to tell apart from its neighbour:
+ * destroyed, negative, positive, all-clear, withheld-as-fill,
+ * withheld-as-type, and where price is now. The surfaces and the structural
+ * tokens are not in that contest — `--nms-background` and `--nms-card` sit one
+ * step apart ON PURPOSE, because a card a whole step off the page has no
+ * hierarchy left to review, and a guard that demanded they separate would be
+ * arguing with the reason they are close.
+ *
+ * THE THRESHOLD IS DERIVED, NOT PREFERRED. Read the family's own values: six
+ * distinct lightnesses inside a band bounded at both ends by contrast
+ * obligations. Every one of these is a fill under white, or type on a card, or
+ * both, so the band cannot run to white at the top or to black at the bottom
+ * without failing SC 1.4.3 in one direction or the other. 0.02 is the spacing
+ * six distinct values already fit into that band: every gap in the family is
+ * exactly 0.02 except the one this guard was written for. So the number is the
+ * family's own measured spacing, and a value that violates it is a value that
+ * did not fit where its neighbours already fit.
+ *
+ * `--nms-destructive` AND `--nms-neg` ARE A DECLARED IDENTICAL PAIR. They hold
+ * one value in every palette on purpose — `tokens.ts` argues at length that the
+ * sign of a number and the affordance of a destructive button are different
+ * kinds of thing wearing one colour today — so the guard EXEMPTS them and then
+ * ASSERTS THE EXEMPTION, the way `contrast.ts` declares an excluded pair rather
+ * than staying silent about it. An absence would be indistinguishable from an
+ * oversight, and a stale one would be worse: the day those two values come
+ * apart, the case below reds and the declaration has to go rather than sitting
+ * there excusing a pair that no longer exists.
+ */
+
+/** The seven names whose whole job is to be told apart from each other. */
+const STATE_FAMILY: readonly string[] = [
+  "--nms-destructive",
+  "--nms-neg",
+  "--nms-pos",
+  "--nms-ok",
+  "--nms-warn",
+  "--nms-caution",
+  "--nms-now",
+];
+
+/** The family's own measured spacing, in OKLCH lightness. See the block above. */
+const MIN_STATE_LIGHTNESS_GAP = 0.02;
+
+/** Two state tokens that hold one value on purpose, and the argument for it. */
+interface DeclaredIdenticalPair {
+  readonly one: string;
+  readonly other: string;
+  /** Why one value under two names is the intended state. A sentence. */
+  readonly reason: string;
+}
+
+/**
+ * The pairs the guard above lets through, each with its argument attached.
+ */
+const DECLARED_IDENTICAL_PAIRS: readonly DeclaredIdenticalPair[] = [
+  {
+    one: "--nms-destructive",
+    other: "--nms-neg",
+    reason:
+      "Two names at one value, decided in spec #432 §4.1 and argued in `tokens.ts`. `--nms-neg` is DATA, the sign of a number; `--nms-destructive` is INTENT, the affordance of a button that destroys something. Every palette in the repo resolves both to the same colour today, `apps/web` included, and that is the point rather than an oversight: welding them into one name would mean the day the money-red wants to soften, or wants a colourblind-safe pairing with `--nms-pos`, every destructive affordance moves with it. Themed mode is where the two roles come apart on screen, a cyan and a red, and it is the mode built to pull them apart. So this pair is exempt from the spacing rule here, and the case below holds the exemption honest by asserting the two values really are identical.",
+  },
+];
+
+/** `oklch(L 0 0)`'s lightness, or `undefined` for anything else. */
+function grayscaleLightness(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const match = /^oklch\(\s*([\d.]+)\s+0\s+0\s*\)$/.exec(value.trim());
+  return match === null ? undefined : Number.parseFloat(match[1]!);
+}
+
+/** Every unordered pair of the family, as `[a, b]`. */
+const STATE_PAIRS: readonly (readonly [string, string])[] = STATE_FAMILY.flatMap(
+  (one, at) => STATE_FAMILY.slice(at + 1).map((other) => [one, other] as const),
+);
+
+function isDeclaredIdentical(one: string, other: string): boolean {
+  return DECLARED_IDENTICAL_PAIRS.some(
+    (pair) =>
+      (pair.one === one && pair.other === other) ||
+      (pair.one === other && pair.other === one),
+  );
+}
+
+describe("grayscale keeps its state colours apart", () => {
+  it("names seven tokens the package actually declares", () => {
+    // FALSE-PASS FLOOR. A family scoped to names nothing declares would produce
+    // no readable lightness, no pair, and a green run over nothing at all. The
+    // count is here too, so a name silently dropped from the list is a red
+    // rather than a quieter guard.
+    expect(STATE_FAMILY.length).toBe(7);
+    for (const name of STATE_FAMILY) {
+      expect(NMS_TOKEN_NAMES, `${name} is not a declared token`).toContain(name);
+    }
+    expect(STATE_PAIRS.length).toBe(21);
+  });
+
+  it("writes every state colour in a lightness this guard can read", () => {
+    // The second half of the floor. `oklch(0.45 0 0)` is the base mode's whole
+    // notation, and a value in any other one would compare as `undefined`
+    // against `undefined` and pass every spacing case below without measuring a
+    // thing.
+    for (const name of STATE_FAMILY) {
+      const value = GRAYSCALE_TOKENS[name];
+      expect(
+        grayscaleLightness(value),
+        `${name} is ${value}, which is not oklch(L 0 0)`,
+      ).toBeDefined();
+    }
+  });
+
+  it.each(STATE_PAIRS.filter(([one, other]) => !isDeclaredIdentical(one, other)))(
+    "keeps %s and %s at least 0.02 L apart",
+    (one, other) => {
+      const first = grayscaleLightness(GRAYSCALE_TOKENS[one])!;
+      const second = grayscaleLightness(GRAYSCALE_TOKENS[other])!;
+      const gap = Math.abs(first - second);
+      // The verdict sentence IS the compared value, so the diff a red prints
+      // says which two states collapsed and by how much, in the shape
+      // `ops/components/contrast.test.ts` uses for a failed ratio.
+      expect(
+        gap + 1e-9 >= MIN_STATE_LIGHTNESS_GAP
+          ? "apart"
+          : `${one} at L ${first} and ${other} at L ${second} are ${gap.toFixed(3)} L apart, ` +
+            `and grayscale is the mode that reviews state. The family spaces itself ` +
+            `${MIN_STATE_LIGHTNESS_GAP} L; move one of them.`,
+      ).toBe("apart");
+    },
+  );
+
+  it.each(DECLARED_IDENTICAL_PAIRS.map((pair) => [pair.one, pair.other, pair] as const))(
+    "still finds %s and %s holding one value, as declared",
+    (one, other, pair) => {
+      // The exemption asserted rather than merely taken. If these two ever come
+      // apart, the declaration is stale and this red is what says so: delete the
+      // row and let the spacing rule have the pair.
+      expect([one, GRAYSCALE_TOKENS[one]]).toEqual([one, GRAYSCALE_TOKENS[other]]);
+      expect(pair.reason.length).toBeGreaterThan(80);
+      expect(STATE_FAMILY).toContain(one);
+      expect(STATE_FAMILY).toContain(other);
+    },
+  );
 });
