@@ -303,10 +303,19 @@ describe("G-D13: the ladder route", () => {
       "@numisma/engine/calendar",
       "@numisma/components",
     ];
+    // THE CLAUSE IS `[^;]*?` HERE FOR THE REASON SPELLED OUT IN FULL BELOW, on the
+    // package sweep that first carried the narrowing (spec #439 S4). Same defect, same
+    // one-character fix: `[\s\S]*?` crosses newlines, so a match opening on an
+    // unrelated import runs on to the first `@numisma/*` `from` beneath it and reports
+    // an erased type-only import as a runtime read, naming the wrong file. The ten
+    // `apps/web` files in this closure are exactly as exposed to that as the package
+    // tree was; nothing is red today only because none of them currently writes a
+    // type-only `@numisma/*` import after another import. With both sweeps narrowed,
+    // the import-order convention that paragraph names really does stop mattering.
     for (const file of closure) {
       const source = readFileSync(join(HERE, "..", file), "utf-8");
       for (const match of source.matchAll(
-        /^\s*import\s+(?!type\b)([\s\S]*?)\bfrom\s*["'](@numisma\/[^"']+)["']/gm,
+        /^\s*import\s+(?!type\b)([^;]*?)\bfrom\s*["'](@numisma\/[^"']+)["']/gm,
       )) {
         expect(allowed, `${file} imports ${match[2]} at runtime`).toContain(match[2]);
       }
@@ -423,6 +432,19 @@ describe("G-D13: the ladder route", () => {
     // wide as the lookahead's guarantee, the import order convention stops mattering,
     // and the narrowing can only ever report FEWER things — never fewer offenders,
     // since a runtime engine import still opens its own match on its own line.
+    //
+    // ── `import` OR `export`, BECAUSE A RE-EXPORT IS A RUNTIME READ TOO ────────────
+    // `export { x } from "@numisma/engine"` and `export * from "@numisma/engine"` pull
+    // the module into the bundle exactly as `import` does — the specifier is evaluated
+    // either way — and the manifest pin's own paragraph above names re-export as the
+    // shape that gets `node:` reach into the browser. This is the one file most likely
+    // to acquire it: `packages/components/src/index.ts` is fifteen `export … from`
+    // lines and nothing else, and it sits inside the ladder route's runtime closure.
+    // The alternation is on the LEADING KEYWORD only, so the lookahead still guards
+    // `export type { … } from` and the `[^;]*?` argument above is untouched — a bare
+    // `export * from` has no clause at all, and `[^;]*?` matching `* ` is what carries
+    // it. Nothing in the package re-exports the engine today; this is a latent hole
+    // being closed, not a defect being fixed.
     const packageSrc = join(HERE, "../../../../packages/components/src");
     const files = sourceFiles({ dir: packageSrc, as: "absolute" });
     // FALSE-PASS FLOOR, the same one every sweep in this file carries: "no offender
@@ -433,7 +455,7 @@ describe("G-D13: the ladder route", () => {
       const label = relative(packageSrc, file);
       const source = readFileSync(file, "utf-8");
       for (const match of source.matchAll(
-        /^\s*import\s+(?!type\b)[^;]*?\bfrom\s*["'](@numisma\/engine[^"']*)["']/gm,
+        /^\s*(?:import|export)\s+(?!type\b)[^;]*?\bfrom\s*["'](@numisma\/engine[^"']*)["']/gm,
       )) {
         expect(pure, `${label} imports ${match[1]} at runtime`).toContain(match[1]);
       }
