@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -81,5 +81,86 @@ describe("every exported component has a fixture", () => {
       ).test(text),
     );
     expect(importsIt.map(({ path }) => path).length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * THE WITHDRAWAL OF `useFillPath`, ASSERTED RATHER THAN ASSUMED (spec #451 §4.5).
+ *
+ * `useFillPath` was published at S6 of spec #439 because the four fill-path parts
+ * still lived in `apps/web` and read the provider across the package boundary.
+ * Wave 2 moved them in, which left a published hook with no caller outside the
+ * package, and wave 3 withdrew it. What makes that safe is the pair of claims
+ * below, and neither survives on inspection alone.
+ *
+ * WHY THE ASSERTION LIVES HERE. This file already declares the package's public
+ * surface the source of truth and reads it at runtime, so it is where the surface
+ * shrinking is visible. The capitalization filter above cannot see the change:
+ * `useFillPath` is lowercase, so it was never a fixture obligation and no count in
+ * this file moved when it came out. That is the reason to state the withdrawal
+ * outright — with nothing counting it, the surface could grow the hook back and
+ * every test in the repo would stay green.
+ *
+ * THE SCAN IS THE HALF `pnpm typecheck` CANNOT MAKE. An app importing
+ * `useFillPath` from `@numisma/components` is a type error the day the index stops
+ * naming it, so typecheck holds that door. It does NOT hold the deep subpath:
+ * `@numisma/components/ui/fill-path.tsx` still exports the hook and would resolve
+ * for anyone, which is exactly the route a consumer takes when the index says no.
+ * So the scan reads import specifiers across every workspace source tree and asks
+ * the question the compiler will not.
+ *
+ * THE SUBPATH ITSELF IS NOT THE TARGET AND MUST NOT BECOME ONE. `fill-path.fixture.tsx`
+ * beside this file crosses it for nine internal names on purpose (see the docblock
+ * in the package's `index.ts`). What is asserted is one name, not the crossing.
+ */
+const REPO_ROOT = resolve(SRC, "..", "..", "..");
+
+/** The package's own tree, where the hook is defined and read internally. */
+const PACKAGE_SRC = join(REPO_ROOT, "packages", "components", "src");
+
+/** Every workspace source file outside the package, skipping installed deps. */
+function consumerFiles(dir: string): string[] {
+  if (dir === PACKAGE_SRC) return [];
+  return readdirSync(dir).flatMap((entry) => {
+    if (entry === "node_modules" || entry.startsWith(".")) return [];
+    const path = join(dir, entry);
+    if (statSync(path).isDirectory()) return consumerFiles(path);
+    return /\.(m?[jt]sx?)$/.test(path) ? [path] : [];
+  });
+}
+
+describe("the package no longer publishes `useFillPath`", () => {
+  it("keeps it off the runtime surface, and keeps its two neighbours on", () => {
+    const surface = Object.keys(components);
+    expect(surface).not.toContain("useFillPath");
+    // The neighbours are named so a withdrawal that overshot is a failure here
+    // rather than a type error somewhere downstream: `useFillPathSelection` is
+    // the workbench's selection probe, `FillPathProvider` is what mounts it.
+    expect(surface).toContain("useFillPathSelection");
+    expect(surface).toContain("FillPathProvider");
+  });
+
+  it("has no consumer outside the package importing it, by any specifier", () => {
+    // `\buseFillPath\b` and not a substring match: `useFillPathSelection` contains
+    // the withdrawn name and is a legitimate import in this very directory, so a
+    // naive `includes` would fail against the correct end state.
+    const imports =
+      /import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*["']([^"']*@numisma\/components[^"']*)["']/g;
+    const offenders = consumerFiles(REPO_ROOT).flatMap((file) =>
+      [...readFileSync(file, "utf8").matchAll(imports)]
+        .filter(([, names]) => /\buseFillPath\b/.test(names!))
+        .map(([, , specifier]) => `${relative(REPO_ROOT, file)} imports it from "${specifier}"`),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it("still reaches the hook internally, which is what makes the withdrawal free", () => {
+    // The four parts read it directly. If the withdrawal had deleted the hook
+    // rather than unpublishing it, the package would not compile — but a test
+    // that only checks the index is absent would report success either way.
+    const module = readFileSync(join(PACKAGE_SRC, "ui", "fill-path.tsx"), "utf8");
+    expect(module).toMatch(/export function useFillPath\(/);
+    const index = readFileSync(join(PACKAGE_SRC, "index.ts"), "utf8");
+    expect(index).not.toMatch(/^\s*useFillPath,\s*$/m);
   });
 });

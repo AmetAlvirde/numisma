@@ -43,11 +43,29 @@ export {
  * already gives out. The workbench reaches all four by subpath instead, which is
  * the arrangement the paragraph below describes.
  *
- * `useFillPath` was published at S6 because the parts still lived in `apps/web`
- * and read this provider across the boundary. They do not any more: it is now
- * published surface with no caller outside the package, and wave 3 decides
- * whether to withdraw it. `useFillPathSelection` has one — the workbench's
- * selection probe.
+ * `useFillPath` IS WITHDRAWN, and this is where the decision landed (spec #451
+ * §4.5). It was published at S6 of spec #439 because the parts still lived in
+ * `apps/web` and read this provider across the boundary; wave 2 moved them in and
+ * left a published hook with no caller outside the package, which wave 3 took out.
+ * The hook itself is untouched — it is still exported from `./ui/fill-path`, and
+ * the four parts still read it directly, because each of them also needs `view`
+ * and two need `selectIndex`. What changed is that a consuming app can no longer
+ * reach it, which is the whole of the change.
+ *
+ * NOTHING IN THIS REPO COUNTED THE WITHDRAWAL, which is why it is asserted by hand.
+ * `fixture-coverage.test.ts` filters to capitalized FUNCTIONS and `useFillPath` is
+ * lowercase, so it was never a fixture obligation and no count moved when it came
+ * out. The surface could grow the hook back tomorrow and every other test in the
+ * repo would stay green. `fixture-coverage.test.ts` now says outright that it is
+ * gone, that `useFillPathSelection` and `FillPathProvider` are not, that the module
+ * still exports it, and that no file outside `packages/components/src` imports it
+ * by ANY specifier — the index or the deep subpath. The compiler holds only the
+ * first of those routes.
+ *
+ * `useFillPathSelection` STAYS, and it is the narrower shape: exactly `select`,
+ * `selected` and `selectedIndex`, never `view`. Its one consumer is the workbench's
+ * selection probe. That is what a hook published from this file is supposed to look
+ * like, and it is the reason the withdrawal above costs nobody anything.
  *
  * `Figure`, `Expectation`, `formatUnits` and the module's class strings are NOT
  * here on purpose, and the subpath they cross by is NOT dead (spec #439 review
@@ -71,7 +89,6 @@ export {
   FillPath,
   FillPathCards,
   FillPathProvider,
-  useFillPath,
   useFillPathSelection,
 } from "./ui/fill-path";
 export type {
