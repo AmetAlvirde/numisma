@@ -476,7 +476,7 @@ describe("the torn banner and the two warnings carry their rules as utilities", 
     // THE FOURTH `<code>` THAT SAT IN A `.notice` BOX ON `main`. `.notice code`
     // (`background: #000; padding: 2px 6px; border-radius: 6px`) reached four elements,
     // and this banner is the one whose carrier was spelled out by hand — `TORN` writes
-    // the surface itself because its border is `--neg` — so it is the one that could
+    // the surface itself because its border is `--nms-neg` — so it is the one that could
     // lose the descendant rule without any other assertion noticing. Asserted against
     // the shared constant rather than against three literals, so the chip cannot drift
     // away from the three that import it.
@@ -676,7 +676,7 @@ describe("the selected-rung card carries its section as utilities", () => {
       "opacity-[0.55]",
     ]);
 
-    // Dashed in `--warn`, matching the inferred warning above the chart — the same
+    // Dashed in `--nms-warn`, matching the inferred warning above the chart — the same
     // certainty, the same visual language.
     const inferred = panelOf(withSelectedRung(base, { pricePassedUnconfirmed: true }));
     const inferredPill = [...inferred.querySelectorAll("p:nth-of-type(2) span")].find(
@@ -689,7 +689,7 @@ describe("the selected-rung card carries its section as utilities", () => {
       "border-dashed",
     ]);
 
-    // `--now`, never `--pos`: the next rung is where price is HEADING, and green is the
+    // `--nms-now`, never `--nms-pos`: the next rung is where price is HEADING, and green is the
     // colour that means FILLED.
     expectClasses(panelOf(base).querySelector("h2 span"), [
       ...shape,
