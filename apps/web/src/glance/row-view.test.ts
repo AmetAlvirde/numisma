@@ -271,7 +271,7 @@ describe("the /big-picture wiring", () => {
   });
 
   it("renders absence through the em dash, never a zero", () => {
-    const table = read("components/SectionTable.tsx");
+    const table = read("../../../packages/components/src/ui/section-table.tsx");
     expect(table).toMatch(/—/);
     expect(table).toMatch(/rowView\.rendered/);
     // The reference is rendered in the header, so it is stated and not implied.
@@ -300,7 +300,7 @@ describe("the /big-picture wiring", () => {
     const page = read("routes/big-picture.tsx");
     expect(page).toMatch(/<SummaryCard[\s\S]*?fundValueRendered=\{view\.fundValueRendered\}/);
 
-    const card = read("components/SummaryCard.tsx");
+    const card = read("../../../packages/components/src/ui/summary-card.tsx");
     // BOTH metrics gate on the one fact — the NAV, and the unrealized P&L that
     // divides by it. The P&L is worse than the NAV, not better: it carries no
     // suppression key of its own, so nothing upstream could ever withhold it, and it
@@ -317,7 +317,7 @@ describe("the /big-picture wiring", () => {
     // `clean` is drawn wholly from `dataSafety`, which counts EXCLUDED RECORDS and
     // knows nothing about MARK ABSENCE, so the badge certified data the two lines
     // beneath it were admitting ignorance of. A badge is an assertion too.
-    const card = read("components/SummaryCard.tsx");
+    const card = read("../../../packages/components/src/ui/summary-card.tsx");
     expect(card).toMatch(
       /<DataSafetyBadge[\s\S]*?fundValueRendered=\{fundValueRendered\}/,
     );

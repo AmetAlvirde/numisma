@@ -1,7 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Shell } from "../components/Shell.tsx";
-import { CARD_SURFACE, NOTICE_CODE } from "@numisma/components";
-import { FillPathCards } from "../components/FillPath.tsx";
+import {
+  CARD_SURFACE,
+  FillPathCards,
+  NOTICE_CODE,
+  Shell,
+} from "@numisma/components";
 import type { FillPathPage } from "../ladder/fill-path-view.ts";
 
 /**

@@ -23,44 +23,33 @@
  * behavior-preserving conversion — a red-first test here would have to assert markup
  * nobody wants changed.
  *
- * The fixture is authored. `started-ladder.fixtures.ts` is hand-written and its own tests
- * say so; no ledger output has been near this file.
+ * The fixture is authored. `fill-path.fixtures.ts` was transcribed from a hand-written
+ * app fixture whose own tests say so; no ledger output has been near this file.
  */
 import { describe, expect, it } from "vitest";
 
 import {
-  DELETED_IN_SLICE_7,
-  DELETED_IN_SLICE_8,
-  DELETED_IN_SLICE_9,
   classTokens,
   fireEvent,
   render,
   renderedClassNames,
   absentSlots,
-  expectNoStyledClassSurvives,
   screen,
-} from "../render.testkit.tsx";
-import { FillPath, FillPathCards, FillPathProvider } from "./FillPath.tsx";
-import { composeFillPathPage } from "../ladder/fill-path-view.ts";
-import type { FillPathView } from "../ladder/fill-path-view.ts";
-import { ladderFixture } from "../ladder/started-ladder.fixtures.ts";
-import { CARD_SURFACE, NOTICE_CODE } from "@numisma/components";
-
-/** One fixture, composed through the real view module — never a hand-built view object. */
-function viewOf(name: "partly-walked" | "day-zero"): FillPathView {
-  const fixture = ladderFixture(name);
-  if (fixture === undefined) throw new Error(`fixture \`${name}\` is gone`);
-  const page = composeFillPathPage(fixture.anchor, fixture.planId, fixture.spot);
-  if (page.status !== "ok") {
-    throw new Error(`fixture composed to \`${page.status}\`, not a page`);
-  }
-  return page.view;
-}
-
-/** The widest fixture: filled rungs, waiting rungs and a live spot, so every card draws. */
-function partlyWalkedView(): FillPathView {
-  return viewOf("partly-walked");
-}
+} from "../testkit/render.testkit";
+import { CARD_SURFACE } from "./card";
+// THE WHOLE CARD SHELL IS ON THIS SIDE NOW (spec #439 S9). The file mounted four parts
+// and `FillPathCards` from `apps/web` while the last of them was still over there; the
+// rung list crossed at S9, `apps/web/src/components/` stopped existing, and this file
+// landed beside what it asserts about.
+import { FillPath, FillPathCards, FillPathProvider } from "./fill-path";
+import type { FillPathView } from "./fill-path";
+// THE VIEWS ARE AUTHORED LITERALS RATHER THAN COMPOSED VALUES, which is the one thing
+// this file gave up to cross: `composeFillPathPage(ladderFixture(name))` is unreachable
+// from the package (§4.3). The literals are not taken on trust —
+// `apps/web/src/ladder/fill-path-fixture-equivalence.test.ts` deep-compares both of the
+// two read here against what the composer emits.
+import { dayZeroView, partlyWalkedView } from "./fill-path.fixtures";
+import { NOTICE_CODE } from "./snapshot-notice";
 
 /** The header alone, so an assertion about it names one card's markup and not four. */
 function renderHeader(view: FillPathView) {
@@ -211,10 +200,10 @@ describe("the header card carries its section as utilities", () => {
     // to name its colour or the chip renders in the inherited text colour.
     const base = partlyWalkedView();
     const tones: [FillPathView["state"], string][] = [
-      ["pending", "text-[var(--muted)]"],
-      ["active", "text-[var(--pos)]"],
-      ["ended", "text-[var(--muted)]"],
-      ["unreadable", "text-[var(--warn)]"],
+      ["pending", "text-[var(--nms-muted-foreground)]"],
+      ["active", "text-[var(--nms-pos)]"],
+      ["ended", "text-[var(--nms-muted-foreground)]"],
+      ["unreadable", "text-[var(--nms-warn)]"],
     ];
     for (const [state, tone] of tones) {
       const { container, unmount } = renderHeader({ ...base, state });
@@ -243,7 +232,7 @@ describe("the header card carries its section as utilities", () => {
       "justify-end",
       "pb-[10px]",
       "border-b",
-      "border-b-[var(--line)]",
+      "border-b-[var(--nms-border)]",
       "mb-3",
       "@[380px]/fp-header:flex-col",
       "@[380px]/fp-header:items-end",
@@ -255,13 +244,13 @@ describe("the header card carries its section as utilities", () => {
     expectClasses(spot?.querySelector("strong"), [
       "text-[1.05rem]",
       "tabular-nums",
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
     ]);
     expectClasses(spot?.querySelector("span:last-of-type"), [
       "m-0",
       "mt-1",
       "text-[0.7rem]",
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
     ]);
   });
 
@@ -287,11 +276,18 @@ describe("the header card carries its section as utilities", () => {
     ]);
     // The zero basis is what lets a two-word label wrap instead of pushing its figure
     // off the rail, so it is asserted rather than left to read as decoration.
+    //
+    // `--nms-muted-foreground` RATHER THAN `--muted` BECAUSE THE STRING MOVED (spec #439
+    // S6). `TILE_LABEL` now lives in `@numisma/components/ui/fill-path.tsx` and reads
+    // inside the package's namespace, which `apps/web` aliases onto its own `--muted`.
+    // Same painted grey, reached through the new name — and this assertion is the parity
+    // evidence for that, which is why it names the class exactly rather than matching a
+    // substring of it.
     expectClasses(tile?.querySelector("span"), [
       "text-[0.7rem]",
       "uppercase",
       "tracking-[0.04em]",
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
       "flex-[1_1_0]",
       "min-w-0",
       "@[380px]/fp-header:flex-none",
@@ -314,9 +310,9 @@ describe("the header card carries its section as utilities", () => {
       "h-1.5",
       "overflow-hidden",
       "rounded-[3px]",
-      "bg-[var(--line)]",
+      "bg-[var(--nms-border)]",
     ]);
-    expectClasses(track?.firstElementChild, ["h-full", "bg-[var(--pos)]"]);
+    expectClasses(track?.firstElementChild, ["h-full", "bg-[var(--nms-pos)]"]);
     // THE WIDTH IS AN INLINE STYLE AND STAYS ONE. It is a measurement, and there is no
     // utility for "whatever fraction this ladder happens to be at".
     expect(track?.firstElementChild?.getAttribute("style")).toMatch(/width:/);
@@ -326,7 +322,7 @@ describe("the header card carries its section as utilities", () => {
       "m-0",
       "mt-1.5",
       "text-[0.78rem]",
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
     ]);
   });
 
@@ -339,7 +335,7 @@ describe("the header card carries its section as utilities", () => {
       "justify-end",
       "gap-x-[10px]",
       "border-t",
-      "border-t-[var(--line)]",
+      "border-t-[var(--nms-border)]",
       "pt-3",
       "@[380px]/fp-header:flex-col",
       "@[380px]/fp-header:items-stretch",
@@ -361,12 +357,12 @@ describe("the header card carries its section as utilities", () => {
       "mt-1",
       "text-[0.78rem]",
       "text-pretty",
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
     ]);
   });
 
   it("gives day zero its hero and its two quieter projections", () => {
-    const { container } = renderHeader(viewOf("day-zero"));
+    const { container } = renderHeader(dayZeroView());
     const expected = container.querySelectorAll("section > div")[1];
     const hero = expected?.firstElementChild;
     const quiet = expected?.lastElementChild;
@@ -385,10 +381,11 @@ describe("the header card carries its section as utilities", () => {
     // what the deleted `.fp-expected .fp-tiles` context rule did.
     expectClasses(quiet, ["grid", "grid-cols-1", "mb-0"]);
     // A projection reads quieter in two ways at once, and the size is the half that had
-    // been a descendant selector rather than a class of its own.
+    // been a descendant selector rather than a class of its own. The colour is the
+    // second of `ui/fill-path.tsx`'s two reads (spec #439 S6); see the tile label above.
     expectClasses(quiet?.firstElementChild?.querySelector("strong"), [
       "text-[0.95rem]",
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
       "tabular-nums",
     ]);
   });
@@ -425,31 +422,6 @@ describe("the header card carries its section as utilities", () => {
       "@[380px]/fp-header:text-left",
     ]);
   });
-
-  it("renders none of the twenty-five class names slice 7 deleted", () => {
-    // THE WHOLE PAGE, not the header alone: the assertion that catches the carrier
-    // nobody remembered is a claim about the subtree, and `fp-tile-label` in particular
-    // was rendered by the CHART card's inspect label as well as by the header's tiles.
-    const { container } = render(<FillPathCards view={partlyWalkedView()} />);
-    const rendered = renderedClassNames(container);
-    for (const deleted of DELETED_IN_SLICE_7) expect(rendered).not.toContain(deleted);
-
-    // And the ladder and the chart still carry theirs, which is what makes the line
-    // above a claim about slice 7 rather than about the file having been emptied. Slice
-    // 8 took the ladder's names, so what is left to hold that line is the chart's, which
-    // slice 9 takes last.
-    for (const surviving of ["fp-chart-card"]) {
-      expect(rendered).toContain(surviving);
-    }
-  });
-
-  it("renders both day-zero blocks free of those names too", () => {
-    // Day zero draws the hero, the projections and the expected wrapper — three of the
-    // deleted names' carriers that `partly-walked` never reaches.
-    const { container } = render(<FillPathCards view={viewOf("day-zero")} />);
-    const rendered = renderedClassNames(container);
-    for (const deleted of DELETED_IN_SLICE_7) expect(rendered).not.toContain(deleted);
-  });
 });
 
 /**
@@ -468,33 +440,35 @@ describe("the torn banner and the two warnings carry their rules as utilities", 
     return { ...partlyWalkedView(), tornActs: { status: "outstanding", count: 2 } };
   }
 
-  it("paints the banner in `--neg` and keeps it an alert", () => {
+  it("paints the banner in the alarm colour and keeps it an alert", () => {
     const { container } = render(<FillPathCards view={tornView()} />);
     const banner = container.querySelector('[role="alert"]');
 
     // The surface is spelled out on this one element rather than composed from
-    // `CARD_SURFACE`, because the banner's border is `--neg` and the shared string's is
-    // `--line`: two unvariant `border-color` utilities would race. Asserted from both
-    // ends — the colour that must be there, and the one that must not.
+    // `CARD_SURFACE`, because the banner's border is the alarm red and the shared
+    // string's is the ordinary hairline: two unvariant `border-color` utilities would
+    // race. Asserted from both ends — the colour that must be there, and the one that
+    // must not.
     expectClasses(banner, [
       "rounded-xl",
       "border",
-      "border-[var(--neg)]",
-      "bg-[var(--card)]",
+      "border-[var(--nms-neg)]",
+      "bg-[var(--nms-card)]",
       "p-4",
-      "text-[var(--neg)]",
+      "text-[var(--nms-neg)]",
     ]);
-    expect(classTokens(banner!)).not.toContain("border-[var(--line)]");
+    expect(classTokens(banner!)).not.toContain("border-[var(--nms-border)]");
     expect(banner?.tagName).toBe("DIV");
     expect(banner?.getAttribute("role")).toBe("alert");
 
-    // The sentence under the heading steps back to `--text`: it is prose inside a block
-    // painted `--neg`, and reading it in the alarm colour makes the whole card shout.
+    // The sentence under the heading steps back to the ordinary foreground: it is prose
+    // inside a block painted in the alarm colour, and reading it in that colour too makes
+    // the whole card shout.
     expectClasses(banner?.querySelector("p"), [
       "m-0",
       "mt-1.5",
       "text-[0.85rem]",
-      "text-[var(--text)]",
+      "text-[var(--nms-foreground)]",
     ]);
   });
 
@@ -502,7 +476,7 @@ describe("the torn banner and the two warnings carry their rules as utilities", 
     // THE FOURTH `<code>` THAT SAT IN A `.notice` BOX ON `main`. `.notice code`
     // (`background: #000; padding: 2px 6px; border-radius: 6px`) reached four elements,
     // and this banner is the one whose carrier was spelled out by hand — `TORN` writes
-    // the surface itself because its border is `--neg` — so it is the one that could
+    // the surface itself because its border is `--nms-neg` — so it is the one that could
     // lose the descendant rule without any other assertion noticing. Asserted against
     // the shared constant rather than against three literals, so the chip cannot drift
     // away from the three that import it.
@@ -533,7 +507,7 @@ describe("the torn banner and the two warnings carry their rules as utilities", 
       paragraph.textContent?.includes("were not checked for this snapshot"),
     );
 
-    expectClasses(line, ["m-0", "text-[0.8rem]", "text-[var(--muted)]"]);
+    expectClasses(line, ["m-0", "text-[0.8rem]", "text-[var(--nms-muted-foreground)]"]);
     expect(classTokens(line!)).not.toContain("mt-1");
   });
 
@@ -568,7 +542,7 @@ describe("the torn banner and the two warnings carry their rules as utilities", 
         "border-l-4",
       ]);
     }
-    expectClasses(certain, ["border-l-[var(--neg)]"]);
+    expectClasses(certain, ["border-l-[var(--nms-neg)]"]);
     expect(classTokens(certain!)).not.toContain("[border-left-style:dashed]");
 
     // THE DASH IS ONE EDGE, NOT FOUR. `border-dashed` would dash the card's other three
@@ -576,9 +550,9 @@ describe("the torn banner and the two warnings carry their rules as utilities", 
     // the difference between the two certainties is the whole reason these paragraphs
     // look different, and it must not spill onto the surface they share.
     expectClasses(inferred, [
-      "border-l-[var(--warn)]",
+      "border-l-[var(--nms-warn)]",
       "[border-left-style:dashed]",
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
     ]);
   });
 
@@ -657,13 +631,13 @@ describe("the selected-rung card carries its section as utilities", () => {
 
     expectClasses(price, ["m-0", "mb-2", "text-[1.3rem]", "tabular-nums"]);
     const size = price?.querySelector("span");
-    expectClasses(size, ["text-[var(--muted)]"]);
+    expectClasses(size, ["text-[var(--nms-muted-foreground)]"]);
     // `0.75em`, not `0.75rem`: the unit steps down from the FIGURE it belongs to, so it
     // has to be relative to the price's own size rather than to the root's.
     expectClasses(size?.querySelector("span"), ["text-[0.75em]"]);
     expectClasses(
       [...(price?.children ?? [])].find((child) => child.textContent === "@"),
-      ["text-[var(--muted)]", "opacity-70"],
+      ["text-[var(--nms-muted-foreground)]", "opacity-70"],
     );
   });
 
@@ -687,8 +661,8 @@ describe("the selected-rung card carries its section as utilities", () => {
     const ordinary = panelOf(withSelectedRung(base, { venueResting: false }));
     expectClasses(ordinary.querySelector("p:nth-of-type(2) span"), [
       ...shape,
-      "border-[var(--line)]",
-      "text-[var(--muted)]",
+      "border-[var(--nms-border)]",
+      "text-[var(--nms-muted-foreground)]",
     ]);
 
     // Greyed AND dashed, per G-D12: a declared rung with no order is not a state the
@@ -696,13 +670,13 @@ describe("the selected-rung card carries its section as utilities", () => {
     const unplaced = panelOf(withSelectedRung(base, { notPlaced: true }));
     expectClasses(unplaced.querySelector("p:nth-of-type(2) span"), [
       ...shape,
-      "border-[var(--line)]",
-      "text-[var(--muted)]",
+      "border-[var(--nms-border)]",
+      "text-[var(--nms-muted-foreground)]",
       "border-dashed",
       "opacity-[0.55]",
     ]);
 
-    // Dashed in `--warn`, matching the inferred warning above the chart — the same
+    // Dashed in `--nms-warn`, matching the inferred warning above the chart — the same
     // certainty, the same visual language.
     const inferred = panelOf(withSelectedRung(base, { pricePassedUnconfirmed: true }));
     const inferredPill = [...inferred.querySelectorAll("p:nth-of-type(2) span")].find(
@@ -710,17 +684,17 @@ describe("the selected-rung card carries its section as utilities", () => {
     );
     expectClasses(inferredPill, [
       ...shape,
-      "border-[var(--warn)]",
-      "text-[var(--warn)]",
+      "border-[var(--nms-warn)]",
+      "text-[var(--nms-warn)]",
       "border-dashed",
     ]);
 
-    // `--now`, never `--pos`: the next rung is where price is HEADING, and green is the
+    // `--nms-now`, never `--nms-pos`: the next rung is where price is HEADING, and green is the
     // colour that means FILLED.
     expectClasses(panelOf(base).querySelector("h2 span"), [
       ...shape,
-      "border-[var(--now)]",
-      "text-[var(--now)]",
+      "border-[var(--nms-now)]",
+      "text-[var(--nms-now)]",
     ]);
   });
 
@@ -741,7 +715,7 @@ describe("the selected-rung card carries its section as utilities", () => {
       "@[380px]/fp-selected:grid-cols-[auto_1fr]",
       "@[380px]/fp-selected:gap-y-1",
     ]);
-    expectClasses(panel.querySelector("dt"), ["text-[var(--muted)]"]);
+    expectClasses(panel.querySelector("dt"), ["text-[var(--nms-muted-foreground)]"]);
     // `m-0` because the UA indents a `dd` by 40px and preflight is off.
     expectClasses(panel.querySelector("dd"), [
       "m-0",
@@ -765,10 +739,10 @@ describe("the selected-rung card carries its section as utilities", () => {
       "mt-3",
       "pt-2.5",
       "border-t",
-      "border-t-[var(--line)]",
+      "border-t-[var(--nms-border)]",
       "text-[0.75rem]",
       "leading-[1.5]",
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
     ]);
     expect(classTokens(recorded!)).not.toContain("mt-1");
   });
@@ -864,7 +838,7 @@ describe("the rung list carries its section as utilities", () => {
       "py-3",
       "border",
       "rounded-xl",
-      "text-[var(--text)]",
+      "text-[var(--nms-foreground)]",
       // A button's font is the UA's until something says otherwise, and no utility spells
       // the `font` shorthand.
       "[font:inherit]",
@@ -878,11 +852,11 @@ describe("the rung list carries its section as utilities", () => {
       "@[380px]/fp-list:gap-x-3",
       "@[380px]/fp-list:gap-y-3",
     ]);
-    // NEUTRAL, DELIBERATELY: `--pos` here would ring a waiting rung in the colour that
-    // means filled the moment a keyboard reached it.
+    // NEUTRAL, DELIBERATELY: `--nms-pos` here would ring a waiting rung in the colour
+    // that means filled the moment a keyboard reached it.
     expectClasses(rows[0], [
       "focus-visible:outline-2",
-      "focus-visible:outline-[var(--text)]",
+      "focus-visible:outline-[var(--nms-foreground)]",
       "focus-visible:outline-offset-2",
     ]);
   });
@@ -901,9 +875,9 @@ describe("the rung list carries its section as utilities", () => {
     // the price for the eye.
     expect(backgrounds).toEqual(
       new Set([
-        "bg-[var(--bg)]",
-        "bg-[color-mix(in_srgb,var(--pos)_12%,var(--bg))]",
-        "bg-[color-mix(in_srgb,var(--now)_14%,var(--bg))]",
+        "bg-[var(--nms-background)]",
+        "bg-[color-mix(in_srgb,var(--nms-pos)_12%,var(--nms-background))]",
+        "bg-[color-mix(in_srgb,var(--nms-now)_14%,var(--nms-background))]",
       ]),
     );
     // Every row carries exactly one of them; a row with two would be a race.
@@ -931,8 +905,8 @@ describe("the rung list carries its section as utilities", () => {
       fireEvent.click(rows[index]!);
       const selected = classTokens(rows[index]!);
 
-      expect(selected).toContain("[box-shadow:0_0_0_1px_var(--text)]");
-      expect(selected).toContain("border-[var(--text)]");
+      expect(selected).toContain("[box-shadow:0_0_0_1px_var(--nms-foreground)]");
+      expect(selected).toContain("border-[var(--nms-foreground)]");
       // SELECTION FORCES THE BORDER SOLID, which is what the deleted rule did — a
       // selected never-placed rung stops being dashed while it is under inspection.
       expect(selected).toContain("border-solid");
@@ -950,7 +924,9 @@ describe("the rung list carries its section as utilities", () => {
       // `border-style: dashed` is the WHOLE signal that a rung was never placed (G-D12):
       // not a state the ladder is in, one it never entered.
       expect(classTokens(row)).toContain("border-dashed");
-      expectClasses(row.children[1]?.querySelector("span"), ["text-[var(--muted)]"]);
+      expectClasses(row.children[1]?.querySelector("span"), [
+        "text-[var(--nms-muted-foreground)]",
+      ]);
     }
     for (const row of rows.filter((_, index) => !view.rungs[index]!.notPlaced)) {
       expect(classTokens(row)).toContain("border-solid");
@@ -966,7 +942,7 @@ describe("the rung list carries its section as utilities", () => {
       "text-[0.78rem]",
       "font-semibold",
       "tracking-[0.03em]",
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
       "@[380px]/fp-list:self-auto",
     ]);
     expectClasses(figures, ["grid", "gap-px", "min-w-0"]);
@@ -980,7 +956,7 @@ describe("the rung list carries its section as utilities", () => {
     // WEIGHT AND COLOUR BOTH, unlike the inspect card's colour-only demotion: a list row
     // is read at a glance rather than as a sentence, and 700-weight grey still reads loud.
     const size = price?.firstElementChild;
-    expectClasses(size, ["font-normal", "text-[var(--muted)]"]);
+    expectClasses(size, ["font-normal", "text-[var(--nms-muted-foreground)]"]);
     expectClasses(
       [...(size?.children ?? [])].find((span) => span.textContent === "@"),
       ["opacity-70"],
@@ -1029,9 +1005,12 @@ describe("the rung list carries its section as utilities", () => {
     for (const [index, rung] of view.rungs.entries()) {
       const status = rows[index]?.children[2]?.children[0];
       if (status === undefined) continue;
-      if (rung.notPlaced) expect(toneOf(rows[index]!)).toEqual(["text-[var(--muted)]"]);
-      else if (rung.isNext) expect(toneOf(rows[index]!)).toEqual(["text-[var(--now)]"]);
-      else if (rung.filled) expect(toneOf(rows[index]!)).toEqual(["text-[var(--pos)]"]);
+      if (rung.notPlaced)
+        expect(toneOf(rows[index]!)).toEqual(["text-[var(--nms-muted-foreground)]"]);
+      else if (rung.isNext)
+        expect(toneOf(rows[index]!)).toEqual(["text-[var(--nms-now)]"]);
+      else if (rung.filled)
+        expect(toneOf(rows[index]!)).toEqual(["text-[var(--nms-pos)]"]);
       // The ordinary rung's status inherits the row's own colour, as it did when it had
       // no rule of its own; a `text-` utility here would be a declaration the file never
       // carried.
@@ -1071,36 +1050,13 @@ describe("the rung list carries its section as utilities", () => {
       paragraph.textContent?.includes("that no declared rung explains"),
     );
 
-    expectClasses(orphans, ["m-0", "mt-3", "text-[0.8rem]", "text-[var(--muted)]"]);
+    expectClasses(orphans, [
+      "m-0",
+      "mt-3",
+      "text-[0.8rem]",
+      "text-[var(--nms-muted-foreground)]",
+    ]);
     expect(classTokens(orphans!)).not.toContain("mt-1");
-  });
-
-  it("renders none of the thirty-four class names slice 8 deleted", () => {
-    // THE WHOLE PAGE, on the widest view this file can build: every warning, the banner,
-    // an orphan count, and a rung patched into three states at once, so every carrier the
-    // slice touched is on screen at the same time.
-    const view = partlyWalkedView();
-    const { container } = render(
-      <FillPathCards
-        view={{
-          ...view,
-          tornActs: { status: "outstanding", count: 1 },
-          warnings: { filledNotRecorded: 1, pricePassedNoFill: 1 },
-          orphanLots: 2,
-          rungs: view.rungs.map((rung) =>
-            rung.isNext
-              ? { ...rung, placedAtUsd: 1, notPlaced: true, pricePassedUnconfirmed: true }
-              : rung,
-          ),
-        }}
-      />,
-    );
-    const rendered = renderedClassNames(container);
-    for (const deleted of DELETED_IN_SLICE_8) expect(rendered).not.toContain(deleted);
-
-    // And the chart still carries its own, which is what makes the line above a claim
-    // about slice 8 rather than about the render having been emptied.
-    expect(rendered).toContain("fp-chart-card");
   });
 });
 
@@ -1153,7 +1109,7 @@ describe("the chart card carries its section as utilities", () => {
       "flex-none",
       "text-[0.8rem]",
       "tabular-nums",
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
     ]);
   });
 
@@ -1170,9 +1126,12 @@ describe("the chart card carries its section as utilities", () => {
       "max-w-[500px]",
       "mx-auto",
       // `currentColor` IS THE CHART LIBRARY'S THEME for axes, ticks, grid and titles, so
-      // these two are guide legibility rather than label styling.
+      // these two are guide legibility rather than label styling. The grey is reached
+      // through the package's namespace now that the chart renders from
+      // `@numisma/components` (spec #439 S5); `styles.css` aliases
+      // `--nms-muted-foreground` onto `--muted`, so the painted value is unchanged.
       "text-[10px]",
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
     ]);
     // The hook survives its rule: `fill-path-chart-a11y.test.tsx` queries this wrapper.
     expect(wrapper?.getAttribute("aria-hidden")).toBe("true");
@@ -1194,7 +1153,7 @@ describe("the chart card carries its section as utilities", () => {
       "gap-x-[14px]",
       "gap-y-1",
       "text-[0.72rem]",
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
     ]);
     for (const entry of legend!.querySelectorAll("li")) {
       expectClasses(entry, ["flex", "items-center", "gap-1.5"]);
@@ -1218,13 +1177,13 @@ describe("the chart card carries its section as utilities", () => {
       "w-[18px]",
       "border-t-2",
       "[border-top-style:solid]",
-      "border-t-[var(--pos)]",
+      "border-t-[var(--nms-pos)]",
     ]);
     expectClasses(waiting, [
       "w-[18px]",
       "border-t-2",
       "[border-top-style:dashed]",
-      "border-t-[var(--muted)]",
+      "border-t-[var(--nms-muted-foreground)]",
     ]);
     // THE NOW SWATCH IS A HORIZONTAL RULE, matching the picture: price is the y axis, so
     // spot is a price LEVEL. It stays distinguishable from `waiting` on colour and on
@@ -1233,7 +1192,7 @@ describe("the chart card carries its section as utilities", () => {
       "w-[18px]",
       "border-t-2",
       "[border-top-style:solid]",
-      "border-t-[var(--now)]",
+      "border-t-[var(--nms-now)]",
     ]);
 
     // THE STYLE IS PER EDGE AND MUST STAY THERE. `border-dashed` sets `border-style` on
@@ -1269,51 +1228,5 @@ describe("the chart card carries its section as utilities", () => {
     // and preflight is off, so `w-full` alone leaves the slider 4px wider than the box
     // around it, with its track tail under the card's border at 320px.
     expectClasses(input, ["w-full", "mx-0"]);
-  });
-
-  it("renders none of the eight class names slice 9 deleted", () => {
-    const { container } = renderChartCard();
-    const rendered = renderedClassNames(container);
-    for (const deleted of DELETED_IN_SLICE_9) expect(rendered).not.toContain(deleted);
-
-    // AND THE THREE HOOKS SURVIVE. They lost their rules and kept their names, because
-    // the chart's a11y and selection contracts query the render by them; a green line
-    // above with these gone would mean the conversion took a test surface with it.
-    for (const hook of ["fp-chart-card", "fp-chart", "fp-inspect"]) {
-      expect(rendered).toContain(hook);
-    }
-  });
-});
-
-/**
- * THE TERMINAL ASSERTION (spec #420 Seam E, slice 9), on all five census successors and
- * the shell's.
- *
- * THE SET OF CLASS NAMES THIS SURFACE RENDERS, INTERSECTED WITH THE SET OF CLASS
- * SELECTORS LEFT IN `styles.css`, IS EMPTY. That is the mechanical proof that no house
- * rule survives WITH A CARRIER — the failure mode the nine deletion guards cannot see,
- * because each of them knows only the names its own slice took.
- *
- * IT COULD ONLY LAND HERE. Every slice but the last renders a class the file still
- * styles, on purpose: that is what a nine-slice migration through a shared stylesheet
- * looks like from the inside. The assertion is false by design for eight slices and true
- * for good afterwards.
- *
- * IT IS NOT A RESTATEMENT OF "THE FILE HAS NO RULES". `styles-css-end-state.test.ts` says
- * that about the file; this says something the file cannot know — that nothing RENDERED
- * reaches whatever is in it. A rule added back under a name no guard lists goes red here
- * the moment a component writes its class.
- *
- * AND AT THE END STATE IT CARRIES ITS OWN NEGATIVE CONTROL, because the file it reads is
- * now empty of rules and the intersection is therefore empty for free.
- * `expectNoStyledClassSurvives` re-runs the identical walk against a probe sheet built
- * from this surface's own render, so a blank render, a reader that stopped reading or an
- * intersection that never intersects reds here instead of passing green. What the claim
- * is worth is written in that helper's docblock.
- */
-describe("no rule left in styles.css reaches this surface", () => {
-  it("renders no class name the stylesheet still selects", () => {
-    const { container } = render(<FillPathCards view={partlyWalkedView()} />);
-    expectNoStyledClassSurvives(container);
   });
 });

@@ -31,13 +31,13 @@
 import { describe, expect, it } from "vitest";
 import type { ReactNode } from "react";
 
-import { Crumb } from "@numisma/components";
+import { Crumb } from "./crumb";
 
 import {
   classTokens as tokens,
   render,
   renderedClassNames,
-} from "../../render.testkit.tsx";
+} from "../testkit/render.testkit";
 
 /**
  * Mount one crumb whose slot builds a plain anchor at `href`, and hand back both

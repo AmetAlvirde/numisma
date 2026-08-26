@@ -12,92 +12,32 @@
  * primitive that builds the class string for it, forbids any new class name, and
  * requires `styles.css` to be byte-identical — a rule spec #412 Slice 5 has since broken
  * exactly once, adding a `:root` block of `--nms-*` overrides and no selector at all.
- * Both arms are censused, and they emit
- * the SAME set from different elements: `muted` is the percentage suffix on the
+ * BOTH ARMS ARE CENSUSED, from different elements. Six cases mount `anchoredView()`
+ * and one mounts `anchorlessView()`, because `muted` is the percentage suffix on the
  * anchored arm and the "no earlier anchor" header on the genesis one. That is not a
- * redundant assertion — the genesis path renders a different header cell and a
- * different value cell, and a new class name introduced on either would be invisible
- * to the anchored arm alone.
+ * redundant assertion — the genesis path renders a header cell the anchored arm never
+ * produces, and it is the only render of this component's third `--nms-muted-foreground`
+ * read, so a class name rewritten there would be invisible to the anchored arm alone.
+ * The genesis case censuses that cell directly; it used to ride along inside the
+ * whole-tree `expectNoStyledClassSurvives` scaffolding, which spec #439 S0 retired.
  *
- * THE ROWS ARE AUTHORED. `row-view.test.ts` stays the oracle for every derived value;
- * this file pins markup and nothing else. No ledger output has been near it.
+ * THE ROWS ARE AUTHORED, and since spec #439 S2 they live in `section-table.fixtures.ts`
+ * beside the component rather than in this file. Same literals, three readers: this test,
+ * the workbench's cosmos fixture, and whatever renders the table next.
+ * `apps/web/src/glance/row-view.test.ts` stays the oracle for every derived value; this
+ * file pins markup and nothing else. No ledger output has been near it.
  */
 import { describe, expect, it } from "vitest";
 
 import {
   classTokens as tokens,
-  DELETED_IN_SLICE_2,
-  DELETED_IN_SLICE_3,
-  DELETED_IN_SLICE_4,
   render,
-  renderedClassNames,
   absentSlots,
-  expectNoStyledClassSurvives,
   screen,
-} from "../render.testkit.tsx";
-import { CARD_SURFACE } from "@numisma/components";
-import { SectionTable } from "./SectionTable.tsx";
-import type { DashboardSection } from "@numisma/engine";
-import type { BigPictureView } from "../glance/row-view.ts";
-
-function section(): DashboardSection {
-  return {
-    id: "portfolios",
-    title: "Portfolios",
-    rows: [
-      {
-        id: "row-a",
-        kind: "portfolio",
-        label: "Alpha",
-        usdValue: 600,
-        percentOfFund: 60,
-      },
-      {
-        id: "row-b",
-        kind: "portfolio",
-        label: "Beta",
-        usdValue: 400,
-        percentOfFund: 40,
-      },
-    ],
-  };
-}
-
-/** Both deltas render on `row-a`; `row-b` is suppressed with a named cause. */
-function anchoredView(): BigPictureView {
-  return {
-    reference: { asOf: "2026-01-01", label: "Thu 1 Jan" },
-    costBasisLabel: "cost basis",
-    percentOfFundRendered: true,
-    fundValueRendered: true,
-    rows: new Map([
-      [
-        "row-a",
-        {
-          rendered: true,
-          vsAnchor: { rendered: true, usdValue: 25, percent: 4.35 },
-          vsCostBasis: { rendered: true, usdValue: -10, percent: -1.64 },
-        },
-      ],
-      [
-        "row-b",
-        {
-          rendered: false,
-          suppressedBy: "unexpected-absence" as const,
-          vsAnchor: { rendered: false, suppressedBy: "no-earlier-anchor" as const },
-          vsCostBasis: { rendered: false, suppressedBy: "no-cost-basis" as const },
-        },
-      ],
-    ]),
-  };
-}
-
-/** The genesis arm: no anchor to name, and NAV withheld, so the % column is absent too. */
-function anchorlessView(): BigPictureView {
-  const view = anchoredView();
-  const { reference: _reference, ...rest } = view;
-  return { ...rest, percentOfFundRendered: false };
-}
+} from "../testkit/render.testkit";
+import { CARD_SURFACE } from "./card";
+import { SectionTable } from "./section-table";
+import { anchoredView, anchorlessView, section } from "./section-table.fixtures";
 
 describe("SectionTable on the shared Card", () => {
   it("renders the section title as an h2", () => {
@@ -127,7 +67,7 @@ describe("SectionTable on the shared Card", () => {
     const suffix = screen
       .getAllByText(/%$/)
       .find((element) => element.tagName === "SPAN")!;
-    for (const utility of ["text-[var(--muted)]", "m-0", "mt-1"]) {
+    for (const utility of ["text-[var(--nms-muted-foreground)]", "m-0", "mt-1"]) {
       expect(tokens(suffix)).toContain(utility);
     }
   });
@@ -142,8 +82,16 @@ describe("SectionTable on the shared Card", () => {
     // it a positive anchor delta and a negative cost-basis one.
     const up = screen.getByText(/▲/);
     const down = screen.getByText(/▼/);
-    expect(tokens(up)).toContain("text-[var(--pos)]");
-    expect(tokens(down)).toContain("text-[var(--neg)]");
+    // THESE TWO ARRIVED ALREADY NAMESPACED and the other four did not, which is the whole
+    // reason the slice brief enumerates the component's reads over the FILE'S OWN TEXT
+    // rather than over what a reviewer sees on screen: `POSITIVE` and `NEGATIVE` crossed
+    // with `SummaryCard` in spec #439 S1 and were rewritten there, so the strings below
+    // appear nowhere in `section-table.tsx`. The four that are its own were rewritten in
+    // S2, in lockstep with the component. A test left asserting an old string goes red on
+    // the exact class, which is this wave's parity evidence — never loosened to a
+    // substring to get past it.
+    expect(tokens(up)).toContain("text-[var(--nms-pos)]");
+    expect(tokens(down)).toContain("text-[var(--nms-neg)]");
   });
 
   it("keeps the escape hatch on the scroller and the table", () => {
@@ -190,8 +138,8 @@ describe("SectionTable on the shared Card", () => {
       "px-[10px]",
       "py-2",
       "border-b",
-      "border-[var(--line)]",
-      "text-[var(--muted)]",
+      "border-[var(--nms-border)]",
+      "text-[var(--nms-muted-foreground)]",
       "text-[0.78rem]",
       "uppercase",
       "tracking-[0.04em]",
@@ -211,7 +159,7 @@ describe("SectionTable on the shared Card", () => {
     const cells = screen.getAllByRole("cell");
     const labelCell = cells.find((cell) => cell.textContent === "Alpha")!;
     const usdCell = labelCell.nextElementSibling!;
-    for (const utility of ["px-[10px]", "py-2", "border-b", "border-[var(--line)]"]) {
+    for (const utility of ["px-[10px]", "py-2", "border-b", "border-[var(--nms-border)]"]) {
       expect(tokens(labelCell)).toContain(utility);
       expect(tokens(usdCell)).toContain(utility);
     }
@@ -219,26 +167,42 @@ describe("SectionTable on the shared Card", () => {
     expect(tokens(usdCell)).toContain("text-right");
   });
 
-  it("writes none of the deleted class names, on either arm", () => {
-    const anchored = render(
-      <SectionTable section={section()} view={anchoredView()} />,
-    );
-    const genesis = render(
-      <SectionTable section={section()} view={anchorlessView()} />,
-    );
+  it("censuses the genesis arm's own header cell, the one the anchored arm never renders", () => {
+    // THE OTHER ARM, AND THE ONLY TEST RENDER IT HAS (spec #439 review finding 3).
+    // `anchorlessView()` is `anchoredView()` with `reference` DESTRUCTURED OUT, which
+    // is the sole condition under which the anchor column's header says "no earlier
+    // anchor" instead of naming a date. That fallback span is this component's THIRD
+    // `--nms-muted-foreground` read (`section-table.tsx:219`); the other two are the
+    // header box and the percentage suffix, both on the anchored arm. §4.7's table
+    // enumerates the component at `--muted x3`, and the wave's parity gate rests on a
+    // moved test's expected class string failing loudly when a read is rewritten — so
+    // the read with no test rendering it is the one hole in that argument.
+    //
+    // The case this replaces was the retired `expectNoStyledClassSurvives` scaffolding,
+    // which mounted this arm incidentally. The census is what the docblock above
+    // promises, so it is asserted directly rather than as a side effect of something
+    // else.
+    render(<SectionTable section={section()} view={anchorlessView()} />);
 
-    for (const { container } of [anchored, genesis]) {
-      const rendered = renderedClassNames(container.firstElementChild!);
-      for (const deleted of [
-        ...DELETED_IN_SLICE_2,
-        ...DELETED_IN_SLICE_3,
-        ...DELETED_IN_SLICE_4,
-      ]) {
-        expect([...rendered]).not.toContain(deleted);
-      }
-      // The hook is gone as of slice 8, which deleted the last rule selecting through
-      // it; the primitive's own contract test holds that end.
-      expect([...rendered]).not.toContain("absent");
+    const genesis = screen.getByRole("columnheader", { name: "vs no earlier anchor" });
+    const fallback = genesis.querySelector("span")!;
+    expect(fallback.textContent).toBe("no earlier anchor");
+    expect(tokens(fallback)).toContain("text-[var(--nms-muted-foreground)]");
+    for (const utility of ["m-0", "mt-1"]) {
+      expect(tokens(fallback)).toContain(utility);
+    }
+
+    // The cell around it is still an ordinary numeric header, so a fallback that
+    // escaped its `<th>` — or a `<th>` that lost the shared box on this arm alone —
+    // reds here rather than only in the anchored census above.
+    for (const utility of [
+      "px-[10px]",
+      "py-2",
+      "border-b",
+      "border-[var(--nms-border)]",
+      "text-right",
+    ]) {
+      expect(tokens(genesis)).toContain(utility);
     }
   });
 
@@ -272,38 +236,5 @@ describe("SectionTable on the shared Card", () => {
     // no such class and no em dash, which is what makes the assertions above a
     // suppression witness rather than a description of every `<tr>` this table draws.
     expect(container.querySelectorAll("tr.row-suppressed")).toHaveLength(1);
-  });
-});
-
-/**
- * THE TERMINAL ASSERTION (spec #420 Seam E, slice 9), on all five census successors and
- * the shell's.
- *
- * THE SET OF CLASS NAMES THIS SURFACE RENDERS, INTERSECTED WITH THE SET OF CLASS
- * SELECTORS LEFT IN `styles.css`, IS EMPTY. That is the mechanical proof that no house
- * rule survives WITH A CARRIER — the failure mode the nine deletion guards cannot see,
- * because each of them knows only the names its own slice took.
- *
- * IT COULD ONLY LAND HERE. Every slice but the last renders a class the file still
- * styles, on purpose: that is what a nine-slice migration through a shared stylesheet
- * looks like from the inside. The assertion is false by design for eight slices and true
- * for good afterwards.
- *
- * IT IS NOT A RESTATEMENT OF "THE FILE HAS NO RULES". `styles-css-end-state.test.ts` says
- * that about the file; this says something the file cannot know — that nothing RENDERED
- * reaches whatever is in it. A rule added back under a name no guard lists goes red here
- * the moment a component writes its class.
- *
- * AND AT THE END STATE IT CARRIES ITS OWN NEGATIVE CONTROL, because the file it reads is
- * now empty of rules and the intersection is therefore empty for free.
- * `expectNoStyledClassSurvives` re-runs the identical walk against a probe sheet built
- * from this surface's own render, so a blank render, a reader that stopped reading or an
- * intersection that never intersects reds here instead of passing green. What the claim
- * is worth is written in that helper's docblock.
- */
-describe("no rule left in styles.css reaches this surface", () => {
-  it("renders no class name the stylesheet still selects", () => {
-    const { container } = render(<SectionTable section={section()} view={anchoredView()} />);
-    expectNoStyledClassSurvives(container);
   });
 });

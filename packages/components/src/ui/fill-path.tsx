@@ -1,141 +1,211 @@
 import { createContext, useContext, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import { formatUsd } from "@numisma/engine/format";
-import { Absent } from "@numisma/components";
-import type {
-  FillPathRungView,
-  FillPathView,
-  MeasuredFigure,
-} from "../ladder/fill-path-view.ts";
-import { COMPACT_USD } from "../ladder/price-drop-path.ts";
-import { PriceDropPathChart } from "./PriceDropPathChart.tsx";
-import { Card, CARD_SURFACE, NOTICE_CODE } from "@numisma/components";
+
+import { Absent } from "./absent";
+import { Card, CARD_SURFACE } from "./card";
+import type { DcaPositionView } from "./dca-card";
+import { COMPACT_USD } from "./price-drop-path";
+import {
+  PriceDropPathChart,
+  type FillPathRungView,
+  type MeasuredFigure,
+} from "./price-drop-path-chart";
+import { NOTICE_CODE } from "./snapshot-notice";
 
 /**
- * THE FILL PATH, ON THE PHONE (spec #285 §5.6–5.13 / G-D10b, slice #289) — the declared
- * ladder rendered as a path partly walked.
+ * ── THE FILL PATH'S VIEW CONTRACT, DECLARED HERE (spec #439 §4.1, S6) ────────────────
  *
- * FOUR STACKED CARDS, in U's 320px rework's order: header figures → `Price Drop Path`
- * chart with its inspect slider → the selected-rung panel → the rung list. Stacked
- * rather than gridded because the surface is judged on a phone held in one hand; the
- * desk gets the same stack, wider.
+ * `apps/web/src/ladder/fill-path-view.ts` keeps every line of `composeFillPathPage` and
+ * imports these types back from `@numisma/components`. The consumer defines the
+ * interface, which is the standard direction and also the only one that lets a cosmos
+ * fixture build a `FillPathView` literal without importing `apps/web` — the crossing
+ * `seam-isolation.test.ts` forbids.
  *
- * IT RENDERS DECIDED FACTS AND DECIDES NOTHING. Every flag, count, coordinate and
- * absence cause below arrives from `ladder/fill-path-view.ts`, which is where a test can
- * reach them. The only state that lives here is which rung the operator is inspecting,
- * which is a UI affordance and not a fact about the fund.
- *
- * ── `~` MEANS "THIS NUMBER IS NOT A MEASUREMENT" (G-D5c, restated) ──────────────────
- * There used to be a provenance footer whose first paragraph explained, in prose, which
- * figures on this page are exact and which are not. It is gone: the distinction now
- * travels ON each figure as a leading `~`, where the reader is already looking, instead
- * of in a paragraph three cards below the number it describes.
- *
- * A `~` is owed by exactly two kinds of figure, and by nothing else:
- *
- *   1. A PROJECTION — the two `Expectation` tiles, which are what the DECLARED ladder
- *      would acquire if it were walked. Nothing was measured to produce them.
- *   2. A ROUNDED RENDERING of a figure printed exactly elsewhere — the compact price
- *      span here, and the chart's own spot label. Both round hard enough to disagree
- *      with the exact figure on the same screen, and the `~` is what makes that a
- *      rounding rather than a contradiction.
- *
- * Everything measured (`Figure`) prints bare, and so does every DECLARED total: a rung
- * size and the waiting sum over rung sizes are exact statements of what the operator
- * wrote down. They are intentions rather than measurements, but they are not estimates,
- * and tilde-ing them would spend the mark's meaning on the wrong distinction — the one
- * the `Waiting` label already carries.
- *
- * ── EVERY ABSENCE IS RENDERED AND NAMED, AND NO `$0` IS REACHABLE ───────────────────
- * The three measured figures are ABSENT on the wire until a fill is recorded (G-D8),
- * not zero, so this file has no branch that could print `$0.00` for them: it is handed a
- * `MeasuredFigure` and the `known: false` arm carries a cause string, never a number.
- * The 0% progress bar stays, because a bar at zero reads as absence — which is the
- * truth — while a zero DOLLAR figure would read as a measurement.
- *
- * ── THE CHART IS PRESENTATION, NOT THE RECORD (§6.3) ────────────────────────────────
- * The chart is `aria-hidden`. Every per-rung fact it plots is in the rung list below
- * it, and the one thing only the picture carries — the shape of the capital curve — is
- * the generated caption beside it, from `ladder/convexity-caption.ts`. There is no
- * hand-maintained chart description here and there must never be one.
- *
- * It is drawn by `@tanstack/charts` as of the charts spike; `PriceDropPathChart` holds
- * the whole of that decision, including the four things that keep a library chart out
- * of the accessibility tree. This surface is unchanged by the swap.
- *
- * The inspect slider is NOT the only path to the selected-rung panel: every rung row is
- * a `<button>` that selects on click AND on focus, so tabbing down the ladder walks the
- * inspect panel with it. That is what makes inspection keyboard- and screen-reader-
- * reachable without the chart being involved at all.
+ * NOTHING HERE DECIDES ANYTHING. Every flag, count, coordinate and absence cause below
+ * arrives already decided from the composer. What the package owns is the SHAPE, and the
+ * shape is what a fixture can be authored against.
  */
 
 /**
- * ── THE HEADER CARD'S SECTION, AS UTILITIES (spec #420 slice 7) ──────────────────────
+ * WHAT THE DECLARED LADDER WOULD ACQUIRE IF IT WERE WALKED — an INTENTION, and a
+ * separate type from `MeasuredFigure` for exactly that reason.
  *
- * `styles.css` opened the fill path with about three hundred lines covering this one
- * card: an identity row, a state chip, a spot reading, three tiles, a progress bar, the
- * waiting block, day zero's hero and TWO `@container fp-header` blocks reflowing most of
- * it at 380px. Every declaration in that section is now one of the strings below, and
- * `fill-path-header-section-deleted.test.ts` holds the other end.
+ * `MeasuredFigure` means "a figure that was measured, or the named reason it was not",
+ * and its whole job is that no projection can ever stand where a measurement belongs. An
+ * expectation is a third thing: nothing was measured and nothing failed to be measured,
+ * because there was nothing to measure yet. Giving it its own type is what stops a
+ * refactor from quietly passing these numbers to `<Figure>` and printing a projection
+ * under the label `Deployed`. The word "Expected" in the UI copy is the operator-facing
+ * half of that guarantee; this type is the half that survives the next edit.
  *
- * ── THE CONTAINER IS THE CARD, NOT THE VIEWPORT, AND KEEPS ITS ONE NAME ──────────────
- * `container: fp-header / inline-size` is a shorthand with a single name, which is
- * exactly what Tailwind's NAMED container utility emits, so `@container/fp-header` is a
- * literal translation here. The glance card's pair had to be split into a bare
- * `@container` plus an arbitrary `container-name` because the shorthand carries only
- * what it is given and that card needed two names; this one needed one.
- *
- * ── THE RAIL IS THE SHAPE, AND THREE BLOCKS SHARE IT ─────────────────────────────────
- * Spot, a tile and the waiting block are the SAME row at 320px — label left, figure hard
- * right, one line each — and all three turn into a stacked block at 380px of CARD width.
- * `RAIL` is that shared narrow form; each block adds what it alone declared. Composing
- * rather than repeating is what keeps the three from drifting apart at one edge, which is
- * what the deleted rules' shared selector lists were doing.
- *
- * ── WHERE A SHORTHAND SITS BESIDE ITS OWN LONGHAND ───────────────────────────────────
- * `m-0 mb-3` and `m-0 mt-1.5` are the preflight-off pattern every converted surface in
- * this app uses: the UA margins on `p` are live, so a rule that said `margin: 0 0 12px`
- * has to zero three edges and set one, and Tailwind sorts the shorthand ahead of the
- * longhand so the specific edge wins. Two utilities setting the SAME property would be a
- * coin toss instead — see `BADGE_TONE` below, which is a total map for that reason.
+ * BOTH NUMBERS ARE DERIVED FROM RUNGS THE OPERATOR DECLARED, and from nothing else. No
+ * order, no lot and no venue reading is involved.
  */
-const HEADER_CARD = "@container/fp-header";
-const HEADER_TITLE = "m-0 text-[1.15rem] wrap-anywhere";
-const HEADER_HEAD =
-  "block @[380px]/fp-header:flex @[380px]/fp-header:flex-wrap @[380px]/fp-header:items-baseline @[380px]/fp-header:justify-between @[380px]/fp-header:gap-x-4 @[380px]/fp-header:gap-y-0";
-const HEADER_ID =
-  "flex flex-wrap items-baseline gap-x-2 gap-y-1 min-w-0 mb-[10px] @[380px]/fp-header:flex-[1_1_180px]";
+export interface ExpectedFigures {
+  /** Σ over declared rungs of `sizeUsd / priceUsd` — units, if every rung filled. */
+  units: number;
+  /**
+   * Total declared USD ÷ expected units.
+   *
+   * THIS IS A SIZE-WEIGHTED HARMONIC MEAN OF THE RUNG PRICES, NOT THE ARITHMETIC MEAN.
+   * A DCA ladder is convex — the lower rungs commit more capital and buy more units per
+   * dollar — so averaging the prices would overstate the entry the ladder is aiming at,
+   * by more the more convex the operator made it. It is derived from the two totals here
+   * precisely so no caller is tempted to average prices instead.
+   */
+  avgEntryUsd: number;
+}
+
+/** Whether a torn act was found, cleared, or never looked for. */
+export type TornActReading =
+  | { status: "outstanding"; count: number }
+  | { status: "clear" }
+  | { status: "unchecked" };
+
+export interface ChartCircle {
+  key: string;
+  cx: number;
+  cy: number;
+  filled: boolean;
+  next: boolean;
+}
 
 /**
- * THE STATE, AS A TAG — a chip rather than bare text, because it sits beside a heading
- * and needs an edge to stop reading as part of the title.
+ * Hand-rolled SVG geometry, and a type narrower than it looks.
  *
- * `border-current` IS THE WHOLE POINT OF SPLITTING THE COLOUR OUT. The deleted rule drew
- * `1px solid currentColor`, so the chip's edge is whatever its text is, and the three
- * tones below each move both at once.
+ * The picture is drawn by `PriceDropPathChart` off `price-drop-path.ts` (ADR-018), and
+ * the only field with a live consumer is `nowX`, read as a message chain to answer "is
+ * spot live". Finishing that demolition — and promoting `spotIsLive` to a named boolean
+ * so the chain goes away — is **slice 3 of spec #285**, which owns this code.
  */
-const BADGE =
-  "flex-none rounded-[999px] border border-current px-[7px] py-[2px] text-[0.65rem] font-semibold uppercase leading-[1.4] tracking-[0.05em]";
+export interface ChartGeometry {
+  width: number;
+  height: number;
+  /** `"x,y x,y …"`, ready for a `<polyline points>`. */
+  points: string;
+  circles: readonly ChartCircle[];
+  /** x of the "now" line. Absent unless spot is LIVE — a last close is not now. */
+  nowX?: number;
+}
 
 /**
- * ONE COLOUR REACHES THE CHIP, AND WHICH ONE IS A FACT ABOUT THIS MAP.
- *
- * The deleted rules were a base that painted `--muted` and two overrides that repainted
- * it. As utilities that is a cascade this string cannot express: two unvariant `color`
- * utilities on one element are resolved by Tailwind's EMITTED order, not by the order
- * they are written in. A total map has no override to lose. `DcaCard`'s state word made
- * the same move for the same reason, and the semantics are deliberately identical —
- * `pending` is NOT an alarm colour, because a declared ladder awaiting its first fill is
- * the normal starting state; `unreadable` is the only one that wants the eye.
+ * WHICH OF THREE THINGS IS TRUE about the waiting capital, decided by the composer
+ * rather than in JSX. `nothing-waiting` is a fully walked ladder; `all-resting` is every
+ * waiting dollar encumbered at the venue; `partly-unplaced` is the split that makes
+ * hidden encumbrance visible. Two arms cannot say this: an `else` on `neverPlacedUsd > 0`
+ * prints "all of it is resting at the venue" for a ladder with nothing resting at all.
  */
-const BADGE_TONE: Record<FillPathView["state"], string> = {
-  pending: "text-[var(--muted)]",
-  active: "text-[var(--pos)]",
-  ended: "text-[var(--muted)]",
-  unreadable: "text-[var(--warn)]",
-};
+export type WaitingSplit =
+  | "nothing-waiting"
+  | "all-resting"
+  | "partly-unplaced";
 
-/** The narrow row every data block on this card is: label left, figure hard right. */
+export interface FillPathFigures {
+  waitingDeclaredUsd: number;
+  waitingRestingUsd: number;
+  /**
+   * Declared but NEVER PLACED — the whole of what the two waiting totals disagree
+   * about. See `fill-path-view.ts`'s header for why it is not an unfilled-vs-open split.
+   */
+  neverPlacedUsd: number;
+  split: WaitingSplit;
+}
+
+/** The whole page, decided. */
+export interface FillPathView {
+  planId: string;
+  positionId: string;
+  /** What the header calls this ladder. NEVER the plan id — a UUID is a join key. */
+  title: string;
+  /**
+   * `DcaPositionRow["state"]`, READ BY NAME FROM THE ONE PLACE THIS PACKAGE SPELLS IT
+   * (spec #439 §4.1). `dca-card.tsx` wrote the union out when `DcaPositionView` crossed;
+   * a second copy here would be two spellings of one fact, drifting silently in exactly
+   * the direction the type direction was chosen to close. `composeFillPathPage` assigning
+   * `row.state` into this field is the compile-time pin that catches a fifth state, and
+   * it only works against ONE name.
+   */
+  state: DcaPositionView["state"];
+  /** Whether a reconciliation ran for this row at all — absence rule 2. */
+  reconciled: boolean;
+  deployed: MeasuredFigure;
+  unitsAcquired: MeasuredFigure;
+  avgEntry: MeasuredFigure;
+  /**
+   * DAY ZERO — a reconciliation RAN and found nothing filled. See `hasNotStarted`.
+   *
+   * This is NOT the same question as "are the three measured figures absent", even
+   * though today the answer coincides: `figures` absent (absence rule 2) also leaves
+   * all three absent, and that ladder has NOT been established as unstarted — it was
+   * never checked. `false` here therefore covers both "something has filled" and "we
+   * could not tell", which are different facts and stay different downstream.
+   */
+  notStarted: boolean;
+  /**
+   * The declared ladder's own projection — present ONLY on a `notStarted` ladder that
+   * declares enough to project from (see `expectedFigures`). Absent everywhere else,
+   * including on any ladder that has started: once a real fill exists, the measured
+   * figures are the answer and an expectation beside them would compete with it.
+   */
+  expected?: ExpectedFigures;
+  /**
+   * ABSENT WHEN NO RECONCILIATION RAN — absence rule 2, held all the way to the render.
+   * These two totals are present at zero (zero waiting capital is a real answer) but
+   * only when there was something to measure them from; reading an absent `figures` as
+   * `0` would print a capital figure and an all-clear off a row that could not check.
+   */
+  figures?: FillPathFigures;
+  rungs: readonly FillPathRungView[];
+  /**
+   * Recorded lots no declared rung explains. Absent-at-zero ON THE WIRE (rule 5) — but
+   * absent HERE means the same thing `figures` absent means, because rule 5's
+   * unambiguity comes entirely from `figures` sitting beside it saying a reconciliation
+   * ran. Without that neighbour, `0` would state "none unexplained" from an absence.
+   */
+  orphanLots?: number;
+  tornActs: TornActReading;
+  /** The two unrecorded-fill warnings, counted APART: their certainties differ. */
+  warnings: { filledNotRecorded: number; pricePassedNoFill: number };
+  /** How far down the ladder the walk has got. Present whenever a reconciliation ran. */
+  progress?: { filledRungs: number; totalRungs: number; percent: number };
+  chart?: ChartGeometry;
+  /** The chart's accessible substitute. Absent when the ladder carries no shape. */
+  caption?: string;
+  /** The price the page is decorated with — live, or the last close it fell back to. */
+  spotUsd?: number;
+  /** True when the fetch failed. Every spot-independent fact still renders. */
+  spotUnavailable: boolean;
+  spotLoading: boolean;
+  /**
+   * THE BOUNDARY OF WHAT THIS ROW COULD HAVE KNOWN — the anchor's own `asOf`, passed
+   * through verbatim. Not a clock, not a wire date (the `dca` branch carries none, and
+   * three invariants depend on it staying that way), not a fill timestamp.
+   */
+  recordedThrough: string;
+}
+
+/**
+ * ── THE SHARED CLASS-STRING CHAIN (spec #439 §4.1, S6) ───────────────────────────────
+ *
+ * Nine strings, and they travel together because the code composes them into one
+ * another. `Figure` and `Expectation` below read `TILE`, `STACKED_LABEL`, `TILE_VALUE`,
+ * `TILE_ABSENT` and `EXPECTED_VALUE`; `STACKED_LABEL` composes down through `SPOT_LABEL`,
+ * `RAIL_LABEL` and `TILE_LABEL` to `RAIL`. Splitting the chain at any link would fork a
+ * string, which is the one thing the composition exists to prevent.
+ *
+ * EVERY LINK NOW HAS A CONSUMER IN THIS FILE. S6 left three of them reaching back into
+ * `apps/web` by subpath: `SPOT_LABEL` for `SpotReadout`, `TILE_VALUE` for `Waiting`'s
+ * figure, `TILE_LABEL` for `ExpectedRow`'s hero label. Spec #439's S7 brought all three
+ * of those components across, so the only name still crossing the boundary is
+ * `TILE_LABEL`, read a second time by `Chart`'s inspect-slider label until S8.
+ *
+ * THE CONTAINER NAME IS `fp-header`, AND THE HEADER CARD DECLARES IT — `HEADER_CARD`,
+ * below, which arrived with S7. Every `@[380px]/fp-header:` variant in this file is a
+ * read of that container; the tiles reflow with the header card and with nothing else.
+ */
+
+/** The narrow row every data block on the header card is: label left, figure hard right. */
 const RAIL = "flex flex-wrap items-baseline justify-end gap-x-[10px] gap-y-0 m-0 min-w-0";
 
 /**
@@ -143,9 +213,15 @@ const RAIL = "flex flex-wrap items-baseline justify-end gap-x-[10px] gap-y-0 m-0
  * what makes "Expected average entry" wrap to two lines instead of shoving its figure
  * onto a line of its own: the label is prose and survives a break, the number is the
  * thing being aligned and must not leave the rail.
+ *
+ * ONE COLOUR READ, REACHED BY FOUR NAMES. `RAIL_LABEL`, `SPOT_LABEL` and
+ * `STACKED_LABEL` all compose from this string, so the tile label's grey is written
+ * once here and nowhere else. `--nms-muted-foreground` is `apps/web`'s `--muted`, its
+ * secondary TEXT grey — never `--nms-muted`, which is a recessed SURFACE and would
+ * compile, emit a rule and paint this label wrong.
  */
 const TILE_LABEL =
-  "text-[0.7rem] font-semibold uppercase tracking-[0.04em] text-[var(--muted)]";
+  "text-[0.7rem] font-semibold uppercase tracking-[0.04em] text-[var(--nms-muted-foreground)]";
 const RAIL_LABEL = `${TILE_LABEL} flex-[1_1_0] min-w-0`;
 /** Spot keeps its right alignment when the card reflows; the tiles turn left. */
 const SPOT_LABEL = `${RAIL_LABEL} @[380px]/fp-header:flex-none`;
@@ -165,93 +241,20 @@ const TILE_ABSENT =
   "flex-wrap justify-end text-right @[380px]/fp-header:justify-start @[380px]/fp-header:text-left";
 
 /**
- * SPOT IS CONTEXT, NOT THE ANSWER. It reads in `--muted` like every other reference
- * figure on the card, which leaves Waiting as the one accented number.
- *
- * At 380px it becomes the corner figure again — label over value, right-aligned, no rule
- * under it — which is why the border and the padding both have an arm that removes them.
- */
-const SPOT =
-  `${RAIL} mb-3 pb-[10px] border-b border-b-[var(--line)]` +
-  " @[380px]/fp-header:flex-col @[380px]/fp-header:items-end @[380px]/fp-header:gap-x-0" +
-  " @[380px]/fp-header:gap-y-px @[380px]/fp-header:pb-0 @[380px]/fp-header:border-b-0" +
-  " @[380px]/fp-header:text-right";
-const SPOT_VALUE = "flex-none text-right text-[1.05rem] tabular-nums text-[var(--muted)]";
-const SPOT_NOTE = "m-0 mt-1 text-[0.7rem] text-[var(--muted)]";
-/** Spot's own reflow already right-aligns the block, so this one has no wide arm. */
-const SPOT_ABSENT = "flex-wrap justify-end text-right";
-
-/**
- * One column of rows at 320px; a real grid of tiles once the CARD is wide enough.
- *
- * `grid-cols-1` IS NOT LITERALLY THE DELETED `grid-template-columns: 1fr`, and here it
- * cannot differ. `1fr` is `minmax(auto, 1fr)`, whose automatic minimum is the item's
- * min-content contribution; `grid-cols-1` emits `repeat(1, minmax(0, 1fr))`, which has no
- * such floor. The two part company only when a tile's min-content exceeds the card
- * interior — measured in Chrome at 320px, with `min-width: auto` forced onto a tile and a
- * 363px unbreakable token in it: `1fr` grows the track to 363.008px, `minmax(0,1fr)`
- * holds 254px.
- *
- * Every tile carries `min-w-0`, which is `TILE`'s reproduction of the `min-width: 0` the
- * deleted `.fp-spot, .fp-tile` rule declared. That zeroes the automatic minimum, so the
- * `auto` half of `minmax(auto, 1fr)` was already 0 on the pre-slice tree. The
- * substitution is inert by construction, not merely unobserved: measured at 254px of card
- * interior the real tiles' widest min-content is 97.82px, and both track definitions
- * resolve to the same 254px track.
- */
-const TILES =
-  "grid grid-cols-1 gap-2" +
-  " @[380px]/fp-header:grid-cols-[repeat(auto-fit,minmax(130px,1fr))] @[380px]/fp-header:gap-3";
-
-/**
- * A BAR AT ZERO READS AS ABSENCE, which is the truth on day zero — so the track is always
- * drawn and the fill is allowed to be 0 wide. The fill's WIDTH stays an inline style: it
- * is a measurement, not a design decision, and there is no utility for "whatever fraction
- * this ladder happens to be at".
- */
-const PROGRESS = "m-0 mb-[14px]";
-const PROGRESS_TRACK = "h-1.5 overflow-hidden rounded-[3px] bg-[var(--line)]";
-const PROGRESS_FILL = "h-full bg-[var(--pos)]";
-const PROGRESS_NOTE = "m-0 mt-1.5 text-[0.78rem] text-[var(--muted)]";
-
-/**
- * The measured-layout waiting block takes the SAME row shape as the tiles above it, with
- * its sentence breaking to a full-width line under both. `flex-[1_0_100%]` is what forces
- * that break, so the sentence never tries to share the rail with the number it explains.
- */
-const WAITING =
-  "flex flex-wrap items-baseline justify-end gap-x-[10px] border-t border-t-[var(--line)] pt-3" +
-  " @[380px]/fp-header:flex-col @[380px]/fp-header:items-stretch" +
-  " @[380px]/fp-header:justify-start @[380px]/fp-header:gap-y-[2px]";
-const WAITING_SUB =
-  "flex-[1_0_100%] m-0 mt-1 text-[0.78rem] text-pretty text-[var(--muted)]";
-
-/**
- * DAY ZERO'S BLOCK — a headline figure and two quiet projections under it.
- *
- * THE HERO STEPS OUT OF THE RAIL, label above rather than beside: the rail is for the
- * reference rows and leaving it is half of what makes this figure read first. The other
- * half is size — `--muted` alone lost to the projections, whose strings are simply
- * longer, so the projections step DOWN in size as well as being muted.
- */
-const EXPECTED = "mb-[14px]";
-const HERO = "flex flex-col gap-px mb-3";
-const HERO_VALUE =
-  "text-[1.75rem] font-bold leading-[1.15] tracking-[-0.01em] tabular-nums";
-/**
- * A PROJECTION READS QUIETER THAN A MEASUREMENT, in two ways at once. `--muted` is the
- * colour every other unmeasured thing on this page already uses, and 0.95rem is the step
- * down `.fp-tiles-quiet .fp-tile-value` used to make. That rule was a CONTEXT — a
- * descendant selector on the wrapper — and it collapses into this one string because
- * `Expectation` is the only thing that ever rendered inside that wrapper. Both sizes are
- * spelled once, never as a base plus an override: `TILE_VALUE`'s 1.05rem and this
- * 0.95rem are unvariant `font-size` utilities and would race each other on one element.
+ * A PROJECTION READS QUIETER THAN A MEASUREMENT, in two ways at once. The grey is the
+ * one every other unmeasured thing on this page already uses, and 0.95rem is the step
+ * down the deleted `.fp-tiles-quiet .fp-tile-value` rule used to make. That rule was a
+ * CONTEXT — a descendant selector on the wrapper — and it collapses into this one string
+ * because `Expectation` is the only thing that ever rendered inside that wrapper. Both
+ * sizes are spelled once, never as a base plus an override: `TILE_VALUE`'s 1.05rem and
+ * this 0.95rem are unvariant `font-size` utilities and would race each other on one
+ * element.
  */
 const EXPECTED_VALUE =
-  "flex-none text-right text-[0.95rem] tabular-nums text-[var(--muted)] @[380px]/fp-header:text-left";
+  "flex-none text-right text-[0.95rem] tabular-nums text-[var(--nms-muted-foreground)] @[380px]/fp-header:text-left";
 
 /** One measured tile: the figure, or the named reason there is none. Never a `$0`. */
-function Figure({
+export function Figure({
   label,
   figure,
   render = formatUsd,
@@ -280,9 +283,11 @@ function Figure({
  *
  * THE `~` IS PRINTED HERE AND NOT PASSED IN, so it cannot be forgotten at a call site.
  * This is the component that renders projections, so every projection wears the mark by
- * construction — see this file's header for what the mark claims.
+ * construction: a `~` claims the number is not a measurement, and the two kinds of figure
+ * that owe one are a projection and a rounded rendering of a figure printed exactly
+ * elsewhere.
  */
-function Expectation({
+export function Expectation({
   label,
   value,
   render = formatUsd,
@@ -300,7 +305,7 @@ function Expectation({
 }
 
 /** Units render to 8 places at most — a satoshi is the smallest thing there is. */
-function formatUnits(value: number): string {
+export function formatUnits(value: number): string {
   return `${value.toFixed(8).replace(/0+$/, "").replace(/\.$/, "")} BTC`;
 }
 
@@ -315,7 +320,7 @@ function formatUnits(value: number): string {
  * chart is a `<input type="range">` and a range is an INDEX — that is not a modelling
  * choice, it is what the element is. The rung list is a list of keyed rungs. Selection
  * therefore has two natural spellings and something has to reconcile them; before this
- * slice it was `FillPathCards`' JSX, translating index to key on the way down and key to
+ * seam it was `FillPathCards`' JSX, translating index to key on the way down and key to
  * index on the way back, which is why the two cards took two different prop pairs. Now
  * exactly one module converts, both directions are next to each other, and each part asks
  * in the only terms it has.
@@ -335,8 +340,22 @@ type FillPathSelection = {
 
 const SelectionContext = createContext<FillPathSelection | undefined>(undefined);
 
-/** The context, or a loud failure. Read by the parts; never exported. */
-function useFillPath(): FillPathSelection {
+/**
+ * The context, or a loud failure.
+ *
+ * EXPORTED, AND SPEC #439 S6 IS WHY. This used to say "read by the parts; never
+ * exported", which was true while the parts sat in the same file. They no longer do:
+ * `Header`, `Chart`, `SelectedRung` and `RungList` are still in `apps/web` and read this
+ * provider across the package boundary until S7 to S9 bring them over. It is lowercase,
+ * so `fixture-coverage.test.ts` demands no fixture for it, and it goes on the curated
+ * index rather than crossing by subpath because that is the specifier the ladder route's
+ * runtime closure already allows.
+ *
+ * WHAT THAT COSTS, SO S9 DOES NOT HAVE TO DISCOVER IT: once the last part lands here,
+ * this is published surface with no caller outside the package. Wave 3 decides whether to
+ * withdraw it; wave 2 does not.
+ */
+export function useFillPath(): FillPathSelection {
   const selection = useContext(SelectionContext);
   if (selection === undefined) {
     // A part mounted outside the provider would otherwise render an empty card and look
@@ -349,7 +368,7 @@ function useFillPath(): FillPathSelection {
 /**
  * THE ONE PIECE OF STATE ON THIS PAGE: which rung the operator is inspecting. It is a UI
  * affordance and not a fact about the fund, which is why it lives here and every other
- * value on the page arrives already decided from `ladder/fill-path-view.ts`.
+ * value on the page arrives already decided from `apps/web/src/ladder/fill-path-view.ts`.
  *
  * STATE AND DERIVATION, AND NO EFFECT. The default — the rung price will reach next,
  * falling back to the top of the ladder when there is no live spot — is derived on every
@@ -397,19 +416,19 @@ export function FillPathProvider({
  * parent to convert between them.
  *
  * ── ITS ONLY CONSUMER TODAY IS ITS TEST, AND THAT IS THE CHOICE, NOT AN OVERSIGHT ────
- * The four parts below read `useFillPath` instead. Not because this shape is wrong for
- * them, but because it is deliberately NARROWER than any of them needs: every part also
- * reads `view` — the card that is the page's title, the panel that counts rungs, the list
- * that renders them — and `Chart` needs `selectIndex` as well. A part consuming this hook
- * would call the internal one beside it for the rest, which is two reads of one context
- * to satisfy a signature.
+ * The four parts read `useFillPath` instead. Not because this shape is wrong for them,
+ * but because it is deliberately NARROWER than any of them needs: every part also reads
+ * `view` — the card that is the page's title, the panel that counts rungs, the list that
+ * renders them — and `Chart` needs `selectIndex` as well. A part consuming this hook
+ * would call the wider one beside it for the rest, which is two reads of one context to
+ * satisfy a signature.
  *
  * The alternative was to delete it and let Seam E be `useFillPath` until the workbench
  * needs the narrow shape. It stays because the shape is the seam's stated contract: what
  * a component outside this module is allowed to know about the selection is these three
- * fields and NOT `view`, which is exactly the boundary the workbench's fixtures will
- * mount against. Publishing the narrow surface is what keeps `view` from leaking into the
- * next consumer's props by default.
+ * fields and NOT `view`, which is exactly the boundary the workbench's fixture mounts
+ * against. Publishing the narrow surface is what keeps `view` from leaking into the next
+ * consumer's props by default.
  *
  * What that costs — a published surface with no in-tree caller — is paid off in
  * `fill-path-selection.test.tsx`, which exercises it as a consumer would: the exact three
@@ -425,59 +444,158 @@ export function useFillPathSelection(): {
 }
 
 /**
- * THE PARTS, ATTACHED AS PLAIN PROPERTIES AND NAMED-EXPORTED (grill D4, the same shape
- * `Card` uses). `FillPath.RungList` is the call-site vocabulary; the named exports are
- * what a per-part test mounts on its own, which is how each card's half of the
- * accessibility contract is asserted without its three siblings standing in for it.
+ * ── THE HEADER CARD'S SECTION, AS UTILITIES (spec #420 slice 7, moved by #439 S7) ────
  *
- * There is no `FillPath` component: the fill path is a composition, and the composition
- * with the house arrangement already has a name — `FillPathCards`, below.
+ * `styles.css` opened the fill path with about three hundred lines covering this one
+ * card: an identity row, a state chip, a spot reading, three tiles, a progress bar, the
+ * waiting block, day zero's hero and TWO `@container fp-header` blocks reflowing most of
+ * it at 380px. Every declaration in that section is one of the strings below, and
+ * `fill-path-header-section-deleted.test.ts` holds the other end.
+ *
+ * ── THE CONTAINER IS THE CARD, NOT THE VIEWPORT, AND KEEPS ITS ONE NAME ──────────────
+ * `container: fp-header / inline-size` is a shorthand with a single name, which is
+ * exactly what Tailwind's NAMED container utility emits, so `@container/fp-header` is a
+ * literal translation here. The glance card's pair had to be split into a bare
+ * `@container` plus an arbitrary `container-name` because the shorthand carries only
+ * what it is given and that card needed two names; this one needed one.
+ *
+ * ── THE RAIL IS THE SHAPE, AND THREE BLOCKS SHARE IT ─────────────────────────────────
+ * Spot, a tile and the waiting block are the SAME row at 320px — label left, figure hard
+ * right, one line each — and all three turn into a stacked block at 380px of CARD width.
+ * `RAIL` is that shared narrow form; each block adds what it alone declared. Composing
+ * rather than repeating is what keeps the three from drifting apart at one edge, which is
+ * what the deleted rules' shared selector lists were doing.
+ *
+ * ── WHERE A SHORTHAND SITS BESIDE ITS OWN LONGHAND ───────────────────────────────────
+ * `m-0 mb-3` and `m-0 mt-1.5` are the preflight-off pattern every converted surface in
+ * this app uses: the UA margins on `p` are live, so a rule that said `margin: 0 0 12px`
+ * has to zero three edges and set one, and Tailwind sorts the shorthand ahead of the
+ * longhand so the specific edge wins. Two utilities setting the SAME property would be a
+ * coin toss instead — see `BADGE_TONE` below, which is a total map for that reason.
  */
-export const FillPath = {
-  Header,
-  Chart,
-  SelectedRung,
-  RungList,
-} as const;
+const HEADER_CARD = "@container/fp-header";
+const HEADER_TITLE = "m-0 text-[1.15rem] wrap-anywhere";
+const HEADER_HEAD =
+  "block @[380px]/fp-header:flex @[380px]/fp-header:flex-wrap @[380px]/fp-header:items-baseline @[380px]/fp-header:justify-between @[380px]/fp-header:gap-x-4 @[380px]/fp-header:gap-y-0";
+const HEADER_ID =
+  "flex flex-wrap items-baseline gap-x-2 gap-y-1 min-w-0 mb-[10px] @[380px]/fp-header:flex-[1_1_180px]";
 
 /**
- * THE HOUSE ARRANGEMENT, and the only thing the ladder route mounts. Its name and its
- * single `view` prop are unchanged across this conversion, which is what keeps
- * `routes/ladder.$planId.tsx` out of the diff (grill D2).
+ * THE STATE, AS A TAG — a chip rather than bare text, because it sits beside a heading
+ * and needs an edge to stop reading as part of the title.
  *
- * SIX CHILDREN, FOUR OF THEM PARTS. The torn-act banner and the unrecorded warnings are
- * not cards and coordinate nothing — they read the view and render or return null — so
- * they stay internal to this composition rather than being published as parts nobody
- * would arrange differently.
+ * `border-current` IS THE WHOLE POINT OF SPLITTING THE COLOUR OUT. The deleted rule drew
+ * `1px solid currentColor`, so the chip's edge is whatever its text is, and the four
+ * tones below each move both at once.
  */
-export function FillPathCards({ view }: { view: FillPathView }): ReactElement {
-  return (
-    <FillPathProvider view={view}>
-      <TornActBanner view={view} />
-      <FillPath.Header />
-      <UnrecordedWarnings view={view} />
-      <FillPath.Chart />
-      <FillPath.SelectedRung />
-      <FillPath.RungList />
-    </FillPathProvider>
-  );
-}
+const BADGE =
+  "flex-none rounded-[999px] border border-current px-[7px] py-[2px] text-[0.65rem] font-semibold uppercase leading-[1.4] tracking-[0.05em]";
 
 /**
- * ABOVE EVERYTHING, AND RED (G-D7/G-D12). The copy states the literal truth rather than
- * a severity: `record-fill` REFUSES to record anything while a torn act is outstanding,
- * so the operator is not being warned, they are being told why the next thing they try
- * will not work.
+ * ONE COLOUR REACHES THE CHIP, AND WHICH ONE IS A FACT ABOUT THIS MAP.
  *
- * ABSENCE IS NOT THE ALL-CLEAR (absence rule 3). A row that could not check says so, in
- * a quiet line — silence there would claim a check that never ran.
+ * The deleted rules were a base that painted `--muted` and two overrides that repainted
+ * it. As utilities that is a cascade this string cannot express: two unvariant `color`
+ * utilities on one element are resolved by Tailwind's EMITTED order, not by the order
+ * they are written in. A total map has no override to lose. `DcaCard`'s state word made
+ * the same move for the same reason, and the semantics are deliberately identical —
+ * `pending` is NOT an alarm colour, because a declared ladder awaiting its first fill is
+ * the normal starting state; `unreadable` is the only one that wants the eye.
+ *
+ * `--nms-muted-foreground` IS THE SECONDARY TEXT GREY, never `--nms-muted`, which is a
+ * recessed SURFACE and would compile, emit a rule and paint two of these arms wrong.
+ * `tokens.ts`'s header holds that argument; no guard in the repo can catch the wrong
+ * name inside the right namespace.
  */
+const BADGE_TONE: Record<FillPathView["state"], string> = {
+  pending: "text-[var(--nms-muted-foreground)]",
+  active: "text-[var(--nms-pos)]",
+  ended: "text-[var(--nms-muted-foreground)]",
+  unreadable: "text-[var(--nms-warn)]",
+};
+
 /**
- * THE ONE CARD-SURFACED ELEMENT THAT SPELLS THE SURFACE ITSELF (spec #420 slice 8).
+ * SPOT IS CONTEXT, NOT THE ANSWER. It reads in the muted foreground like every other
+ * reference figure on the card, which leaves Waiting as the one accented number.
+ *
+ * At 380px it becomes the corner figure again — label over value, right-aligned, no rule
+ * under it — which is why the border and the padding both have an arm that removes them.
+ */
+const SPOT =
+  `${RAIL} mb-3 pb-[10px] border-b border-b-[var(--nms-border)]` +
+  " @[380px]/fp-header:flex-col @[380px]/fp-header:items-end @[380px]/fp-header:gap-x-0" +
+  " @[380px]/fp-header:gap-y-px @[380px]/fp-header:pb-0 @[380px]/fp-header:border-b-0" +
+  " @[380px]/fp-header:text-right";
+const SPOT_VALUE =
+  "flex-none text-right text-[1.05rem] tabular-nums text-[var(--nms-muted-foreground)]";
+const SPOT_NOTE = "m-0 mt-1 text-[0.7rem] text-[var(--nms-muted-foreground)]";
+/** Spot's own reflow already right-aligns the block, so this one has no wide arm. */
+const SPOT_ABSENT = "flex-wrap justify-end text-right";
+
+/**
+ * One column of rows at 320px; a real grid of tiles once the CARD is wide enough.
+ *
+ * `grid-cols-1` IS NOT LITERALLY THE DELETED `grid-template-columns: 1fr`, and here it
+ * cannot differ. `1fr` is `minmax(auto, 1fr)`, whose automatic minimum is the item's
+ * min-content contribution; `grid-cols-1` emits `repeat(1, minmax(0, 1fr))`, which has no
+ * such floor. The two part company only when a tile's min-content exceeds the card
+ * interior — measured in Chrome at 320px, with `min-width: auto` forced onto a tile and a
+ * 363px unbreakable token in it: `1fr` grows the track to 363.008px, `minmax(0,1fr)`
+ * holds 254px.
+ *
+ * Every tile carries `min-w-0`, which is `TILE`'s reproduction of the `min-width: 0` the
+ * deleted `.fp-spot, .fp-tile` rule declared. That zeroes the automatic minimum, so the
+ * `auto` half of `minmax(auto, 1fr)` was already 0 on the pre-slice tree. The
+ * substitution is inert by construction, not merely unobserved: measured at 254px of card
+ * interior the real tiles' widest min-content is 97.82px, and both track definitions
+ * resolve to the same 254px track.
+ */
+const TILES =
+  "grid grid-cols-1 gap-2" +
+  " @[380px]/fp-header:grid-cols-[repeat(auto-fit,minmax(130px,1fr))] @[380px]/fp-header:gap-3";
+
+/**
+ * A BAR AT ZERO READS AS ABSENCE, which is the truth on day zero — so the track is always
+ * drawn and the fill is allowed to be 0 wide. The fill's WIDTH stays an inline style: it
+ * is a measurement, not a design decision, and there is no utility for "whatever fraction
+ * this ladder happens to be at".
+ */
+const PROGRESS = "m-0 mb-[14px]";
+const PROGRESS_TRACK = "h-1.5 overflow-hidden rounded-[3px] bg-[var(--nms-border)]";
+const PROGRESS_FILL = "h-full bg-[var(--nms-pos)]";
+const PROGRESS_NOTE = "m-0 mt-1.5 text-[0.78rem] text-[var(--nms-muted-foreground)]";
+
+/**
+ * The measured-layout waiting block takes the SAME row shape as the tiles above it, with
+ * its sentence breaking to a full-width line under both. `flex-[1_0_100%]` is what forces
+ * that break, so the sentence never tries to share the rail with the number it explains.
+ */
+const WAITING =
+  "flex flex-wrap items-baseline justify-end gap-x-[10px] border-t border-t-[var(--nms-border)] pt-3" +
+  " @[380px]/fp-header:flex-col @[380px]/fp-header:items-stretch" +
+  " @[380px]/fp-header:justify-start @[380px]/fp-header:gap-y-[2px]";
+const WAITING_SUB =
+  "flex-[1_0_100%] m-0 mt-1 text-[0.78rem] text-pretty text-[var(--nms-muted-foreground)]";
+
+/**
+ * DAY ZERO'S BLOCK — a headline figure and two quiet projections under it.
+ *
+ * THE HERO STEPS OUT OF THE RAIL, label above rather than beside: the rail is for the
+ * reference rows and leaving it is half of what makes this figure read first. The other
+ * half is size — the muted grey alone lost to the projections, whose strings are simply
+ * longer, so the projections step DOWN in size as well as being muted.
+ */
+const EXPECTED = "mb-[14px]";
+const HERO = "flex flex-col gap-px mb-3";
+const HERO_VALUE =
+  "text-[1.75rem] font-bold leading-[1.15] tracking-[-0.01em] tabular-nums";
+
+/**
+ * ── THE ONE CARD-SURFACED ELEMENT THAT SPELLS THE SURFACE ITSELF (spec #420 slice 8) ──
  *
  * Everything else that is painted like a card imports `CARD_SURFACE` and adds to it. This
- * banner cannot, because the deleted rule repainted the border: the shared string carries
- * `border-[var(--line)]` and the banner's edge is `--neg`, and two unvariant
+ * banner cannot, because the deleted rule repainted the border: the shared string draws
+ * the ordinary hairline and this banner's edge is the alarm red, and two unvariant
  * `border-color` utilities on one element are resolved by Tailwind's EMITTED order rather
  * than by the order they are written in. That is the same cascade `BADGE_TONE` is a total
  * map to avoid, one property along. Written out once, with the border it actually wants.
@@ -488,47 +606,37 @@ export function FillPathCards({ view }: { view: FillPathView }): ReactElement {
  * The other three carriers of that rule import the same constant.
  */
 const TORN =
-  "rounded-xl border border-[var(--neg)] bg-[var(--card)] p-4 text-[var(--neg)]";
+  "rounded-xl border border-[var(--nms-neg)] bg-[var(--nms-card)] p-4 text-[var(--nms-neg)]";
 /**
- * THE SENTENCE STEPS BACK TO `--text`. It is prose inside a block painted in the alarm
- * colour, and reading it in that colour too makes the whole card shout instead of the one
- * line that is the alarm.
+ * THE SENTENCE STEPS BACK TO THE ORDINARY FOREGROUND. It is prose inside a block painted
+ * in the alarm colour, and reading it in that colour too makes the whole card shout
+ * instead of the one line that is the alarm.
  */
-const TORN_BODY = "m-0 mt-1.5 text-[0.85rem] text-[var(--text)]";
+const TORN_BODY = "m-0 mt-1.5 text-[0.85rem] text-[var(--nms-foreground)]";
 /**
  * `margin: 0`, ALL FOUR EDGES. The deleted rule zeroed the margin outright and, being
  * unlayered, beat the `mt-1` this paragraph carried from slice 2's shared-vocabulary
  * conversion. Reproducing the rule means dropping that `mt-1`; keeping it would open a
  * 4px gap nothing has ever rendered.
  */
-const UNCHECKED = "m-0 text-[0.8rem] text-[var(--muted)]";
+const UNCHECKED = "m-0 text-[0.8rem] text-[var(--nms-muted-foreground)]";
 
-function TornActBanner({ view }: { view: FillPathView }) {
-  if (view.tornActs.status === "outstanding") {
-    return (
-      <div className={TORN} role="alert">
-        <strong>
-          {view.tornActs.count} torn fill{" "}
-          {view.tornActs.count === 1 ? "act" : "acts"} outstanding
-        </strong>
-        <p className={TORN_BODY}>
-          Recording is blocked until this is repaired —{" "}
-          <code className={NOTICE_CODE}>pnpm orders:fill</code>{" "}
-          will refuse while a half-written act is open. Repair it at the desk.
-        </p>
-      </div>
-    );
-  }
-  if (view.tornActs.status === "unchecked") {
-    return (
-      <p className={UNCHECKED}>
-        Torn fill acts were not checked for this snapshot — this is NOT "none
-        outstanding".
-      </p>
-    );
-  }
-  return null;
-}
+/**
+ * TWO CERTAINTIES, ONE SURFACE, AND ONE EDGE BETWEEN THEM.
+ *
+ * Both paragraphs are card-surfaced, so `CARD_SURFACE` rides along and only the left
+ * border differs. Every declaration that differs is a LONGHAND on purpose: `border-l-4`
+ * beats the shared string's shorthand width and `border-l-[…]` beats its shorthand
+ * colour, which is the one ordering Tailwind does guarantee.
+ *
+ * THE DASH IS ONE EDGE, NOT FOUR. `border-dashed` sets `border-style` on every side and
+ * would dash the card's other three; the arbitrary property puts it on the left alone.
+ * The difference between a venue fact and a guess is the whole reason these two look
+ * different, and it must not spill onto the surface they share.
+ */
+const WARN = `${CARD_SURFACE} m-0 text-[0.85rem] leading-[1.45]`;
+const WARN_CERTAIN = `${WARN} border-l-4 border-l-[var(--nms-neg)]`;
+const WARN_INFERRED = `${WARN} border-l-4 border-l-[var(--nms-warn)] [border-left-style:dashed] text-[var(--nms-muted-foreground)]`;
 
 /**
  * Card 1 — the figures and the progress bar.
@@ -540,14 +648,14 @@ function TornActBanner({ view }: { view: FillPathView }) {
  * spent saying one thing, so the card projects instead: Waiting (already the honest
  * substitute for Deployed on day zero) beside what the DECLARED ladder would acquire.
  *
- * THE SWITCH IS `view.expected`, decided in `ladder/fill-path-view.ts`, and this file
- * asks rather than re-derives. It is emphatically NOT "are the measured figures absent":
- * a ladder whose orders sidecar could not be read has all three absent too, and it gets
- * the ORIGINAL layout, because nothing about it has been established — least of all that
- * it has not started. Projecting onto that row would print a confident number beside the
- * sentence saying nothing could be checked.
+ * THE SWITCH IS `view.expected`, decided in `apps/web/src/ladder/fill-path-view.ts`, and
+ * this file asks rather than re-derives. It is emphatically NOT "are the measured figures
+ * absent": a ladder whose orders sidecar could not be read has all three absent too, and
+ * it gets the ORIGINAL layout, because nothing about it has been established — least of
+ * all that it has not started. Projecting onto that row would print a confident number
+ * beside the sentence saying nothing could be checked.
  */
-function Header() {
+export function Header(): ReactElement {
   const { view } = useFillPath();
   // `expected` is only ever set on a reconciled row, so `figures` is present with it;
   // pairing them here is what lets the row below take both non-optional.
@@ -639,7 +747,7 @@ function Header() {
  * NO `~` ON EITHER. A spot reading is a price the venue printed, exact to the cent as
  * received; the chart's rounded copy of it wears the tilde instead.
  */
-function SpotReadout({ view }: { view: FillPathView }) {
+function SpotReadout({ view }: { view: FillPathView }): ReactElement {
   return (
     <p className={SPOT}>
       <span className={SPOT_LABEL}>Spot</span>
@@ -671,8 +779,8 @@ function SpotReadout({ view }: { view: FillPathView }) {
  * the waiting capital was actually encumbered at the venue — `all-resting`, `partly-
  * unplaced`, `all-filled`. The card is now one accented number and its references, and a
  * paragraph reintroduced the crowding that shape exists to remove. `figures.split` is
- * still computed and tested in `ladder/fill-path-view.ts`, so the fact is available to
- * whatever surface wants to carry it; nothing renders it today.
+ * still computed and tested in `apps/web/src/ladder/fill-path-view.ts`, so the fact is
+ * available to whatever surface wants to carry it; nothing renders it today.
  */
 function ExpectedRow({
   expected,
@@ -680,7 +788,7 @@ function ExpectedRow({
 }: {
   expected: NonNullable<FillPathView["expected"]>;
   figures: NonNullable<FillPathView["figures"]>;
-}) {
+}): ReactElement {
   return (
     <div className={EXPECTED}>
       {/* WAITING IS THE PROTAGONIST and is built to look like it: out of the tile grid
@@ -709,7 +817,7 @@ function ExpectedRow({
  * to its own em dash, not a footnote about the number, and it is the only prose left on
  * this card.
  */
-function Waiting({ figures }: { figures: FillPathView["figures"] }) {
+function Waiting({ figures }: { figures: FillPathView["figures"] }): ReactElement {
   if (figures === undefined) {
     return (
       <div className={WAITING}>
@@ -731,30 +839,53 @@ function Waiting({ figures }: { figures: FillPathView["figures"] }) {
 }
 
 /**
+ * ABOVE EVERYTHING, AND RED (G-D7/G-D12). The copy states the literal truth rather than
+ * a severity: `record-fill` REFUSES to record anything while a torn act is outstanding,
+ * so the operator is not being warned, they are being told why the next thing they try
+ * will not work.
+ *
+ * ABSENCE IS NOT THE ALL-CLEAR (absence rule 3). A row that could not check says so, in
+ * a quiet line — silence there would claim a check that never ran.
+ *
+ * NOT A PART, AND IT COORDINATES NOTHING (spec #439 S7). It reads the view and renders or
+ * returns null, so it travels with the card it sits above rather than joining the frozen
+ * `FillPath` object as an arrangement nobody would change.
+ */
+export function TornActBanner({ view }: { view: FillPathView }): ReactElement | null {
+  if (view.tornActs.status === "outstanding") {
+    return (
+      <div className={TORN} role="alert">
+        <strong>
+          {view.tornActs.count} torn fill{" "}
+          {view.tornActs.count === 1 ? "act" : "acts"} outstanding
+        </strong>
+        <p className={TORN_BODY}>
+          Recording is blocked until this is repaired —{" "}
+          <code className={NOTICE_CODE}>pnpm orders:fill</code>{" "}
+          will refuse while a half-written act is open. Repair it at the desk.
+        </p>
+      </div>
+    );
+  }
+  if (view.tornActs.status === "unchecked") {
+    return (
+      <p className={UNCHECKED}>
+        Torn fill acts were not checked for this snapshot — this is NOT "none
+        outstanding".
+      </p>
+    );
+  }
+  return null;
+}
+
+/**
  * Between header and chart (G-D12), and VISUALLY DISTINCT because their certainties
  * differ. `filled at venue — not recorded` is a FACT the venue reported. `price passed,
  * no fill recorded` is INFERRED from spot: price traded through a resting order and the
  * venue has not said anything, which usually means nothing happened. Rendering them the
  * same would teach the operator to treat a certainty like a guess.
  */
-/**
- * TWO CERTAINTIES, ONE SURFACE, AND ONE EDGE BETWEEN THEM.
- *
- * Both paragraphs are card-surfaced, so `CARD_SURFACE` rides along and only the left
- * border differs. Every declaration that differs is a LONGHAND on purpose: `border-l-4`
- * beats the shared string's shorthand width and `border-l-[…]` beats its shorthand
- * colour, which is the one ordering Tailwind does guarantee.
- *
- * THE DASH IS ONE EDGE, NOT FOUR. `border-dashed` sets `border-style` on every side and
- * would dash the card's other three; the arbitrary property puts it on the left alone.
- * The difference between a venue fact and a guess is the whole reason these two look
- * different, and it must not spill onto the surface they share.
- */
-const WARN = `${CARD_SURFACE} m-0 text-[0.85rem] leading-[1.45]`;
-const WARN_CERTAIN = `${WARN} border-l-4 border-l-[var(--neg)]`;
-const WARN_INFERRED = `${WARN} border-l-4 border-l-[var(--warn)] [border-left-style:dashed] text-[var(--muted)]`;
-
-function UnrecordedWarnings({ view }: { view: FillPathView }) {
+export function UnrecordedWarnings({ view }: { view: FillPathView }): ReactElement {
   return (
     <>
       {view.warnings.filledNotRecorded > 0 ? (
@@ -784,10 +915,10 @@ function UnrecordedWarnings({ view }: { view: FillPathView }) {
  * `view.rungs` does arrive sorted DESCENDING by price from `ladder/fill-path-view.ts`, so
  * `rungs[0]` and `rungs.at(-1)` would be right today — and would silently print the span
  * backwards the day that sort is changed or a caller passes an unsorted list. `cumulate`
- * in `ladder/price-drop-path.ts` genuinely cannot avoid depending on that ordering (a
- * running sum IS an order), so it states the dependency on its own interface and asserts
- * it in a test instead. This readout has no such excuse: a
- * min/max is order-free, so it takes one and owes the reader no caveat.
+ * in `./price-drop-path` genuinely cannot avoid depending on that ordering (a running sum
+ * IS an order), so it states the dependency on its own interface and asserts it in a test
+ * instead. This readout has no such excuse: a min/max is order-free, so it takes one and
+ * owes the reader no caveat.
  *
  * Absent when there is nothing to span — a single rung is a price, not a range.
  *
@@ -849,7 +980,7 @@ const CHART_TITLE = `${CARD_HEADING} flex-auto min-w-0`;
  * head and nowhere else, so the context the descendant selector was testing for is the
  * only context there is.
  */
-const CHART_RANGE = "ml-auto mb-2.5 flex-none text-[0.8rem] tabular-nums text-[var(--muted)]";
+const CHART_RANGE = "ml-auto mb-2.5 flex-none text-[0.8rem] tabular-nums text-[var(--nms-muted-foreground)]";
 /**
  * The chart's accessible substitute, sized as prose rather than as a caption footnote:
  * for a screen-reader user this sentence IS the chart. `m-0 mt-2.5` because the UA's own
@@ -868,7 +999,7 @@ const INSPECT = "mt-3.5 flex flex-col gap-1.5";
 const INSPECT_RANGE = "w-full mx-0";
 
 /** Card 2 — the chart, its generated caption, and the inspect slider. */
-function Chart() {
+export function Chart(): ReactElement {
   // THE CHART ASKS IN INDEXES, because its inspect control is a range input and a range
   // is an index. Nothing here converts: the slider reads and writes the index, the
   // adapter is handed the selected rung's own key, and the provider is the one module
@@ -982,9 +1113,9 @@ const SELECTED_HEADING = `${CARD_HEADING} flex items-center gap-[10px]`;
  * dimmed the currency past legibility.
  */
 const SELECTED_PRICE = "m-0 mb-2 text-[1.3rem] tabular-nums";
-const SELECTED_SIZE = "text-[var(--muted)]";
+const SELECTED_SIZE = "text-[var(--nms-muted-foreground)]";
 const SELECTED_UNIT = "text-[0.75em]";
-const SELECTED_AT = "text-[var(--muted)] opacity-70";
+const SELECTED_AT = "text-[var(--nms-muted-foreground)] opacity-70";
 
 /**
  * THE EXCEPTION SHELF'S ROWS — term left, value against the right rail, until the card is
@@ -998,7 +1129,7 @@ const SELECTED_AT = "text-[var(--muted)] opacity-70";
 const DETAIL =
   "grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 m-0 mt-2.5 text-[0.85rem]" +
   " @[380px]/fp-selected:grid-cols-[auto_1fr] @[380px]/fp-selected:gap-y-1";
-const DETAIL_TERM = "text-[var(--muted)]";
+const DETAIL_TERM = "text-[var(--nms-muted-foreground)]";
 /** `m-0` because the UA indents a `dd` by 40px and preflight is off. */
 const DETAIL_VALUE = "m-0 text-right tabular-nums @[380px]/fp-selected:text-left";
 
@@ -1012,17 +1143,17 @@ const DETAIL_VALUE = "m-0 text-right tabular-nums @[380px]/fp-selected:text-left
  *
  * WHAT EACH TONE MEANS. Unplaced is greyed AND dashed (G-D12): a declared rung with no
  * order is not a state the ladder is in, it is one it never entered. Inferred is dashed
- * in `--warn`, matching the inferred warning above the chart — the same certainty, the
- * same visual language. Next is `--now` and never `--pos`, because the next rung is where
- * price is HEADING and green is the colour that means FILLED.
+ * in `--nms-warn`, matching the inferred warning above the chart — the same certainty,
+ * the same visual language. Next is `--nms-now` and never `--nms-pos`, because the next
+ * rung is where price is HEADING and green is the colour that means FILLED.
  */
 const PILL =
   "rounded-[10px] border px-[7px] py-[2px] text-[0.68rem] font-semibold uppercase tracking-[0.03em]";
 const PILL_TONE = {
-  state: "border-[var(--line)] text-[var(--muted)]",
-  unplaced: "border-[var(--line)] text-[var(--muted)] border-dashed opacity-[0.55]",
-  inferred: "border-[var(--warn)] text-[var(--warn)] border-dashed",
-  next: "border-[var(--now)] text-[var(--now)]",
+  state: "border-[var(--nms-border)] text-[var(--nms-muted-foreground)]",
+  unplaced: "border-[var(--nms-border)] text-[var(--nms-muted-foreground)] border-dashed opacity-[0.55]",
+  inferred: "border-[var(--nms-warn)] text-[var(--nms-warn)] border-dashed",
+  next: "border-[var(--nms-now)] text-[var(--nms-now)]",
 } as const;
 const PILLS = "flex flex-wrap items-center gap-1.5 m-0";
 
@@ -1035,10 +1166,10 @@ const PILLS = "flex flex-wrap items-center gap-1.5 m-0";
  * hairline are here — a half-reproduced border is a rule that never goes away.
  */
 const RECORDED =
-  "m-0 mt-3 pt-2.5 border-t border-t-[var(--line)] text-[0.75rem] leading-[1.5] text-[var(--muted)]";
+  "m-0 mt-3 pt-2.5 border-t border-t-[var(--nms-border)] text-[0.75rem] leading-[1.5] text-[var(--nms-muted-foreground)]";
 
 /** Card 3 — everything known about the one rung under inspection. */
-function SelectedRung() {
+export function SelectedRung(): ReactElement {
   const { view, selected: rung } = useFillPath();
   if (rung === undefined) {
     return (
@@ -1086,7 +1217,7 @@ function SelectedRung() {
               operator said these belong together, and they do — at a different price. */}
           <dd className={DETAIL_VALUE}>
             {formatUsd(rung.placedAtUsd)}{" "}
-            <span className="m-0 mt-1 text-[var(--muted)]">differs from the declared rung</span>
+            <span className="m-0 mt-1 text-[var(--nms-muted-foreground)]">differs from the declared rung</span>
           </dd>
         </dl>
       )}
@@ -1244,11 +1375,11 @@ function Pills({ rung }: { rung: FillPathRungView }) {
  * numbers that describe it stacked (the price it buys at, the capital it commits), then
  * the state, right-aligned.
  *
- * THE TINT REUSES THE CHART'S PALETTE and no other: `--pos` for filled, `--now` for the
- * rung price reaches next, bare `--bg` for waiting. That is the same three-colour key
- * the Price Drop Path draws with, so the list and the picture cannot say different
- * things about the same rung. The `next` pill was `--pos`-bordered before this, which
- * borrowed the colour that means FILLED for the one rung that has not.
+ * THE TINT REUSES THE CHART'S PALETTE and no other: `--nms-pos` for filled, `--nms-now`
+ * for the rung price reaches next, bare `--nms-background` for waiting. That is the same
+ * three-colour key the Price Drop Path draws with, so the list and the picture cannot say
+ * different things about the same rung. The `next` pill was `--nms-pos`-bordered before
+ * this, which borrowed the colour that means FILLED for the one rung that has not.
  */
 /**
  * THE RUNG LIST'S SECTION, AS UTILITIES (spec #420 slice 8).
@@ -1277,12 +1408,12 @@ const LIST_CARD = "@container/fp-list";
 const LIST_ITEMS = "list-none grid gap-2 m-0 p-0";
 const ROW =
   "grid grid-cols-[1.75rem_auto_minmax(0,1fr)] items-baseline gap-x-[10px] gap-y-0" +
-  " w-full px-[14px] py-3 border rounded-xl text-[var(--text)] [font:inherit]" +
+  " w-full px-[14px] py-3 border rounded-xl text-[var(--nms-foreground)] [font:inherit]" +
   " text-left cursor-pointer" +
-  // NEUTRAL, DELIBERATELY. `--pos` would ring a waiting rung in the colour that means
+  // NEUTRAL, DELIBERATELY. `--nms-pos` would ring a waiting rung in the colour that means
   // filled the moment a keyboard reached it, and this is the accessible path to the
   // inspect panel — it has to be visible.
-  " focus-visible:outline-2 focus-visible:outline-[var(--text)] focus-visible:outline-offset-2" +
+  " focus-visible:outline-2 focus-visible:outline-[var(--nms-foreground)] focus-visible:outline-offset-2" +
   " @[380px]/fp-list:grid-cols-[2.25rem_minmax(0,1fr)_auto] @[380px]/fp-list:items-center" +
   " @[380px]/fp-list:gap-x-3 @[380px]/fp-list:gap-y-3";
 
@@ -1295,24 +1426,32 @@ const ROW =
  * `border-color` utilities race — so the priority the stylesheet expressed by position is
  * spelled out in `rungRowClasses` instead, where it can be read.
  *
- * THE TINT REUSES THE CHART'S PALETTE AND NO OTHER: `--pos` filled, `--now` next, bare
- * `--bg` waiting. Mixed into the background rather than used neat, so the tint says which
- * state without competing with the price for the eye.
+ * THE TINT REUSES THE CHART'S PALETTE AND NO OTHER: `--nms-pos` filled, `--nms-now` next,
+ * bare `--nms-background` waiting. Mixed into the background rather than used neat, so the
+ * tint says which state without competing with the price for the eye.
+ *
+ * ── ELEVEN OF THIS CARD'S TWENTY-TWO READS ARE IN THESE TWO MAPS (spec #439 S9) ──────
+ * BOTH ARGUMENTS OF EVERY `color-mix()` ARE A READ. Four of the seven strings below mix
+ * two custom properties, so a rewrite counting one read per class string finds one where
+ * there are two — and a mix with one undefined argument computes to TRANSPARENT while the
+ * rule sits present and correct in the stylesheet. That is the second of the two silent
+ * failures `tokens.ts` was written against, and it is why the count is checked rather
+ * than the spelling.
  *
  * SELECTION IS A RING, NOT A FILL. A background swap would fight the state tint and could
  * make a waiting rung look filled while the operator inspected it, so selection moves the
  * border colour and adds a shadow and touches the background of nothing.
  */
 const ROW_TINT = {
-  waiting: "bg-[var(--bg)]",
-  filled: "bg-[color-mix(in_srgb,var(--pos)_12%,var(--bg))]",
-  next: "bg-[color-mix(in_srgb,var(--now)_14%,var(--bg))]",
+  waiting: "bg-[var(--nms-background)]",
+  filled: "bg-[color-mix(in_srgb,var(--nms-pos)_12%,var(--nms-background))]",
+  next: "bg-[color-mix(in_srgb,var(--nms-now)_14%,var(--nms-background))]",
 } as const;
 const ROW_EDGE = {
-  line: "border-[var(--line)]",
-  filled: "border-[color-mix(in_srgb,var(--pos)_34%,var(--line))]",
-  next: "border-[color-mix(in_srgb,var(--now)_42%,var(--line))]",
-  selected: "border-[var(--text)]",
+  line: "border-[var(--nms-border)]",
+  filled: "border-[color-mix(in_srgb,var(--nms-pos)_34%,var(--nms-border))]",
+  next: "border-[color-mix(in_srgb,var(--nms-now)_42%,var(--nms-border))]",
+  selected: "border-[var(--nms-foreground)]",
 } as const;
 /**
  * AN ARBITRARY PROPERTY RATHER THAN `shadow-[…]`, and measured before it was written.
@@ -1322,7 +1461,7 @@ const ROW_EDGE = {
  * rule's, and parity by computed value is what this migration is checked by. The property
  * form computes byte-for-byte what the rule did.
  */
-const ROW_RING = "[box-shadow:0_0_0_1px_var(--text)]";
+const ROW_RING = "[box-shadow:0_0_0_1px_var(--nms-foreground)]";
 
 /**
  * Dashed, per G-D12: a declared rung with no order is not a state the ladder is in, it is
@@ -1353,7 +1492,7 @@ function rungRowClasses(rung: FillPathRungView, isSelected: boolean): string {
  * and the gutter goes back to sharing that alignment.
  */
 const ROW_INDEX =
-  "self-center text-[0.78rem] font-semibold tracking-[0.03em] text-[var(--muted)]" +
+  "self-center text-[0.78rem] font-semibold tracking-[0.03em] text-[var(--nms-muted-foreground)]" +
   " @[380px]/fp-list:self-auto";
 /** The two numbers that describe a rung, stacked in the order the chart plots them. */
 const ROW_FIGURES = "grid gap-px min-w-0";
@@ -1366,7 +1505,7 @@ const ROW_PRICE = "text-[1.05rem] font-bold tracking-[-0.01em] tabular-nums";
  * rather than the shared muted one so it stays legible against the two state tints, which
  * already move the row's colour.
  */
-const ROW_SIZE = "font-normal text-[var(--muted)]";
+const ROW_SIZE = "font-normal text-[var(--nms-muted-foreground)]";
 /** The preposition recedes one step further than the figure it follows. */
 const ROW_AT = "opacity-70";
 
@@ -1389,16 +1528,17 @@ const ROW_STATUS = `${ROW_LINE} text-[0.82rem] font-bold first-letter:uppercase`
  * about rule order. Never-placed beats next beats filled, which is the order the three
  * deleted context rules were written in. The ordinary rung is the empty string on purpose:
  * its status had no rule and inherited the row's colour, and a `text-` utility here would
- * be a declaration the file never carried.
+ * be a declaration the file never carried — so the empty arm is NOT a missing read and
+ * filling it in is a change to what the card paints.
  */
 const ROW_STATUS_TONE = {
-  unplaced: "text-[var(--muted)]",
-  next: "text-[var(--now)]",
-  filled: "text-[var(--pos)]",
+  unplaced: "text-[var(--nms-muted-foreground)]",
+  next: "text-[var(--nms-now)]",
+  filled: "text-[var(--nms-pos)]",
   plain: "",
 } as const;
 /** The venue's word, under the spot-derived one: quiet, but present — two claims. */
-const ROW_SUBSTATUS = `${ROW_LINE} text-[0.72rem] text-[var(--muted)]`;
+const ROW_SUBSTATUS = `${ROW_LINE} text-[0.72rem] text-[var(--nms-muted-foreground)]`;
 /**
  * A FULL-WIDTH LINE OF ITS OWN AT 320px. A pill cannot be made narrower than its longest
  * word, so it is given the whole tile rather than a column that might not hold it; still
@@ -1408,9 +1548,9 @@ const ROW_QUALS =
   "flex flex-wrap justify-end gap-1 col-span-full mt-1" +
   " @[380px]/fp-list:col-auto @[380px]/fp-list:mt-0";
 /** 12px of its own, which is what the deleted rule set over slice 2's shared 4px. */
-const ORPHANS = "m-0 mt-3 text-[0.8rem] text-[var(--muted)]";
+const ORPHANS = "m-0 mt-3 text-[0.8rem] text-[var(--nms-muted-foreground)]";
 
-function RungList() {
+export function RungList(): ReactElement {
   const { view, selected, select } = useFillPath();
   return (
     <Card className={LIST_CARD}>
@@ -1438,7 +1578,13 @@ function RungList() {
               <span className={ROW_FIGURES}>
                 <span
                   className={
-                    rung.notPlaced ? `${ROW_PRICE} text-[var(--muted)]` : ROW_PRICE
+                    // WRITTEN INLINE, AND IT IS THE SEVENTEENTH OF THIS CARD'S TWENTY-TWO
+                    // COLOUR READS (spec #439 S9). A sweep over the constant declarations
+                    // above finds twenty-one; this one is on a conditional class in JSX,
+                    // which is exactly the shape such a sweep cannot see.
+                    rung.notPlaced
+                      ? `${ROW_PRICE} text-[var(--nms-muted-foreground)]`
+                      : ROW_PRICE
                   }
                 >
                   {/* MUTED, FOR THE SAME REASON AS THE INSPECT CARD'S — the column is
@@ -1496,6 +1642,12 @@ function RungList() {
  * rung can be next AND partly filled, or next AND never placed. So any state other than
  * plain resting still rides the line beneath. What is dropped is only the `waiting`
  * sub-line under `next`, which the view module already guarantees is implied.
+ *
+ * A RUNG THAT IS BOTH `next` AND PARTLY FILLED PRINTS `partly filled · 40%` TWICE — once
+ * as the sub-line's state and once as the partial pill. That is what this card has always
+ * done and `partly-walked`'s rung 4 shows it in the workbench. Spec #439 is
+ * behaviour-preserving, so it crossed unchanged; it is a copy decision for a later wave,
+ * not a regression this move introduced.
  *
  * ── "MATCHED BY PRICE" IS DROPPED FROM THE ROW ────────────────────────────────────────
  * The distinction it drew is real — `joinProvenance` is `"declared" | "price-matched"`,
@@ -1567,14 +1719,124 @@ function RowState({ rung }: { rung: FillPathRungView }) {
 }
 
 /**
- * THE PROVENANCE FOOTER IS GONE, AND ITS THREE PARAGRAPHS ARE NOT LOST — deliberately
- * recorded here, because "a card was deleted" and "three facts were dropped" are
- * different edits and the next reader deserves to know which one this was.
+ * THE FILL PATH, ON THE PHONE (spec #285 §5.6–5.13 / G-D10b, slice #289) — the declared
+ * ladder rendered as a path partly walked, and as of spec #439 S9 it is assembled ENTIRELY
+ * INSIDE THIS PACKAGE. `apps/web/src/components/FillPath.tsx` is deleted and the directory
+ * it lived in no longer exists.
  *
- *   PRECISION → the leading `~`. Which figures are measured and which are projected is
- *     now marked on the figures themselves; see this file's header for the rule.
- *   COMPLETENESS → `RecordedThrough`, in the selected-rung card, beside the `State` the
- *     cutoff actually bounds.
- *   SPOT → `SpotReadout`, in the corner of the header card, where the operator looks
- *     first rather than last.
+ * FOUR STACKED CARDS, in U's 320px rework's order: header figures → `Price Drop Path`
+ * chart with its inspect slider → the selected-rung panel → the rung list. Stacked
+ * rather than gridded because the surface is judged on a phone held in one hand; the
+ * desk gets the same stack, wider.
+ *
+ * IT RENDERS DECIDED FACTS AND DECIDES NOTHING. Every flag, count, coordinate and
+ * absence cause arrives from `apps/web/src/ladder/fill-path-view.ts`, which is where a
+ * test can reach them. The only state that lives here is which rung the operator is
+ * inspecting, which is a UI affordance and not a fact about the fund.
+ *
+ * ── `~` MEANS "THIS NUMBER IS NOT A MEASUREMENT" (G-D5c, restated) ──────────────────
+ * A `~` is owed by exactly two kinds of figure, and by nothing else:
+ *
+ *   1. A PROJECTION — the two `Expectation` tiles, which are what the DECLARED ladder
+ *      would acquire if it were walked. Nothing was measured to produce them.
+ *   2. A ROUNDED RENDERING of a figure printed exactly elsewhere — the chart card's
+ *      compact price span and the chart's own spot label. Both round hard enough to
+ *      disagree with the exact figure on the same screen, and the `~` is what makes that
+ *      a rounding rather than a contradiction.
+ *
+ * Everything measured (`Figure`) prints bare, and so does every DECLARED total: a rung
+ * size and the waiting sum over rung sizes are exact statements of what the operator
+ * wrote down. They are intentions rather than measurements, but they are not estimates,
+ * and tilde-ing them would spend the mark's meaning on the wrong distinction — the one
+ * the `Waiting` label already carries.
+ *
+ * ── EVERY ABSENCE IS RENDERED AND NAMED, AND NO `$0` IS REACHABLE ───────────────────
+ * The three measured figures are ABSENT on the wire until a fill is recorded (G-D8),
+ * not zero, so no branch here could print `$0.00` for them: the card is handed a
+ * `MeasuredFigure` and the `known: false` arm carries a cause string, never a number.
+ * The 0% progress bar stays, because a bar at zero reads as absence — which is the
+ * truth — while a zero DOLLAR figure would read as a measurement.
+ *
+ * ── THE CHART IS PRESENTATION, NOT THE RECORD (§6.3) ────────────────────────────────
+ * The chart is `aria-hidden`. Every per-rung fact it plots is in the rung list below it,
+ * and the one thing only the picture carries — the shape of the capital curve — is the
+ * GENERATED caption beside it, which arrives on `view.caption` from
+ * `apps/web/src/ladder/convexity-caption.ts`. There is no hand-maintained chart
+ * description here and there must never be one.
+ *
+ * The inspect slider is NOT the only path to the selected-rung panel: every rung row is
+ * a `<button>` that selects on click AND on focus, so tabbing down the ladder walks the
+ * inspect panel with it. That is what makes inspection keyboard- and screen-reader-
+ * reachable without the chart being involved at all.
+ */
+
+/**
+ * THE PARTS, ATTACHED AS PLAIN PROPERTIES (grill D4, the same shape `Card` uses).
+ * `FillPath.RungList` is the call-site vocabulary, and mounting one property on its own
+ * is how each card's half of the accessibility contract is asserted without its three
+ * siblings standing in for it.
+ *
+ * ALL FOUR ARE NAMED EXPORTS OF THIS MODULE, AND NONE IS ON THE INDEX. The mixed
+ * assembly S7 and S8 lived under — three parts here, one still a bare function in
+ * `apps/web` — was temporary by construction and ended when S9 deleted the file it lived
+ * in. They stay off `src/index.ts` deliberately: a capitalized function published there
+ * makes `fixture-coverage.test.ts` demand a fixture for it, and the per-part fixtures
+ * this wave wrote are a choice rather than a guard obligation. `FillPath` is an object,
+ * so the guard skips it; `FillPathCards` is a function, so the guard demands one and
+ * gets one.
+ *
+ * There is no `FillPath` component: the fill path is a composition, and the composition
+ * with the house arrangement already has a name — `FillPathCards`, below.
+ */
+export const FillPath = {
+  Header,
+  Chart,
+  SelectedRung,
+  RungList,
+} as const;
+
+/**
+ * THE HOUSE ARRANGEMENT, and the only thing the ladder route mounts. ITS NAME AND ITS
+ * SINGLE `view` PROP ARE UNCHANGED ACROSS THE WHOLE OF SPEC #439, which is what kept
+ * `routes/ladder.$planId.tsx` and `routes/ladder-fixture.$state.tsx` to one import line
+ * each in the diff that moved it (grill D2).
+ *
+ * SIX CHILDREN, FOUR OF THEM PARTS. The torn-act banner and the unrecorded warnings are
+ * not cards and coordinate nothing — they read the view and render or return null — so
+ * they stay internal to this composition rather than being published as parts nobody
+ * would arrange differently.
+ */
+export function FillPathCards({ view }: { view: FillPathView }): ReactElement {
+  return (
+    <FillPathProvider view={view}>
+      <TornActBanner view={view} />
+      <FillPath.Header />
+      <UnrecordedWarnings view={view} />
+      <FillPath.Chart />
+      <FillPath.SelectedRung />
+      <FillPath.RungList />
+    </FillPathProvider>
+  );
+}
+
+/**
+ * ── THE MODULE SURFACE, AND WHY THE SUBPATH LINE IS GONE (spec #439 S9) ─────────────
+ *
+ * `CARD_HEADING`, `PILL`, `PILL_TONE`, `PRICE_PLAIN` and `SIZE_PLAIN` used to be
+ * re-exported here for `apps/web/src/components/FillPath.tsx` to read at
+ * `@numisma/components/ui/fill-path.tsx`. That file is deleted and the whole transitional
+ * import went with it — TEN NAMES at its widest, and not one of them survives into a
+ * published surface, which is the reason the wave crossed by subpath rather than by the
+ * curated index. The five are module-private again, beside `RAIL_LABEL`, `TILE`,
+ * `TILE_ABSENT` and `TILE_LABEL`.
+ *
+ * `route-move.test.ts`'s allowed-specifier list dropped the matching entry in the same
+ * diff. Left standing it would permanently allow a subpath nothing imports, and the next
+ * reader would have no way to tell whether that was deliberate.
+ *
+ * WHAT IS STILL EXPORTED FROM THIS MODULE AND NOT FROM THE INDEX: `Figure`,
+ * `Expectation`, `formatUnits`, `Header`, `Chart`, `SelectedRung`, `TornActBanner` and
+ * `UnrecordedWarnings`. `apps/workbench/src/ui/fill-path.fixture.tsx` mounts every one of
+ * them directly, and the workbench is not `apps/web`: it is the package's own review
+ * surface, and staging a part in isolation is what it is for.
  */

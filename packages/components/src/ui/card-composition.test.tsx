@@ -20,18 +20,20 @@
  *
  * Everything below is authored. No ledger output has been near this file.
  *
- * THE PRIMITIVE MOVED AND THE TEST DID NOT (spec #432 §4.1, §4.6). `Card`, `CardTitle`
- * and `CARD_SURFACE` ship from `@numisma/components`, and this file imports the
- * specifier rather than a path, so what it pins is the SHIPPED surface — what five
- * component call sites, nine more importers of the string and the workbench fixture all
- * get — instead of a local file. "The later workbench fixtures" named above are no
- * longer later: `ui/card.fixture.tsx` imports both names, which is what
- * `fixture-coverage.test.ts` demands the day a component is exported.
+ * THE TEST FOLLOWED THE PRIMITIVE (spec #432 §4.1, §4.6; spec #439 §4.4). `Card`,
+ * `CardTitle` and `CARD_SURFACE` shipped from `@numisma/components` first and this file
+ * stayed in `apps/web` for a wave, because the render harness could not live in a
+ * package. It can now, so the criterion is the plain one: a component test goes to the
+ * package with its component, importing it by relative specifier like everything else
+ * here. "The later workbench fixtures" named above are no longer later:
+ * `ui/card.fixture.tsx` imports both names, which is what `fixture-coverage.test.ts`
+ * demands the day a component is exported — and that guard reads `index.ts` at runtime,
+ * so it is what holds the shipped surface this file no longer names.
  */
 import { describe, expect, it } from "vitest";
 
-import { classTokens as tokens, render, screen } from "../../render.testkit.tsx";
-import { Card, CARD_SURFACE, CardTitle } from "@numisma/components";
+import { classTokens as tokens, render, screen } from "../testkit/render.testkit";
+import { Card, CARD_SURFACE, CardTitle } from "./card";
 
 describe("Card", () => {
   it("attaches its parts under both names, as one function each", () => {

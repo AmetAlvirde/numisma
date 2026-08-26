@@ -14,15 +14,18 @@
  *
  * Everything below is authored. No ledger output has been near this file.
  *
- * THE PRIMITIVE MOVED AND THE TEST DID NOT (spec #432 §4.1). `Absent` now ships from
- * `@numisma/components`, and this file imports it from that specifier rather than from a
- * path, so what it pins is the SHIPPED surface — the thing five call sites and the
- * workbench fixture get — instead of a local file that happens to be re-exported.
+ * THE TEST FOLLOWED THE PRIMITIVE (spec #432 §4.1; spec #439 §4.4). `Absent` shipped
+ * from `@numisma/components` first and this file stayed in `apps/web` for a wave, because
+ * the render harness could not live in a package. It can now, so the criterion is the
+ * plain one: a component test goes to the package with its component. The import is a
+ * relative specifier, which is what every other file inside this package writes, and the
+ * shipped surface is held from the other side — `fixture-coverage.test.ts` reads
+ * `index.ts` at runtime, so an export dropped from it reds there.
  */
 import { describe, expect, it } from "vitest";
 
-import { classTokens as tokens, render, screen } from "../../render.testkit.tsx";
-import { Absent } from "@numisma/components";
+import { classTokens as tokens, render, screen } from "../testkit/render.testkit";
+import { Absent } from "./absent";
 
 describe("Absent", () => {
   it("hides the em dash from assistive technology and exposes the reason", () => {

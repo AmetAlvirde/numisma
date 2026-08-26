@@ -40,6 +40,17 @@ import { sourceFiles } from "../../../../ops/testkit/repo-sources.testkit.js";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const read = (file: string) => readFileSync(join(HERE, file), "utf-8");
 
+/**
+ * `Shell` reached BY NAME out of the package, not merely mentioned.
+ *
+ * A bare `/@numisma\/components/` would match every route in this directory and
+ * assert nothing about the chrome; naming the binding inside the import block is
+ * what makes this a claim about where `Shell` comes from. Paired everywhere it is
+ * used with `not.toMatch(/function Shell\(/)`, which is the half that forbids a
+ * second copy.
+ */
+const SHELL_FROM_PACKAGE = /import \{[^}]*\bShell\b[^}]*\} from "@numisma\/components"/s;
+
 describe("D11: the route move", () => {
   it("serves the glance at `/` — the verdict, not the composition tables", () => {
     const index = read("index.tsx");
@@ -54,7 +65,14 @@ describe("D11: the route move", () => {
     // AS JSX, for the reason the G-D13 half of this file spells out: the import line
     // alone satisfies a bare `/DcaCard/`, so the card can be deleted with this green.
     expect(index).toMatch(/<DcaCard/);
-    expect(index).toMatch(/components\/DcaCard\.tsx/);
+    // FROM THE PACKAGE, BY NAME (spec #439 S4). The card crossed into
+    // `@numisma/components` and the relative path this used to read is gone. Named inside
+    // the import block for `SHELL_FROM_PACKAGE`'s reason: a bare
+    // `/@numisma\/components/` matches every route in this directory and asserts nothing
+    // about where the card comes from.
+    expect(index).toMatch(
+      /import \{[^}]*\bDcaCard\b[^}]*\} from "@numisma\/components"/s,
+    );
   });
 
   it("does NOT duplicate the DCA card onto `/big-picture`", () => {
@@ -78,9 +96,12 @@ describe("D11: the route move", () => {
 
   it("shares ONE Shell between both surfaces", () => {
     // Two copies would drift, and the whole point of a move is that there is one
-    // page's worth of chrome, not two.
+    // page's worth of chrome, not two. `Shell` moved into `@numisma/components`
+    // (spec #439), so the import is a PACKAGE specifier now — and the second
+    // assertion is the half that actually forbids a second copy, wherever the
+    // first one lives.
     for (const file of ["index.tsx", "big-picture.tsx"]) {
-      expect(read(file), file).toMatch(/components\/Shell\.tsx/);
+      expect(read(file), file).toMatch(SHELL_FROM_PACKAGE);
       expect(read(file), file).not.toMatch(/function Shell\(/);
     }
   });
@@ -101,16 +122,20 @@ describe("D11: the route move", () => {
  * operator judges the layout by opening the phone.
  *
  * ── MUTATION CHECK (performed 2026-08-11) ───────────────────────────────────────────
- *  - changed `DcaCard.tsx`'s `to="/ladder/$planId"` to `to="/"` → "DcaCard is the one
+ *  - changed the tap-through's `to="/ladder/$planId"` to `to="/"` → "DcaCard is the one
  *    tap target for the ladder" red. Right reason: the card stopped being the way in,
- *    and the route would be reachable only by typing a UUID.
+ *    and the route would be reachable only by typing a UUID. (Performed against
+ *    `DcaCard.tsx`; the destination lives in `index.tsx`'s `renderLink` slot since spec
+ *    #439 S4 and the case reads it there.)
  *  - added a `reconcileFillPath` VALUE import from `@numisma/engine` to the route →
  *    "the ladder surfaces import no engine VALUE" red. Right reason: a value import is
  *    exactly what would put the engine in the browser bundle.
  *  - added a `beforeLoad` that fetches the Binance URL on the route → "keeps the spot
  *    fetch to ONE call site" red, naming the route file. Right reason: that is the
  *    helpful move into a loader the 451 comment exists to stop.
- *  - added a SIDE-EFFECT `import "@numisma/engine";` to `FillPath.tsx`, and separately a
+ *  - added a SIDE-EFFECT `import "@numisma/engine";` to `FillPath.tsx` (deleted at spec
+ *    #439 S9 — the file that holds the fill path today is the package's own
+ *    `ui/fill-path.tsx`, swept by the last case in this file), and separately a
  *    dynamic `import("@numisma/engine")` to `convexity-caption.ts` → the same test red,
  *    once each, naming the file. Right reason: neither form has a `from` clause, so the
  *    specifier matcher could not see them while both pull the engine into the bundle.
@@ -154,9 +179,23 @@ describe("G-D13: the ladder route", () => {
   it("makes DcaCard the one tap target for the ladder", () => {
     // The route is reached by TAPPING, never by typing a UUID, so the link is the only
     // way in and losing it would strand the whole surface.
-    const card = readFileSync(join(HERE, "../components/DcaCard.tsx"), "utf-8");
-    expect(card).toMatch(/to=["']\/ladder\/\$planId["']/);
-    expect(card).toMatch(/params=\{\{\s*planId\s*\}\}/);
+    //
+    // READ OFF `index.tsx`, NOT OFF THE CARD (spec #439 S4). This used to
+    // `readFileSync` `../components/DcaCard.tsx`, which now throws ENOENT — loud, and
+    // useless, because a filesystem error says nothing about the app. The card moved into
+    // `@numisma/components`, which has no router, so it hands its anchor's classes and the
+    // view's `planId` out through a slot and the destination is written at the call site.
+    //
+    // THE ASSERTION IS STRONGER HERE. `index.tsx` is where the generated route tree is in
+    // scope, so it is where TanStack checks `to` and where a typo in a route path would
+    // otherwise ship. A link-adapter context normalising every destination to
+    // `to: string` would have moved this claim somewhere nothing could check it.
+    const index = read("index.tsx");
+    expect(index).toMatch(/to=["']\/ladder\/\$planId["']/);
+    expect(index).toMatch(/params=\{\{\s*planId\s*\}\}/);
+    // Inside the slot, not loose on the page: the `<Link>` is the card's tap-through and
+    // nothing else on `/` points at the ladder.
+    expect(index).toMatch(/renderLink=\{/);
   });
 
   it("keeps the DCA card on `/` — the ladder route did not move it", () => {
@@ -174,7 +213,7 @@ describe("G-D13: the ladder route", () => {
 
   it("shares the same ONE Shell as the other two surfaces", () => {
     const ladder = read("ladder.$planId.tsx");
-    expect(ladder).toMatch(/components\/Shell\.tsx/);
+    expect(ladder).toMatch(SHELL_FROM_PACKAGE);
     expect(ladder).not.toMatch(/function Shell\(/);
   });
 
@@ -239,15 +278,44 @@ describe("G-D13: the ladder route", () => {
     // this list is narrow about. THAT DEPENDENCY LIST IS ASSERTED BELOW rather than
     // argued here, because the walk stops at the package boundary and would not see it
     // change.
+    // ── THE LIST IS BACK TO THREE (spec #439 S9) ─────────────────────────────────────
+    // BOTH SUBPATH ENTRIES CAME OFF IN THIS ONE DIFF, and both for the same reason: the
+    // file that imported them is `apps/web/src/components/FillPath.tsx`, which S9
+    // deleted along with the directory it lived in.
+    //
+    // `@numisma/components/ui/fill-path.tsx` stood here from S6 to S8 while the fill
+    // path's selection seam and its shared helpers were in the package and the cards
+    // that read them were not: `FillPath.tsx` imported ten names from the module
+    // directly rather than from the curated index, precisely so the arrangement would
+    // die rather than become public API. `@numisma/components/ui/price-drop-path.ts`
+    // arrived at S5 for `COMPACT_USD`, the one compact-USD formatter the fill path has;
+    // the chart, the spot label and the header card's price span all read it from
+    // INSIDE the package now, where this walk cannot see it and does not need to.
+    //
+    // LEFT STANDING, EITHER WOULD PERMANENTLY ALLOW A SUBPATH NOTHING IMPORTS, and the
+    // next reader would have no way to tell whether that was deliberate. The one
+    // remaining app-side reader of `price-drop-path.ts` is
+    // `ladder/started-ladder.fixtures.test.ts`, which is not in any route's runtime
+    // closure — so re-adding either entry is a decision someone makes on purpose, with
+    // this paragraph in front of them.
     const allowed = [
       "@numisma/engine/format",
       "@numisma/engine/calendar",
       "@numisma/components",
     ];
+    // THE CLAUSE IS `[^;]*?` HERE FOR THE REASON SPELLED OUT IN FULL BELOW, on the
+    // package sweep that first carried the narrowing (spec #439 S4). Same defect, same
+    // one-character fix: `[\s\S]*?` crosses newlines, so a match opening on an
+    // unrelated import runs on to the first `@numisma/*` `from` beneath it and reports
+    // an erased type-only import as a runtime read, naming the wrong file. The ten
+    // `apps/web` files in this closure are exactly as exposed to that as the package
+    // tree was; nothing is red today only because none of them currently writes a
+    // type-only `@numisma/*` import after another import. With both sweeps narrowed,
+    // the import-order convention that paragraph names really does stop mattering.
     for (const file of closure) {
       const source = readFileSync(join(HERE, "..", file), "utf-8");
       for (const match of source.matchAll(
-        /^\s*import\s+(?!type\b)([\s\S]*?)\bfrom\s*["'](@numisma\/[^"']+)["']/gm,
+        /^\s*import\s+(?!type\b)([^;]*?)\bfrom\s*["'](@numisma\/[^"']+)["']/gm,
       )) {
         expect(allowed, `${file} imports ${match[2]} at runtime`).toContain(match[2]);
       }
@@ -280,12 +348,42 @@ describe("G-D13: the ladder route", () => {
     const manifest = JSON.parse(
       readFileSync(join(HERE, "../../../../packages/components/package.json"), "utf-8"),
     ) as { dependencies?: Record<string, string>; peerDependencies?: Record<string, string> };
+    //
+    // `@numisma/engine` IS THE ONE ADDITION SO FAR, and it is the exact mutation the
+    // paragraph above named as the dangerous one, made deliberately (spec #439 §4.2).
+    // What makes it safe is not the name but the DEPTH: the package reads the pure
+    // `format` subpath and nothing else, whose own runtime closure is `format.ts` plus
+    // `orders/committed.ts` and reaches no `node:` builtin. That is a claim about where
+    // inside the dependency the package reaches, which this list cannot express — so it
+    // is asserted in the case below, and widening this line without that one would leave
+    // the safety argument resting on nobody.
+    //
+    // `@tanstack/charts` IS THE SECOND, and it is a WORKSPACE MOVE rather than a new
+    // third-party bet (spec #439 S5). `apps/web` already depends on it directly at
+    // exactly `0.11.0`, and it already ships to the browser through the ladder route,
+    // because `PriceDropPathChart` has drawn the Price Drop Path with it since ADR-018.
+    // Moving the component into the package moved the manifest line under it; nothing new
+    // reaches the bundle, and the version matching the app's exactly is what makes that a
+    // checkable statement rather than a hope. That is a stronger argument than any prose
+    // about the library's own `node:` reach could be, because it does not depend on
+    // reading the library at all.
     expect(Object.keys(manifest.dependencies ?? {}).sort()).toEqual([
       "@base-ui/react",
+      "@numisma/engine",
+      "@tanstack/charts",
       "class-variance-authority",
       "clsx",
       "tailwind-merge",
     ]);
+    // AND AT THE APP'S OWN VERSION, which is the half the key list cannot say. A range
+    // here, or a bump on one side only, would put two copies of the chart library in the
+    // ladder route's bundle with every assertion above still green.
+    const webManifest = JSON.parse(
+      readFileSync(join(HERE, "../../package.json"), "utf-8"),
+    ) as { dependencies?: Record<string, string> };
+    expect(manifest.dependencies?.["@tanstack/charts"]).toBe(
+      webManifest.dependencies?.["@tanstack/charts"],
+    );
     // Peers count the same: a peer is resolved out of the app's own tree and bundled just
     // as a dependency is, so this is where the same addition would go to avoid the list
     // above. React and React DOM the app already ships.
@@ -293,6 +391,81 @@ describe("G-D13: the ladder route", () => {
       "react",
       "react-dom",
     ]);
+  });
+
+  it("holds `@numisma/components` to the engine's PURE SUBPATHS, root type-imports aside", () => {
+    // THE CLAIM THE PIN ABOVE CANNOT MAKE (spec #439 §4.2). The pin says WHICH names the
+    // package may depend on; it says nothing about WHERE in a dependency the package
+    // reaches, and the closure walk beside it stops at the package boundary and never
+    // traverses it. So `@numisma/engine` sitting in that manifest is safe only while
+    // every runtime read inside `packages/components/src` lands on `/format` or
+    // `/calendar` — two leaf modules whose own closure is `format.ts` plus
+    // `orders/committed.ts` and reaches no `node:` builtin. One `from "@numisma/engine"`
+    // in a component and `node:os`/`node:path` are in the browser bundle with every
+    // other assertion in this file green.
+    //
+    // WRITTEN AGAINST RUNTIME IMPORTS, AND THE ROOT IS ALLOWED TO BE TYPE-IMPORTED.
+    // `summary-card.tsx` reads `DashboardSummary`, and the engine ROOT is the only place
+    // it is exported from. A type-only import erases at compile time and reaches no
+    // bundle, which is the same reasoning the sibling closure check above already runs
+    // on — hence the negative lookahead, and hence the two `from`-less forms below,
+    // which that lookahead cannot see and which pull the whole engine in regardless.
+    //
+    // ── THE CLAUSE IS `[^;]*?`, NOT `[\s\S]*?`, AND THAT IS THE WHOLE OF IT ─────────
+    // The lookahead only guards the import the match STARTS on. `[\s\S]*?` crosses
+    // newlines, so a match could open on some unrelated import and run on until the
+    // first engine `from` anywhere below it — landing on a type-only ROOT import two
+    // statements down and reporting THAT as a runtime read. The negative lookahead is
+    // silently bypassed whenever it is not the first thing in the match, and the file
+    // named in the failure is not the file with the problem.
+    //
+    // Measured, on `import { cn } from "./x"` above `import type { A } from
+    // "@numisma/engine"` above a genuine `import { evil } from "@numisma/engine"`: the
+    // old clause yielded TWO matches, the crossing one and the real offender, so the
+    // guard reported an erased type import as a bundle hazard. That over-report is why
+    // every package file today writes its engine root type-import FIRST — a convention
+    // nothing states and nothing enforces, adopted to keep this guard quiet rather than
+    // because the order means anything.
+    //
+    // A specifier list holds no `;`, and every import statement ends with one, so
+    // `[^;]*?` cannot leave the statement it opened on. The match is then exactly as
+    // wide as the lookahead's guarantee, the import order convention stops mattering,
+    // and the narrowing can only ever report FEWER things — never fewer offenders,
+    // since a runtime engine import still opens its own match on its own line.
+    //
+    // ── `import` OR `export`, BECAUSE A RE-EXPORT IS A RUNTIME READ TOO ────────────
+    // `export { x } from "@numisma/engine"` and `export * from "@numisma/engine"` pull
+    // the module into the bundle exactly as `import` does — the specifier is evaluated
+    // either way — and the manifest pin's own paragraph above names re-export as the
+    // shape that gets `node:` reach into the browser. This is the one file most likely
+    // to acquire it: `packages/components/src/index.ts` is fifteen `export … from`
+    // lines and nothing else, and it sits inside the ladder route's runtime closure.
+    // The alternation is on the LEADING KEYWORD only, so the lookahead still guards
+    // `export type { … } from` and the `[^;]*?` argument above is untouched — a bare
+    // `export * from` has no clause at all, and `[^;]*?` matching `* ` is what carries
+    // it. Nothing in the package re-exports the engine today; this is a latent hole
+    // being closed, not a defect being fixed.
+    const packageSrc = join(HERE, "../../../../packages/components/src");
+    const files = sourceFiles({ dir: packageSrc, as: "absolute" });
+    // FALSE-PASS FLOOR, the same one every sweep in this file carries: "no offender
+    // found" is also what a sweep over zero files returns.
+    expect(files.length, "the subpath sweep scanned no package source").toBeGreaterThan(0);
+    const pure = ["@numisma/engine/format", "@numisma/engine/calendar"];
+    for (const file of files) {
+      const label = relative(packageSrc, file);
+      const source = readFileSync(file, "utf-8");
+      for (const match of source.matchAll(
+        /^\s*(?:import|export)\s+(?!type\b)[^;]*?\bfrom\s*["'](@numisma\/engine[^"']*)["']/gm,
+      )) {
+        expect(pure, `${label} imports ${match[1]} at runtime`).toContain(match[1]);
+      }
+      expect(source, `${label} side-effect-imports the engine`).not.toMatch(
+        /^\s*import\s*["']@numisma\/engine["']/m,
+      );
+      expect(source, `${label} dynamically imports the engine`).not.toMatch(
+        /\bimport\s*\(\s*["']@numisma\/engine["']/,
+      );
+    }
   });
 });
 

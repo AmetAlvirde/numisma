@@ -10,9 +10,10 @@ alternative was a rule held only in the shape of working code, which the next
 reader is free to "fix".
 
 Surfaces: `apps/web/src/ladder/fill-path-view.ts` (the view module — every
-decision), `apps/web/src/ladder/price-drop-path.ts` (the chart's quantitative
-logic), `apps/web/src/components/FillPath.tsx` and
-`apps/web/src/components/PriceDropPathChart.tsx` (presentation only —
+decision), `packages/components/src/ui/price-drop-path.ts` (the chart's
+quantitative logic, moved into the package at spec #439 S5 as the chart's own
+module), `packages/components/src/ui/fill-path.tsx` and
+`packages/components/src/ui/price-drop-path-chart.tsx` (presentation only —
 [ADR-019](../context/adr/ADR-019-the-chart-is-presentation-its-accessible-substitute-is-generated.md)),
 `apps/web/src/ladder/convexity-caption.ts` (the chart's generated accessible
 substitute), `apps/web/src/ladder/rung-state-copy.ts` (the words a rung's state
@@ -136,5 +137,5 @@ Two mechanical notes that follow from the rule rather than standing beside it:
 - [ADR-019](../context/adr/ADR-019-the-chart-is-presentation-its-accessible-substitute-is-generated.md)
   — the chart is `aria-hidden` presentation; its accessible substitute is the
   generated convexity caption, never a hand-maintained description.
-- [`coverage-rationale.md`](./coverage-rationale.md) — why `FillPath.tsx` and
-  `PriceDropPathChart.tsx` are uninstrumented, and what guards them instead.
+- [`coverage-rationale.md`](./coverage-rationale.md) — why `fill-path.tsx` and
+  `price-drop-path-chart.tsx` are uninstrumented, and what guards them instead.

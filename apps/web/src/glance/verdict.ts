@@ -36,6 +36,35 @@ import {
   type GlanceBlock,
   type SnapshotAnchor,
 } from "../projection/contract.ts";
+/**
+ * THE VERDICT'S SHAPE IS THE PACKAGE'S, AND THIS MODULE IMPORTS ITS OWN RETURN TYPE BACK
+ * (spec #439 §4.1, S3). All seven names used to be declared here; they are declared in
+ * `@numisma/components`'s `ui/glance-card.tsx` now, beside the component that renders
+ * them, and `referenceLabel` — a pure `string -> string` that is rendering vocabulary
+ * rather than derivation — MOVED there outright.
+ *
+ * THE CONSUMER DEFINES THE INTERFACE, which is the standard direction and also the only
+ * one that lets a cosmos fixture build a `Verdict` literal without importing `apps/web`
+ * — `seam-isolation.test.ts` forbids that outright. Every line of `computeVerdict` stays
+ * here, and nothing about what it emits changed.
+ *
+ * IT IS NOT A COPY WAITING TO DRIFT, because the arrow points both ways: this module
+ * RETURNS the package's `Verdict`, so a field added on either side stops compiling at
+ * the assignments below. `TriggerName` is the one that needed a second latch and gets it
+ * at {@link TRIGGER_PRECEDENCE}. The seven names are imported and NOT re-exported — the
+ * card and its structure test were their readers, and both are on the package side now.
+ */
+import { referenceLabel } from "@numisma/components";
+import type {
+  ChangeSlot,
+  FiredTrigger,
+  FundValueSlot,
+  ReserveSlot,
+  SuppressionReason,
+  TriggerName,
+  Verdict,
+} from "@numisma/components";
+import { NAV_MOVE_THRESHOLD_PCT } from "./nav-move-threshold.ts";
 import { addDays, asOfSortKey, calendarDateOf, daysBetween } from "../projection/as-of.ts";
 
 /* ────────────────────────────── the four triggers ─────────────────────────────── */
@@ -89,22 +118,17 @@ export const VENUE_DARK_MIN_DAYS = 1;
 export const RESERVE_FLOOR_WIRE_KEY = "glance.reserveTargetPct" as const;
 
 /**
- * `navMove` — 1.5% against the NAMED reference, UNSCALED.
+ * `navMove`'s threshold lives in its OWN IMPORT-FREE MODULE and is re-exported here
+ * (spec #439 review finding 5).
  *
- * THE HONEST CAVEAT, written down here rather than discovered later: this is a
- * per-STEP test, not a per-day one. When the nearest anchor is a multi-day step the
- * rule is LESS SENSITIVE per day — a 1.4% drift over three days is silent where the
- * same drift in one day would also be silent, but a genuinely eventful three-day
- * stretch can hide under one threshold. Acceptable now that launchd anchors daily and
- * the step is one day; the sparse stretch (06-26 → 06-30, and 07-03's three-day step
- * back to 06-30) is historical only.
- *
- * 1.5% picks the tails of the measured month honestly: it took three of the 28
- * anchored days it was chosen against and left 25. The measured day-over-day range that justifies the
- * choice is deliberately not quoted here — this repository is public, and the range
- * is the fund's best and worst days. It is recorded in the private notes vault.
+ * `push/fixture-synthesis.ts` takes this one constant and nothing else out of
+ * `glance/`, and taking it from this file put `@numisma/components` — and through the
+ * curated index, React and `@tanstack/charts` — on the unattended daily backfill's
+ * import graph. `./nav-move-threshold.ts` has no imports at all, so the push tree
+ * reads the number without reading this file. The re-export is what keeps every
+ * reader on this side unchanged; the rule and its caveat are documented there.
  */
-export const NAV_MOVE_THRESHOLD_PCT = 1.5;
+export { NAV_MOVE_THRESHOLD_PCT };
 
 /**
  * PRECEDENCE — `freshness > feedGap > venueDark > reserveFloor > navMove`, ranked by
@@ -153,9 +177,16 @@ export const TRIGGER_PRECEDENCE = [
   "venueDark",
   "reserveFloor",
   "navMove",
-] as const;
-
-export type TriggerName = (typeof TRIGGER_PRECEDENCE)[number];
+  // THE LATCH THAT REPLACED THE DERIVATION (spec #439 §4.1, S3). `TriggerName` was
+  // `(typeof TRIGGER_PRECEDENCE)[number]` — derived from this array, so the array could
+  // not disagree with the union because it DEFINED it. `@numisma/components` spells the
+  // union now, which makes this an independent value that could drift, and `satisfies`
+  // is what stops it: a sixth entry here with no member in the package's union stops
+  // compiling. The other direction is already held and gets stronger for free —
+  // `TRIGGERS` below is `satisfies Record<TriggerName, object>`, so a sixth member added
+  // to the package's union with no threshold entry stops compiling too. That half was
+  // self-referential before this slice and is a real cross-package check after it.
+] as const satisfies readonly TriggerName[];
 
 /**
  * THE EXHAUSTIVENESS LATCH for {@link TRIGGER_PRECEDENCE}, which is its whole job.
@@ -178,84 +209,6 @@ export const TRIGGERS = {
   // here stops compiling — not about the four thresholds sharing a shape, which they
   // deliberately do not (the Reserve floor is a wire key, not a number).
 } as const satisfies Record<TriggerName, object>;
-
-/* ─────────────────────────────────── the shape ────────────────────────────────── */
-
-/** One trigger that fired, with the sentence it would render as the verdict. */
-export interface FiredTrigger {
-  name: TriggerName;
-  sentence: string;
-}
-
-/**
- * Why a standing number is absent. An empty slot ALREADY means *suppressed* (V1/D7),
- * so it must never also mean "nothing to say" — every absence names its cause, and
- * the four causes are genuinely distinct:
- *
- *  - `unexpected-absence` — a mark the venue owed did not arrive (push-side, V1);
- *  - `no-policy` — no Reserve floor was in force as-of this anchor (R5);
- *  - `no-earlier-anchor` — D4's genesis case: there is no earlier anchor to compare
- *    against, so Change is absent by the same mechanism as any other missing input,
- *    with NO special-case copy;
- *  - `reference-withheld` — composition rule 1: the reference anchor's own numbers
- *    are suppressed, so the surface refuses to compare against a number it will not
- *    show.
- */
-export type SuppressionReason =
-  | "unexpected-absence"
-  | "no-policy"
-  | "no-earlier-anchor"
-  | "reference-withheld";
-
-/** A standing number that renders, or an absence that names its cause. */
-export interface FundValueSlot {
-  rendered: boolean;
-  usdValue?: number;
-  suppressedBy?: SuppressionReason;
-}
-
-/**
- * The Change slot. Its reference is ALWAYS named when one was resolved — including
- * when the number itself is suppressed, because "never claim a date you don't have;
- * always name the one you landed on" (V3) is about the date, not about the number.
- */
-export interface ChangeSlot {
-  rendered: boolean;
-  percent?: number;
-  referenceAsOf?: string;
-  referenceLabel?: string;
-  suppressedBy?: SuppressionReason;
-}
-
-export interface ReserveSlot {
-  rendered: boolean;
-  percentOfFund?: number;
-  floorPct?: number;
-  suppressedBy?: SuppressionReason;
-}
-
-export interface Verdict {
-  /** The anchor this verdict describes. */
-  asOf: string;
-  /** Whole days from that anchor to the wall clock — the freshness derivation. */
-  staleDays: number;
-  /** D1's answer. `false` is the default and, as measured, the common case. */
-  needsYou: boolean;
-  /** The ONE line. `fired[0]`'s sentence, or the standing *no*. */
-  sentence: string;
-  /**
-   * Everything that fired, in precedence order. No component renders it —
-   * `/big-picture` does not list it — but it is NOT dead: the replay suites read
-   * it to pin trigger precedence (audit finding 39).
-   */
-  fired: FiredTrigger[];
-  /** D3's closed set of exactly three standing numbers. All three always render. */
-  slots: {
-    fundValue: FundValueSlot;
-    change: ChangeSlot;
-    reserve: ReserveSlot;
-  };
-}
 
 /** The verdict sentence on a day nothing fired. */
 export const NOTHING_NEEDS_YOU = "Nothing needs you";
@@ -601,26 +554,6 @@ function breachDurationDays(
     days += 1;
   }
   return days;
-}
-
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTHS = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-];
-
-/**
- * `2026-07-13` → `Mon 13 Jul`. Read in UTC, for the same reason the push side does:
- * a local-time read of a bare calendar date lands on the previous day west of
- * Greenwich, which would print the wrong weekday for the reference the number was
- * actually computed against.
- */
-export function referenceLabel(asOf: string): string {
-  const date = new Date(`${asOf}T00:00:00Z`);
-  if (Number.isNaN(date.getTime())) {
-    throw new Error(`referenceLabel: ${JSON.stringify(asOf)} is not a calendar date`);
-  }
-  return `${WEEKDAYS[date.getUTCDay()]} ${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]}`;
 }
 
 /** One decimal, trailing zeros trimmed: `8.20` → `8.2`, `10` → `10`. */

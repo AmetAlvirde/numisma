@@ -2,14 +2,14 @@ import { Link, createFileRoute } from "@tanstack/react-router";
 import type { SnapshotAnchor } from "../projection/contract.ts";
 import { composeBigPicture } from "../glance/row-view.ts";
 import { getDashboard } from "../lib/dashboard.ts";
-import { Shell } from "../components/Shell.tsx";
 import {
   Crumb,
+  SectionTable,
+  Shell,
   SnapshotEmptyNotice,
   SnapshotStaleNotice,
+  SummaryCard,
 } from "@numisma/components";
-import { SummaryCard } from "../components/SummaryCard.tsx";
-import { SectionTable } from "../components/SectionTable.tsx";
 
 /**
  * `/big-picture` — the composition dashboard, MOVED here from `/` (D11), behavior

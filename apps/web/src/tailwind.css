@@ -206,6 +206,12 @@
 
   --color-destructive: var(--nms-destructive);
   --color-neg: var(--nms-neg);
+  --color-pos: var(--nms-pos);
+
+  --color-ok: var(--nms-ok);
+  --color-warn: var(--nms-warn);
+
+  --color-now: var(--nms-now);
 
   --radius-md: var(--nms-radius-md);
 }

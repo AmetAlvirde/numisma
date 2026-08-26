@@ -26,47 +26,24 @@
  * assert that both names RESOLVE — jsdom lays nothing out and answers no container query
  * — so the value half is Chrome's, by binary-searching the reflow width.
  *
- * THE VERDICT IS AUTHORED, not composed through `verdict.ts`. This file asserts markup,
- * and `verdict.test.ts` is the oracle for what the fields should contain; a fixture that
- * ran the real derivation would test the derivation twice and pin the markup once. No
- * ledger output has been near this file.
+ * THE VERDICT IS AUTHORED, not composed through `verdict.ts`, and since spec #439 S3 it
+ * lives in `glance-card.fixtures.ts` beside the component rather than in this file. Same
+ * literal, three readers: this test, the workbench's cosmos fixture, and whatever renders
+ * the glance next. `apps/web/src/glance/verdict.test.ts` stays the oracle for what the
+ * fields should contain; a fixture that ran the real derivation would test the derivation
+ * twice and pin the markup once. No ledger output has been near this file.
  */
 import { describe, expect, it } from "vitest";
 
 import {
   classTokens as tokens,
-  DELETED_IN_SLICE_2,
-  DELETED_IN_SLICE_3,
-  DELETED_IN_SLICE_5,
   render,
-  renderedClassNames,
   absentSlots,
-  expectNoStyledClassSurvives,
   screen,
-} from "../render.testkit.tsx";
-import { CARD_SURFACE } from "@numisma/components";
-import { GlanceCard } from "./GlanceCard.tsx";
-import type { Verdict } from "../glance/verdict.ts";
-
-/** The widest arm: one rendered slot, one suppressed slot with a named reference. */
-function standingVerdict(): Verdict {
-  return {
-    asOf: "2026-01-05",
-    staleDays: 0,
-    needsYou: false,
-    sentence: "Nothing needs you.",
-    fired: [],
-    slots: {
-      fundValue: { rendered: true, usdValue: 1234.5 },
-      change: {
-        rendered: false,
-        referenceLabel: "Mon 5 Jan",
-        suppressedBy: "reference-withheld",
-      },
-      reserve: { rendered: true, percentOfFund: 12.25, floorPct: 10 },
-    },
-  };
-}
+} from "../testkit/render.testkit";
+import { CARD_SURFACE } from "./card";
+import { GlanceCard } from "./glance-card";
+import { standingVerdict } from "./glance-card.fixtures";
 
 describe("GlanceCard on the shared Card", () => {
   it("renders no heading — the verdict sentence opens the card", () => {
@@ -84,11 +61,13 @@ describe("GlanceCard on the shared Card", () => {
       expect(tokens(root)).toContain(utility);
     }
 
-    // `.muted` was `color: var(--muted); margin: 4px 0 0`. Preflight is off, so the
-    // three zeroed edges are as load-bearing as the one that is not.
+    // `.muted` was the recessed type colour plus `margin: 4px 0 0`. Preflight is off, so
+    // the three zeroed edges are as load-bearing as the one that is not. The colour is
+    // `--nms-muted-foreground` since spec #439 S3, which is this card's OWN read rather
+    // than one inherited from a constant `SummaryCard` owns.
     const asOf = screen.getByText(/^as of/);
     expect(asOf.tagName).toBe("P");
-    for (const utility of ["text-[var(--muted)]", "m-0", "mt-1"]) {
+    for (const utility of ["text-[var(--nms-muted-foreground)]", "m-0", "mt-1"]) {
       expect(tokens(asOf)).toContain(utility);
     }
 
@@ -97,7 +76,7 @@ describe("GlanceCard on the shared Card", () => {
     // declarations are on the spans themselves, since the context is static here.
     const reference = screen.getByText(/floor/);
     for (const utility of [
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
       "text-[0.75rem]",
       "font-medium",
       "m-0",
@@ -136,16 +115,19 @@ describe("GlanceCard on the shared Card", () => {
     }
 
     // INVERTED AGAINST THE CLASS NAMES THAT ARE GONE, and unchanged: `.verdict-no` — the
-    // settled arm — was `var(--pos)`, and `.verdict-yes`, the arm that needs the operator,
-    // was `var(--neg)`. The alarming answer gets the alarming colour.
-    expect(tokens(settled)).toContain("text-[var(--pos)]");
+    // settled arm — took the POSITIVE colour, and `.verdict-yes`, the arm that needs the
+    // operator, took the NEGATIVE one. The alarming answer gets the alarming colour.
+    // NEITHER SPELLING IS THIS CARD'S. `POSITIVE`, `NEGATIVE` and the four `METRICS_*`
+    // strings are `SummaryCard`'s and crossed in spec #439 S1; the card's own reads are
+    // the four `--nms-muted-foreground` ones, above and below, which crossed at S3.
+    expect(tokens(settled)).toContain("text-[var(--nms-pos)]");
 
     const alarming = standingVerdict();
     alarming.needsYou = true;
     alarming.sentence = "Reserve is under its floor.";
     render(<GlanceCard verdict={alarming} />);
     expect(tokens(screen.getByText("Reserve is under its floor."))).toContain(
-      "text-[var(--neg)]",
+      "text-[var(--nms-neg)]",
     );
   });
 
@@ -181,7 +163,7 @@ describe("GlanceCard on the shared Card", () => {
       expect(tokens(row)).toContain(utility);
     }
 
-    for (const utility of ["text-[var(--muted)]", "text-[0.8rem]"]) {
+    for (const utility of ["text-[var(--nms-muted-foreground)]", "text-[0.8rem]"]) {
       expect(tokens(screen.getByText("Fund value"))).toContain(utility);
     }
     for (const utility of [
@@ -205,7 +187,7 @@ describe("GlanceCard on the shared Card", () => {
       referenceLabel: "Mon 5 Jan",
     };
     render(<GlanceCard verdict={rising} />);
-    expect(tokens(screen.getByText(/▲/))).toContain("text-[var(--pos)]");
+    expect(tokens(screen.getByText(/▲/))).toContain("text-[var(--nms-pos)]");
 
     const falling = standingVerdict();
     falling.slots.change = {
@@ -214,24 +196,7 @@ describe("GlanceCard on the shared Card", () => {
       referenceLabel: "Mon 5 Jan",
     };
     render(<GlanceCard verdict={falling} />);
-    expect(tokens(screen.getByText(/▼/))).toContain("text-[var(--neg)]");
-  });
-
-  it("writes none of the deleted class names", () => {
-    const { container } = render(<GlanceCard verdict={standingVerdict()} />);
-    const rendered = renderedClassNames(container.firstElementChild!);
-
-    for (const deleted of [
-      ...DELETED_IN_SLICE_2,
-      ...DELETED_IN_SLICE_3,
-      ...DELETED_IN_SLICE_5,
-    ]) {
-      expect([...rendered]).not.toContain(deleted);
-    }
-    // `absent` WAS the one hook that stayed, for three later slices' contextual rules.
-    // Slice 8 deleted the last of them (`.fp-detail .absent`) and the hook with it, so
-    // the claim flips: nothing renders the name, because nothing selects it.
-    expect([...rendered]).not.toContain("absent");
+    expect(tokens(screen.getByText(/▼/))).toContain("text-[var(--nms-neg)]");
   });
 
   it("still mounts the suppressed change's `Absent`, em dash and stated cause", () => {
@@ -251,38 +216,5 @@ describe("GlanceCard on the shared Card", () => {
     // The fixture withholds the reference, so the cause is that vocabulary's words and
     // not the primitive's `suppressed` default.
     expect(slots[0]?.textContent).toBe("—reference withheld");
-  });
-});
-
-/**
- * THE TERMINAL ASSERTION (spec #420 Seam E, slice 9), on all five census successors and
- * the shell's.
- *
- * THE SET OF CLASS NAMES THIS SURFACE RENDERS, INTERSECTED WITH THE SET OF CLASS
- * SELECTORS LEFT IN `styles.css`, IS EMPTY. That is the mechanical proof that no house
- * rule survives WITH A CARRIER — the failure mode the nine deletion guards cannot see,
- * because each of them knows only the names its own slice took.
- *
- * IT COULD ONLY LAND HERE. Every slice but the last renders a class the file still
- * styles, on purpose: that is what a nine-slice migration through a shared stylesheet
- * looks like from the inside. The assertion is false by design for eight slices and true
- * for good afterwards.
- *
- * IT IS NOT A RESTATEMENT OF "THE FILE HAS NO RULES". `styles-css-end-state.test.ts` says
- * that about the file; this says something the file cannot know — that nothing RENDERED
- * reaches whatever is in it. A rule added back under a name no guard lists goes red here
- * the moment a component writes its class.
- *
- * AND AT THE END STATE IT CARRIES ITS OWN NEGATIVE CONTROL, because the file it reads is
- * now empty of rules and the intersection is therefore empty for free.
- * `expectNoStyledClassSurvives` re-runs the identical walk against a probe sheet built
- * from this surface's own render, so a blank render, a reader that stopped reading or an
- * intersection that never intersects reds here instead of passing green. What the claim
- * is worth is written in that helper's docblock.
- */
-describe("no rule left in styles.css reaches this surface", () => {
-  it("renders no class name the stylesheet still selects", () => {
-    const { container } = render(<GlanceCard verdict={standingVerdict()} />);
-    expectNoStyledClassSurvives(container);
   });
 });

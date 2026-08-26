@@ -34,20 +34,25 @@ a contract rather than an accident.
   Tailwind build scan the class strings inside it. Adding a build step here
   removes the scanning.
 - **No CSS at all.** Not a stylesheet, not a `@theme` block, not a token file.
-- **The token specification**, `NMS_TOKENS` in `src/tokens.ts`: fifteen
+- **The token specification**, `NMS_TOKENS` in `src/tokens.ts`: nineteen
   `--nms-*` names today, each with a grayscale default and a note saying what
   reads it. The names are read off component source, not pasted from an upstream
   shadcn theme, so a token a consumer is asked to define is always a token
-  something renders. Spec #432 wave 1 minted the last three
-  (`--nms-card`, `--nms-muted-foreground`, `--nms-neg`), each in the slice that
-  moved the component reading it. Four more names are written down in the
-  file's header table and deliberately unminted, waiting on the component that
-  reads them.
+  something renders. Spec #432 wave 1 minted three (`--nms-card`,
+  `--nms-muted-foreground`, `--nms-neg`); spec #439 wave 2 minted the
+  remaining four (`--nms-pos`, `--nms-ok`, `--nms-warn`, `--nms-now`), each in
+  the slice that moved the component first reading it. All ten names the
+  header table names are minted now, and none is waiting.
 - **A curated export surface.** `src/index.ts` names each export by hand. Today
-  that is seven components — `Absent`, `Button`, `Card`, `CardTitle`, `Crumb`,
-  `SnapshotEmptyNotice` and `SnapshotStaleNotice` — plus `buttonVariants`, the
-  two data exports `CARD_SURFACE` and `NOTICE_CODE`, `cn`, and the token spec.
-  No `export *`.
+  that is fifteen components — `Absent`, `Button`, `Card`, `CardTitle`, `Crumb`,
+  `DcaCard`, `FillPathCards`, `FillPathProvider`, `GlanceCard`,
+  `PriceDropPathChart`, `SectionTable`, `Shell`, `SummaryCard`,
+  `SnapshotEmptyNotice` and `SnapshotStaleNotice` — plus the frozen `FillPath`
+  object its parts hang off, the `useFillPath` and `useFillPathSelection`
+  hooks, `buttonVariants`, `referenceLabel`, the row-level constants
+  (`TABLE_CELL` and its table siblings, the four `METRICS_*` names,
+  `POSITIVE`/`NEGATIVE`), the two data exports `CARD_SURFACE` and
+  `NOTICE_CODE`, `cn`, and the token spec. No `export *`.
 - **No `paths` in the package tsconfig**, deliberately. A stray `@/` specifier
   is a typecheck failure rather than a bundler-specific silence, so the package
   proves its own self-containment on every `pnpm typecheck`.
@@ -149,8 +154,7 @@ may claim a theming result from a text search.
 | The workbench imports nothing from `apps/web` | [`apps/workbench/src/seam-isolation.test.ts`](../apps/workbench/src/seam-isolation.test.ts) | source scan |
 | The app's own source is scanned | [`apps/web/src/app-scan-sentinel.test.ts`](../apps/web/src/app-scan-sentinel.test.ts) | built CSS text |
 | No `@theme` colour utility in app code | [`apps/web/src/theme-color-utilities.test.ts`](../apps/web/src/theme-color-utilities.test.ts) | source text |
-| `styles.css` holds no rule, only tokens | [`apps/web/src/styles-css-end-state.test.ts`](../apps/web/src/styles-css-end-state.test.ts) | CSS text |
-| No class a surface renders is selected by `styles.css` | the six `apps/web/src/components/*-structure.test.tsx` | DOM ∩ CSS text |
+| `styles.css` holds no rule, only tokens, which subsumes "no class survives it" | [`apps/web/src/styles-css-end-state.test.ts`](../apps/web/src/styles-css-end-state.test.ts) | CSS text |
 
 The first four rows are the four standing guards, and each is required to fail on
 its own negative control: remove the package `@source` line, remove `@source
@@ -283,6 +287,26 @@ header table is what a migrating file looks the name up in rather than guessing.
 namespace; nothing catches the right namespace with the wrong name in it, which
 is why the table exists.
 
+Spec #439 wave 2 finished the move: the seven components still carrying real
+product state — `Shell`, `SummaryCard`, `SectionTable`, `GlanceCard`,
+`DcaCard`, `PriceDropPathChart` and `FillPath` — followed the same rewrite, and
+`apps/web/src/components/` no longer exists. **The package declares each
+component's prop type; `apps/web` imports it back.** `glance/verdict.ts`, for
+instance, imports `type { Verdict } from "@numisma/components"` rather than the
+package importing a type from the app — the consumer defines the interface,
+which is what lets a workbench fixture build a prop literal without ever
+importing `apps/web`. Each component's test file moved with it, and the render
+harness ADR-022 bought split in two: the DOM-rendering half —
+`render`, `classCensus`, `renderedClassNames` and the RTL re-exports — is now
+`packages/components/src/testkit/render.testkit.tsx`, the package's own render
+harness; the half that read `apps/web/src/styles.css` to prove no leftover
+house rule matched a rendered class was retired as scaffolding once
+`styles-css-end-state.test.ts` made that property hold globally instead (see
+§4 and §8). The two route tests that still render a package component from
+`apps/web` — `auth-card-utilities.test.tsx` and
+`login-submit-button.test.tsx` — import the harness from that package subpath,
+the same form the repo already uses for `@numisma/components/tokens.ts`.
+
 ## 7. Two conventions about package source
 
 Both are house rules with a cost attached, and both are decided here so a file
@@ -364,11 +388,14 @@ Two properties of that file are worth knowing before editing it. It is
 **unlayered**, which is what makes it beat the package's generated defaults even
 though `__root.tsx` links it first; the defaults arrive under `layer(theme)` and
 unlayered CSS beats every cascade layer regardless of order or specificity. And
-it holds **no rule**, which two tests enforce from opposite ends:
-`styles-css-end-state.test.ts` asserts the file holds exactly two rules, both
-`:root`, and the terminal assertion in each of the six `*-structure.test.tsx`
-files asserts that no class a component renders is selected by anything left in
-it.
+it holds **no rule**: `styles-css-end-state.test.ts` asserts the file holds
+exactly two rules, both `:root`, which subsumes the per-component check that used
+to stand beside it. Each of the six moved `*-structure.test.tsx` files carried
+its own terminal assertion that no class it rendered was selected by anything
+left in `styles.css` (`expectNoStyledClassSurvives`); spec #439 S0 retired it as
+scaffolding once the file's zero class selectors made every such assertion
+unfailable, and the property those six tests used to prove per component is now
+held once, globally, by `styles-css-end-state.test.ts` alone.
 
 **Theme colour utilities are package-only in app code.** `bg-primary`,
 `border-border`, `text-muted` and the rest of the `@theme` vocabulary belong to

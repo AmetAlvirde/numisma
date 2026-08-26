@@ -51,32 +51,30 @@
  * works inside `FillPathCards` has not been decoupled, it has been renamed, so every part
  * is mounted by itself against the provider and nothing else.
  *
- * The fixture is authored: `started-ladder.fixtures.ts` is hand-written and its own tests
- * say so. No ledger output has been near this file.
+ * The fixture is authored: `fill-path.fixtures.ts` was transcribed from a hand-written
+ * app fixture whose own tests say so. No ledger output has been near this file.
  */
 import { describe, expect, it } from "vitest";
 
-import { fireEvent, render, userEvent, within } from "../render.testkit.tsx";
-import {
-  FillPath,
-  FillPathCards,
-  FillPathProvider,
-  useFillPathSelection,
-} from "./FillPath.tsx";
-import { composeFillPathPage } from "../ladder/fill-path-view.ts";
-import { ladderFixture } from "../ladder/started-ladder.fixtures.ts";
-import { CARD_SURFACE } from "@numisma/components";
-
-/** The widest fixture: filled rungs, waiting rungs and a live spot, so every card draws. */
-function partlyWalkedView() {
-  const fixture = ladderFixture("partly-walked");
-  if (fixture === undefined) throw new Error("fixture `partly-walked` is gone");
-  const page = composeFillPathPage(fixture.anchor, fixture.planId, fixture.spot);
-  if (page.status !== "ok") {
-    throw new Error(`fixture composed to \`${page.status}\`, not a page`);
-  }
-  return page.view;
-}
+import { fireEvent, render, userEvent, within } from "../testkit/render.testkit";
+import { CARD_SURFACE } from "./card";
+/**
+ * THE SEAM AND EVERY PART IT COORDINATES ARE NOW ON ONE SIDE (spec #439 S9).
+ *
+ * The file stayed in `apps/web` through S6 to S8 and that was evidentiary rather than
+ * incidental: it ran the whole contract below against a provider that had already
+ * crossed into the package while the four parts it coordinates were still app-side. S9
+ * moved the last part and deleted `apps/web/src/components/`, so there is nothing left
+ * for the file to straddle and it lands here beside what it mounts.
+ *
+ * WHAT IT GAVE UP TO CROSS. It reached every view through
+ * `composeFillPathPage(ladderFixture(name))`, which a package test cannot call (§4.3);
+ * it now reads the authored literal from `fill-path.fixtures.ts`. That literal is not
+ * taken on trust — `apps/web/src/ladder/fill-path-fixture-equivalence.test.ts` deep-
+ * compares it against what the composer emits, on all four ladder states.
+ */
+import { FillPath, FillPathCards, FillPathProvider, useFillPathSelection } from "./fill-path";
+import { partlyWalkedView } from "./fill-path.fixtures";
 
 /**
  * The tabbable selector, spelled the same way `fill-path-chart-a11y.test.tsx` spells it:
@@ -122,9 +120,14 @@ function rungRows(container: Element): HTMLButtonElement[] {
  * that was handed to it — a test that re-read `selectedKey` would be asserting the
  * expression it is supposed to be checking.
  *
- * The selection mark is the only `circle` on the chart filled with `--text`: every rung
- * ring is hollow (`--card`) and the halo beneath the disc is the page background
- * (`--bg`). `PriceDropPathChart` says why those three fills are what they are. The
+ * The selection mark is the only `circle` on the chart filled with the neutral ink: every
+ * rung ring is hollow, filled with the card's own surface so the line reads through it,
+ * and the halo beneath the disc is the page background, punching a clear hole so the disc
+ * lands on empty space. Three fills, three roles, and `PriceDropPathChart` says why each
+ * is what it is. THE SPELLINGS ARE THE PACKAGE'S since the chart crossed into
+ * `@numisma/components` (spec #439 S5) — `--nms-foreground`, `--nms-card` and
+ * `--nms-background`, which `styles.css` aliases onto the same three house colours, so
+ * the painted picture is unchanged and only the query below moved. The
  * adapter carries the datum's own `key` at the end of the element's `data-ts-key`, which
  * is what lets this name a RUNG rather than a coordinate — a pixel assertion would be
  * meaningless anyway, since jsdom lays every element out at zero.
@@ -134,7 +137,7 @@ function rungRows(container: Element): HTMLButtonElement[] {
  */
 function chartSelectionKey(container: Element): string {
   const discs = [
-    ...container.querySelectorAll('.fp-chart circle[fill="var(--text)"]'),
+    ...container.querySelectorAll('.fp-chart circle[fill="var(--nms-foreground)"]'),
   ];
   if (discs.length !== 1) {
     throw new Error(`the chart drew ${discs.length} selection discs, not exactly one`);

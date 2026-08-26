@@ -26,39 +26,22 @@
  * the top margin and the alignment. Preflight is off, so the UA's `<dd>` margin is live
  * and `m-0` is as load-bearing as anything beside it.
  *
- * THE SUMMARY IS AUTHORED. No ledger output has been near this file.
+ * THE SUMMARY IS AUTHORED, and it now lives in `summary-card.fixtures.ts` beside the
+ * component rather than in this file (spec #439 §4.3). Same literal, three readers: this
+ * test, the workbench's cosmos fixture, and whatever renders the card next. No ledger
+ * output has been near it.
  */
 import { describe, expect, it } from "vitest";
 
 import {
   classTokens as tokens,
-  DELETED_IN_SLICE_2,
-  DELETED_IN_SLICE_3,
   render,
-  renderedClassNames,
   absentSlots,
-  expectNoStyledClassSurvives,
   screen,
-} from "../render.testkit.tsx";
-import { CARD_SURFACE } from "@numisma/components";
-import { SummaryCard } from "./SummaryCard.tsx";
-import type { DashboardSummary } from "@numisma/engine";
-
-function cleanSummary(): DashboardSummary {
-  return {
-    fundName: "Test Fund",
-    asOf: "2026-01-05",
-    fundValueUsd: 1000,
-    usdMxn: 18.5,
-    totalUnrealizedPnlUsd: 100,
-    dataSafety: {
-      nonLiveExcluded: 0,
-      invalidExcluded: 0,
-      shortDeferredExcluded: 0,
-      hasWarnings: false,
-    },
-  };
-}
+} from "../testkit/render.testkit";
+import { CARD_SURFACE } from "./card";
+import { SummaryCard } from "./summary-card";
+import { cleanSummary } from "./summary-card.fixtures";
 
 /** Every utility in `expected` is on `element`, one assertion per class. */
 function expectUtilities(element: Element, expected: string[]): void {
@@ -91,7 +74,7 @@ describe("SummaryCard on the shared Card", () => {
     // `.muted` plain — colour and all four margin edges, preflight being off.
     const asOf = screen.getByText(/^as of/);
     expect(asOf.tagName).toBe("P");
-    expectUtilities(asOf, ["text-[var(--muted)]", "m-0", "mt-1"]);
+    expectUtilities(asOf, ["text-[var(--nms-muted-foreground)]", "m-0", "mt-1"]);
   });
 
   it("is the query container the shared 380px breakpoint names", () => {
@@ -156,7 +139,7 @@ describe("SummaryCard on the shared Card", () => {
     );
 
     expectUtilities(screen.getByText("Fund value"), [
-      "text-[var(--muted)]",
+      "text-[var(--nms-muted-foreground)]",
       "text-[0.8rem]",
     ]);
     expectUtilities(screen.getByText("18.50").closest("dd")!, [
@@ -175,7 +158,7 @@ describe("SummaryCard on the shared Card", () => {
       <SummaryCard summary={cleanSummary()} usdMxn={18.5} fundValueRendered />,
     );
     const pnl = screen.getByText(/^\$100/);
-    expectUtilities(pnl, ["text-[var(--pos)]"]);
+    expectUtilities(pnl, ["text-[var(--nms-pos)]"]);
 
     render(
       <SummaryCard
@@ -184,7 +167,7 @@ describe("SummaryCard on the shared Card", () => {
         fundValueRendered
       />,
     );
-    expectUtilities(screen.getByText(/^-\$100/), ["text-[var(--neg)]"]);
+    expectUtilities(screen.getByText(/^-\$100/), ["text-[var(--nms-neg)]"]);
   });
 
   it("carries both badge arms, and wraps only inside the head", () => {
@@ -200,7 +183,7 @@ describe("SummaryCard on the shared Card", () => {
       "text-[0.78rem]",
       "font-semibold",
       "whitespace-nowrap",
-      "bg-[var(--ok)]",
+      "bg-[var(--nms-ok)]",
       "text-white",
     ]);
     // `.badge`'s `nowrap` was overridden for EXACTLY ONE PLACEMENT and the override is
@@ -220,37 +203,11 @@ describe("SummaryCard on the shared Card", () => {
     // By title, not by text: the badge and the em dash beneath it spell the SAME cause
     // from the same constant, deliberately, so the words are not a unique handle.
     expectUtilities(screen.getByTitle("Withheld or excluded data"), [
-      "bg-[var(--warn)]",
+      "bg-[var(--nms-warn)]",
       "text-white",
       "whitespace-nowrap",
       "[header_&]:whitespace-normal",
     ]);
-  });
-
-  it("writes none of the deleted class names, on either arm", () => {
-    const clean = render(
-      <SummaryCard summary={cleanSummary()} usdMxn={18.5} fundValueRendered />,
-    );
-    const suppressed = render(
-      <SummaryCard
-        summary={cleanSummary()}
-        usdMxn={18.5}
-        fundValueRendered={false}
-      />,
-    );
-
-    for (const { container } of [clean, suppressed]) {
-      const rendered = [...renderedClassNames(container.firstElementChild!)];
-      for (const deleted of [...DELETED_IN_SLICE_2, ...DELETED_IN_SLICE_3]) {
-        expect(rendered).not.toContain(deleted);
-      }
-    }
-    // The suppressed arm is the one that renders an `Absent`, and its hook is GONE:
-    // slice 8 took `.fp-detail .absent`, the last contextual rule selecting through it,
-    // so the primitive stopped writing a name with nothing behind it.
-    expect([
-      ...renderedClassNames(suppressed.container.firstElementChild!),
-    ]).not.toContain("absent");
   });
 
   it("still mounts both suppressed figures' `Absent`, em dash and stated cause", () => {
@@ -278,38 +235,5 @@ describe("SummaryCard on the shared Card", () => {
           .container,
       ),
     ).toHaveLength(0);
-  });
-});
-
-/**
- * THE TERMINAL ASSERTION (spec #420 Seam E, slice 9), on all five census successors and
- * the shell's.
- *
- * THE SET OF CLASS NAMES THIS SURFACE RENDERS, INTERSECTED WITH THE SET OF CLASS
- * SELECTORS LEFT IN `styles.css`, IS EMPTY. That is the mechanical proof that no house
- * rule survives WITH A CARRIER — the failure mode the nine deletion guards cannot see,
- * because each of them knows only the names its own slice took.
- *
- * IT COULD ONLY LAND HERE. Every slice but the last renders a class the file still
- * styles, on purpose: that is what a nine-slice migration through a shared stylesheet
- * looks like from the inside. The assertion is false by design for eight slices and true
- * for good afterwards.
- *
- * IT IS NOT A RESTATEMENT OF "THE FILE HAS NO RULES". `styles-css-end-state.test.ts` says
- * that about the file; this says something the file cannot know — that nothing RENDERED
- * reaches whatever is in it. A rule added back under a name no guard lists goes red here
- * the moment a component writes its class.
- *
- * AND AT THE END STATE IT CARRIES ITS OWN NEGATIVE CONTROL, because the file it reads is
- * now empty of rules and the intersection is therefore empty for free.
- * `expectNoStyledClassSurvives` re-runs the identical walk against a probe sheet built
- * from this surface's own render, so a blank render, a reader that stopped reading or an
- * intersection that never intersects reds here instead of passing green. What the claim
- * is worth is written in that helper's docblock.
- */
-describe("no rule left in styles.css reaches this surface", () => {
-  it("renders no class name the stylesheet still selects", () => {
-    const { container } = render(<SummaryCard summary={cleanSummary()} usdMxn={18.5} fundValueRendered />);
-    expectNoStyledClassSurvives(container);
   });
 });

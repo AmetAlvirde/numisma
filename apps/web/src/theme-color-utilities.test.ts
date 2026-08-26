@@ -29,6 +29,13 @@ import { describe, expect, it } from "vitest";
  * lost: `styles.css` is the one place colour is defined either way, and D5 mints
  * no new tokens to make this read shorter.
  *
+ * WHAT THIS NOW WATCHES IS ROUTE MARKUP, NOT COMPONENT MARKUP (spec #439 §4.5). The
+ * seven components that used to sit under `src/components` are moving into
+ * `@numisma/components` one slice at a time, and each one leaves this scan as it goes.
+ * The rule has not changed; the tree it applies to has. What is left when the wave lands
+ * is `router.tsx`, `routes/__root.tsx` and the five route files — which is exactly where
+ * `text-muted` can still be typed by hand.
+ *
  * PACKAGE SOURCE IS EXEMPT BY CONSTRUCTION, not by an exception list. It lives
  * outside the tree scanned below, and `bg-primary` on the package `Button` is
  * exactly right there — that is the vocabulary those utilities belong to.
@@ -50,6 +57,16 @@ const SRC = dirname(fileURLToPath(import.meta.url));
  * narrow the guard at the same moment it narrowed the theme. The lists are
  * short, they change roughly never, and `tailwind.css`'s header carries the same
  * rule in prose.
+ *
+ * THE LIST IS LITERAL, AND A SUBSET FLOOR HOLDS IT COMPLETE (spec #439 review
+ * finding 2). Keeping it literal buys the paragraph above, and it costs the
+ * mirror failure: a mapping ADDED to `@theme` widens the theme and leaves the
+ * guard where it was, so the new name becomes typeable in app code with nothing
+ * red. That is what happened here — `pos`, `ok`, `warn` and `now` were minted at
+ * §4.5 and listed nowhere, and `neg` and `card` had been unlisted since before
+ * this wave. The case below asserts one direction only: every name `@theme` maps
+ * must appear here. It can therefore only ever WIDEN this list, never narrow it,
+ * which is the direction the paragraph above rules out.
  */
 const COLOR_PREFIXES = [
   "bg",
@@ -75,6 +92,12 @@ const THEME_COLOR_NAMES = [
   "primary",
   "secondary",
   "destructive",
+  "card",
+  "neg",
+  "pos",
+  "ok",
+  "warn",
+  "now",
 ];
 
 /**
@@ -113,7 +136,14 @@ describe("no theme colour utility in app code", () => {
     // Guards the guard. A walker that stopped returning files — a moved tree, a
     // renamed extension — would pass every case below over an empty list and
     // report the strongest possible green for having looked at nothing.
-    expect(appComponents.length).toBeGreaterThan(10);
+    //
+    // THE FLOOR IS THE WAVE'S END STATE, SET ONCE (spec #439 §4.5). This is a
+    // false-pass floor, not a census: its job is to prove the walk still returns
+    // files. The count falls monotonically from fifteen to seven as the domain
+    // migration moves each component out, so a floor true at seven is true at every
+    // step in between — and the alternative was five separate edits to one number,
+    // each of which reads in review as somebody weakening a guard.
+    expect(appComponents.length).toBeGreaterThan(6);
   });
 
   it.each(appComponents.map((path) => relative(SRC, path)))(
@@ -142,6 +172,28 @@ describe("the convention is written down where the utilities are created", () =>
     expect(header).toContain("THEME COLOUR UTILITIES ARE PACKAGE-ONLY");
     expect(header).toContain("IS THE TRAP, AND IT COMPILES");
     expect(header).toContain("theme-color-utilities.test.ts");
+  });
+
+  it("lists every colour name `@theme` maps", () => {
+    // THE GUARD CANNOT BE NARROWER THAN THE THEME. `THEME_COLOR_NAMES` is literal
+    // for the reason its docblock gives, and this is the one derivation that costs
+    // nothing: it reads the map and demands the list COVER it. A mapping deleted
+    // from `tailwind.css` leaves this green and the list one name wide of the
+    // theme, which is harmless; a mapping added without a matching list entry is
+    // a hole, and that is what reds.
+    const tailwindCss = readFileSync(join(SRC, "tailwind.css"), "utf8");
+    const theme = tailwindCss.slice(tailwindCss.indexOf("@theme {"));
+    const mapped = [
+      ...new Set(
+        [...theme.matchAll(/^\s*--color-([a-z-]+)\s*:/gm)].map((match) =>
+          (match[1] as string).replace(/-foreground$/, ""),
+        ),
+      ),
+    ].sort();
+    // The floor guards the derivation itself: a `@theme` block this regex stopped
+    // reading would assert an empty set against the list and pass.
+    expect(mapped.length).toBeGreaterThan(8);
+    expect(mapped.filter((name) => !THEME_COLOR_NAMES.includes(name))).toEqual([]);
   });
 });
 

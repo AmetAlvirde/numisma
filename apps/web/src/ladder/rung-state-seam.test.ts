@@ -12,17 +12,21 @@
  * NOTHING ELSE WOULD HAVE CAUGHT IT WHEN THIS WAS WRITTEN. There was no component-test
  * toolchain then (D1, deferred), so the components' branches were only reachable through
  * the view they are handed. There is one now (ADR-022), and the structural half below
- * stays anyway: it asserts that NO file in `apps/web` compares state copy, which is a
- * census over source and not a property of any one mounted tree. A regex here retires
+ * stays anyway: it asserts that NO file in either scanned tree compares state copy, which
+ * is a census over source and not a property of any one mounted tree. A regex here retires
  * only in the commit where a render test makes the same claim — spec #403's own rule —
- * and none has yet. The invariant is asserted at the crossing, in the two forms that
- * together close it:
+ * and none has yet, because the two claims are different: a render test proves which
+ * branch a mounted tree takes on the states it happens to render, and this scan asserts
+ * that no file anywhere spells a branch against words, which is the claim that survives a
+ * state nobody thought to fixture. The invariant is asserted at the crossing, in the two
+ * forms that together close it:
  *
  *  1. BEHAVIORALLY — reword every `label` on the wire and the composed view is unchanged,
  *     field for field. The web's answer does not depend on the engine's words.
  *  2. STRUCTURALLY — no state copy is compared in the components (or anywhere in
- *     `apps/web`), read off the source the way `glance/row-view.test.ts` reads its own.
- *     A behavioral test cannot see a branch a component takes; this can.
+ *     `apps/web/src` or `packages/components/src`), read off the source the way
+ *     `glance/row-view.test.ts` reads its own. A behavioral test cannot see a branch a
+ *     component takes; this can.
  *
  * ── MUTATION CHECK (performed 2026-08-12) ───────────────────────────────────────────
  *  - restored the old coupling in `fill-path-view.ts` (`if (rung.label !== undefined)
@@ -33,8 +37,20 @@
  *    suite: green, and the fixture surface unchanged — which is the property, not a gap.
  *    Under the old code the same edit changed what every waiting row printed.
  *  - put `rung.stateCopy === "waiting"` back into `Pills` → "compares no state copy in a
- *    component" red on `FillPath.tsx`. Right reason: the structural half exists precisely
- *    because no test can render `Pills`.
+ *    component" red on `FillPath.tsx`. Right reason: the structural half sees a branch no
+ *    behavioral test was asking about.
+ *
+ * ── MUTATION CHECK, RE-RUN AFTER THE WIDENING (spec #439 S8, 2026-08-25) ────────────
+ *  - with `Pills` in its new home and the scan NOT yet widened, the same
+ *    `rung.stateCopy === "waiting"` mutation → GREEN. Six tests passed. That is the whole
+ *    argument for this slice's edit written as a result: the guard had stopped asking.
+ *  - the same mutation against the widened scan → red, `packages/components/src/ui/
+ *    fill-path.tsx: reads stateCopy for something other than rendering` AND `: compares
+ *    the words "waiting"`, both halves firing on the package path. Reverted from a `cp`
+ *    backup and the file re-run green.
+ *  - filtered the package walk to nothing (`.filter(() => false)`) → red, `expected 0 to
+ *    be greater than 0`. A widened scan floored on one tree alone would have been green
+ *    over a tree it never read, which is this guard's own failure mode one level up.
  *
  * ── THE HOLES IN THE FIRST STRUCTURAL SCAN, AND THE CHECK THAT CLOSED THEM ──────────
  * A review of PR #308 showed the scan above passing SIX spellings of a copy-driven branch
@@ -70,13 +86,50 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { sourceFiles } from "../../../../ops/testkit/repo-sources.testkit.js";
+import { REPO_ROOT, sourceFiles } from "../../../../ops/testkit/repo-sources.testkit.js";
 import { composeFillPathPage, type FillPathView } from "./fill-path-view.ts";
 import { rungStateCopy } from "./rung-state-copy.ts";
 import { STARTED_LADDER_FIXTURES } from "./started-ladder.fixtures.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WEB_SRC = join(HERE, "..");
+
+/**
+ * THE TWO TREES THE SCAN COVERS, repo-relative, which is also how every path it reports
+ * is keyed (spec #439 S8).
+ *
+ * ── WHY A SECOND TREE, AND WHY THE GUARD WAS GREEN THE WHOLE TIME ───────────────────
+ * The structural scan below was written over `apps/web/src` because that is where the
+ * two components spelling a copy branch lived. Spec #439 moved them: `Pills` is a named
+ * part of `packages/components/src/ui/fill-path.tsx` as of S8, and `RowState` follows at
+ * S9. A walk of `apps/web/src` does not reach either.
+ *
+ * NOTHING WOULD HAVE GONE RED. The offenders list would still be empty, the authoring
+ * count would still be one, and this file would still be green — over a smaller set,
+ * asking its question about a tree the components had left. That is not a test failing;
+ * it is a test that has stopped asking. The mutation logged below was run against the
+ * moved `Pills` before this widening landed and passed, which is the proof rather than
+ * the worry.
+ *
+ * THE SCANNERS DO NOT CHANGE. `interrogations` and `comparedPhrases` are about the SHAPE
+ * of a branch, not about which tree a file sits in, so both trees feed the same two
+ * functions and the widening is entirely in the walk.
+ *
+ * KEYED REPO-RELATIVE, BOTH SIDES. The census below used to slice an `apps/web/src`
+ * prefix off each path; do that to a package path and the result is a mangled string, so
+ * a package file that started comparing `venueAxis` would surface as garbage rather than
+ * as somewhere a reader could go.
+ */
+const WEB_TREE = "apps/web/src";
+const PACKAGE_TREE = "packages/components/src";
+
+/**
+ * The ONE file allowed to hold the state words, and the file `Pills` lives in now. The
+ * first is the exemption; the second is the package walk's floor, and the two are the
+ * only paths this test hardcodes.
+ */
+const AUTHORING_SITE = `${WEB_TREE}/ladder/rung-state-copy.ts`;
+const PILLS_HOME = `${PACKAGE_TREE}/ui/fill-path.tsx`;
 
 /**
  * The state words, as the surface prints them — every one that is COPY AND NOTHING ELSE.
@@ -234,11 +287,21 @@ function code(source: string): string {
   return out;
 }
 
-/** Every `.ts`/`.tsx` file under `apps/web/src`, code text, excluding tests. */
-function productionSources(): { path: string; source: string }[] {
-  return sourceFiles({ dir: WEB_SRC, as: "absolute" })
+/** Every `.ts`/`.tsx` file under one tree, code text, excluding tests, keyed repo-relative. */
+function treeSources(tree: string): { path: string; source: string }[] {
+  return sourceFiles({ dir: tree })
     .filter((path) => !/\.test\.tsx?$/.test(path))
-    .map((path) => ({ path, source: code(readFileSync(path, "utf8")) }));
+    .map((path) => ({ path, source: code(readFileSync(join(REPO_ROOT, path), "utf8")) }));
+}
+
+/**
+ * BOTH TREES, CONCATENATED — the web app and the component package, production source
+ * only. `sourceFiles` throws on a scan root that is not there, so a renamed tree is loud
+ * here rather than silently empty; the floors in the structural test are what catch a
+ * walk that resolved and returned nothing worth scanning.
+ */
+function productionSources(): { path: string; source: string }[] {
+  return [...treeSources(WEB_TREE), ...treeSources(PACKAGE_TREE)];
 }
 
 describe("the state words are authored on the web, from the axes", () => {
@@ -316,14 +379,17 @@ describe("the state words are authored on the web, from the axes", () => {
   });
 
   it("compares no state copy in a component — copy renders, it never branches", () => {
-    // THE STRUCTURAL HALF. `Pills` and `RowState` cannot be rendered by any test in this
-    // repo, so nothing behavioral can see which branch they take. What CAN be seen is
-    // whether the branch is spelled against words: a comparison of `stateCopy`, or of any
-    // shipped state string, anywhere in production `apps/web` source.
+    // THE STRUCTURAL HALF. `Pills` and `RowState` CAN be rendered now — ADR-022's harness
+    // ended that, and spec #439 gives both a fixture — but a render test only proves which
+    // branch a mounted tree takes on the states it happens to render. What this sees
+    // instead is whether the branch is spelled against words at all: a comparison of
+    // `stateCopy`, or of any shipped state string, anywhere in production source under
+    // either scanned tree. That is the claim a state nobody fixtured cannot slip past.
     const offenders: string[] = [];
     let authoringSites = 0;
-    for (const { path, source } of productionSources()) {
-      if (path.endsWith(join("ladder", "rung-state-copy.ts"))) {
+    const scanned = productionSources();
+    for (const { path, source } of scanned) {
+      if (path === AUTHORING_SITE) {
         // The ONE authoring site, exempt because it is the only file that may hold these
         // words at all — and it holds them as returns, never as comparisons.
         authoringSites += 1;
@@ -338,8 +404,19 @@ describe("the state words are authored on the web, from the axes", () => {
     }
     expect(offenders).toEqual([]);
     // The exemption is one file. If a second module starts spelling state words, this
-    // count is the thing that says so before the words are two homes deep.
+    // count is the thing that says so before the words are two homes deep. It is also the
+    // WEB tree's false-pass floor: a walk that returned nothing would produce an empty
+    // offenders list too, and the two failures would cancel out.
     expect(authoringSites).toBe(1);
+    // ── THE PACKAGE TREE'S OWN FLOOR ───────────────────────────────────────────────
+    // A widened scan with one tree's floor reproduces, one level up, the exact failure
+    // it was widened to fix: point the package walk at a filtered-to-nothing set and the
+    // guard is green over a tree it never read. So the package half is floored on its
+    // own, off the SAME array the scanners just consumed rather than a second walk — and
+    // on the one file that makes the floor mean something, because `Pills` is in it.
+    const inPackage = scanned.filter(({ path }) => path.startsWith(`${PACKAGE_TREE}/`));
+    expect(inPackage.length).toBeGreaterThan(0);
+    expect(inPackage.map(({ path }) => path)).toContain(PILLS_HOME);
   });
 
   it("strips comments without being fooled by a slash inside a string", () => {
@@ -373,14 +450,21 @@ describe("the state words are authored on the web, from the axes", () => {
     //    `ladder/` — routing the public-fixture synthesizer through the ladder page's view
     //    module to save a literal would buy the nit with a dependency pointing the wrong
     //    way. Recorded here instead, so the count is a decision rather than a leftover.
+    //
+    // THE MAP GAINS NOTHING FROM THE PACKAGE TREE, and that is a finding rather than an
+    // oversight: NO component compares `venueAxis` at all. The fill path branches on
+    // `rung.filled`, `rung.venueResting` and `rung.notPlaced`, which are decided facts on
+    // the view, so the two entries below are still the whole census after S8 moved two
+    // cards across. What changed is the KEY — repo-relative, so a package file that
+    // started comparing the axis reads as a path rather than as a mangled slice.
     const census = new Map<string, number>([
-      [join("ladder", "fill-path-view.ts"), 1],
-      [join("push", "fixture-synthesis.ts"), 2],
+      [`${WEB_TREE}/ladder/fill-path-view.ts`, 1],
+      [`${WEB_TREE}/push/fixture-synthesis.ts`, 2],
     ]);
     const found = new Map<string, number>();
     for (const { path, source } of productionSources()) {
       const hits = source.match(/venueAxis\s*[!=]==\s*["'`]filled["'`]/g)?.length ?? 0;
-      if (hits > 0) found.set(path.slice(WEB_SRC.length + 1), hits);
+      if (hits > 0) found.set(path, hits);
     }
     expect(Object.fromEntries(found)).toEqual(Object.fromEntries(census));
   });
