@@ -1465,10 +1465,27 @@ const ROW_TINT = {
   filled: "bg-[color-mix(in_srgb,var(--nms-pos)_12%,var(--nms-background))]",
   next: "bg-[color-mix(in_srgb,var(--nms-now)_14%,var(--nms-background))]",
 } as const;
+/**
+ * `--nms-input`, NOT `--nms-border`, AND THAT IS A CONTRAST DECISION.
+ *
+ * The row below is a `<button>` on a card, its waiting fill is one step off the card's
+ * own, and nothing else on it says it is a control: no chrome, no fill contrast, only
+ * figures and words. The edge IS the identification, which is exactly the boundary SC
+ * 1.4.11 wants 3:1 for. On the hairline token it measured 1.21:1 against the card in
+ * both palettes. `--nms-input` is the token spec #451 S3 minted for "the line a control
+ * is identified by" and it already clears 3:1 against `--nms-card` and
+ * `--nms-background` alike, so the row reads it and `--nms-border` keeps the
+ * hairline-for-texture job ADR-026 splits it off for. Repainting `--line` instead would
+ * have moved eight surfaces to fix one edge, which spec #451 §4.1 rejects by name.
+ *
+ * THE TWO MIXES BELOW TAKE THE SAME BASE. A state tint mixed into the hairline would
+ * put a filled or next row back under the hairline's value at the low end of the mix,
+ * so the base moves with the plain arm or the fix has a hole in it.
+ */
 const ROW_EDGE = {
-  line: "border-[var(--nms-border)]",
-  filled: "border-[color-mix(in_srgb,var(--nms-pos)_34%,var(--nms-border))]",
-  next: "border-[color-mix(in_srgb,var(--nms-now)_42%,var(--nms-border))]",
+  line: "border-[var(--nms-input)]",
+  filled: "border-[color-mix(in_srgb,var(--nms-pos)_34%,var(--nms-input))]",
+  next: "border-[color-mix(in_srgb,var(--nms-now)_42%,var(--nms-input))]",
   selected: "border-[var(--nms-foreground)]",
 } as const;
 /**

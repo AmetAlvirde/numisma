@@ -124,12 +124,17 @@ import {
  * mode, INCLUDING THE TWO THAT ONLY EVER APPEAR INSIDE A `color-mix()`. The row's own
  * text and its focus ring read `--nms-foreground`; the tint map mixes `--nms-pos` and
  * `--nms-now` into `--nms-background`; the edge map mixes the same two into
- * `--nms-border`; the gutter, the size figure, a never-placed price, the sub-status and
- * the orphan line all read `--nms-muted-foreground`.
+ * `--nms-input`, which is the CONTROL boundary token and not the hairline, because the
+ * row is a `<button>` whose edge is the only thing that says so (spec #451 §4.1, and the
+ * comment over `ROW_EDGE`); the gutter, the size figure, a never-placed price, the
+ * sub-status and the orphan line all read `--nms-muted-foreground`.
  *
  * WHAT TO LOOK FOR IN APP MODE, which is what `apps/web` paints today reached through the
  * new spelling: the row rests on `#0f1115`, tints toward `#46c98b` when filled and
- * `#e07a4f` when next, edges in `#262a33`, and rings in `#e7e9ee` when selected. A TINT
+ * `#e07a4f` when next, edges in `#606a80`, and rings in `#e7e9ee` when selected. THE ROW
+ * EDGE IS THE VISIBLE CHANGE THIS SLICE MAKES: it was `#262a33`, one step off the card
+ * behind it, and it is now the lighter `#606a80` that clears 3:1 — read it on the waiting
+ * rungs of this fixture in app mode, where the edge is what tells one rung from the next. A TINT
  * THAT PAINTS NOTHING AT ALL is the failure this row exists to show: a `color-mix()` with
  * one undefined argument computes to transparent while the rule sits present and correct
  * in the stylesheet, so a filled row that looks exactly like a waiting one means half a

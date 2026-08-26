@@ -171,7 +171,22 @@ const TEXT_PAIRS: readonly Omit<ContrastPair, "criterion">[] = [
   {
     foreground: "--nms-caution",
     surface: "--nms-card",
-    renders: "`DcaCard`'s `unreadable` sidecar tone, the fill path's `unreadable` row tone, and `PILL_TONE.inferred`.",
+    renders: "`DcaCard`'s `unreadable` sidecar tone, the fill path's `unreadable` state badge, and `PILL_TONE.inferred` where `Pills` renders it, on the selected-rung panel.",
+  },
+  {
+    foreground: "--nms-caution",
+    surface: "--nms-background",
+    renders: "`PILL_TONE.inferred` AGAIN, where `RowState` renders it inside the rung row. The row is not the card: its fill is `ROW_TINT`, which is `--nms-background` bare on a waiting rung and a state colour mixed into `--nms-background` on the other two. The bare arm is what is measured, because a mix that starts from this surface only moves away from it. This is the site that measured 3.20:1 before spec #451 S3 repainted it, so measuring it against a surface it never touches would have retired the failure that justified the repaint.",
+  },
+  {
+    foreground: "--nms-now",
+    surface: "--nms-background",
+    renders: "`ROW_STATUS_TONE.next` on the same row, the status word for the rung price is heading to.",
+  },
+  {
+    foreground: "--nms-pos",
+    surface: "--nms-background",
+    renders: "`ROW_STATUS_TONE.filled` on the same row, and the one status word that means the ladder moved.",
   },
   {
     foreground: "white",
@@ -199,7 +214,12 @@ const NON_TEXT_PAIRS: readonly Omit<ContrastPair, "criterion">[] = [
   {
     foreground: "--nms-caution",
     surface: "--nms-card",
-    renders: "The inferred warning's dashed left rule, and `PILL_TONE.inferred`'s edge. Both are graphical objects under SC 1.4.11 and both move with the pill, so splitting them across two rules would split one visual element.",
+    renders: "The inferred warning's dashed left rule, and `PILL_TONE.inferred`'s edge on the selected-rung panel. Both are graphical objects under SC 1.4.11 and both move with the pill, so splitting them across two rules would split one visual element.",
+  },
+  {
+    foreground: "--nms-caution",
+    surface: "--nms-background",
+    renders: "The same pill's edge inside the rung row, where the surface is `ROW_TINT` rather than the card. The edge and the text move together, which is why this surface appears under both clauses.",
   },
   {
     foreground: "--nms-pos",
@@ -234,12 +254,12 @@ const NON_TEXT_PAIRS: readonly Omit<ContrastPair, "criterion">[] = [
   {
     foreground: "--nms-input",
     surface: "--nms-background",
-    renders: "The field edge. `apps/web`'s login inputs fill with the page colour, so this is the boundary against the field's own fill.",
+    renders: "The field edge. `apps/web`'s login inputs fill with the page colour, so this is the boundary against the field's own fill. Also the fill path's rung row: `ROW_EDGE` reads this token, and a waiting row's own fill is `--nms-background`.",
   },
   {
     foreground: "--nms-input",
     surface: "--nms-card",
-    renders: "The same edge against the card the login form sits in. Both surfaces are required, which is what rules out a value clearing one and missing the other.",
+    renders: "The same edge against the card the login form sits in, and against the card the rung list sits in, which is the surface behind every rung row's edge. Both surfaces are required, which is what rules out a value clearing one and missing the other.",
   },
 ];
 
@@ -264,7 +284,7 @@ export const EXCLUDED_CONTRAST_PAIRS: readonly ExcludedPair[] = [
     foreground: "--nms-border",
     surface: "--nms-card",
     reason:
-      "A hairline drawn for texture, which ADR-026 names as the thing SC 1.4.11 does not reach. It separates two surfaces that are already one step apart in value; it identifies no control and carries no meaning a user could lose. Asserting it would demand 3:1 between a card and its own edge, which is a visual decision the criterion has no opinion about.",
+      "A hairline drawn for texture, which ADR-026 names as the thing SC 1.4.11 does not reach: the card's own edge, the section table's cell rule, the completeness line, the progress track, and two arms of the fill path's pill map. Each separates two surfaces already one step apart in value and carries no meaning a user could lose. Asserting it would demand 3:1 between a card and its own edge, which is a visual decision the criterion has no opinion about. THE ONE CONTROL LEFT ON THIS TOKEN IS BUTTON `outline`, whose visible text label is what identifies it, and SC 1.4.11 does not require a boundary the label already supplies. That argument used to have a hole in it: the fill path's rung row was a `<button>` whose edge was the only thing saying so, at 1.21:1 against the card behind it. The row now reads `--nms-input`, which is asserted above, so the hole is closed by moving the control rather than by widening the excuse.",
   },
   {
     foreground: "--nms-border",

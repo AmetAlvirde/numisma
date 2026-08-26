@@ -167,12 +167,12 @@ export const NMS_TOKENS = [
   {
     name: "--nms-border",
     value: "oklch(0.922 0 0)",
-    note: "Hairline between surfaces. Button `outline`'s edge. IT KEPT ITS VALUE while `--nms-input` below moved, and the split is ADR-026's sentence: a hairline drawn for texture is not a boundary, the line a field is identified by is. `contrast.ts` carries this pair as a named exclusion so the difference is written down rather than inferred from which name a value happened to land on.",
+    note: "Hairline between surfaces. Button `outline`'s edge, where the visible label is what identifies the control. IT KEPT ITS VALUE while `--nms-input` below moved, and the split is ADR-026's sentence: a hairline drawn for texture is not a boundary, the line a control is identified by is. `contrast.ts` carries this pair as a named exclusion so the difference is written down rather than inferred from which name a value happened to land on. THE FILL PATH'S RUNG ROW LEFT THIS TOKEN for `--nms-input`: it is a `<button>` with no chrome and no fill step, so its edge was the identification, and at this value it measured 1.21:1 against the card behind it. A token may not be both jobs at once, and moving the control is the half that does not repaint eight surfaces.",
   },
   {
     name: "--nms-input",
     value: "oklch(0.6 0 0)",
-    note: "Field edge and dark-mode field fill on Button `outline`. LIFTED OFF THE HAIRLINE'S VALUE by spec #451 S3, which is the same edit `apps/web` makes to its own palette in the same slice: at the border's grey this token measured 1.21:1 against a card and SC 1.4.11 wants 3:1 for the boundary that tells a user where a control is. `--nms-border` keeps the old value because a hairline drawn for texture is not that boundary.",
+    note: "Field edge, the fill path's rung-row edge, and dark-mode field fill on Button `outline`. LIFTED OFF THE HAIRLINE'S VALUE by spec #451 S3, which is the same edit `apps/web` makes to its own palette in the same slice: at the border's grey this token measured 1.21:1 against a card and SC 1.4.11 wants 3:1 for the boundary that tells a user where a control is. `--nms-border` keeps the old value because a hairline drawn for texture is not that boundary.",
   },
   {
     name: "--nms-primary",
@@ -212,7 +212,7 @@ export const NMS_TOKENS = [
   {
     name: "--nms-ok",
     value: "oklch(0.46 0 0)",
-    note: "The all-clear FILL — a badge asserting that the fold excluded nothing and the marks arrived. `SummaryCard`'s data-safety badge, green arm. A fill rather than a type colour, which is what makes it the loudest thing in themed mode when nothing repaints. DARKENED by spec #451 S3: it is a fill under `text-white`, and white on the old value reached 3.64:1 where SC 1.4.3 wants 4.5. The badge's label is the thing being read, so the fill is what moves.",
+    note: "The all-clear FILL — a badge asserting that the fold excluded nothing and the marks arrived. `SummaryCard`'s data-safety badge, green arm. A fill rather than a type colour, which is what makes it the loudest thing in themed mode when nothing repaints. DARKENED by spec #451 S3: it is a fill under `text-white`, and white on the old value reached 3.64:1 where SC 1.4.3 wants 4.5. The badge's label is the thing being read, so the fill is what moves. RECORDED AND NOT FIXED: that move landed this token at L 0.46 while `--nms-destructive` and `--nms-neg` sit at 0.45, so in the base mode the all-clear and the destructive colour are one hundredth of L apart where they used to be 0.62 against 0.45. Both are states, and grayscale is the mode that reviews state. Nothing catches it: `app-token-drift.test.ts` asserts pairwise distinctness for `THEMED_TOKENS` and there is no equivalent for `GRAYSCALE_TOKENS`, so the collision is a fact written down here rather than a guard. Minting or moving a value for it is a separate slice.",
   },
   {
     name: "--nms-warn",
