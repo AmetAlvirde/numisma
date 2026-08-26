@@ -92,9 +92,10 @@ CLI. A `grep` for either filename therefore returns hits and still returns no
 driver, which is the reason both are spelled out here by name.
 
 The `.tsx` render components (`SummaryCard`, `SectionTable`, `FillPath`,
-`PriceDropPathChart`) and the route/router `.tsx` files are **not** matched by the
-coverage include glob (`apps/*/src/**/*.ts` matches `.ts`, not `.tsx`) — a
-deliberate posture recorded in §6, not an oversight.
+`PriceDropPathChart`, and the rest of `packages/components/src/ui/` since spec
+#439) and the route/router `.tsx` files are **not** matched by the coverage
+include glob (`apps/*/src/**/*.ts` and `packages/*/src/**/*.ts` match `.ts`, not
+`.tsx`) — a deliberate posture recorded in §6, not an oversight.
 
 ## 2. Defensive / unreachable guards (kept on purpose, cannot be tested honestly)
 
@@ -508,10 +509,11 @@ self-executing script (above).
 resolved):** `SummaryCard`, `SectionTable`, `FillPath` and `PriceDropPathChart`
 (and the route/router `.tsx` files) are outside instrumentation because the include
 glob is `*.ts`, not `*.tsx`. The ladder's two — added to this ledger by spec #302
-slice E (M4) — were the largest uninstrumented surfaces in the app while going
-unnamed here, which is the one thing this document exists to prevent: **no gap is
-silent, including a gap in the account of the gaps.** Their entry is below, after
-the dashboard pair.
+slice E (M4), moved into `packages/components/src/ui/` by spec #439 wave 2 —
+were the largest uninstrumented render surfaces while going unnamed here, which
+is the one thing this document exists to prevent: **no gap is silent, including
+a gap in the account of the gaps.** Their entry is below, after the dashboard
+pair.
 
 For `SummaryCard` and `SectionTable` the exclusion
 is deliberate: they render already-tested engine data (`@numisma/engine/format` +
@@ -536,26 +538,32 @@ rendering the component, and it is named here rather than implied — it catches
 surface silently reverting to the raw payload; it cannot catch a layout mistake or
 a wrong branch inside JSX. **The reader must open the page to judge that.**
 
-**`FillPath.tsx` and `PriceDropPathChart.tsx` — the ladder's two (M4, spec #302
-slice E).** Same exclusion, same reason (the glob is `*.ts`), and by line count
-the two largest uninstrumented files in `apps/web`. They went unnamed in this
-ledger through the whole `prototype/tanstack-charts` spike; naming them is the
-policy, because a gap this document does not mention is exactly the gap it exists
-to prevent.
+**`fill-path.tsx` and `price-drop-path-chart.tsx` — the ladder's two (M4, spec
+#302 slice E).** Same exclusion, same reason (the glob is `*.ts`), and by line
+count the two largest uninstrumented files in the product's render layer.
+Spec #439 wave 2 moved both into `packages/components/src/ui/`, kebab-cased,
+along with `Shell`, `SummaryCard`, `SectionTable`, `GlanceCard` and `DcaCard`;
+the include glob (`packages/*/src/**/*.ts`, `apps/*/src/**/*.ts`) still matches
+`.ts` only, so the exclusion travelled with them unchanged. They went unnamed in
+this ledger through the whole `prototype/tanstack-charts` spike; naming them is
+the policy, because a gap this document does not mention is exactly the gap it
+exists to prevent.
 
 *What compensates, and how much.* The strong part of the answer is that the
 quantitative logic these two used to hold **is no longer in them**: spec #302
 slice A lifted `cumulate`, `withRadius`, `splitAt`, `spotMarkFor`,
-`deployedMarkFor` and the compact-USD formatter into
-`apps/web/src/ladder/price-drop-path.ts`, which IS measured — the repo's own rule
-from the trigger paragraph below ("any branch that cannot be lifted into a pure
-module should buy the toolchain") applied in the direction it was written for, and
-these branches *could* be lifted. Every state a rung can be in is likewise decided
-in the measured `ladder/fill-path-view.ts` and its state copy authored in the
-measured `ladder/rung-state-copy.ts`; the components read decided fields. So the
-chart's arithmetic — the ring scale's floor, the running total's ordering
-dependency, the out-of-domain clamp — is under the number, in `price-drop-path.ts`
-and its tests, rather than inside the blind spot.
+`deployedMarkFor` and the compact-USD formatter into what is now
+`packages/components/src/ui/price-drop-path.ts` — moved again, unchanged in
+substance, by spec #439 S5, the chart's own module travelling with the chart.
+It IS measured — the repo's own rule from the trigger paragraph below ("any
+branch that cannot be lifted into a pure module should buy the toolchain")
+applied in the direction it was written for, and these branches *could* be
+lifted. Every state a rung can be in is likewise decided in the measured
+`ladder/fill-path-view.ts` and its state copy authored in the measured
+`ladder/rung-state-copy.ts`, both still in `apps/web`; the components read
+decided fields. So the chart's arithmetic — the ring scale's floor, the running
+total's ordering dependency, the out-of-domain clamp — is under the number, in
+`price-drop-path.ts` and its tests, rather than inside the blind spot.
 
 *What is left uncovered, stated plainly.* Mark composition and JSX: which mark
 draws which decided field, the `aria-hidden` wrapper and its `.sr-only`
@@ -568,11 +576,21 @@ branch could be rendered by a person at all — a reviewer can open every state
 without touching real data — and the **a11y invariant, which is now asserted** (the
 chart subtree is `aria-hidden`, nothing in it is reachable by keyboard, a substitute
 node exists). That last one is the audit's T7, and spec #403 slice 1 closed it:
-`components/fill-path-chart-a11y.test.tsx` mounts `FillPathCards` under jsdom with a
-synthesized fixture and pins all three clauses, the third against the value
-`ladder/convexity-caption.ts` generates for that fixture rather than against a
-literal. Deleting the `.sr-only` element turns it red, which was the named silent
-failure. Note what the assertion does and does not reach: it pins the subtree as it
+`packages/components/src/ui/fill-path-chart-a11y.test.tsx` (moved from
+`apps/web/src/components/` at spec #439 S9, with the component it mounts) mounts
+`FillPathCards` under jsdom with a synthesized fixture and pins all three
+clauses. The third clause moved on the same slice: it used to recompute
+`convexityCaption` from the view's rungs and compare against that; a package
+test cannot reach `apps/web/src/ladder/convexity-caption.ts`, so it now asserts
+the `.sr-only` node's text against `view.caption`, a field on the authored
+fixture. Against an authored literal that only proves the component renders the
+field it is handed — the property that the caption is *generated* from the
+data the chart is drawn from, not hand-maintained, moved with it to
+`apps/web/src/ladder/fill-path-fixture-equivalence.test.ts`, which deep-compares
+`composeFillPathPage`'s real output against each package fixture that claims to
+be one of its four ladder states, caption included. Deleting the `.sr-only`
+element still turns the a11y test red, which was the named silent failure.
+Note what the assertion does and does not reach: it pins the subtree as it
 actually mounts, so a library upgrade that starts mounting a focusable surface fires
 it, but under `@tanstack/charts` 0.11.0 the adapter renders `tabindex="-1"` whatever
 the definition's `focus`/`keyboard` flags say — so those four neutralization props are
@@ -704,7 +722,7 @@ logic extraction — not a line in the exclude list.
 | --- | --- | --- | --- |
 | `glance/row-view.ts` | 98.57% | `:141` | One rendering branch. |
 | `glance/verdict.ts` | 99.08% | `:621-622` | `referenceLabel`'s invalid-calendar-date throw — defensive, every caller passes an already-validated `asOf`. The precedence-sort branch this row used to cite is covered now. |
-| `lib/binance-spot.ts` | 0% | `:33-95` | Added at `d5fe02c` — no row existed before #377, and this one does not fit the defensive/unreached-fixture/real-branch taxonomy cleanly. `useBinanceSpotUsd` is a browser-only React hook (`useEffect`/`useState`) — the live-spot fetch, its success/failure/abort paths, and the last-close fallback are real, reachable browser behavior, not a script that runs on import (importing this file is inert; nothing executes until a mounted component calls the hook). It is uninstrumented for the same underlying reason §6 names for `SummaryCard`/`SectionTable`/`FillPath.tsx`/`PriceDropPathChart.tsx` — written before the RTL/jsdom harness existed, and nothing has yet mounted a component to drive the hook — except those are `.tsx` and excluded by the `*.ts`-only include glob, while this file is a `.ts` hook that IS in the glob and so reports a genuine, uninstrumented-in-practice 0% rather than being named as excluded. Flagged rather than forced into a label; closing it means either a render test on the harness §6 bought, or extracting the fetch/state-transition logic into a plain `.ts` function the way `price-drop-path.ts` did for the chart math. |
+| `lib/binance-spot.ts` | 0% | `:33-95` | Added at `d5fe02c` — no row existed before #377, and this one does not fit the defensive/unreached-fixture/real-branch taxonomy cleanly. `useBinanceSpotUsd` is a browser-only React hook (`useEffect`/`useState`) — the live-spot fetch, its success/failure/abort paths, and the last-close fallback are real, reachable browser behavior, not a script that runs on import (importing this file is inert; nothing executes until a mounted component calls the hook). It is uninstrumented for the same underlying reason §6 names for `SummaryCard`/`SectionTable`/`fill-path.tsx`/`price-drop-path-chart.tsx` — written before the RTL/jsdom harness existed, and nothing has yet mounted a component to drive the hook — except those are `.tsx` and excluded by the `*.ts`-only include glob, while this file is a `.ts` hook that IS in the glob and so reports a genuine, uninstrumented-in-practice 0% rather than being named as excluded. Flagged rather than forced into a label; closing it means either a render test on the harness §6 bought, or extracting the fetch/state-transition logic into a plain `.ts` function the way `price-drop-path.ts` did for the chart math. |
 | `push/dca-block.ts` | 98.41% | `:278,283` | `:278` and `:283` are the `placedQuantity`/`venueFilledFraction` omit-when-undefined spread guards' omission arms — real, reachable: every current fixture supplies both fields, so the arm that would drop them from the view never fires. The file also carries four branch-only gaps this column does not cite (per the derivation rule above, a file below 100% lines cites only its line gaps): `:161` is `torn ?? []`'s default-array arm (every fixture supplies a torn-acts array); `:232` is `position?.lots ?? []`'s equivalent; `:236-237` are the `currency`/`reviewFx` field-presence spread guards, one arm each unexercised — same default-value shape, not a rejection path. |
 | `push/unattended-report.ts` | 100% lines, 94.44% branch | `:78` | One branch-only gap: `linesFor`'s `this.#byKind.get(kind) ?? []` default-array arm — a real, reachable case (querying a `kind` nothing has been filed under yet), just not one any current fixture drives. |
 | `ladder/convexity-caption.ts` | 100% lines, 95.65% branch | `:135` | One branch-only gap: the `clauses.length === 0` empty-caption arm — real, reachable (a ladder with nothing left to say), just not one any current fixture produces. |

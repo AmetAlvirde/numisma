@@ -61,14 +61,24 @@ not less accessible); the deletion is the one-directional, unnoticeable edit.
 **Something mechanical catches it now.** This paragraph used to end "nothing
 mechanical can catch it today", and the harness that sentence was waiting on
 arrived with [ADR-022](ADR-022-a-render-test-harness-for-the-web-component-layer.md).
-`apps/web/src/components/fill-path-chart-a11y.test.tsx` mounts `FillPathCards`
-under jsdom against a synthesized fixture and asserts all three clauses: the
-`.fp-chart` wrapper carries `aria-hidden="true"`, nothing under it answers the
-tabbable selector, and the `.sr-only` node's text equals what
-`ladder/convexity-caption.ts` generates for that same fixture — compared against
-the generated value, never a literal, because a literal expectation would be the
-hand-maintained description this ADR forbids, smuggled in as a test. Deleting
-the caption element turns the suite red; that was checked by deleting it.
+`packages/components/src/ui/fill-path-chart-a11y.test.tsx` (moved from
+`apps/web/src/components/` at spec #439 S9, with the component it mounts)
+mounts `FillPathCards` under jsdom against a synthesized fixture and asserts all
+three clauses: the `.fp-chart` wrapper carries `aria-hidden="true"`, nothing
+under it answers the tabbable selector, and the `.sr-only` node's text equals
+`view.caption` on that fixture. Moving into the package cost the direct
+comparison: a package test cannot reach `apps/web/src/ladder/convexity-caption.ts`,
+so `view.caption` is now an authored literal and this test alone proves only
+that the component renders the field it is handed. The property this ADR
+actually needs — that the caption is *generated* from the data the chart is
+drawn from, never hand-maintained — moved with it to
+`apps/web/src/ladder/fill-path-fixture-equivalence.test.ts`, which
+deep-compares `composeFillPathPage`'s real output, caption included, against
+each package fixture claiming to be one of its four ladder states. The two
+tests together hold what the one test held before: the a11y test proves the
+DOM renders the caption field; the equivalence test proves that field is never
+a hand-maintained guess. Deleting the caption element still turns the a11y
+suite red; that was checked by deleting it.
 
 **What is still held by prose, named precisely.** The test pins the subtree as it
 actually mounts, so a library upgrade that begins mounting a focusable surface
