@@ -124,12 +124,17 @@ import {
  * mode, INCLUDING THE TWO THAT ONLY EVER APPEAR INSIDE A `color-mix()`. The row's own
  * text and its focus ring read `--nms-foreground`; the tint map mixes `--nms-pos` and
  * `--nms-now` into `--nms-background`; the edge map mixes the same two into
- * `--nms-border`; the gutter, the size figure, a never-placed price, the sub-status and
- * the orphan line all read `--nms-muted-foreground`.
+ * `--nms-input`, which is the CONTROL boundary token and not the hairline, because the
+ * row is a `<button>` whose edge is the only thing that says so (spec #451 §4.1, and the
+ * comment over `ROW_EDGE`); the gutter, the size figure, a never-placed price, the
+ * sub-status and the orphan line all read `--nms-muted-foreground`.
  *
  * WHAT TO LOOK FOR IN APP MODE, which is what `apps/web` paints today reached through the
  * new spelling: the row rests on `#0f1115`, tints toward `#46c98b` when filled and
- * `#e07a4f` when next, edges in `#262a33`, and rings in `#e7e9ee` when selected. A TINT
+ * `#e07a4f` when next, edges in `#606a80`, and rings in `#e7e9ee` when selected. THE ROW
+ * EDGE IS THE VISIBLE CHANGE THIS SLICE MAKES: it was `#262a33`, one step off the card
+ * behind it, and it is now the lighter `#606a80` that clears 3:1 — read it on the waiting
+ * rungs of this fixture in app mode, where the edge is what tells one rung from the next. A TINT
  * THAT PAINTS NOTHING AT ALL is the failure this row exists to show: a `color-mix()` with
  * one undefined argument computes to transparent while the rule sits present and correct
  * in the stylesheet, so a filled row that looks exactly like a waiting one means half a
@@ -139,10 +144,13 @@ import {
  * already tinted: a background swap would fight the state tint and could make a waiting
  * rung look filled while the operator inspected it.
  *
- * A RUNG THAT IS `next` AND PARTLY FILLED PRINTS `partly filled · 40%` TWICE — the
- * sub-line beneath `next` and the partial pill beside it. Visible on `partly-walked`'s
- * rung 4. That is what this card has always done; spec #439 is behaviour-preserving, so
- * it crossed unchanged and it is NOT a regression this wave introduced.
+ * THE PARTIAL PILL IS GONE, on this card and on the panel above it (spec #451 S6). Both
+ * printed `partly filled · 40%` under words that already said it: the row's sub-line
+ * beneath `next`, and the panel's state pill. `partly-walked`'s rung 4 is where to look —
+ * ONE statement of the percentage per card now, and no qualifier pill anywhere on this
+ * ladder. `out-of-order` is the row to check the surviving pill against: `price passed,
+ * unconfirmed` is a fact about SPOT, `stateCopy` cannot carry it, and it still fires on
+ * rungs 1 and 3.
  *
  * `FillPathCards` IS THE WHOLE PAGE IN ONE FRAME, in all four ladder states, and it is
  * the first time anyone outside the app has been able to look at it. That is what this
@@ -549,7 +557,7 @@ export default {
     <div>
       <Row
         title="the ladder, at both widths"
-        note="Three tints and three edges across eight rows: `--nms-pos` mixed in on the three filled rungs, `--nms-now` on rung 4 which price reaches next, bare `--nms-background` on the rest, and the two deepest rungs DASHED because they were declared and never placed. All four status tones are here too — muted on the never-placed pair, `--nms-now` on rung 4, `--nms-pos` on the filled three, and NOTHING on the ordinary waiting rungs, whose status inherits the row's colour and whose empty arm in the tone map is deliberate. At 320px the qualifier pills take a full-width line of their own; past 380px they sit in their cell. Rung 4 prints `partly filled · 40%` twice, as the sub-line and as the pill — pre-existing, and left alone."
+        note="Three tints and three edges across eight rows: `--nms-pos` mixed in on the three filled rungs, `--nms-now` on rung 4 which price reaches next, bare `--nms-background` on the rest, and the two deepest rungs DASHED because they were declared and never placed. All four status tones are here too — muted on the never-placed pair, `--nms-now` on rung 4, `--nms-pos` on the filled three, and NOTHING on the ordinary waiting rungs, whose status inherits the row's colour and whose empty arm in the tone map is deliberate. At 320px the qualifier pills take a full-width line of their own; past 380px they sit in their cell — and NO ROW ON THIS LADDER carries one since spec #451 S6 deleted the partial-fill pill, so rung 4 now prints `partly filled · 40%` once, as the sub-line under `next`. The qualifier line is `out-of-order`'s to show. AT 320px, `R7` AND `R8` SIT ON THEIR OWN PRICES' BASELINE (spec #451 S7): `declared — not placed` wraps to three lines in that ~90px status column and sets the grid row's height, and the label's old `self-center` centred it against that height while the price stayed on line one. The label declares no alignment of its own now, so both widths are the row's — baseline here, centred past 380px on the right, where nothing wraps."
       >
         <BothWidths view={partlyWalkedView()}>
           <RungList />

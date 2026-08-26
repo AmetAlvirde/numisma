@@ -10,8 +10,9 @@
  * SO EACH TEST BELOW ASSERTS ONE FIXTURE STILL EXERCISES THE BRANCH IT IS NAMED FOR,
  * through the real `composeFillPathPage` the route uses. Nothing here asserts what a
  * component RENDERS from it — that is out of this slice's scope by #304, and the repo has
- * no RTL toolchain (docs/coverage-rationale.md §6). The render itself is judged by opening
- * the page, which is what the fixture surface is for.
+ * no RTL toolchain (docs/coverage-rationale.md §6). The render itself is judged in the
+ * workbench, which renders these four states from the derived copy that
+ * `fill-path-fixture-equivalence.test.ts` pins to this one.
  *
  * ── MUTATION CHECK (repo discipline; performed 2026-08-12) ───────────────────────────
  * Each guard was broken once against the finished fixtures, confirmed red for the right
@@ -35,7 +36,20 @@
  *    a prefix of fills cannot show that.
  *  - static-imported the fixtures into the route → "the fixture surface cannot reach
  *    production" red. Right reason: a static import survives dead-code elimination and
- *    ships the whole fixture set in the production bundle.
+ *    ships the whole fixture set in the production bundle. THAT CASE IS RETIRED (spec
+ *    #451 S4): the route it read is deleted, so there is no gate left to verify. Its
+ *    concern lives on in the two guards below, re-checked 2026-08-26:
+ *
+ *  - added `import { STARTED_LADDER_FIXTURES } from "../ladder/started-ladder.fixtures.ts"`
+ *    to `routes/ladder.$planId.tsx` → "no route imports the fixtures" red, naming that
+ *    file. Right reason: the sweep reads every file under `routes/`, so the violation
+ *    is found wherever it is typed rather than at two remembered filenames.
+ *  - the same import, built, then scanned → `client-bundle.integration.test.ts`'s
+ *    "carries no started-ladder fixture values" red, naming the browser chunk and all
+ *    seven token families it found there: the four `renders` sentences and the three id
+ *    prefixes. Right reason: a route-reachable static import is exactly what puts
+ *    authored fixture text in the bytes a browser downloads, which is the outcome the
+ *    retired case was describing a mechanism for.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -53,10 +67,11 @@ import {
   ladderFixture,
   type LadderFixture,
 } from "./started-ladder.fixtures.ts";
+import { sourceFiles } from "../../../../ops/testkit/repo-sources.testkit.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-/** Composes a fixture exactly the way `routes/ladder-fixture.$state.tsx` does. */
+/** Composes a fixture through the same `composeFillPathPage` the live ladder route calls. */
 function render(name: string): FillPathView {
   const fixture = ladderFixture(name);
   expect(fixture, `no fixture named ${name}`).toBeDefined();
@@ -183,29 +198,41 @@ describe("the started-ladder fixture surface", () => {
     expect(view.figures?.split).toBe("nothing-waiting");
   });
 
-  it("the fixture surface cannot reach production", () => {
-    // The mechanism, asserted rather than described: the dev route reads the fixtures
-    // ONLY inside an `import.meta.env.DEV` branch, and reaches them by DYNAMIC import so
-    // the production build's dead-code elimination takes the module — and every value in
-    // it — out of the bundle entirely.
-    const route = readFileSync(
-      join(HERE, "..", "routes", "ladder-fixture.$state.tsx"),
-      "utf-8",
-    );
-    expect(route).toMatch(/import\.meta\.env\.DEV/);
-    expect(route).toMatch(
-      /import\(\s*["'][^"']*started-ladder\.fixtures\.ts["']\s*\)/,
-    );
+  it("no route imports the fixtures, so no router can pull them into a build", () => {
+    // WHAT THIS REPLACED, AND WHY IT IS BROADER (spec #451 §4.3). A dev-only route used
+    // to render these fixtures behind an `import.meta.env.DEV` gate, and this case read
+    // that route's source to prove the gate: DEV branch, dynamic import, no static
+    // import, plus a fourth check that the live ladder route said nothing about
+    // fixtures. The route is deleted. There is no gate left to verify because there is
+    // no door.
+    //
+    // The concern survives the mechanism. A route file is what a router walks, and what
+    // a router walks is what a bundler follows into the browser, so "the fixtures reach
+    // no route" is the property those four assertions were serving. It is asserted over
+    // EVERY file under `routes/` rather than at two remembered filenames, which is what
+    // makes it keep holding as routes are added. The outcome it implies — no fixture
+    // value in the shipped bytes — is asserted separately against a real build by
+    // `client-bundle.integration.test.ts`.
+    const routeFiles = sourceFiles({
+      dir: join(HERE, "..", "routes"),
+      as: "absolute",
+    });
+    // FALSE-PASS FLOOR. An empty list also produces an empty offender list, and a
+    // renamed or moved `routes/` directory is how that happens. The sibling sweeps in
+    // `routes/route-move.test.ts` assert the same floor for the same reason.
     expect(
-      route,
-      "a STATIC import of the fixtures ships them in the production bundle",
-    ).not.toMatch(/from\s*["'][^"']*started-ladder\.fixtures\.ts["']/);
-    // And the live surface is untouched: the fixtures reach no session-gated path.
-    const live = readFileSync(
-      join(HERE, "..", "routes", "ladder.$planId.tsx"),
-      "utf-8",
+      routeFiles.length,
+      "the routes sweep scanned no files",
+    ).toBeGreaterThan(3);
+    // Any module specifier naming the fixtures, in any import position: static, dynamic,
+    // side-effect or re-export. The specifier may not span a line, which keeps prose
+    // that merely mentions the filename from reading as a reference to it.
+    const reachesFixtures =
+      /(?:from|import)\s*\(?\s*["'][^"'\n]*started-ladder\.fixtures\.ts["']/;
+    const importers = routeFiles.filter((file) =>
+      reachesFixtures.test(readFileSync(file, "utf-8")),
     );
-    expect(live).not.toMatch(/fixture/i);
+    expect(importers, importers.join("\n")).toEqual([]);
   });
 
   it("is authored here, and never seeded from real trade output", () => {

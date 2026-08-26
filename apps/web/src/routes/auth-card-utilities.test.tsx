@@ -120,27 +120,51 @@ describe("the auth surface's utilities", () => {
     expect(classes(form)).not.toContain("card");
   });
 
-  it("puts `.auth-card label`'s stacked, muted label on both labels", async () => {
+  it("puts `.auth-card label`'s stacked, muted label on both fields", async () => {
     const { container } = await renderLoginPage();
     const labels = [...container.querySelectorAll("label")];
     expect(labels).toHaveLength(2);
 
     for (const label of labels) {
-      // gap 6px, font-size 0.85rem, colour --muted. The size is an arbitrary value
-      // rather than `text-sm`, which would also set a line-height the rule never set.
-      for (const utility of [
-        "flex",
-        "flex-col",
-        "gap-1.5",
-        "text-[0.85rem]",
-        "text-[var(--muted)]",
-      ]) {
+      // THE STACK MOVED OFF THE LABEL AND NOTHING ELSE DID (spec #451 S5). The label
+      // stopped wrapping its input, so `.auth-card label`'s `display:flex`,
+      // `flex-direction:column` and `gap:6px` now sit on the element that holds the
+      // pair; the two declarations that are about TYPE stay on the label itself. The
+      // rendered box is the same box, which is why both halves are asserted here
+      // rather than one half being dropped.
+      //
+      // The size is an arbitrary value rather than `text-sm`, which would also set a
+      // line-height the rule never set.
+      for (const utility of ["text-[0.85rem]", "text-[var(--nms-muted-foreground)]"]) {
         expect(classes(label)).toContain(utility);
+      }
+      for (const utility of ["flex", "flex-col", "gap-1.5"]) {
+        expect(classes(label.parentElement!)).toContain(utility);
       }
     }
   });
 
-  it("puts `.auth-card input`'s box and house colours on both inputs", async () => {
+  it("associates each label with its field explicitly, not by wrapping", async () => {
+    // `htmlFor` appeared zero times in the repo before spec #451 S5. A wrapping label
+    // is a valid association and a weaker one: several screen readers announce the
+    // explicit pairing and not the implicit one, and the wrap is what a refactor drops
+    // without noticing. The ids are asserted UNIQUE because two fields sharing one id
+    // is the failure that leaves `getByLabelText` green and the second field unnamed.
+    const { container } = await renderLoginPage();
+    const labels = [...container.querySelectorAll("label")];
+
+    const ids = labels.map((label) => {
+      const target = label.getAttribute("for");
+      expect(target).toBeTruthy();
+      const field = container.querySelector(`#${target}`)!;
+      expect(field.tagName).toBe("INPUT");
+      expect(label.contains(field)).toBe(false);
+      return target;
+    });
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it("puts `.auth-card input`'s box, the package tokens and a focus ring on both inputs", async () => {
     const { container } = await renderLoginPage();
     const inputs = [...container.querySelectorAll("input")];
     expect(inputs).toHaveLength(2);
@@ -150,10 +174,22 @@ describe("the auth surface's utilities", () => {
         "p-2.5",
         "rounded-lg",
         "border",
-        "border-[var(--line)]",
-        "bg-[var(--bg)]",
-        "text-[var(--text)]",
+        // Spec #451 §4.2: app-side TSX paints with `--nms-*`. The border read is
+        // `--nms-input` and NOT `--nms-border`, which is the hairline; S3 unaliased
+        // the two so this edge could clear 3:1 without repainting eight surfaces.
+        "border-[var(--nms-input)]",
+        "bg-[var(--nms-background)]",
+        // `--nms-foreground`, never `--nms-muted`: the app's `--muted` is muted TEXT
+        // and the package's `--nms-muted` is a recessed SURFACE.
+        "text-[var(--nms-foreground)]",
         "text-[1rem]",
+        // These two were the only controls in the app falling through to the user
+        // agent's focus ring. The shape is the package's own, off the fill path's
+        // rung rows; the colour is `--nms-ring`, which is what every Button variant
+        // rings with.
+        "focus-visible:outline-2",
+        "focus-visible:outline-[var(--nms-ring)]",
+        "focus-visible:outline-offset-2",
       ]) {
         expect(classes(input)).toContain(utility);
       }
@@ -192,11 +228,82 @@ describe("the auth surface's utilities", () => {
 
     const paragraph = await screen.findByText("Invalid email or password");
     expect(paragraph.tagName).toBe("P");
-    expect(classes(paragraph)).toContain("text-[var(--neg)]");
+    // `--nms-destructive`, NOT `--nms-neg` (spec #451 §4.2). `apps/web` resolves both
+    // to the same hex today, so this is the one read in the file where a wrong choice
+    // is invisible on screen and wrong in the vocabulary: `--nms-neg` is data, the sign
+    // of a number, and a failed sign-in is the affordance of a control.
+    expect(classes(paragraph)).toContain("text-[var(--nms-destructive)]");
     expect(classes(paragraph)).toContain("m-0");
     expect(container.contains(paragraph)).toBe(true);
     // The paragraph's only styling came from `.error`, so the name goes with the rule.
     expect(classes(paragraph)).not.toContain("error");
+  });
+
+  it("points both fields at an element that exists before anything has failed", async () => {
+    // THE STATE EVERY VISITOR SEES FIRST, which is the state the error case below could
+    // not reach. `aria-describedby` naming an id no element carries is a dangling IDREF:
+    // it is not a DOM error, the description simply does not exist, and axe-core's
+    // `aria-valid-attr-value` is what fails on it under the target ADR-026 adopts.
+    //
+    // The fix is to render the paragraph unconditionally and let its TEXT be empty,
+    // which is also how a live region is supposed to be built: `role="alert"` on a node
+    // that is inserted along with its content is the forgiving case rather than the
+    // specified one, and no jsdom assertion can tell the two apart.
+    const { container } = await renderLoginPage();
+    const inputs = [...container.querySelectorAll("input")];
+    expect(inputs).toHaveLength(2);
+
+    for (const input of inputs) {
+      const described = input.getAttribute("aria-describedby");
+      expect(described).toBeTruthy();
+      expect(container.querySelector(`#${described}`)).not.toBeNull();
+    }
+    // And it is empty, so nothing is announced and nothing takes vertical space until
+    // there is something to say.
+    expect(screen.getByRole("alert").textContent).toBe("");
+  });
+
+  it("announces a failed sign-in, and points both fields at what it says", async () => {
+    // A FAILED SIGN-IN WAS SILENT (SC 4.1.3). The paragraph appeared, nothing said so,
+    // and the operator's focus was still on the submit button. `role="alert"` is the
+    // live region; `aria-live` is stated alongside it because the implicit politeness
+    // of the role is exactly the thing a reader has to look up. Both fields point at
+    // it, so the reason is re-read when focus returns to the field that caused it.
+    signInEmail.mockClear();
+    signInEmail.mockImplementationOnce(
+      () =>
+        Promise.resolve({ error: { message: "Invalid email or password" } }) as never,
+    );
+    const { container } = await renderLoginPage();
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("Email"), "operator@example.test");
+    await user.type(screen.getByLabelText("Password"), "authored-secret");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    const paragraph = await screen.findByRole("alert");
+    expect(paragraph.textContent).toBe("Invalid email or password");
+    expect(paragraph.getAttribute("aria-live")).toBe("assertive");
+
+    const described = paragraph.getAttribute("id")!;
+    expect(described).toBeTruthy();
+    for (const input of container.querySelectorAll("input")) {
+      expect(input.getAttribute("aria-describedby")).toBe(described);
+    }
+  });
+
+  it("reads no app-name colour anywhere on the page", async () => {
+    // Spec #451 §4.2 and §8 signal 4: after the rewrite the second `:root` block in
+    // `styles.css` is the app's one-way translation layer, and the ten app names are
+    // implementation behind it. This is the RENDERED channel of that claim — the file
+    // text is the wave's own check — and it catches the one thing a grep of the source
+    // would not: an app name arriving on this page through an imported class string.
+    const { container } = await renderLoginPage();
+    const rendered = classCensus(container.firstElementChild!).join(" ");
+
+    for (const appName of ["--bg", "--line", "--muted", "--text", "--neg"]) {
+      expect([appName, rendered.includes(`var(${appName})`)]).toEqual([appName, false]);
+    }
   });
 
   it("renders no `auth`, `auth-card` or `error` class name anywhere on the page", async () => {

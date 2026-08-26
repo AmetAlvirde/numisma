@@ -87,6 +87,32 @@
   /* The recessed surface, sitting between `--bg` and `--card`: on this dark palette a
      hovered ghost button reads as a well, not as a highlight. */
   --recess: #14161c;
+  /* MINTED BY SPEC #451 S3, and minted here for the same reason `--accent` is: the app
+     had no such colour. `--warn` is `#8a5a12`, an amber chosen to sit UNDER white, where
+     it reaches 5.91:1 and passes. The same amber as TYPE on `--card` reaches 2.91:1 and
+     fails SC 1.4.3, which wants 4.5. This is that amber lifted to a value a card can
+     carry — 7.09:1 on `--card`, 7.77:1 on `--bg` — at `--warn`'s own hue, so the two
+     read as one role at two jobs rather than as two colours.
+
+     `--warn` KEEPS THE FILL JOB and its value is unchanged. Making warn a fill
+     everywhere was the alternative, and it works for the two `unreadable` badges and
+     fails for the `inferred` pill, which is dashed and tinted because that is the rung
+     list's language for "declared, never placed". A fix right for two of three sites is
+     not a rule. */
+  --caution: #d99a3c;
+  /* THE FIELD EDGE, AND IT IS NOT `--line` (spec #451 S3). An input's boundary and a
+     card's hairline were never the same decision; they had merely been the same value.
+     SC 1.4.11 asks 3:1 of the line that tells a user where a control is, and `--line`
+     gives 1.20:1 against `--card`. The login field is `--bg` inside a `--card`, so this
+     value has to clear 3:1 against BOTH: it measures 3.48:1 and 3.18:1. `#5a6478` clears
+     `--bg` at 3.18 and misses `--card` at 2.90, which is the near miss the pair list is
+     what catches.
+
+     `--line` IS UNTOUCHED ON PURPOSE. Repainting it would have reached eight surfaces to
+     fix one input, which is the fix a rule where each consumer polices its own theme
+     would have produced. ADR-026 covers the hairline explicitly: texture is not a
+     boundary. */
+  --field-line: #606a80;
 
   --nms-background: var(--bg);
   /* THE RAISED SURFACE. `CARD_SURFACE` reads it from inside the package (spec #432
@@ -103,7 +129,11 @@
   --nms-muted-foreground: var(--muted);
   --nms-muted: var(--recess);
   --nms-border: var(--line);
-  --nms-input: var(--line);
+  /* NO LONGER `var(--line)` (spec #451 S3). See `--field-line` above for the whole
+     argument; the short version is that the package's contrast guard measured this edge
+     at 1.20:1 against a card and SC 1.4.11 wants 3. The two names went back to being two
+     decisions rather than one value. */
+  --nms-input: var(--field-line);
   --nms-primary: var(--accent);
   --nms-primary-foreground: var(--accent-text);
   /* The quieter action takes the hairline colour, one step lighter than `--card`, so a
@@ -129,6 +159,12 @@
      `--nms-destructive` — nothing failed and nothing is being destroyed. */
   --nms-ok: var(--ok);
   --nms-warn: var(--warn);
+  /* THE SAME MEANING AS THE LINE ABOVE, SAID AS TYPE (spec #451 S3). `DcaCard`'s
+     `unreadable` sidecar, the fill path's `unreadable` row tone, and the `inferred` pill
+     with its dashed left rule all read this instead of `--nms-warn` now. It is NOT
+     `--nms-warn-foreground`: in the shadcn convention this file wires, `X-foreground` is
+     the text that sits ON an `X` fill, and here that colour is white. */
+  --nms-caution: var(--caution);
   /* THE SPOT LEVEL, and the one alias in this block whose house colour exists for a
      single picture. `PriceDropPathChart` reads it three times from inside the package —
      the horizontal rule at spot, the end-anchored label beside it and the `Now` legend

@@ -47,7 +47,7 @@ DB at runtime.
 
 ## Route map
 
-Seven routes, all under `src/routes/` (file-based, `routeTree.gen.ts` is
+Six routes, all under `src/routes/` (file-based, `routeTree.gen.ts` is
 generated and committed):
 
 | Route | File | Behavior |
@@ -56,9 +56,15 @@ generated and committed):
 | `/` | `src/routes/index.tsx` | **Triage/glance surface** (D11): "does anything need me before I next sit at the desk?" Session-gated loader (`getDashboard`); redirects to `/login` if unauthenticated. Also carries the DCA card, the one standing card D11's polarity is deliberately reversed for, because it is checked at triage frequency. It taps through to `/ladder/$planId`. |
 | `/big-picture` | `src/routes/big-picture.tsx` | The full composition dashboard (summary + section tables) — moved here from `/` by the D11 route move. Same session-gated loader. |
 | `/ladder/$planId` | `src/routes/ladder.$planId.tsx` | The fill path for one declared ladder, reached by tapping the `/` DCA card. Same session-gated loader; `$planId` is the plan record's own id, and an unknown or malformed one renders a not-found card naming which it is. Spot comes from a browser fetch (`src/lib/binance-spot.ts`), not the loader, because Binance answers Vercel's US-hosted functions with HTTP 451. |
-| `/ladder-fixture/$state` | `src/routes/ladder-fixture.$state.tsx` | **Dev-only** twin of the route above, rendering the same cards from synthesized ladders so every started-ladder state can be looked at. Outside `import.meta.env.DEV` the loader returns `disabled`; the fixtures are reached by dynamic import inside that branch, so a production build drops the module entirely. No loader, no pool, no real data. |
 | `/login` | `src/routes/login.tsx` | Email/password sign-in only. No signup link, no `/signup` route — single-tenant (ADR-007). The submitted email is trimmed and lowercased; the password never is. Navigates to `/` on success. |
 | `/api/auth/$` | `src/routes/api/auth/$.ts` | Catch-all mounting Better Auth's handler (`auth.handler`) for `GET`/`POST`. |
+
+The app ships no fixture route. Spec #451 deleted the dev-only
+`/ladder-fixture/$state` twin. `src/ladder/started-ladder.fixtures.ts` stays as
+test data: `apps/workbench` is where the four started-ladder states are looked
+at, rendering the package's own `FillPathView` literals, which
+`src/ladder/fill-path-fixture-equivalence.test.ts` deep-compares against what
+`composeFillPathPage` emits for each fixture.
 
 There is no change-password screen and no client call to one — see
 `docs/hosted-cutover-runbook.md` step 6 for the password-rotation procedure
@@ -206,11 +212,14 @@ Notable groups:
   visitors) and dashboard loader.
 - `src/client-bundle.integration.test.ts` — scans the **built**
   `.vercel/output/static` assets for leaked server-only tokens (the pg
-  driver, connection strings, `BETTER_AUTH_SECRET`, the table name). Skips
+  driver, connection strings, `BETTER_AUTH_SECRET`, the table name), and
+  since spec #451 also for started-ladder fixture values, read off
+  `src/ladder/started-ladder.fixtures.ts` rather than copied from it. Skips
   on an unbuilt tree; runs in CI after `pnpm --filter @numisma/web build`.
 - `src/glance/*.test.ts`, `src/ladder/*.test.ts` cover the triage verdict, the DCA
   card's view model, and the fill path's pure modules (`fill-path-view.ts`,
-  `price-drop-path.ts`, `convexity-caption.ts`, `started-ladder.fixtures.ts`).
+  `convexity-caption.ts`, `started-ladder.fixtures.ts`). `price-drop-path.ts`
+  left for `@numisma/components` at spec #439.
   The render surfaces stay thin because the decisions live in these modules.
 - `src/routes/route-move.test.ts` — source-level assertions that `/` is the
   glance and `/big-picture` carries the composition tables (D11), since
@@ -218,9 +227,11 @@ Notable groups:
   `/ladder/$planId`'s whole reachable import graph and fails on an engine
   **value** import in any form, and pins that route's loader to the one
   session-gated line so a fixture path can never be branched into it.
-  `src/ladder/started-ladder.fixtures.test.ts` holds the other half: the
-  dev-only route's gate and its dynamic import, asserted against the route's
-  own source.
+  `src/ladder/started-ladder.fixtures.test.ts` holds the other half: since
+  spec #451 deleted the dev-only route, it sweeps every file under
+  `src/routes/` and fails if any of them imports the fixtures, naming the file
+  that does. The built-artifact half sits in
+  `src/client-bundle.integration.test.ts`.
 - `src/event-store-import-guard.test.ts`,
   `src/preferences-import-guard.test.ts`, `src/plans-import-guard.test.ts` —
   confine privileged local-disk reads to the push path, keeping the render

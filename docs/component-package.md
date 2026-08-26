@@ -23,6 +23,8 @@ and
 [ADR-025](../context/adr/ADR-025-the-end-state-cascade-contract.md), which is
 what makes `apps/web`'s missing preflight and its package-only colour utilities
 a contract rather than an accident.
+[ADR-026](../context/adr/ADR-026-wcag-2-2-aa-is-the-conformance-target.md) sets
+the level `src/contrast.ts` measures against.
 
 ---
 
@@ -34,25 +36,48 @@ a contract rather than an accident.
   Tailwind build scan the class strings inside it. Adding a build step here
   removes the scanning.
 - **No CSS at all.** Not a stylesheet, not a `@theme` block, not a token file.
-- **The token specification**, `NMS_TOKENS` in `src/tokens.ts`: nineteen
+- **The token specification**, `NMS_TOKENS` in `src/tokens.ts`: twenty
   `--nms-*` names today, each with a grayscale default and a note saying what
   reads it. The names are read off component source, not pasted from an upstream
   shadcn theme, so a token a consumer is asked to define is always a token
   something renders. Spec #432 wave 1 minted three (`--nms-card`,
-  `--nms-muted-foreground`, `--nms-neg`); spec #439 wave 2 minted the
-  remaining four (`--nms-pos`, `--nms-ok`, `--nms-warn`, `--nms-now`), each in
-  the slice that moved the component first reading it. All ten names the
-  header table names are minted now, and none is waiting.
+  `--nms-muted-foreground`, `--nms-neg`); spec #439 wave 2 minted four
+  (`--nms-pos`, `--nms-ok`, `--nms-warn`, `--nms-now`), each in the slice that
+  moved the component first reading it; spec #451 wave 3 minted the twentieth,
+  `--nms-caution`, and it is the first name minted for a measurement rather
+  than for a move. `--nms-warn` at `#8a5a12` carries white as a fill and reaches
+  only 2.91:1 as text on a card, so the fill job stayed on `--nms-warn` and the
+  text job took the new name. In the same wave `--nms-input` stopped aliasing
+  `apps/web`'s `--line`, a card hairline, and took its own app name
+  `--field-line: #606a80`, which clears SC 1.4.11's 3:1 against both
+  `--nms-background` and `--nms-card`. The ten-name house-vocabulary table in
+  the `tokens.ts` header stays closed at ten: `--nms-caution` has no bare
+  counterpart, because `apps/web` had been saying "withheld" in `--warn`, and
+  mints `--caution` beside `--accent` and `--recess` instead. Six grayscale
+  defaults moved in the same slice, each because the guard measured it.
+- **The contrast pair list**, `src/contrast.ts`: a hand-authored list of the
+  foreground/surface pairs the package's own components paint, each entry
+  carrying its WCAG 2.2 success criterion so a red names the rule and not only
+  the number. The package ships no CSS and reads no consumer's disk, so the file
+  is the claim and `ops/components/contrast.test.ts` is what measures it,
+  resolving `NMS_TOKENS` and `apps/web/src/styles.css` off disk. The workbench's
+  themed mode is exempt, and the exemption is a declared property of the
+  registration rather than an absence: its contract is pairwise distinctness so
+  that a token rendering nowhere shows up, which means it would fail on purpose.
+  ADR-026 is where the level is written down.
 - **A curated export surface.** `src/index.ts` names each export by hand. Today
   that is fifteen components — `Absent`, `Button`, `Card`, `CardTitle`, `Crumb`,
   `DcaCard`, `FillPathCards`, `FillPathProvider`, `GlanceCard`,
   `PriceDropPathChart`, `SectionTable`, `Shell`, `SummaryCard`,
   `SnapshotEmptyNotice` and `SnapshotStaleNotice` — plus the frozen `FillPath`
-  object its parts hang off, the `useFillPath` and `useFillPathSelection`
-  hooks, `buttonVariants`, `referenceLabel`, the row-level constants
+  object its parts hang off, the `useFillPathSelection` hook,
+  `buttonVariants`, `referenceLabel`, the two data exports `CARD_SURFACE` and
+  `NOTICE_CODE`, `cn`, and the token spec. No `export *`. Two withdrawals have
+  narrowed this: spec #439 unpublished the row-level class strings
   (`TABLE_CELL` and its table siblings, the four `METRICS_*` names,
-  `POSITIVE`/`NEGATIVE`), the two data exports `CARD_SURFACE` and
-  `NOTICE_CODE`, `cn`, and the token spec. No `export *`.
+  `POSITIVE`/`NEGATIVE`), and spec #451 withdrew `useFillPath`, which had no
+  caller outside the package. `contrast.ts` is not exported either; the guard
+  imports it by path.
 - **No `paths` in the package tsconfig**, deliberately. A stray `@/` specifier
   is a typecheck failure rather than a bundler-specific silence, so the package
   proves its own self-containment on every `pnpm typecheck`.
@@ -246,6 +271,99 @@ three.
 Chrome does not recalculate style in a **background** tab, so probing an inactive
 renderer through devtools or a script returns stale colours. Activate the tab
 before reading anything computed.
+
+### The themed-mode census, swept at `986a56c`, re-derived at `3e05e96`
+
+The themed pass above asks one question the rest of the suite cannot: which
+declared token repaints nothing. Spec #451 S2 (issue #453) ran it across all
+twelve fixture files and recorded the answer here so it does not have to be run
+again from memory.
+
+**Two reads at two commits, and the rows say which.** The sweep itself, source
+plus compiled stylesheet, was run at `986a56c`, before the rest of spec #451
+landed. Wave 3 then moved four warning sites, minted a twentieth token, moved
+the rung row's boundary, and moved six grayscale defaults, so four rows below
+(`--nms-warn`, `--nms-caution`, `--nms-input`, `--nms-border`) were re-derived
+from source at `3e05e96` and are marked. The other sixteen stand as swept: no
+wave-3 commit touched what paints them. The **grayscale defaults** the sweep
+happened to see are not in this table at all, and six of them moved after it;
+`tokens.ts` is where those values live.
+
+**The twelve fixtures swept**, all under
+[`apps/workbench/src/ui/`](../apps/workbench/src/ui/), named here so a reader can
+tell a token nothing paints from a token whose fixture was never opened:
+`absent`, `button`, `card`, `crumb`, `dca-card`, `fill-path`, `glance-card`,
+`price-drop-path-chart`, `section-table`, `shell`, `snapshot-notice`,
+`summary-card`.
+
+**How each row was derived, and why not from a screenshot.** A token reaches the
+screen two ways, and a grep for `var(--nms-` sees only one of them: Button paints
+`--nms-primary` through the theme utility `bg-primary`, which resolves through
+`tailwind.css`'s `@theme` block and never spells the token's name. So each row
+was read twice. First from source: which component file reads the name, bare or
+through a mapped utility, and which fixture renders that component, following the
+class strings that cross files (`CARD_SURFACE` from `card.tsx`, `POSITIVE` and
+`NEGATIVE` and `METRICS_TERM` from `summary-card.tsx`, `CELL_BOX` behind the six
+`TABLE_*` strings from `section-table.tsx`). Second from the compiled stylesheet:
+the workbench's own Tailwind entry was built through Vite, the same path
+`tailwind-scan.test.ts` uses, and every emitted rule that reads a token was
+listed with the selector that gates it. That second read is what separates a
+token painted at rest from one painted only on `:hover`, only on
+`:focus-visible`, or only under `prefers-color-scheme: dark`, which is a
+distinction a static themed screenshot cannot make either way. Both reads are
+reproducible from the tree at `986a56c`, and no row rests on a screenshot.
+
+The **fixtures** column lists where a package component paints the token. The
+workbench's own chrome is excluded from it and called out below, because a token
+the instrument paints is not a token a component renders.
+
+| token | fixtures that paint it | how |
+| --- | --- | --- |
+| `--nms-background` | `button`, `fill-path`, `price-drop-path-chart` | Button `outline`'s fill, the chart's label plates, the untinted rung rows. The decorator's `bg-background` wrapper and the workbench's `html` rule also paint it under all twelve. |
+| `--nms-card` | `card`, `dca-card`, `fill-path`, `glance-card`, `price-drop-path-chart`, `section-table`, `snapshot-notice`, `summary-card` | `CARD_SURFACE`'s fill, carried by every `Card` composer and by the stale-snapshot notice. The chart also fills its rung dots with it. |
+| `--nms-foreground` | `button`, `crumb`, `dca-card`, `fill-path`, `price-drop-path-chart` | Button's secondary hover mix and `hover:text-foreground`, Crumb's current segment, the selected rung's border and 1px shadow, the chart's axis labels. Every fixture's own note line uses `text-foreground/60` on top of that. |
+| `--nms-muted-foreground` | `absent`, `crumb`, `dca-card`, `fill-path`, `glance-card`, `price-drop-path-chart`, `section-table`, `summary-card` | `Absent`'s em dash and its stated cause, `METRICS_TERM`, the table header box, and direct reads in five more components. Not painted by `button`, `card`, `shell` or `snapshot-notice`. |
+| `--nms-muted` | `button`, **on hover only** | Its only three reads anywhere are Button's `hover:bg-muted`, `aria-expanded:bg-muted` and `dark:hover:bg-muted/50`. No fixture stages `aria-expanded`, so hovering an `outline` or `ghost` button is the only way to see it. **Nothing paints it at rest.** |
+| `--nms-border` | `button`, `card`, `dca-card`, `fill-path`, `glance-card`, `section-table`, `snapshot-notice`, `summary-card` | `CARD_SURFACE`'s hairline, `CELL_BOX`'s bottom rule under both the composition table and the DCA rung table, six reads across the fill path, and Button `outline`'s `border-border`. **Re-derived at `3e05e96`**: the fill path had nine reads at sweep time; three of them, the rung row's own edge in its three states, moved to `--nms-input`. |
+| `--nms-input` | `button`, `fill-path` | **Re-derived at `3e05e96`.** At sweep time every emitted rule that read it sat inside `@media (prefers-color-scheme: dark)` (`dark:border-input`, `dark:bg-input/30`, `dark:hover:bg-input/50`, all on Button `outline`) and it rendered nowhere under a light scheme. Spec #451 S3 unaliased it from the app's `--line` so it clears 3:1 as a control edge, and the rung row then took it for its boundary in all three states, at rest, under any scheme. |
+| `--nms-primary` | `button` | `bg-primary` on the `default` variant, `text-primary` on `link`. |
+| `--nms-primary-foreground` | `button` | `text-primary-foreground`, the `default` variant's label. |
+| `--nms-secondary` | `button` | `bg-secondary`, and the bare `color-mix` that darkens it on hover. |
+| `--nms-secondary-foreground` | `button` | `text-secondary-foreground` on the `secondary` variant. |
+| `--nms-destructive` | `button`, `snapshot-notice` | The `destructive` variant's tint and text, plus `aria-invalid` on all six variants in the `states` fixture. `snapshot-notice` stages a destructive Button beside the refusal on purpose, so the two reds can be told apart. |
+| `--nms-neg` | `dca-card`, `fill-path`, `glance-card`, `section-table`, `snapshot-notice`, `summary-card` | `NEGATIVE`, exported by `summary-card.tsx` and imported by both `glance-card.tsx` and `section-table.tsx`, the torn-act block's border and headline, and the stale-snapshot refusal. |
+| `--nms-pos` | `dca-card`, `fill-path`, `glance-card`, `price-drop-path-chart`, `section-table`, `summary-card` | `POSITIVE`, on the same three-file path as `NEGATIVE`, the filled path and its rung tints and edges, and the chart's filled dots. |
+| `--nms-ok` | `summary-card` | The green arm of the data-safety badge, and its only read in the package. |
+| `--nms-warn` | `summary-card` | **Re-derived at `3e05e96`.** The amber arm of the data-safety badge, as a fill under white, and its only read left in the package. At sweep time it also carried the `unreadable` chip and the dashed `inferred` pill and left edge; all four of those sites read `--nms-caution` now, because as type on a card `#8a5a12` measures 2.91:1 and SC 1.4.3 wants 4.5. |
+| `--nms-caution` | `dca-card`, `fill-path` | **Re-derived at `3e05e96`**, and minted after the sweep, so it has no swept row. Four reads: `dca-card`'s `unreadable` chip, `fill-path`'s `unreadable` chip, and the `inferred` pill's border-plus-text and its dashed left edge. |
+| `--nms-now` | `fill-path`, `price-drop-path-chart` | The spot rule, its end-anchored label, the `Now` legend swatch, and the tint and edge on the rung price reaches next. |
+| `--nms-ring` | `button`, `snapshot-notice`, **on keyboard focus only** | `focus-visible:border-ring` and `focus-visible:ring-ring/50` sit on `buttonVariants`' base string, so the ring rides every Button in both fixtures. **Nothing paints it at rest**, which §5's focus-ring pass already says in its own words. |
+| `--nms-radius-md` | `button`, `snapshot-notice` | `rounded-md` on the base, plus the `min()` clamps on `xs`, `sm`, `icon-xs` and `icon-sm`. The one token here that is not a colour. |
+
+**No token repaints nothing.** All twenty have at least one painter in the
+package, so the sweep turned up no deletion candidate and nothing here is acted
+on. Two are painted only in a state the fixtures do not hold: `--nms-muted` on
+hover and `--nms-ring` on keyboard focus. Both are still live reads on real
+elements, so neither is dead, and the reason each is easy to mistake for dead is
+written above rather than left for the next sweep to rediscover. `--nms-input`
+was the third of those at sweep time and no longer is: the rung row paints it at
+rest.
+
+**What this handed the contrast guard** (spec #451 S3, issue #455): an empty
+exclusion list. The guard's premise is that a token nothing renders is not a pair
+to assert, and no token qualified. The state-gated rows in particular stayed in:
+a hover surface still carries text, a focus ring is a non-text boundary under
+SC 1.4.11, and `--nms-input` was the token S3 unaliased precisely so the login
+field's boundary can clear 3:1, which is an `apps/web` read the package's
+dark-only rule said nothing about. `contrast.ts` and
+`ops/components/contrast.test.ts` are what shipped from it, and both are §1's
+subject.
+
+**One fixture appears in no row.** `shell` renders a component that sets layout
+and nothing else, so it reads no colour token at all. It still shows the
+decorator's background and foreground, and the boxes inside it are the fixture's
+own `foreground/10` and `foreground/20` bands. That absence is a fact about
+`Shell`, not a finding about a token.
 
 ## 6. Adding a component
 
@@ -441,9 +559,13 @@ references it, this proves it computed.
 pnpm dev
 ```
 
-then the route the surface lives on. For ladder, Fill Path and chart states the
-live ledger does not happen to be in, use `/ladder-fixture/$state`, whose
-fixtures are authored and carry no ledger figure.
+then the route the surface lives on. Spec #451 deleted `/ladder-fixture/$state`,
+so the app now shows only the ladder state the live ledger is in. For the other
+states, run the workbench (`pnpm --filter @numisma/workbench dev`) in **app
+mode**, which carries a copy of `styles.css` that `app-token-drift.test.ts`
+pins to the app's on every run. Say so when you record the probe: the workbench
+is a second cascade, not the shipping one, so a parity claim made there is
+narrower than one made on a route.
 
 ### The procedure
 

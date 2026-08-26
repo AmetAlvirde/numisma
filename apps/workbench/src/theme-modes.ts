@@ -87,6 +87,7 @@ export const THEMED_TOKENS: Readonly<Record<string, string>> = {
   "--nms-pos": "#b026ff",
   "--nms-ok": "#00ff4c",
   "--nms-warn": "#ff00a8",
+  "--nms-caution": "#ff6f00",
   "--nms-now": "#7cff00",
   "--nms-ring": "#f2a516",
   "--nms-radius-md": "14px",
@@ -101,7 +102,7 @@ export const THEMED_TOKENS: Readonly<Record<string, string>> = {
  * alias chain to meet these literals, rather than comparing alias text that
  * would keep matching while the palette moved underneath it.
  *
- * NINETEEN NAMES, MATCHING THE PACKAGE EXACTLY. Fifteen was wave 1's final
+ * TWENTY NAMES, MATCHING THE PACKAGE EXACTLY. Fifteen was wave 1's final
  * count; spec #439 S1 moved `SummaryCard` into the package reading `--nms-pos`,
  * `--nms-ok` and `--nms-warn`, and S5 moved `PriceDropPathChart` in reading
  * `--nms-now`. `styles.css` aliased each onto the house name it already had in
@@ -149,6 +150,24 @@ export const THEMED_TOKENS: Readonly<Record<string, string>> = {
  * carried, and the gate check that cleared the chart for the workbench painted
  * these strokes INVISIBLE precisely because no `--nms-` name backed them yet.
  *
+ * `#d99a3c` IS `--caution` RESOLVED, AND IT IS THE TWENTIETH (spec #451 S3).
+ * `--nms-warn` above it is unchanged and keeps the badge fill; this is the same
+ * meaning as type, at a value a card can carry. The two are adjacent here on
+ * purpose — they are one role at two jobs, and a reviewer who cannot tell the
+ * amber sidecar from the amber badge in app mode is looking at exactly the
+ * confusion the mint exists to end. Themed mode paints them a magenta and an
+ * orange for the same reason it paints `--nms-neg` and `--nms-destructive` a
+ * cyan and a red.
+ *
+ * `#606a80` IS `--field-line` RESOLVED, AND IT IS THE ONE VALUE IN THIS TABLE
+ * THAT MOVED RATHER THAN ARRIVED. `--nms-input` read `var(--line)` until spec
+ * #451 S3, so it carried `#262a33`, the hairline, one row up from where it sits
+ * now. The package's contrast guard measured that edge at 1.20:1 against a card
+ * where SC 1.4.11 wants 3, and the fix was a second decision rather than a
+ * repaint of `--line`, which eight surfaces read. `--nms-border` still carries
+ * `#262a33`, so the two names in this table now differ, which is what the split
+ * looks like from here.
+ *
  * `#f0736a` IS `--neg` RESOLVED, AND IT APPEARS TWICE. `--nms-destructive` and
  * `--nms-neg` both alias onto `--neg` in `styles.css`, so app mode carries one
  * literal under two names and no guard objects: only themed mode asserts
@@ -164,7 +183,7 @@ export const APP_TOKENS: Readonly<Record<string, string>> = {
   "--nms-muted-foreground": "#9aa1ad",
   "--nms-muted": "#14161c",
   "--nms-border": "#262a33",
-  "--nms-input": "#262a33",
+  "--nms-input": "#606a80",
   "--nms-primary": "#3b6cf0",
   "--nms-primary-foreground": "#ffffff",
   "--nms-secondary": "#262a33",
@@ -174,6 +193,7 @@ export const APP_TOKENS: Readonly<Record<string, string>> = {
   "--nms-pos": "#46c98b",
   "--nms-ok": "#1f7a4d",
   "--nms-warn": "#8a5a12",
+  "--nms-caution": "#d99a3c",
   "--nms-now": "#e07a4f",
   "--nms-ring": "#3b6cf0",
   "--nms-radius-md": "8px",

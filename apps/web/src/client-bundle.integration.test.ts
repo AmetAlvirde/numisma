@@ -30,6 +30,13 @@
  * So: a green pre-check is not this invariant proven. If the two ever disagree,
  * this one wins.
  *
+ * A SECOND CLAIM RIDES THE SAME BUILD (spec #451 §4.3). The started-ladder fixtures
+ * are authored ladders that exist for a deep-compare in tests, and no browser should
+ * ever download one. That used to be asserted as a mechanism, by reading the source
+ * of a dev-only route that has since been deleted. It is asserted here as an outcome
+ * instead, because the outcome is what the mechanism was for and this is the only
+ * guard in the repo that can read what actually shipped.
+ *
  * SUBSTRATE-GATED, like the Postgres integration tests: it needs a build to
  * inspect, so it SKIPS with a loud warning when `.vercel/output/static` is
  * absent (a plain `pnpm test` on an unbuilt tree still passes). CI builds the
@@ -40,6 +47,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { STARTED_LADDER_FIXTURES } from "./ladder/started-ladder.fixtures.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // HERE = apps/web/src → the web package root is one level up.
@@ -123,6 +131,70 @@ describe.skipIf(!hasBuild)("ADR-007 client-bundle invariant", () => {
       for (const token of FORBIDDEN) {
         if (contents.includes(token)) {
           leaks.push(`${file} contains server-only token "${token}"`);
+        }
+      }
+    }
+    expect(leaks, leaks.join("\n")).toEqual([]);
+  });
+
+  it("carries no started-ladder fixture values", () => {
+    // THE OUTCOME A DELETED ROUTE USED TO ASSERT AS A MECHANISM (spec #451 §4.3).
+    // `ladder/started-ladder.fixtures.ts` is four authored ladders, kept because
+    // `fill-path-fixture-equivalence.test.ts` deep-compares them against the package's
+    // derived copy. Nothing a browser downloads should carry them: they are invented
+    // trades, and a screenshot of a production build showing `fixture:overfilled` is a
+    // screenshot nobody can read correctly.
+    //
+    // A dev-only route used to render them behind an `import.meta.env.DEV` gate, and a
+    // source-text guard read that route to prove the gate held. The route is gone. This
+    // asserts what the gate was for, against the bytes rather than against a file:
+    // whatever import graph a future edit builds, no fixture value reaches the client.
+    // `started-ladder.fixtures.test.ts` holds the fast source-level half — no file under
+    // `routes/` imports the module — and this one is authoritative for the same reason
+    // the leak check above is.
+    //
+    // THE TOKENS ARE READ OFF THE FIXTURES, not copied from them, so a renamed fixture
+    // or a re-numbered plan id cannot leave this guard scanning for values that no
+    // longer exist.
+    //
+    // WHY THE IDS ARE SCANNED FOR BY PREFIX AND THE PROSE IS NOT. Every id in that file
+    // is ASSEMBLED AT RUNTIME from a template — `facade00-…-${index}`,
+    // `fixture-rung-${n}`, `fixture:${name}` — so no whole id is ever a literal in a
+    // built asset, and a scan for one would be a scan for something that cannot appear:
+    // a token that can never fire, in a guard whose whole job is to fire. What the
+    // bundler emits is the template's literal head, which is what is matched here. The
+    // `renders` sentences need no such care; they are written out in full and each is
+    // long enough that nothing else in the tree could produce one.
+    const tokens = [
+      ...STARTED_LADDER_FIXTURES.map((fixture) => fixture.renders),
+      ...new Set(
+        STARTED_LADDER_FIXTURES.flatMap((fixture) => [
+          fixture.planId.split("-")[0]!,
+          ...(fixture.anchor.report.dca?.positions ?? []).flatMap((position) => [
+            `${position.positionId.split(":")[0]!}:`,
+            ...(position.rungs ?? []).flatMap((rung) =>
+              rung.id === undefined ? [] : [rung.id.replace(/\d+$/, "")],
+            ),
+          ]),
+        ]),
+      ),
+    ];
+    // FALSE-PASS FLOOR, IN BOTH DIRECTIONS. An empty token list scans for nothing and
+    // reports green, which is what an emptied or restructured fixtures module would
+    // produce. A token short enough to be a fragment is the opposite failure — it would
+    // match half the bundle — so the length is asserted rather than trimmed to, and a
+    // derivation that starts yielding one goes red here instead of going quiet.
+    expect(tokens.length, "no fixture tokens to scan for").toBeGreaterThan(4);
+    for (const token of tokens) {
+      expect(token.length, `"${token}" is too short to identify a fixture`).toBeGreaterThan(6);
+    }
+
+    const leaks: string[] = [];
+    for (const file of walk(CLIENT_DIR)) {
+      const contents = readFileSync(file, "utf-8");
+      for (const token of tokens) {
+        if (contents.includes(token)) {
+          leaks.push(`${file} contains fixture value "${token}"`);
         }
       }
     }

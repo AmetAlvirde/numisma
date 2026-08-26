@@ -98,6 +98,19 @@ describe("the sign-in submit button", () => {
     ).toBe("submit");
   });
 
+  it("is not the only button on the form, and the other one never submits it", async () => {
+    // The show/hide toggle sits inside the `<form>`, so a plain `<button>` with no
+    // `type` would submit it on every click — the mirror image of the trap the comment
+    // above this button in `login.tsx` records. It is the package `Button`, whose Base
+    // UI primitive defaults to `type="button"`, and it says so anyway.
+    await renderLoginPage();
+    const toggle = screen.getByRole("button", { name: "Show password" });
+
+    expect(toggle.getAttribute("type")).toBe("button");
+    expect(toggle.getAttribute("data-slot")).toBe("button");
+    expect(screen.getByRole("button", { name: "Sign in" })).not.toBe(toggle);
+  });
+
   it("goes disabled with the pending copy once the request is in flight", async () => {
     signInEmail.mockClear();
     await renderLoginPage();
@@ -110,5 +123,71 @@ describe("the sign-in submit button", () => {
     const pending = await screen.findByRole("button", { name: "Signing in…" });
     expect((pending as HTMLButtonElement).disabled).toBe(true);
     expect(signInEmail).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * THE PASSWORD TOGGLE, AND THE ONE WAY IT FAILS SILENTLY (spec #451 S5).
+ *
+ * A show/hide toggle that REMOUNTS the field instead of swapping its `type` loses what
+ * was typed, and it loses it at the moment the operator reached for the toggle because
+ * they were unsure what they had typed. Nothing about the page looks wrong afterwards:
+ * an empty password field is exactly what an empty password field looks like. So the
+ * claim below is not "the type changed" but "the value survived a round trip", asserted
+ * by typing once and toggling twice.
+ *
+ * THE ACCESSIBLE NAME IS THE ONE STATE CHANNEL, and `aria-pressed` is gone. Carrying
+ * both made the toggle announce its state twice in opposite senses: with the password on
+ * screen a reader said "Hide password, toggle button, PRESSED", where pressed reads as
+ * "hiding is on". The APG's Button pattern says to pick one, and the name is the half
+ * that is already on screen in words, so the visible label and the announcement cannot
+ * disagree and a voice-control user can still say what they see. Spec #451 S5 asked for
+ * `aria-pressed`; it was written before the contradiction was noticed, and dropping the
+ * attribute is what keeps the visible UI unchanged and SC 2.5.3 satisfied, which freezing
+ * the name would not.
+ *
+ * The toggle lives in the ROUTE, not in `@numisma/components`. There is one password
+ * field in this app; it becomes a package primitive when there are two.
+ */
+describe("the show/hide password toggle", () => {
+  it("swaps the field's type and says the state once, in the name", async () => {
+    await renderLoginPage();
+    const user = userEvent.setup();
+    const field = screen.getByLabelText("Password");
+
+    expect(field.getAttribute("type")).toBe("password");
+    const show = screen.getByRole("button", { name: "Show password" });
+    // ONE CHANNEL. `aria-pressed` beside a name that already flips is the second one,
+    // and the two run in opposite senses: the name says what the next click DOES, the
+    // pressed state says what the current one IS.
+    expect(show.hasAttribute("aria-pressed")).toBe(false);
+    expect(show.textContent).toBe("Show");
+
+    await user.click(show);
+
+    expect(field.getAttribute("type")).toBe("text");
+    const hide = screen.getByRole("button", { name: "Hide password" });
+    expect(hide.hasAttribute("aria-pressed")).toBe(false);
+    // The announcement with the password ON SCREEN is "Hide password, button", and the
+    // visible word is "Hide". Nothing on the element says "pressed" against that.
+    expect(hide.textContent).toBe("Hide");
+    expect(hide.getAttribute("aria-label")).toBe("Hide password");
+  });
+
+  it("keeps the typed value across the swap, and across the swap back", async () => {
+    await renderLoginPage();
+    const user = userEvent.setup();
+    const field = screen.getByLabelText("Password") as HTMLInputElement;
+
+    await user.type(field, "authored-secret");
+    expect(field.value).toBe("authored-secret");
+
+    await user.click(screen.getByRole("button", { name: "Show password" }));
+    expect(field.value).toBe("authored-secret");
+    expect(field.getAttribute("type")).toBe("text");
+
+    await user.click(screen.getByRole("button", { name: "Hide password" }));
+    expect(field.value).toBe("authored-secret");
+    expect(field.getAttribute("type")).toBe("password");
   });
 });

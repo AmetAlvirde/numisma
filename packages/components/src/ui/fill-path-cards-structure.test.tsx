@@ -48,7 +48,7 @@ import type { FillPathView } from "./fill-path";
 // from the package (§4.3). The literals are not taken on trust —
 // `apps/web/src/ladder/fill-path-fixture-equivalence.test.ts` deep-compares both of the
 // two read here against what the composer emits.
-import { dayZeroView, partlyWalkedView } from "./fill-path.fixtures";
+import { dayZeroView, outOfOrderView, partlyWalkedView } from "./fill-path.fixtures";
 import { NOTICE_CODE } from "./snapshot-notice";
 
 /** The header alone, so an assertion about it names one card's markup and not four. */
@@ -203,7 +203,7 @@ describe("the header card carries its section as utilities", () => {
       ["pending", "text-[var(--nms-muted-foreground)]"],
       ["active", "text-[var(--nms-pos)]"],
       ["ended", "text-[var(--nms-muted-foreground)]"],
-      ["unreadable", "text-[var(--nms-warn)]"],
+      ["unreadable", "text-[var(--nms-caution)]"],
     ];
     for (const [state, tone] of tones) {
       const { container, unmount } = renderHeader({ ...base, state });
@@ -550,7 +550,7 @@ describe("the torn banner and the two warnings carry their rules as utilities", 
     // the difference between the two certainties is the whole reason these paragraphs
     // look different, and it must not spill onto the surface they share.
     expectClasses(inferred, [
-      "border-l-[var(--nms-warn)]",
+      "border-l-[var(--nms-caution)]",
       "[border-left-style:dashed]",
       "text-[var(--nms-muted-foreground)]",
     ]);
@@ -676,7 +676,7 @@ describe("the selected-rung card carries its section as utilities", () => {
       "opacity-[0.55]",
     ]);
 
-    // Dashed in `--nms-warn`, matching the inferred warning above the chart — the same
+    // Dashed in `--nms-caution`, matching the inferred warning above the chart — the same
     // certainty, the same visual language.
     const inferred = panelOf(withSelectedRung(base, { pricePassedUnconfirmed: true }));
     const inferredPill = [...inferred.querySelectorAll("p:nth-of-type(2) span")].find(
@@ -684,8 +684,8 @@ describe("the selected-rung card carries its section as utilities", () => {
     );
     expectClasses(inferredPill, [
       ...shape,
-      "border-[var(--nms-warn)]",
-      "text-[var(--nms-warn)]",
+      "border-[var(--nms-caution)]",
+      "text-[var(--nms-caution)]",
       "border-dashed",
     ]);
 
@@ -889,6 +889,41 @@ describe("the rung list carries its section as utilities", () => {
     }
   });
 
+  it("edges every row in the control token, never the hairline", () => {
+    // THE ROW IS A `<button>` AND ITS EDGE IS THE ONLY THING THAT SAYS SO — no chrome,
+    // no fill step against the card behind it, only figures and words. That makes the
+    // edge the boundary SC 1.4.11 wants 3:1 for, and on `--nms-border` it measured
+    // 1.21:1 in both palettes. `contrast.ts` asserts `--nms-input` against `--nms-card`
+    // and `--nms-background`; this is what keeps the row pointed at the token that
+    // claim covers, including inside the two `color-mix()` bases, where a slip back to
+    // the hairline would put a filled or next row under 3:1 at the low end of the mix.
+    const view = partlyWalkedView();
+    const { container } = render(<FillPathCards view={view} />);
+    const rows = () => [...container.querySelectorAll<HTMLButtonElement>("li > button")];
+    // SELECTION IS MOVED ACROSS THE LADDER because it overrides the state edge, so a
+    // ladder read at one selection never shows all three state arms at once.
+    const edges = new Set<string>();
+    for (const [index] of view.rungs.entries()) {
+      fireEvent.click(rows()[index]!);
+      for (const row of rows()) {
+        for (const token of classTokens(row)) {
+          if (token.startsWith("border-[")) edges.add(token);
+        }
+      }
+    }
+
+    expect(edges).toEqual(
+      new Set([
+        "border-[var(--nms-input)]",
+        "border-[color-mix(in_srgb,var(--nms-pos)_34%,var(--nms-input))]",
+        "border-[color-mix(in_srgb,var(--nms-now)_42%,var(--nms-input))]",
+        // Selection, which is asserted whole in the case below.
+        "border-[var(--nms-foreground)]",
+      ]),
+    );
+    for (const edge of edges) expect(edge).not.toContain("--nms-border");
+  });
+
   it("rings the selected row instead of filling it, on every state", () => {
     // BOTH HALVES, on a row whose state already paints a background: the ring is present
     // AND the background is the one the state gave it. A conversion that reached for a
@@ -938,13 +973,21 @@ describe("the rung list carries its section as utilities", () => {
     const figures = rows[0]?.children[1];
 
     expectClasses(rows[0]?.children[0], [
-      "self-center",
       "text-[0.78rem]",
       "font-semibold",
       "tracking-[0.03em]",
       "text-[var(--nms-muted-foreground)]",
-      "@[380px]/fp-list:self-auto",
     ]);
+    // THE INDEX TAKES THE ROW'S OWN ALIGNMENT AT BOTH WIDTHS (spec #451 S7). The
+    // deleted `self-center` centred the label against a row whose height is set by
+    // the tallest thing in it, so a three-line `Declared — not placed` at 320px sank
+    // `R7` and `R8` while their prices stayed on the first baseline. With no `self-*`
+    // override the label takes `items-baseline` at 320px and `items-center` past
+    // 380px, and both of those are the ROW's — which is what keeps the two widths
+    // one decision instead of two.
+    expect(
+      classTokens(rows[0]!.children[0]!).filter((token) => token.includes("self-")),
+    ).toEqual([]);
     expectClasses(figures, ["grid", "gap-px", "min-w-0"]);
     const price = figures?.firstElementChild;
     expectClasses(price, [
@@ -1019,10 +1062,15 @@ describe("the rung list carries its section as utilities", () => {
   });
 
   it("gives the qualifiers a full-width line at 320px and a cell at 380px", () => {
-    const view = partlyWalkedView();
+    // `out-of-order`, NOT `partly-walked`, since spec #451 S6: the partial-fill pill was
+    // the duplicate the copy slice deleted, and `price passed, unconfirmed` is now the
+    // only qualifier any row can carry. `partly-walked` fires none of them.
+    const view = outOfOrderView();
     const { rows } = rowsOf(view);
-    const withQuals = rows.find((row) => row.children[2]?.children.length === 3);
-    const quals = withQuals?.children[2]?.children[2];
+    const withQuals = rows.find((row) =>
+      row.textContent?.includes("price passed, unconfirmed"),
+    );
+    const quals = [...(withQuals?.children[2]?.children ?? [])].at(-1);
 
     // A pill cannot be made narrower than its longest word, so at 320px it is given the
     // whole tile rather than a column that might not hold it — still right-aligned, so it

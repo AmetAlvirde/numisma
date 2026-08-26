@@ -154,7 +154,13 @@ describe("the app's --nms-* overrides in styles.css", () => {
     ["--nms-background", "var(--bg)"],
     ["--nms-foreground", "var(--text)"],
     ["--nms-border", "var(--line)"],
-    ["--nms-input", "var(--line)"],
+    // NOT `var(--line)` since spec #451 S3, and the pair below it is what the
+    // split is for. An input's boundary and a card's hairline had been one
+    // value and were never one decision: SC 1.4.11 wants 3:1 of the line that
+    // identifies a control, `--line` gives 1.20:1 against `--card`, and
+    // `--field-line` is the second decision. `--nms-border` still reads
+    // `--line`, so a rewrite that welded them back reds this line.
+    ["--nms-input", "var(--field-line)"],
     ["--nms-destructive", "var(--neg)"],
     ["--nms-muted-foreground", "var(--muted)"],
     ["--nms-card", "var(--card)"],
@@ -200,6 +206,26 @@ describe("the app's --nms-* overrides in styles.css", () => {
       if (name === "--nms-now") continue;
       expect(value, name).not.toContain("--now");
     }
+  });
+
+  it("mints a caution colour rather than making the badge amber carry type", () => {
+    // The mint spec #451 S3 makes, and the shape of it: `--warn` keeps its
+    // value and its fill job, `--caution` is a new palette entry, and
+    // `--nms-caution` aliases onto the new one. A "fix" that pointed
+    // `--nms-caution` at `--warn` would put 2.91:1 type back on a card while
+    // every other guard stayed green.
+    expect(stylesCss).toMatch(/^\s*--caution:\s*#[0-9a-f]{6};/m);
+    expect(overrides.get("--nms-caution")).toBe("var(--caution)");
+    expect(overrides.get("--nms-warn")).toBe("var(--warn)");
+  });
+
+  it("mints a field edge rather than repainting the hairline", () => {
+    // The unalias, from the other end. `--line` keeping its value is half the
+    // claim — eight surfaces read it — and `--nms-border` still reaching it is
+    // the other half, which is what stops the fix being applied to the wrong
+    // one of the two names.
+    expect(stylesCss).toMatch(/^\s*--field-line:\s*#[0-9a-f]{6};/m);
+    expect(overrides.get("--nms-border")).toBe("var(--line)");
   });
 
   it("mints a recessed surface for --nms-muted, distinct from the app's --muted text", () => {

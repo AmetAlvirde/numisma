@@ -294,13 +294,31 @@ const STATE_COPY: Record<DcaPositionView["state"], string> = {
  * fact about this table rather than about a cascade. `dca-card-structure.test.tsx` walks
  * all four arms for that reason, not only the one the live wire happens to be in.
  */
-const STATE_BADGE = "text-[0.72rem] font-semibold uppercase tracking-[0.04em]";
+/**
+ * ── THE FLOOR IS 0.75rem, AND IT IS THE HOUSE'S OWN (spec #451 S7) ───────────────────
+ * WCAG 2.2 AA, adopted in ADR-026, sets NO MINIMUM FONT SIZE. It constrains contrast,
+ * and `pending` and `ended` were never in trouble there: `--nms-muted-foreground` on
+ * `--nms-card` measures 6.63:1 against a 4.5:1 threshold and passes with room. So the
+ * complaint that these badges are hard to read was true and its diagnosis was not —
+ * eyes report "too faint" for what is actually 0.72rem, upper-cased and tracked out,
+ * which is three legibility costs stacked on one string.
+ *
+ * A ratio could not have caught this and a taste call would have to be re-argued on the
+ * next badge, so the rule is written as a NUMBER instead: no shipped app surface renders
+ * text below 0.75rem. It is a house rule rather than a conformance one, named as such
+ * here so the next reader does not go looking for the success criterion behind it.
+ *
+ * THE COLOUR DOES NOT MOVE. Re-tinting a pair that passes at 6.63:1 would spend the
+ * palette on a problem it does not have, and `pending` taking the same recessed grey as
+ * `ended` is the argument above, not an oversight.
+ */
+const STATE_BADGE = "text-[0.75rem] font-semibold uppercase tracking-[0.04em]";
 
 const STATE_TONE: Record<DcaPositionView["state"], string> = {
   pending: "text-[var(--nms-muted-foreground)]",
   active: "text-[var(--nms-pos)]",
   ended: "text-[var(--nms-muted-foreground)]",
-  unreadable: "text-[var(--nms-warn)]",
+  unreadable: "text-[var(--nms-caution)]",
 };
 
 /** What kind of plan this is, where the wire names one. */

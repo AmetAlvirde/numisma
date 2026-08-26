@@ -13,7 +13,6 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as BigPictureRouteImport } from './routes/big-picture'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LadderPlanIdRouteImport } from './routes/ladder.$planId'
-import { Route as LadderFixtureStateRouteImport } from './routes/ladder-fixture.$state'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 
 const LoginRoute = LoginRouteImport.update({
@@ -36,11 +35,6 @@ const LadderPlanIdRoute = LadderPlanIdRouteImport.update({
   path: '/ladder/$planId',
   getParentRoute: () => rootRouteImport,
 } as any)
-const LadderFixtureStateRoute = LadderFixtureStateRouteImport.update({
-  id: '/ladder-fixture/$state',
-  path: '/ladder-fixture/$state',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -51,7 +45,6 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/big-picture': typeof BigPictureRoute
   '/login': typeof LoginRoute
-  '/ladder-fixture/$state': typeof LadderFixtureStateRoute
   '/ladder/$planId': typeof LadderPlanIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
@@ -59,7 +52,6 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/big-picture': typeof BigPictureRoute
   '/login': typeof LoginRoute
-  '/ladder-fixture/$state': typeof LadderFixtureStateRoute
   '/ladder/$planId': typeof LadderPlanIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
@@ -68,33 +60,19 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/big-picture': typeof BigPictureRoute
   '/login': typeof LoginRoute
-  '/ladder-fixture/$state': typeof LadderFixtureStateRoute
   '/ladder/$planId': typeof LadderPlanIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths:
-    | '/'
-    | '/big-picture'
-    | '/login'
-    | '/ladder-fixture/$state'
-    | '/ladder/$planId'
-    | '/api/auth/$'
+  fullPaths: '/' | '/big-picture' | '/login' | '/ladder/$planId' | '/api/auth/$'
   fileRoutesByTo: FileRoutesByTo
-  to:
-    | '/'
-    | '/big-picture'
-    | '/login'
-    | '/ladder-fixture/$state'
-    | '/ladder/$planId'
-    | '/api/auth/$'
+  to: '/' | '/big-picture' | '/login' | '/ladder/$planId' | '/api/auth/$'
   id:
     | '__root__'
     | '/'
     | '/big-picture'
     | '/login'
-    | '/ladder-fixture/$state'
     | '/ladder/$planId'
     | '/api/auth/$'
   fileRoutesById: FileRoutesById
@@ -103,7 +81,6 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   BigPictureRoute: typeof BigPictureRoute
   LoginRoute: typeof LoginRoute
-  LadderFixtureStateRoute: typeof LadderFixtureStateRoute
   LadderPlanIdRoute: typeof LadderPlanIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
 }
@@ -138,13 +115,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LadderPlanIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/ladder-fixture/$state': {
-      id: '/ladder-fixture/$state'
-      path: '/ladder-fixture/$state'
-      fullPath: '/ladder-fixture/$state'
-      preLoaderRoute: typeof LadderFixtureStateRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
@@ -159,7 +129,6 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   BigPictureRoute: BigPictureRoute,
   LoginRoute: LoginRoute,
-  LadderFixtureStateRoute: LadderFixtureStateRoute,
   LadderPlanIdRoute: LadderPlanIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
 }

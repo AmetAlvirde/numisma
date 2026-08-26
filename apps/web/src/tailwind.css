@@ -210,6 +210,7 @@
 
   --color-ok: var(--nms-ok);
   --color-warn: var(--nms-warn);
+  --color-caution: var(--nms-caution);
 
   --color-now: var(--nms-now);
 

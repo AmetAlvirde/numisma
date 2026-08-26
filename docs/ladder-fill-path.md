@@ -17,8 +17,11 @@ module), `packages/components/src/ui/fill-path.tsx` and
 [ADR-019](../context/adr/ADR-019-the-chart-is-presentation-its-accessible-substitute-is-generated.md)),
 `apps/web/src/ladder/convexity-caption.ts` (the chart's generated accessible
 substitute), `apps/web/src/ladder/rung-state-copy.ts` (the words a rung's state
-prints, authored on the web from facts and never read off the wire), and
-`apps/web/src/styles.css` (the row tints, the only place `color-mix()` appears).
+prints, authored on the web from facts and never read off the wire), and `apps/web/src/styles.css` (the palette the app supplies for the package's
+`--nms-*` names, and nothing else: under
+[ADR-025](../context/adr/ADR-025-the-end-state-cascade-contract.md) the file
+holds two `:root` blocks and no rules, so the row tints live in the class
+strings inside `fill-path.tsx`).
 
 ---
 
@@ -83,9 +86,17 @@ picture and the list, and adds no fourth.*
 
 | Colour | Means | Drawn as |
 | --- | --- | --- |
-| `--pos` | this rung **filled** | solid path segment, filled dot, `Filled` legend swatch, filled row tint |
-| `--muted` | this rung is **waiting** | dashed path segment, hollow dot, `Waiting` legend swatch, bare row |
-| `--now` | **where price is** | the "now" rule, `Now` legend swatch, the next rung's row tint |
+| `--nms-pos` | this rung **filled** | solid path segment, filled dot, `Filled` legend swatch, filled row tint |
+| `--nms-muted-foreground` | this rung is **waiting** | dashed path segment, hollow dot, `Waiting` legend swatch, bare row |
+| `--nms-now` | **where price is** | the "now" rule, `Now` legend swatch, the next rung's row tint |
+
+The names are the package's, per
+[ADR-023](../context/adr/ADR-023-unbuilt-tsx-and-a-namespaced-token-spec-the-consumer-supplies.md):
+the components read `--nms-*` and `apps/web` supplies the values behind them.
+**`--nms-muted-foreground`, never `--nms-muted`.** The English collides and the
+roles are opposite. The app's old bare `--muted` was muted TEXT, and
+`--nms-muted` is a recessed SURFACE that Button's `ghost` and `outline` hover
+use. Swapping one for the other compiles, emits a rule, paints, and is wrong.
 
 Three states, one key, two renderings of it. The rung list tints with the same
 three tokens the Price Drop Path strokes with, which is what makes it impossible
@@ -102,8 +113,8 @@ stroked in `--pos`, the same green as the filled path, the filled dot, the
 whose one job is *this rung filled*.
 
 The resolution was not to pick a fourth hue. `Deployed` was moved onto the
-chart's **neutral ink** — `var(--text)`, no hue at all — **with no legend
-swatch**, precisely so that it cannot read as a fourth state. The reasoning
+chart's **neutral ink**, today `var(--nms-foreground)`, no hue at all, **with no
+legend swatch**, precisely so that it cannot read as a fourth state. The reasoning
 generalizes, and is the operative form of the rule:
 
 > `Deployed` is a **measurement the chart annotates itself with**, not a state a
@@ -119,8 +130,8 @@ share.
 Two mechanical notes that follow from the rule rather than standing beside it:
 
 - The neutral rule's opacity (0.7) is **set against the axis spine, not picked**.
-  `--text` is the brightest token in the palette; held back too far (0.4) it
-  landed *dimmer* than the `--muted` gridlines the library draws in
+  `--nms-foreground` is the brightest token in the palette; held back too far
+  (0.4) it landed *dimmer* than the `--nms-muted-foreground` gridlines the library draws in
   `currentColor`, and a mark quieter than the frame it stands in reads as part of
   the frame.
 - `color-mix()` is used unguarded in the row tints (spec #302 C6/D2, accepted).

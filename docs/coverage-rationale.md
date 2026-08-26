@@ -582,10 +582,13 @@ draws which decided field, the `aria-hidden` wrapper and its `.sr-only`
 substitute, the legend's three entries and their swatch classes, the row tints.
 A wrong prop on the right value, or a legend swatch pointed at the wrong token,
 is not catchable here. Two things stand in: the **fixture surface** added by spec
-#302 slice B (`/ladder-fixture/{day-zero,partly-walked,out-of-order,overfilled}`
-under `pnpm --filter @numisma/web dev`), which is the first time any started-ladder
-branch could be rendered by a person at all — a reviewer can open every state
-without touching real data — and the **a11y invariant, which is now asserted** (the
+#302 slice B, which was the first time any started-ladder branch could be
+rendered by a person at all, so a reviewer can open every state without touching
+real data. Spec #451 S4 deleted the `/ladder-fixture/$state` route it first
+shipped as, and `apps/workbench` is the surface now, rendering the same four
+states from the package's own `FillPathView` literals, which
+`apps/web/src/ladder/fill-path-fixture-equivalence.test.ts` deep-compares
+against what `composeFillPathPage` emits. The second is the **a11y invariant, which is now asserted** (the
 chart subtree is `aria-hidden`, nothing in it is reachable by keyboard, a substitute
 node exists). That last one is the audit's T7, and spec #403 slice 1 closed it:
 `packages/components/src/ui/fill-path-chart-a11y.test.tsx` (moved from
