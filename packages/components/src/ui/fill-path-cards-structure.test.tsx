@@ -48,7 +48,7 @@ import type { FillPathView } from "./fill-path";
 // from the package (§4.3). The literals are not taken on trust —
 // `apps/web/src/ladder/fill-path-fixture-equivalence.test.ts` deep-compares both of the
 // two read here against what the composer emits.
-import { dayZeroView, partlyWalkedView } from "./fill-path.fixtures";
+import { dayZeroView, outOfOrderView, partlyWalkedView } from "./fill-path.fixtures";
 import { NOTICE_CODE } from "./snapshot-notice";
 
 /** The header alone, so an assertion about it names one card's markup and not four. */
@@ -1019,10 +1019,15 @@ describe("the rung list carries its section as utilities", () => {
   });
 
   it("gives the qualifiers a full-width line at 320px and a cell at 380px", () => {
-    const view = partlyWalkedView();
+    // `out-of-order`, NOT `partly-walked`, since spec #451 S6: the partial-fill pill was
+    // the duplicate the copy slice deleted, and `price passed, unconfirmed` is now the
+    // only qualifier any row can carry. `partly-walked` fires none of them.
+    const view = outOfOrderView();
     const { rows } = rowsOf(view);
-    const withQuals = rows.find((row) => row.children[2]?.children.length === 3);
-    const quals = withQuals?.children[2]?.children[2];
+    const withQuals = rows.find((row) =>
+      row.textContent?.includes("price passed, unconfirmed"),
+    );
+    const quals = [...(withQuals?.children[2]?.children ?? [])].at(-1);
 
     // A pill cannot be made narrower than its longest word, so at 320px it is given the
     // whole tile rather than a column that might not hold it — still right-aligned, so it

@@ -1073,6 +1073,13 @@ export function Chart(): ReactElement {
               geometry: `.fp-tile-label` was a type rule and the flex arms lived on the
               three `>` selectors above it, none of which reached inside `.fp-inspect`. */}
           <span className={TILE_LABEL}>Inspect rung</span>
+          {/* THE VALUE IS AN INDEX AND THE ANNOUNCEMENT IS NOT (SC 4.1.2, ADR-026). A
+              range reports its `value`, so a screen reader read "4" for a control whose
+              whole purpose is to pick a described thing — an index the operator never
+              sees, on a card whose every other surface names rungs by price and state.
+              `aria-valuetext` replaces the number with the row's own words. See
+              `rungValueText` for why it is composed from the same facts the row renders
+              and not from the panel below. */}
           <input
             className={INSPECT_RANGE}
             type="range"
@@ -1080,6 +1087,11 @@ export function Chart(): ReactElement {
             max={view.rungs.length - 1}
             step={1}
             value={selectedIndex}
+            aria-valuetext={
+              selected === undefined
+                ? undefined
+                : rungValueText(selected, view.rungs.length)
+            }
             onChange={(event) => selectIndex(Number(event.target.value))}
           />
         </label>
@@ -1323,6 +1335,17 @@ function RecordedThrough({ view }: { view: FillPathView }) {
  * would have re-enabled the pill silently with every test still green. `stateCopy` is
  * rendered here and compared nowhere; see `ladder/rung-state-copy.ts`.
  *
+ * ── THE PARTIAL PILL IS GONE HERE TOO (spec #451 §4.4) ────────────────────────────────
+ * It printed `partly filled · 40%` directly beneath the state pill, which was already
+ * printing `partly filled · 40%` — the same string, twice, adjacent, on one card. The
+ * state pill cannot be the one that goes: on a partly filled rung `venueResting` is false,
+ * so `stateIsRedundant` never fires and the state pill is the row's only statement of what
+ * this rung is. See `RowState`'s docblock for the rule both deletions are instances of:
+ * `stateCopy` owns the venue state and everything that decorates it, the percentage
+ * decorates the state, and the pills carry only facts from a different axis.
+ *
+ * §4.4 read this duplicate as living in ONE card. It was in two, and the second was here.
+ *
  * ── "MATCHED BY PRICE" IS GONE ────────────────────────────────────────────────────────
  * It is the join's provenance — that this rung was tied to its order by price rather than
  * by a carried id. On a WAITING rung there is nothing joined yet for the provenance to be
@@ -1348,11 +1371,6 @@ function Pills({ rung }: { rung: FillPathRungView }) {
         waiting · price passed, unconfirmed
       </span>
     ) : null,
-    rung.filledPercent === undefined ? null : (
-      <span key="partial" className={`${PILL} ${PILL_TONE.state}`}>
-        partly filled · {rung.filledPercent}%
-      </span>
-    ),
   ].filter((pill) => pill !== null);
 
   // An empty pill row is still a row: it holds its own margin and opens a gap under the
@@ -1643,11 +1661,15 @@ export function RungList(): ReactElement {
  * plain resting still rides the line beneath. What is dropped is only the `waiting`
  * sub-line under `next`, which the view module already guarantees is implied.
  *
- * A RUNG THAT IS BOTH `next` AND PARTLY FILLED PRINTS `partly filled · 40%` TWICE — once
- * as the sub-line's state and once as the partial pill. That is what this card has always
- * done and `partly-walked`'s rung 4 shows it in the workbench. Spec #439 is
- * behaviour-preserving, so it crossed unchanged; it is a copy decision for a later wave,
- * not a regression this move introduced.
+ * THE PARTIAL PILL IS GONE TOO (spec #451 §4.4), and it did not need a rung to be `next`
+ * to be a duplicate. This file used to record the narrower claim — that `partly filled ·
+ * 40%` printed twice only on a rung that was BOTH next and partly filled — and the claim
+ * was wrong. `RowState` computes `status = isNext ? "next" : stateIsDefault ? undefined :
+ * stateCopy`, so a partly filled rung that is NOT next carries `stateCopy` on the STATUS
+ * line and the pill printed the same string under it. Being next only ever made it three
+ * lines instead of two. No fixture ships the two-line arrangement, which is how the
+ * narrower claim got recorded and stayed; `fill-path-row-copy.test.tsx` patches one and
+ * asserts both.
  *
  * ── "MATCHED BY PRICE" IS DROPPED FROM THE ROW ────────────────────────────────────────
  * The distinction it drew is real — `joinProvenance` is `"declared" | "price-matched"`,
@@ -1665,6 +1687,28 @@ export function RungList(): ReactElement {
  * THE UNPLACED PILL IS GONE because `stateCopy` already reads `declared — not placed` for
  * exactly that rung; the pill was the same sentence twice. The row's dashed border still
  * carries it visually, per G-D12.
+ *
+ * ── THE RULE BOTH DELETIONS ARE INSTANCES OF (spec #451 §4.4) ─────────────────────────
+ * **`stateCopy` OWNS THE VENUE STATE AND EVERYTHING THAT DECORATES IT. THE PILLS CARRY
+ * ONLY FACTS FROM A DIFFERENT AXIS.**
+ *
+ * The unplaced pill and the partial pill were the same finding twice: each repeated a
+ * clause of the venue state that `rungStateCopy` had already authored — the state itself,
+ * and the percentage that decorates it. `ladder/rung-state-copy.ts` says so in its own
+ * words: "the percentage DECORATES the state, it does not replace it." So it goes in the
+ * state words, and a pill that prints it is the second copy.
+ *
+ * WHAT THE RULE ADMITS, and why `price passed, unconfirmed` survives both deletions: it
+ * is a fact about SPOT, not about the venue. Price fell past a resting order and the
+ * venue has said nothing, which `stateCopy` cannot express — the rung is still `waiting`
+ * to the venue, and that is exactly the disagreement the pill exists to show. The same
+ * test applies to any pill a later state proposes: if the words `stateCopy` would author
+ * for this rung already contain the claim, the pill is a duplicate; if they cannot
+ * contain it, it is a pill.
+ *
+ * IT IS A TEST ON THE FACT AND NEVER ON THE STRING. Nothing here compares against
+ * `stateCopy`'s contents — spec #306's whole point — so the rule is applied by whoever
+ * adds the pill, at the moment they can still name which axis their fact is on.
  */
 /**
  * WHICH OF THE FOUR TONES THE STATUS WORD TAKES, in the order the deleted context rules
@@ -1685,8 +1729,9 @@ function RowState({ rung }: { rung: FillPathRungView }) {
   const stateIsDefault = rung.venueResting;
   const status = rung.isNext ? "next" : stateIsDefault ? undefined : rung.stateCopy;
   const substatus = rung.isNext && !stateIsDefault ? rung.stateCopy : undefined;
-  const hasQuals =
-    rung.pricePassedUnconfirmed || rung.filledPercent !== undefined;
+  // ONE QUALIFIER LEFT, and the docblock above says why it is the only one that qualifies:
+  // it is the single fact in this column that `stateCopy` is not already carrying.
+  const hasQuals = rung.pricePassedUnconfirmed;
 
   // NOT AN EMPTY SPAN — the column is a grid cell with its own spacing, and an empty one
   // still claims the width it would need for a status that is not there.
@@ -1704,18 +1749,53 @@ function RowState({ rung }: { rung: FillPathRungView }) {
       )}
       {hasQuals ? (
         <span className={ROW_QUALS}>
-          {rung.pricePassedUnconfirmed ? (
-            <span className={`${PILL} ${PILL_TONE.inferred}`}>price passed, unconfirmed</span>
-          ) : null}
-          {rung.filledPercent === undefined ? null : (
-            <span className={`${PILL} ${PILL_TONE.state}`}>
-              partly filled · {rung.filledPercent}%
-            </span>
-          )}
+          <span className={`${PILL} ${PILL_TONE.inferred}`}>price passed, unconfirmed</span>
         </span>
       ) : null}
     </span>
   );
+}
+
+/**
+ * WHAT THE INSPECT RANGE SAYS INSTEAD OF ITS INDEX (SC 4.1.2 under ADR-026) — one rung,
+ * in the words its ROW prints, so `aria-valuetext` can carry it.
+ *
+ * IT LIVES BESIDE `RowState` BECAUSE IT IS THE SAME SENTENCE. The slider and the row are
+ * two routes to one selection (§6.3c), and the announcement is the row read aloud: the
+ * gutter's `R4`, the figures line, the status line, and the one surviving qualifier — in
+ * that order, because that is the order they sit in. Written next to the component whose
+ * output it restates, so a change to either is made with the other in view.
+ *
+ * THE ORDINARY RUNG SAYS NOTHING ABOUT ITS STATE, AND THAT IS THE ROW'S RULE HONOURED
+ * RATHER THAN A GAP. `venueResting` blanks the row's state column — an empty column MEANS
+ * waiting, which is what makes the exceptions the only things in it — so an announcement
+ * that spoke "waiting" on five rungs out of eight would hand a screen-reader user the
+ * wallpaper the sighted column was rebuilt to delete.
+ *
+ * THE NUMBERS ARE THE ROW'S, NOT THE PANEL'S. `USD` is said once, on the size, where the
+ * panel's headline says it; `@` becomes "at", because the row's glyph is punctuation a
+ * screen reader is free to swallow and this string is only ever heard. A rung whose
+ * snapshot carries no size says so in the same words the row's em dash carries beside it.
+ */
+function rungValueText(rung: FillPathRungView, total: number): string {
+  const figures =
+    rung.sizeUsd === undefined
+      ? `${PRICE_PLAIN.format(rung.priceUsd)}, size not carried`
+      : `${SIZE_PLAIN.format(rung.sizeUsd)} USD at ${PRICE_PLAIN.format(rung.priceUsd)}`;
+  // The same two lines `RowState` prints, decided the same way: `next` takes the status
+  // line and the venue state rides beneath it, and a resting rung states neither. Bound
+  // in the shape `RowState`'s `status` is bound in, and for the same reason — the seam
+  // guard (#306) admits a read of `stateCopy` into a ternary arm and nothing else, so the
+  // words are carried to the join without ever being asked a question.
+  const state = rung.venueResting ? undefined : rung.stateCopy;
+  const clauses = [
+    `Rung ${rung.ladderIndex} of ${total}`,
+    figures,
+    ...(rung.isNext ? ["next"] : []),
+    ...(state === undefined ? [] : [state]),
+    ...(rung.pricePassedUnconfirmed ? ["price passed, unconfirmed"] : []),
+  ];
+  return clauses.join(", ");
 }
 
 /**
