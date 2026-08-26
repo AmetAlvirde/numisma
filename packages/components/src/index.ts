@@ -38,9 +38,10 @@ export {
  *
  * THE FOUR PARTS THEMSELVES ARE NOT NAMED HERE. `Header`, `Chart`,
  * `SelectedRung` and `RungList` are module exports of `./ui/fill-path`, reached
- * through `FillPath` at every call site. Publishing them here would turn four
+ * through `FillPath` at every APP call site. Publishing them here would turn four
  * more capitalized functions into fixture obligations for a surface the object
- * already gives out.
+ * already gives out. The workbench reaches all four by subpath instead, which is
+ * the arrangement the paragraph below describes.
  *
  * `useFillPath` was published at S6 because the parts still lived in `apps/web`
  * and read this provider across the boundary. They do not any more: it is now
@@ -49,10 +50,22 @@ export {
  * selection probe.
  *
  * `Figure`, `Expectation`, `formatUnits` and the module's class strings are NOT
- * here on purpose. The subpath they used to cross by,
- * `@numisma/components/ui/fill-path.tsx`, died with
- * `apps/web/src/components/FillPath.tsx` at S9 rather than becoming public API,
- * which is what crossing by subpath bought.
+ * here on purpose, and the subpath they cross by is NOT dead (spec #439 review
+ * finding 7). What died at S9 is the `apps/web` CROSSING: `FillPath.tsx` imported
+ * ten transitional names over
+ * `@numisma/components/ui/fill-path.tsx` while the parts were in the package and
+ * the cards that read them were not, and `routes/route-move.test.ts` correctly
+ * dropped that subpath from its allow-list when the file went. The subpath itself
+ * still has nine importers — `apps/workbench/src/ui/fill-path.fixture.tsx` mounts
+ * `Chart`, `Expectation`, `Figure`, `formatUnits`, `Header`, `RungList`,
+ * `SelectedRung`, `TornActBanner` and `UnrecordedWarnings` directly, and
+ * `fill-path.tsx:1837` says so.
+ *
+ * SO THIS IS NOT A LICENCE TO UNEXPORT THEM. The workbench is not `apps/web`; it is
+ * the package's own review surface, and the subpath is how it gets under the
+ * arrangement `FillPath` hands out whole. What crossing by subpath bought is that
+ * these names never became public API for a consuming APP, which is a narrower
+ * claim than "nothing imports them" and the only one true here.
  */
 export {
   FillPath,
@@ -88,27 +101,34 @@ export {
 } from "./ui/price-drop-path-chart";
 export {
   SectionTable,
-  TABLE_CELL,
-  TABLE_CELL_NUM,
-  TABLE_HEAD_CELL,
-  TABLE_HEAD_CELL_NUM,
-  TABLE_SCROLL,
-  TABLE_SURFACE,
   type BigPictureView,
   type RowAbsenceReason,
   type RowDelta,
   type RowView,
 } from "./ui/section-table";
 export { Shell } from "./ui/shell";
-export {
-  METRICS_FIGURE,
-  METRICS_LIST,
-  METRICS_ROW,
-  METRICS_TERM,
-  NEGATIVE,
-  POSITIVE,
-  SummaryCard,
-} from "./ui/summary-card";
+/**
+ * THE CLASS STRINGS THESE TWO MODULES SHARE ARE NOT PUBLISHED (spec #439 review
+ * finding 6). `TABLE_CELL`, `TABLE_CELL_NUM`, `TABLE_HEAD_CELL`, `TABLE_HEAD_CELL_NUM`,
+ * `TABLE_SCROLL`, `TABLE_SURFACE`, `METRICS_FIGURE`, `METRICS_LIST`, `METRICS_ROW`,
+ * `METRICS_TERM`, `NEGATIVE` and `POSITIVE` are Tailwind strings the components share
+ * WITH EACH OTHER, and every reader is a sibling reaching by relative path —
+ * `section-table.tsx` and `glance-card.tsx` take `NEGATIVE`/`POSITIVE` from
+ * `./summary-card`, `dca-card.tsx` takes the table box from `./section-table`. Not one
+ * has an importer outside `packages/components/src`.
+ *
+ * THAT IS THE DIFFERENCE FROM `CARD_SURFACE` AND `NOTICE_CODE`, which are here because
+ * `apps/web` route files read them. §4.1's rule about re-exporting from `index.ts` is
+ * about PROP TYPES the app has to name. Before the move these strings were shared the
+ * same way, across `apps/web/src/components/*.tsx`; moving the sharing inside the
+ * package should have made the index entries unnecessary rather than required them.
+ *
+ * `fixture-coverage.test.ts` filters to capitalized FUNCTIONS, so string constants are
+ * invisible to it by construction and this surface could accumulate indefinitely and
+ * stay green. If an app-side caller ever needs one, publishing it then is a one-line
+ * diff with a reason attached.
+ */
+export { SummaryCard } from "./ui/summary-card";
 export {
   NOTICE_CODE,
   SnapshotEmptyNotice,
