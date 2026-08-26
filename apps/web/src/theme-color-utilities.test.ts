@@ -33,8 +33,9 @@ import { describe, expect, it } from "vitest";
  * seven components that used to sit under `src/components` are moving into
  * `@numisma/components` one slice at a time, and each one leaves this scan as it goes.
  * The rule has not changed; the tree it applies to has. What is left when the wave lands
- * is `router.tsx`, `routes/__root.tsx` and the five route files — which is exactly where
- * `text-muted` can still be typed by hand.
+ * is `router.tsx`, `routes/__root.tsx` and the route files — which is exactly where
+ * `text-muted` can still be typed by hand. Four route files, since spec #451 S4 deleted
+ * the dev-only fixture route.
  *
  * PACKAGE SOURCE IS EXEMPT BY CONSTRUCTION, not by an exception list. It lives
  * outside the tree scanned below, and `bg-primary` on the package `Button` is
@@ -143,7 +144,13 @@ describe("no theme colour utility in app code", () => {
     // migration moves each component out, so a floor true at seven is true at every
     // step in between — and the alternative was five separate edits to one number,
     // each of which reads in review as somebody weakening a guard.
-    expect(appComponents.length).toBeGreaterThan(6);
+    //
+    // RE-DERIVED ONCE MORE, AT SIX (spec #451 §3 gate 5). S4 deleted
+    // `routes/ladder-fixture.$state.tsx`, a scanned file, so the end state above is now
+    // six: `router.tsx`, `routes/__root.tsx` and four route files. The number moves
+    // because a file this walk covered is gone, which is the one reason a false-pass
+    // floor may move at all — the guard covers everything it covered yesterday.
+    expect(appComponents.length).toBeGreaterThan(5);
   });
 
   it.each(appComponents.map((path) => relative(SRC, path)))(

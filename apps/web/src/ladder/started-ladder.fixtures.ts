@@ -1,6 +1,13 @@
 /**
  * STARTED-LADDER FIXTURES — the four ladders nobody had ever seen (spec #302 slice B,
- * issue #304), rendered by `routes/ladder-fixture.$state.tsx`.
+ * issue #304).
+ *
+ * ── WHO RENDERS THEM NOW (spec #451 S4) ─────────────────────────────────────────────
+ * A dev-only route used to render this file. It is deleted. The workbench renders the
+ * same four states from `@numisma/components`'s `ui/fill-path.fixtures.ts`, which was
+ * derived from this file mechanically, and `fill-path-fixture-equivalence.test.ts`
+ * deep-compares the two sides so the derivation cannot drift. That test is why this
+ * file outlived the route: it is one half of the compare.
  *
  * ── WHY THIS FILE EXISTS ────────────────────────────────────────────────────────────
  * Every branch of "a ladder that has started" was unexecuted, by anyone: the solid
@@ -46,9 +53,9 @@ import type {
 } from "../projection/contract.ts";
 import { venueFilled, type SpotReading } from "./fill-path-view.ts";
 
-/** One ladder to look at, and the name it answers to in the URL. */
+/** One ladder to look at, and the name it answers to. */
 export interface LadderFixture {
-  /** The URL segment: `/ladder-fixture/<name>`. Typed by hand, so kebab and short. */
+  /** The lookup key, and the workbench's name for the state. Kebab and short. */
   name: string;
   /** The state branch this fixture exists to put on screen. Shown on the surface. */
   renders: string;
