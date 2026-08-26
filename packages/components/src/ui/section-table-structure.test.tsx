@@ -12,12 +12,14 @@
  * primitive that builds the class string for it, forbids any new class name, and
  * requires `styles.css` to be byte-identical — a rule spec #412 Slice 5 has since broken
  * exactly once, adding a `:root` block of `--nms-*` overrides and no selector at all.
- * Both arms are censused, and they emit
- * the SAME set from different elements: `muted` is the percentage suffix on the
+ * BOTH ARMS ARE CENSUSED, from different elements. Six cases mount `anchoredView()`
+ * and one mounts `anchorlessView()`, because `muted` is the percentage suffix on the
  * anchored arm and the "no earlier anchor" header on the genesis one. That is not a
- * redundant assertion — the genesis path renders a different header cell and a
- * different value cell, and a new class name introduced on either would be invisible
- * to the anchored arm alone.
+ * redundant assertion — the genesis path renders a header cell the anchored arm never
+ * produces, and it is the only render of this component's third `--nms-muted-foreground`
+ * read, so a class name rewritten there would be invisible to the anchored arm alone.
+ * The genesis case censuses that cell directly; it used to ride along inside the
+ * whole-tree `expectNoStyledClassSurvives` scaffolding, which spec #439 S0 retired.
  *
  * THE ROWS ARE AUTHORED, and since spec #439 S2 they live in `section-table.fixtures.ts`
  * beside the component rather than in this file. Same literals, three readers: this test,
@@ -35,7 +37,7 @@ import {
 } from "../testkit/render.testkit";
 import { CARD_SURFACE } from "./card";
 import { SectionTable } from "./section-table";
-import { anchoredView, section } from "./section-table.fixtures";
+import { anchoredView, anchorlessView, section } from "./section-table.fixtures";
 
 describe("SectionTable on the shared Card", () => {
   it("renders the section title as an h2", () => {
@@ -163,6 +165,45 @@ describe("SectionTable on the shared Card", () => {
     }
     expect(tokens(labelCell)).toContain("text-left");
     expect(tokens(usdCell)).toContain("text-right");
+  });
+
+  it("censuses the genesis arm's own header cell, the one the anchored arm never renders", () => {
+    // THE OTHER ARM, AND THE ONLY TEST RENDER IT HAS (spec #439 review finding 3).
+    // `anchorlessView()` is `anchoredView()` with `reference` DESTRUCTURED OUT, which
+    // is the sole condition under which the anchor column's header says "no earlier
+    // anchor" instead of naming a date. That fallback span is this component's THIRD
+    // `--nms-muted-foreground` read (`section-table.tsx:219`); the other two are the
+    // header box and the percentage suffix, both on the anchored arm. §4.7's table
+    // enumerates the component at `--muted x3`, and the wave's parity gate rests on a
+    // moved test's expected class string failing loudly when a read is rewritten — so
+    // the read with no test rendering it is the one hole in that argument.
+    //
+    // The case this replaces was the retired `expectNoStyledClassSurvives` scaffolding,
+    // which mounted this arm incidentally. The census is what the docblock above
+    // promises, so it is asserted directly rather than as a side effect of something
+    // else.
+    render(<SectionTable section={section()} view={anchorlessView()} />);
+
+    const genesis = screen.getByRole("columnheader", { name: "vs no earlier anchor" });
+    const fallback = genesis.querySelector("span")!;
+    expect(fallback.textContent).toBe("no earlier anchor");
+    expect(tokens(fallback)).toContain("text-[var(--nms-muted-foreground)]");
+    for (const utility of ["m-0", "mt-1"]) {
+      expect(tokens(fallback)).toContain(utility);
+    }
+
+    // The cell around it is still an ordinary numeric header, so a fallback that
+    // escaped its `<th>` — or a `<th>` that lost the shared box on this arm alone —
+    // reds here rather than only in the anchored census above.
+    for (const utility of [
+      "px-[10px]",
+      "py-2",
+      "border-b",
+      "border-[var(--nms-border)]",
+      "text-right",
+    ]) {
+      expect(tokens(genesis)).toContain(utility);
+    }
   });
 
   it("keeps `row-suppressed` on the suppressed `<tr>`, and its four stated causes", () => {
