@@ -549,6 +549,18 @@ this ledger through the whole `prototype/tanstack-charts` spike; naming them is
 the policy, because a gap this document does not mention is exactly the gap it
 exists to prevent.
 
+**A NAMED GAP CROSSED WITH THEM, and it is accounted here rather than lost.**
+`referenceLabel` moved out of `apps/web/src/glance/verdict.ts` and into
+`packages/components/src/ui/glance-card.tsx:152`, taking its invalid-calendar-date
+throw (now `:155`) with it. §9's `verdict.ts` row cited that throw and reads 100%
+lines after the move, which is the one reading that would be dishonest: the branch
+did not become covered, it left instrumentation, because the glob does not follow a
+`.ts` gap into a `.tsx`. The throw is still there and still defensive — every caller
+passes an already-validated `asOf` — and it is still untaken. Naming it here is what
+keeps §6's own rule true: no gap is silent, including a gap in the account of the
+gaps. It is also the shape to watch for in wave 3, since anything else this migration
+moves out of a `.ts` and into a component takes its accounting with it.
+
 *What compensates, and how much.* The strong part of the answer is that the
 quantitative logic these two used to hold **is no longer in them**: spec #302
 slice A lifted `cumulate`, `withRadius`, `splitAt`, `spotMarkFor`,
@@ -672,6 +684,16 @@ it just is not where a line-by-line diff against a fresh run would look for
 it. Line numbers are the fresh run's, at `e1d6265`; re-run `pnpm coverage`
 for the current picture.
 
+**Three rows carry a later vintage, and they say so in their own prose.**
+`glance/row-view.ts`, `glance/verdict.ts` and `ladder/fill-path-view.ts` were
+re-derived against spec #439 wave 2 (review finding 4), from a run on that
+branch. Wave 2 moved the view and row TYPE DECLARATIONS those three files held
+into `@numisma/components`, so all three shrank — `fill-path-view.ts` by 202
+lines — and their `e1d6265` cites pointed at moved code or, twice, past end of
+file. The rest of this section is still the `e1d6265` run. Nothing mechanical
+watches this table, which is the whole reason a diff that shortens a measured
+file has to come back and read it.
+
 All of the following are broadly one of two shapes: a rejection/error-path
 branch that runs only on a malformed input, a network/provider failure, or a
 lock/fs race; or a default-value/fallback arm no current fixture happens to
@@ -720,13 +742,13 @@ logic extraction — not a line in the exclude list.
 
 | File | Lines | Uncovered | What's there |
 | --- | --- | --- | --- |
-| `glance/row-view.ts` | 98.57% | `:141` | One rendering branch. |
-| `glance/verdict.ts` | 99.08% | `:621-622` | `referenceLabel`'s invalid-calendar-date throw — defensive, every caller passes an already-validated `asOf`. The precedence-sort branch this row used to cite is covered now. |
+| `glance/row-view.ts` | 98.59% | `:96` | Re-derived at spec #439 wave 2 (the row types moved into `@numisma/components` and the file went 246 lines to 201, which is what moved the cite — `delta()` is at `:93` now, and old `:141` is inside `composeBigPicture`). One rendering branch: `delta()`'s ZERO-REFERENCE arm, the one that emits a USD difference and no `percent` rather than dividing by nothing. Real and reachable — a reference row worth exactly $0 — just not one any current fixture produces. |
+| `glance/verdict.ts` | 100% lines, 90.74% branch | `:319-333,567-568` | Re-derived at spec #439 wave 2, and the file is at 100% LINES now — the gap this row used to carry, `referenceLabel`'s invalid-calendar-date throw at old `:621-622`, did not become covered: it LEFT INSTRUMENTATION with the function, which moved to `packages/components/src/ui/glance-card.tsx:152`. That is a `.tsx`, outside the `*.ts`-only include glob, so it is now accounted in §6's `.tsx` exclusion below rather than here. What is left is branch-only: `:319` is the feed-gap sentence's `missing === 1 ? "has" : "have"` pluralization, `:333` the `glance.venueDark ?? []` default-array arm (every current fixture carries the field), and `:567-568` are `ordinal()`'s teens arm and its `?? "th"` suffix fallback. |
 | `lib/binance-spot.ts` | 0% | `:33-95` | Added at `d5fe02c` — no row existed before #377, and this one does not fit the defensive/unreached-fixture/real-branch taxonomy cleanly. `useBinanceSpotUsd` is a browser-only React hook (`useEffect`/`useState`) — the live-spot fetch, its success/failure/abort paths, and the last-close fallback are real, reachable browser behavior, not a script that runs on import (importing this file is inert; nothing executes until a mounted component calls the hook). It is uninstrumented for the same underlying reason §6 names for `SummaryCard`/`SectionTable`/`fill-path.tsx`/`price-drop-path-chart.tsx` — written before the RTL/jsdom harness existed, and nothing has yet mounted a component to drive the hook — except those are `.tsx` and excluded by the `*.ts`-only include glob, while this file is a `.ts` hook that IS in the glob and so reports a genuine, uninstrumented-in-practice 0% rather than being named as excluded. Flagged rather than forced into a label; closing it means either a render test on the harness §6 bought, or extracting the fetch/state-transition logic into a plain `.ts` function the way `price-drop-path.ts` did for the chart math. |
 | `push/dca-block.ts` | 98.41% | `:278,283` | `:278` and `:283` are the `placedQuantity`/`venueFilledFraction` omit-when-undefined spread guards' omission arms — real, reachable: every current fixture supplies both fields, so the arm that would drop them from the view never fires. The file also carries four branch-only gaps this column does not cite (per the derivation rule above, a file below 100% lines cites only its line gaps): `:161` is `torn ?? []`'s default-array arm (every fixture supplies a torn-acts array); `:232` is `position?.lots ?? []`'s equivalent; `:236-237` are the `currency`/`reviewFx` field-presence spread guards, one arm each unexercised — same default-value shape, not a rejection path. |
 | `push/unattended-report.ts` | 100% lines, 94.44% branch | `:78` | One branch-only gap: `linesFor`'s `this.#byKind.get(kind) ?? []` default-array arm — a real, reachable case (querying a `kind` nothing has been filed under yet), just not one any current fixture drives. |
 | `ladder/convexity-caption.ts` | 100% lines, 95.65% branch | `:135` | One branch-only gap: the `clauses.length === 0` empty-caption arm — real, reachable (a ladder with nothing left to say), just not one any current fixture produces. |
-| `ladder/fill-path-view.ts` | 98.52% | `:502,613,675-676` | Added at `e1d6265` (PR #387 review finding 8 — §6 line 483 named this file only in passing, "the measured `ladder/fill-path-view.ts`", with no figure and no gap accounted; that is not an accounting, so it gets a row). `:502` is the "this row carries no plan body" fallback in the price-axis kind check — real, reachable for a row whose kind is neither `dcaLadder` nor `dcaTime`, just not one any current fixture produces. `:613` is the zero-rungs arm of the reconciled progress percent (`rungs.length === 0 ? 0 : …`) — no current fixture drives a reconciled row with an empty rung list. `:675-676` is the `spot.status === "loading"` arm of the spot-price status derivation — a real, reachable mid-fetch state no current fixture captures. Branch-only companions (`:442,452,501,509,612,674,703,716`) live in the same functions but are not carried in this column, per the derivation rule above. |
+| `ladder/fill-path-view.ts` | 98.52% | `:300,411,473-474` | Added at `e1d6265` (PR #387 review finding 8 — §6 line 483 named this file only in passing, "the measured `ladder/fill-path-view.ts`", with no figure and no gap accounted; that is not an accounting, so it gets a row). Re-derived at spec #439 wave 2: the same three gaps, at new cites — the view types moved into `@numisma/components` and the file went 739 lines to 537, which put two of the three previous cites past end of file. `:300` is the "this row carries no plan body" fallback in the price-axis kind check — real, reachable for a row whose kind is neither `dcaLadder` nor `dcaTime`, just not one any current fixture produces. `:411` is the zero-rungs arm of the reconciled progress percent (`rungs.length === 0 ? 0 : …`) — no current fixture drives a reconciled row with an empty rung list. `:473-474` is the `spot.status === "loading"` arm of the spot-price status derivation — a real, reachable mid-fetch state no current fixture captures. Branch-only companions live in the same functions but are not carried in this column, per the derivation rule above. |
 | `push/anchor-fixture.ts` | 83.72% | `:88-93,95-96` | `loadAnchorFixture`'s schema-version-mismatch and empty-anchors-array throws — a fixture-regeneration guard, real but low-probability (the fixture is checked in and regenerated deliberately via `--fixture-only`). |
 | `push/backfill-core.ts` | 95.78% | `:262-266` | An error-path branch in the replay loop: `deriveSnapshot`'s fold-as-of/requested-as-of mismatch guard. |
 | `push/fixture-synthesis.ts` | 94.93% | `:440,445-447,462,464,470,511,571-574,586-589,712-713,736,809-810,816-817,1101-1102` | More synthesis-edge branches than the previous vintage (test infrastructure adjacent, but the module itself is product code per the `**/*.fixtures.ts` exclude boundary): `:440,445-447` a rung-axis weighting fallback and `:462,464,470,511` degenerate empty-object-spread guards in the non-cost scale/percentage math; `:571-574,586-589` are two defensive throws the file's own comments call "Unreachable through `synthesizeAnchors`" — a synthetic id/plan-id lookup that must never fall back to the real (private) value; `:712-713` a no-op early return; `:736` a percentage fallback; `:809-810` `resolveTargetInvestedPct`'s no-pinned-rows minimum; `:816-817` a zero-weights map guard; `:1101-1102` the synthetic-NAV seed fallback. |
