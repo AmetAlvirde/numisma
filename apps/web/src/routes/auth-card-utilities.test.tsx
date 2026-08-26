@@ -239,6 +239,30 @@ describe("the auth surface's utilities", () => {
     expect(classes(paragraph)).not.toContain("error");
   });
 
+  it("points both fields at an element that exists before anything has failed", async () => {
+    // THE STATE EVERY VISITOR SEES FIRST, which is the state the error case below could
+    // not reach. `aria-describedby` naming an id no element carries is a dangling IDREF:
+    // it is not a DOM error, the description simply does not exist, and axe-core's
+    // `aria-valid-attr-value` is what fails on it under the target ADR-026 adopts.
+    //
+    // The fix is to render the paragraph unconditionally and let its TEXT be empty,
+    // which is also how a live region is supposed to be built: `role="alert"` on a node
+    // that is inserted along with its content is the forgiving case rather than the
+    // specified one, and no jsdom assertion can tell the two apart.
+    const { container } = await renderLoginPage();
+    const inputs = [...container.querySelectorAll("input")];
+    expect(inputs).toHaveLength(2);
+
+    for (const input of inputs) {
+      const described = input.getAttribute("aria-describedby");
+      expect(described).toBeTruthy();
+      expect(container.querySelector(`#${described}`)).not.toBeNull();
+    }
+    // And it is empty, so nothing is announced and nothing takes vertical space until
+    // there is something to say.
+    expect(screen.getByRole("alert").textContent).toBe("");
+  });
+
   it("announces a failed sign-in, and points both fields at what it says", async () => {
     // A FAILED SIGN-IN WAS SILENT (SC 4.1.3). The paragraph appeared, nothing said so,
     // and the operator's focus was still on the submit button. `role="alert"` is the

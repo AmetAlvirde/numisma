@@ -157,11 +157,25 @@ function LoginPage() {
                 paint. `type="button"` is spelled out for the same reason the submit
                 button below spells `type="submit"` — the two defaults disagree, and
                 a bare `<button>` in a `<form>` submits it. */}
+            {/* ONE STATE CHANNEL, AND IT IS THE NAME. This carried `aria-pressed`
+                alongside a name that flips, and the two run in opposite senses: the name
+                says what the next click DOES, `aria-pressed` says what the current state
+                IS. With the password on screen a reader announced "Hide password, toggle
+                button, pressed", where pressed reads as "hiding is on" while the password
+                is legible. The APG's Button pattern says to carry one or the other.
+
+                THE NAME IS THE HALF THAT STAYS, because it is already on screen in words:
+                the visible label flips with it, so the announcement and the button cannot
+                disagree, and SC 2.5.3 holds in both states because "Show"/"Hide" is
+                contained in "Show password"/"Hide password". Freezing the name instead
+                and keeping `aria-pressed` would have forced the visible word to freeze
+                too, or broken label-in-name. Spec #451 S5 asked for `aria-pressed`; it
+                was written before the contradiction was noticed, and this is the channel
+                that costs the sighted operator nothing. */}
             <Button
               type="button"
               variant="outline"
               size="sm"
-              aria-pressed={passwordVisible}
               aria-label={passwordVisible ? "Hide password" : "Show password"}
               onClick={() => setPasswordVisible((visible) => !visible)}
             >
@@ -169,32 +183,43 @@ function LoginPage() {
             </Button>
           </div>
         </div>
-        {signIn.isError ? (
-          // A FAILED SIGN-IN USED TO BE SILENT (SC 4.1.3). The paragraph appeared, the
-          // operator's focus was still on the submit button, and nothing said why the
-          // page had not moved. `role="alert"` makes it a live region; `aria-live` is
-          // spelled alongside it because the role's implicit politeness is the thing a
-          // reader has to go and look up, and both fields point at this id, so the
-          // reason is re-read when focus returns to the field that caused it.
-          //
-          // `m-0` IS LOAD-BEARING. `.error` zeroed all four margin edges and preflight
-          // is off, so dropping the rule without it hands the paragraph the UA's `1em`
-          // top and bottom back and the form grows two lines — silently, with the suite
-          // green.
-          //
-          // `--nms-destructive`, NOT `--nms-neg`. `apps/web` resolves both to the same
-          // hex, so this is the read where the wrong name is invisible on screen:
-          // `--nms-neg` is data, the sign of a number, and a failed sign-in is the
-          // affordance of a control (spec #451 §4.2).
-          <p
-            id={ERROR_ID}
-            role="alert"
-            aria-live="assertive"
-            className="m-0 text-[var(--nms-destructive)]"
-          >
-            {signIn.error.message}
-          </p>
-        ) : null}
+        {/* THE PARAGRAPH IS ALWAYS IN THE DOM, AND THAT IS TWO FIXES IN ONE ELEMENT.
+
+            A FAILED SIGN-IN USED TO BE SILENT (SC 4.1.3). The paragraph appeared, the
+            operator's focus was still on the submit button, and nothing said why the
+            page had not moved. `role="alert"` makes it a live region; `aria-live` is
+            spelled alongside it because the role's implicit politeness is the thing a
+            reader has to go and look up, and both fields point at this id, so the reason
+            is re-read when focus returns to the field that caused it.
+
+            IT USED TO RENDER ONLY INSIDE `signIn.isError`, AND THAT COST TWO THINGS.
+            Both fields carry `aria-describedby={ERROR_ID}` unconditionally, so on first
+            paint and after every success the reference pointed at an id no element
+            carried. A dangling IDREF is not a DOM error, the description simply does not
+            exist, and it is what axe-core's `aria-valid-attr-value` fails on under the
+            target ADR-026 adopts. Separately, a `role="alert"` node INSERTED together
+            with its text is the forgiving case rather than the specified one: the
+            guidance is to have the region in the tree and change what is inside it.
+            Rendering it always and letting the text be empty closes both.
+
+            `m-0` IS LOAD-BEARING TWICE OVER. `.error` zeroed all four margin edges and
+            preflight is off, so dropping the rule without it hands the paragraph the
+            UA's `1em` top and bottom back and the form grows two lines, silently, with
+            the suite green. Now that the paragraph is always present, it is also what
+            keeps an empty one zero-height.
+
+            `--nms-destructive`, NOT `--nms-neg`. `apps/web` resolves both to the same
+            hex, so this is the read where the wrong name is invisible on screen:
+            `--nms-neg` is data, the sign of a number, and a failed sign-in is the
+            affordance of a control (spec #451 §4.2). */}
+        <p
+          id={ERROR_ID}
+          role="alert"
+          aria-live="assertive"
+          className="m-0 text-[var(--nms-destructive)]"
+        >
+          {signIn.isError ? signIn.error.message : ""}
+        </p>
         {/* THE PACKAGE `Button`, and `type="submit"` IS LOAD-BEARING. Base UI's
             button hands the element `type: "button"` by default and merges
             external props last, so the attribute below is what keeps this a
