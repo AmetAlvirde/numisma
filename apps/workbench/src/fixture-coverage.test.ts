@@ -140,17 +140,47 @@ describe("the package no longer publishes `useFillPath`", () => {
     expect(surface).toContain("FillPathProvider");
   });
 
-  it("has no consumer outside the package importing it, by any specifier", () => {
-    // `\buseFillPath\b` and not a substring match: `useFillPathSelection` contains
-    // the withdrawn name and is a legitimate import in this very directory, so a
-    // naive `includes` would fail against the correct end state.
-    const imports =
+  it("has no consumer outside the package importing it, through any import form", () => {
+    // TWO ARMS, BECAUSE ONE FORM IS NOT THE FORM. The braced arm catches
+    // `import { useFillPath } from "…"`, and `\buseFillPath\b` rather than a substring
+    // match, because `useFillPathSelection` contains the withdrawn name and is a
+    // legitimate import in this very directory. The namespace arm catches the route the
+    // first one cannot see: a star import of the package bound to a local name, followed
+    // by a member read of the withdrawn hook off that binding, which reaches the same
+    // function through a path the braced pattern never looks at. The form is not spelled
+    // out here, because this file is itself inside the sweep and a worked example in a
+    // comment IS an offender, which is how the arm was first seen red. The docblock
+    // above says "any specifier" and used to mean "any module path"; it means both now.
+    const braced =
       /import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*["']([^"']*@numisma\/components[^"']*)["']/g;
-    const offenders = consumerFiles(REPO_ROOT).flatMap((file) =>
-      [...readFileSync(file, "utf8").matchAll(imports)]
-        .filter(([, names]) => /\buseFillPath\b/.test(names!))
-        .map(([, , specifier]) => `${relative(REPO_ROOT, file)} imports it from "${specifier}"`),
-    );
+    const namespaced =
+      /import\s*\*\s*as\s+([A-Za-z_$][\w$]*)\s*from\s*["']([^"']*@numisma\/components[^"']*)["']/g;
+    const files = consumerFiles(REPO_ROOT);
+    // FALSE-PASS FLOOR. An empty file list produces an empty offender list and this case
+    // reports green having read nothing, which is how a moved workspace or a broken
+    // `REPO_ROOT` would look. Both sibling sweeps written in this wave carry one:
+    // `started-ladder.fixtures.test.ts` for its routes directory, and
+    // `client-bundle.integration.test.ts` for its token list. The number is a floor and
+    // not a census: it may be raised, and it goes red rather than drifting quietly down.
+    expect(files.length).toBeGreaterThan(20);
+
+    const offenders = files.flatMap((file) => {
+      const source = readFileSync(file, "utf8");
+      const where = relative(REPO_ROOT, file);
+      return [
+        ...[...source.matchAll(braced)]
+          .filter(([, names]) => /\buseFillPath\b/.test(names!))
+          .map(([, , specifier]) => `${where} imports it from "${specifier}"`),
+        ...[...source.matchAll(namespaced)]
+          .filter(([, binding]) =>
+            new RegExp(`\\b${binding!}\\s*\\.\\s*useFillPath\\b`).test(source),
+          )
+          .map(
+            ([, binding, specifier]) =>
+              `${where} reads it as \`${binding}.useFillPath\` off "${specifier}"`,
+          ),
+      ];
+    });
     expect(offenders).toEqual([]);
   });
 
