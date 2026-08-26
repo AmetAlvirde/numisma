@@ -57,6 +57,16 @@ const SRC = dirname(fileURLToPath(import.meta.url));
  * narrow the guard at the same moment it narrowed the theme. The lists are
  * short, they change roughly never, and `tailwind.css`'s header carries the same
  * rule in prose.
+ *
+ * THE LIST IS LITERAL, AND A SUBSET FLOOR HOLDS IT COMPLETE (spec #439 review
+ * finding 2). Keeping it literal buys the paragraph above, and it costs the
+ * mirror failure: a mapping ADDED to `@theme` widens the theme and leaves the
+ * guard where it was, so the new name becomes typeable in app code with nothing
+ * red. That is what happened here — `pos`, `ok`, `warn` and `now` were minted at
+ * §4.5 and listed nowhere, and `neg` and `card` had been unlisted since before
+ * this wave. The case below asserts one direction only: every name `@theme` maps
+ * must appear here. It can therefore only ever WIDEN this list, never narrow it,
+ * which is the direction the paragraph above rules out.
  */
 const COLOR_PREFIXES = [
   "bg",
@@ -82,6 +92,12 @@ const THEME_COLOR_NAMES = [
   "primary",
   "secondary",
   "destructive",
+  "card",
+  "neg",
+  "pos",
+  "ok",
+  "warn",
+  "now",
 ];
 
 /**
@@ -156,6 +172,28 @@ describe("the convention is written down where the utilities are created", () =>
     expect(header).toContain("THEME COLOUR UTILITIES ARE PACKAGE-ONLY");
     expect(header).toContain("IS THE TRAP, AND IT COMPILES");
     expect(header).toContain("theme-color-utilities.test.ts");
+  });
+
+  it("lists every colour name `@theme` maps", () => {
+    // THE GUARD CANNOT BE NARROWER THAN THE THEME. `THEME_COLOR_NAMES` is literal
+    // for the reason its docblock gives, and this is the one derivation that costs
+    // nothing: it reads the map and demands the list COVER it. A mapping deleted
+    // from `tailwind.css` leaves this green and the list one name wide of the
+    // theme, which is harmless; a mapping added without a matching list entry is
+    // a hole, and that is what reds.
+    const tailwindCss = readFileSync(join(SRC, "tailwind.css"), "utf8");
+    const theme = tailwindCss.slice(tailwindCss.indexOf("@theme {"));
+    const mapped = [
+      ...new Set(
+        [...theme.matchAll(/^\s*--color-([a-z-]+)\s*:/gm)].map((match) =>
+          (match[1] as string).replace(/-foreground$/, ""),
+        ),
+      ),
+    ].sort();
+    // The floor guards the derivation itself: a `@theme` block this regex stopped
+    // reading would assert an empty set against the list and pass.
+    expect(mapped.length).toBeGreaterThan(8);
+    expect(mapped.filter((name) => !THEME_COLOR_NAMES.includes(name))).toEqual([]);
   });
 });
 
