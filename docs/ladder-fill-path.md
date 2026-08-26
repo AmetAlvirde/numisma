@@ -113,8 +113,8 @@ stroked in `--pos`, the same green as the filled path, the filled dot, the
 whose one job is *this rung filled*.
 
 The resolution was not to pick a fourth hue. `Deployed` was moved onto the
-chart's **neutral ink**, today `var(--nms-foreground)`, no hue at all — **with no legend
-swatch**, precisely so that it cannot read as a fourth state. The reasoning
+chart's **neutral ink**, today `var(--nms-foreground)`, no hue at all, **with no
+legend swatch**, precisely so that it cannot read as a fourth state. The reasoning
 generalizes, and is the operative form of the rule:
 
 > `Deployed` is a **measurement the chart annotates itself with**, not a state a
