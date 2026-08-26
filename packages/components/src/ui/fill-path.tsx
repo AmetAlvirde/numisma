@@ -1505,13 +1505,29 @@ function rungRowClasses(rung: FillPathRungView, isSelected: boolean): string {
 }
 
 /**
- * Centred against the whole tile rather than sat on the price's baseline: the rung number
- * labels the tile, not the first figure in it. At desk width the row centres its items
- * and the gutter goes back to sharing that alignment.
+ * THE LABEL TAKES THE ROW'S ALIGNMENT AND DECLARES NONE OF ITS OWN (spec #451 S7).
+ *
+ * It used to carry `self-center`, on the reading that the rung number labels the TILE
+ * rather than the first figure in it. That reading holds only while the tile is one line
+ * tall. At 320px the state column is dissolved (`ROW_STATE` below), so the status sits in
+ * column 3 of a ~90px track and `declared — not placed` wraps to THREE LINES — which sets
+ * the grid row's height. `align-self: center` then centres `R7` and `R8` against that
+ * height while their prices stay on the first baseline, and the ladder's left rail goes
+ * ragged in the one list whose whole job is to be read down.
+ *
+ * WITH NO `self-*` HERE, BOTH WIDTHS ARE THE ROW'S DECISION: `items-baseline` at 320px,
+ * so the label sits on the price's baseline no matter how tall the status grows, and
+ * `items-center` past 380px, where `ROW` switches and nothing on the row wraps anyway.
+ * The desk shape is unchanged — `self-auto` was already resolving to the row's
+ * `items-center` there, so deleting it deletes a no-op.
+ *
+ * THE WRAP ITSELF IS NOT A DEFECT. A pill cannot be made narrower than its longest word
+ * and `ROW_QUALS` gives it the whole tile for that reason; the fixture note accepts the
+ * full-width line. What was unintended is the drift the wrap caused, and only the drift
+ * moves here.
  */
 const ROW_INDEX =
-  "self-center text-[0.78rem] font-semibold tracking-[0.03em] text-[var(--nms-muted-foreground)]" +
-  " @[380px]/fp-list:self-auto";
+  "text-[0.78rem] font-semibold tracking-[0.03em] text-[var(--nms-muted-foreground)]";
 /** The two numbers that describe a rung, stacked in the order the chart plots them. */
 const ROW_FIGURES = "grid gap-px min-w-0";
 const ROW_PRICE = "text-[1.05rem] font-bold tracking-[-0.01em] tabular-nums";

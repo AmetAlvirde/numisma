@@ -110,7 +110,7 @@ export default {
       </Row>
       <Row
         title="pending — a declared plan awaiting its first fill"
-        note="Read 4, and DELIBERATELY NOT AN ALARM COLOUR: day zero is the normal starting state, so the badge takes the same recessed grey `ended` does. The kind span beside it, `time-based`, is read 6 on the same line."
+        note="Read 4, and DELIBERATELY NOT AN ALARM COLOUR: day zero is the normal starting state, so the badge takes the same recessed grey `ended` does. The kind span beside it, `time-based`, is read 6 on the same line. THE TYPE MOVED AND THE COLOUR DID NOT (spec #451 S7): all four badges are 0.75rem now, up from 0.72rem. `PENDING` and `ENDED` measure 6.63:1 and pass AA with room, so what made them hard to read was the SIZE under an uppercase, tracked-out treatment — and AA sets no minimum font size, so 0.75rem is the house's own floor rather than a conformance one."
       >
         <DcaCard view={cadenceView()} />
       </Row>

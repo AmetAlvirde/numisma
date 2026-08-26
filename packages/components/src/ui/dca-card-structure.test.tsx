@@ -223,13 +223,24 @@ describe("DcaCard on the shared Card", () => {
       const word = screen.getByText(copy[state]!);
 
       for (const utility of [
-        "text-[0.72rem]",
+        "text-[0.75rem]",
         "font-semibold",
         "uppercase",
         "tracking-[0.04em]",
       ]) {
         expect(tokens(word)).toContain(utility);
       }
+      // THE HOUSE FLOOR, ASSERTED AS A SET AND NOT AS A MEMBER (spec #451 S7). AA
+      // sets no minimum font size, so this badge is judged against the floor rather
+      // than against a ratio — it passes contrast at 6.63:1 and was still hard to
+      // read. A `toContain` would pass just as happily on a string that carried
+      // 0.72rem beside the new value, which is the same coin toss the colour map
+      // below is written against.
+      expect(
+        tokens(word).filter(
+          (token) => token.startsWith("text-[") && !token.startsWith("text-[var("),
+        ),
+      ).toEqual(["text-[0.75rem]"]);
       expect(tokens(word)).toContain(colour);
       // Exactly one colour reaches the element. The assertion above would pass just as
       // happily on a string carrying the deleted base grey beside the state's colour,

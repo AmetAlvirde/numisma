@@ -938,13 +938,21 @@ describe("the rung list carries its section as utilities", () => {
     const figures = rows[0]?.children[1];
 
     expectClasses(rows[0]?.children[0], [
-      "self-center",
       "text-[0.78rem]",
       "font-semibold",
       "tracking-[0.03em]",
       "text-[var(--nms-muted-foreground)]",
-      "@[380px]/fp-list:self-auto",
     ]);
+    // THE INDEX TAKES THE ROW'S OWN ALIGNMENT AT BOTH WIDTHS (spec #451 S7). The
+    // deleted `self-center` centred the label against a row whose height is set by
+    // the tallest thing in it, so a three-line `Declared — not placed` at 320px sank
+    // `R7` and `R8` while their prices stayed on the first baseline. With no `self-*`
+    // override the label takes `items-baseline` at 320px and `items-center` past
+    // 380px, and both of those are the ROW's — which is what keeps the two widths
+    // one decision instead of two.
+    expect(
+      classTokens(rows[0]!.children[0]!).filter((token) => token.includes("self-")),
+    ).toEqual([]);
     expectClasses(figures, ["grid", "gap-px", "min-w-0"]);
     const price = figures?.firstElementChild;
     expectClasses(price, [
