@@ -247,6 +247,85 @@ Chrome does not recalculate style in a **background** tab, so probing an inactiv
 renderer through devtools or a script returns stale colours. Activate the tab
 before reading anything computed.
 
+### The themed-mode census, read 2026-08-26 at `986a56c`
+
+The themed pass above asks one question the rest of the suite cannot: which
+declared token repaints nothing. Spec #451 S2 (issue #453) ran it across all
+twelve fixture files and recorded the answer here so it does not have to be run
+again from memory.
+
+**The twelve fixtures swept**, all under
+[`apps/workbench/src/ui/`](../apps/workbench/src/ui/), named here so a reader can
+tell a token nothing paints from a token whose fixture was never opened:
+`absent`, `button`, `card`, `crumb`, `dca-card`, `fill-path`, `glance-card`,
+`price-drop-path-chart`, `section-table`, `shell`, `snapshot-notice`,
+`summary-card`.
+
+**How each row was derived, and why not from a screenshot.** A token reaches the
+screen two ways, and a grep for `var(--nms-` sees only one of them: Button paints
+`--nms-primary` through the theme utility `bg-primary`, which resolves through
+`tailwind.css`'s `@theme` block and never spells the token's name. So each row
+was read twice. First from source: which component file reads the name, bare or
+through a mapped utility, and which fixture renders that component, following the
+class strings that cross files (`CARD_SURFACE` from `card.tsx`, `POSITIVE` and
+`NEGATIVE` and `METRICS_TERM` from `summary-card.tsx`, `CELL_BOX` behind the six
+`TABLE_*` strings from `section-table.tsx`). Second from the compiled stylesheet:
+the workbench's own Tailwind entry was built through Vite, the same path
+`tailwind-scan.test.ts` uses, and every emitted rule that reads a token was
+listed with the selector that gates it. That second read is what separates a
+token painted at rest from one painted only on `:hover`, only on
+`:focus-visible`, or only under `prefers-color-scheme: dark`, which is a
+distinction a static themed screenshot cannot make either way. Both reads are
+reproducible from the tree at `986a56c`, and no row rests on a screenshot.
+
+The **fixtures** column lists where a package component paints the token. The
+workbench's own chrome is excluded from it and called out below, because a token
+the instrument paints is not a token a component renders.
+
+| token | fixtures that paint it | how |
+| --- | --- | --- |
+| `--nms-background` | `button`, `fill-path`, `price-drop-path-chart` | Button `outline`'s fill, the chart's label plates, the untinted rung rows. The decorator's `bg-background` wrapper and the workbench's `html` rule also paint it under all twelve. |
+| `--nms-card` | `card`, `dca-card`, `fill-path`, `glance-card`, `price-drop-path-chart`, `section-table`, `snapshot-notice`, `summary-card` | `CARD_SURFACE`'s fill, carried by every `Card` composer and by the stale-snapshot notice. The chart also fills its rung dots with it. |
+| `--nms-foreground` | `button`, `crumb`, `dca-card`, `fill-path`, `price-drop-path-chart` | Button's secondary hover mix and `hover:text-foreground`, Crumb's current segment, the selected rung's border and 1px shadow, the chart's axis labels. Every fixture's own note line uses `text-foreground/60` on top of that. |
+| `--nms-muted-foreground` | `absent`, `crumb`, `dca-card`, `fill-path`, `glance-card`, `price-drop-path-chart`, `section-table`, `summary-card` | `Absent`'s em dash and its stated cause, `METRICS_TERM`, the table header box, and direct reads in five more components. Not painted by `button`, `card`, `shell` or `snapshot-notice`. |
+| `--nms-muted` | `button`, **on hover only** | Its only three reads anywhere are Button's `hover:bg-muted`, `aria-expanded:bg-muted` and `dark:hover:bg-muted/50`. No fixture stages `aria-expanded`, so hovering an `outline` or `ghost` button is the only way to see it. **Nothing paints it at rest.** |
+| `--nms-border` | `button`, `card`, `dca-card`, `fill-path`, `glance-card`, `section-table`, `snapshot-notice`, `summary-card` | `CARD_SURFACE`'s hairline, `CELL_BOX`'s bottom rule under both the composition table and the DCA rung table, nine reads across the fill path, and Button `outline`'s `border-border`. |
+| `--nms-input` | `button`, **under a dark OS preference only** | Every emitted rule that reads it sits inside `@media (prefers-color-scheme: dark)`: `dark:border-input`, `dark:bg-input/30`, `dark:hover:bg-input/50`, all on Button `outline`. **Renders nowhere under a light scheme**, which is what a themed sweep on a light machine shows. |
+| `--nms-primary` | `button` | `bg-primary` on the `default` variant, `text-primary` on `link`. |
+| `--nms-primary-foreground` | `button` | `text-primary-foreground`, the `default` variant's label. |
+| `--nms-secondary` | `button` | `bg-secondary`, and the bare `color-mix` that darkens it on hover. |
+| `--nms-secondary-foreground` | `button` | `text-secondary-foreground` on the `secondary` variant. |
+| `--nms-destructive` | `button`, `snapshot-notice` | The `destructive` variant's tint and text, plus `aria-invalid` on all six variants in the `states` fixture. `snapshot-notice` stages a destructive Button beside the refusal on purpose, so the two reds can be told apart. |
+| `--nms-neg` | `dca-card`, `fill-path`, `glance-card`, `section-table`, `snapshot-notice`, `summary-card` | `NEGATIVE`, exported by `summary-card.tsx` and imported by both `glance-card.tsx` and `section-table.tsx`, the torn-act block's border and headline, and the stale-snapshot refusal. |
+| `--nms-pos` | `dca-card`, `fill-path`, `glance-card`, `price-drop-path-chart`, `section-table`, `summary-card` | `POSITIVE`, on the same three-file path as `NEGATIVE`, the filled path and its rung tints and edges, and the chart's filled dots. |
+| `--nms-ok` | `summary-card` | The green arm of the data-safety badge, and its only read in the package. |
+| `--nms-warn` | `dca-card`, `fill-path`, `summary-card` | The badge's other arm, the `unreadable` chip, and the dashed `inferred` pill and left edge. |
+| `--nms-now` | `fill-path`, `price-drop-path-chart` | The spot rule, its end-anchored label, the `Now` legend swatch, and the tint and edge on the rung price reaches next. |
+| `--nms-ring` | `button`, `snapshot-notice`, **on keyboard focus only** | `focus-visible:border-ring` and `focus-visible:ring-ring/50` sit on `buttonVariants`' base string, so the ring rides every Button in both fixtures. **Nothing paints it at rest**, which §5's focus-ring pass already says in its own words. |
+| `--nms-radius-md` | `button`, `snapshot-notice` | `rounded-md` on the base, plus the `min()` clamps on `xs`, `sm`, `icon-xs` and `icon-sm`. The one token here that is not a colour. |
+
+**No token repaints nothing.** All nineteen have at least one painter in the
+package, so the sweep turned up no deletion candidate and nothing here is acted
+on. Three are painted only in a state the fixtures do not hold: `--nms-muted` on
+hover, `--nms-ring` on keyboard focus, and `--nms-input` under a dark OS
+preference. Each is still a live read on a real element, so none of the three is
+dead, and the reason each is easy to mistake for dead is written above rather
+than left for the next sweep to rediscover.
+
+**What this hands the contrast guard** (spec #451 S3, issue #455): an empty
+exclusion list. The guard's premise is that a token nothing renders is not a pair
+to assert, and no token qualifies. The three state-gated rows in particular stay
+in: a hover surface still carries text, a focus ring is a non-text boundary under
+SC 1.4.11, and `--nms-input` is the token S3 unaliases precisely so the login
+field's boundary can clear 3:1, which is an `apps/web` read the package's
+dark-only rule says nothing about.
+
+**One fixture appears in no row.** `shell` renders a component that sets layout
+and nothing else, so it reads no colour token at all. It still shows the
+decorator's background and foreground, and the boxes inside it are the fixture's
+own `foreground/10` and `foreground/20` bands. That absence is a fact about
+`Shell`, not a finding about a token.
+
 ## 6. Adding a component
 
 A component reaches the package one of two ways, and which one depends on where
