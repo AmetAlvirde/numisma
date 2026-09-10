@@ -66,6 +66,7 @@ table is a fast index; the map is the tour.
 | [`docs/codebase-map.md`](./docs/codebase-map.md)                           | Deep orientation entry point — every package, runbook, and ADR at a glance.                                             |
 | [`docs/domain-model.md`](./docs/domain-model.md)                           | The domain: the ten verbs, position-moving semantics, closed book, invalidation watch, profit-split obligation, Orders. |
 | [`docs/scripts.md`](./docs/scripts.md)                                     | The full root script reference — local review, orders, market data, hosted projection, quality gates.                   |
+| [`docs/binance-exports.md`](./docs/binance-exports.md)                     | The two Binance spot export shapes and what a venue ingest needs from each.                                            |
 | [`docs/local-data.md`](./docs/local-data.md)                               | Where the durable store lives, `resolveDataDir`, the `<dataDir>` layout, reversibility, ingest validation.              |
 | [`docs/ladder-fill-path.md`](./docs/ladder-fill-path.md)                   | The DCA ladder card: the day-zero projection and the state key the chart and the rung list share.                       |
 | [`docs/plans-authoring-runbook.md`](./docs/plans-authoring-runbook.md)     | Writing a `plans.jsonl` line by hand, and what `pnpm plans` says back.                                                  |
