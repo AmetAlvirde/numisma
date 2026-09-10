@@ -104,6 +104,7 @@ These are the seams most likely to be misread from the tree alone:
 | [`ladder-fill-path.md`](./ladder-fill-path.md) | The DCA ladder card's two product rules: the day-zero projection (and why it is already reliable by construction), and the three-colour state key the picture and the rung list share. |
 | [`plans-authoring-runbook.md`](./plans-authoring-runbook.md) | How to write a `plans.jsonl` line by hand, what the allowlist edit costs, and how to read `pnpm plans` back. |
 | [`scripts.md`](./scripts.md) | The full `pnpm` script reference across all workspace members. |
+| [`binance-exports.md`](./binance-exports.md) | The two Binance spot CSVs, what each is authoritative for, and the five places their shape breaks the Bitget reader's approach. |
 | [`local-data.md`](./local-data.md) | The durable-store rule, the `<dataDir>` layout, the write allowlist, and the `<fund>`/`<exchange>` placeholder convention. |
 | [`component-package.md`](./component-package.md) | What `@numisma/components` ships, the five things a consumer owes it, the two silent styling failures and the two instruments that separate them, and the manual theming pass in the workbench. |
 
