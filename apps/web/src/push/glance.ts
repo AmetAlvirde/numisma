@@ -44,6 +44,7 @@ import {
   addDays,
   composeRowDependencies,
   instrumentsForSource,
+  isExpectedOn,
   lastExpectedMarkDate,
   weekdayName,
 } from "@numisma/engine";
@@ -116,14 +117,22 @@ export function buildGlanceBlock(
     }
   }
 
-  // EVERY registered instrument is expected on EVERY anchor, and that is a deliberate
-  // consequence of carry-forward rather than an oversight. `lastExpectedMarkDate`
-  // always resolves to some date <= `asOf`, so on any anchor all thirteen instruments
-  // owe a current mark; `arrived` is the count of instruments that are FRESH against
-  // that date. The reading is "thirteen instruments should have a current mark; N do".
-  // Keeping `expected` at "due today" while `missing` carried forward absences from
-  // previous days would make `arrived = expected - missing.length` go NEGATIVE.
-  const expectedEntries = allRegisteredInstruments();
+  // EVERY registered instrument is expected on EVERY anchor from its `expectedFrom`
+  // on, and that is a deliberate consequence of carry-forward rather than an
+  // oversight. `lastExpectedMarkDate` always resolves to some date <= `asOf`, so on
+  // any anchor every instrument registered by that date owes a current mark;
+  // `arrived` is the count of instruments that are FRESH against it. The reading is
+  // "N instruments should have a current mark; M do". Keeping `expected` at "due
+  // today" while `missing` carried forward absences from previous days would make
+  // `arrived = expected - missing.length` go NEGATIVE.
+  //
+  // `expectedFrom` is tested against the date the mark is OWED FOR, not the anchor,
+  // so a weekday venue's row that starts on a Saturday owes nothing until Monday.
+  // Without it, `pnpm backfill` would hold every historical anchor to an instrument
+  // registered after it and suppress NAV across the whole hosted history.
+  const expectedEntries = allRegisteredInstruments().filter((entry) =>
+    isExpectedOn(entry, lastExpectedMarkDate(entry.source, asOf)),
+  );
   const missing: GlanceMissingMark[] = expectedEntries
     .filter((entry) => {
       const lastMark = lastMarkById.get(entry.instrumentId);

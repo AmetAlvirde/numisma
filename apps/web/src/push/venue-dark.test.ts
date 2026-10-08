@@ -35,7 +35,6 @@ const WEEKDAY_VENUE = [
   "nu-mxn",
   "rivn-mxn",
   "sbux-mxn",
-  "mcd-mxn",
 ];
 const DAILY_VENUE = ["btc", "eth", "render", "gram"];
 const ALL_INSTRUMENTS = [...WEEKDAY_VENUE, ...DAILY_VENUE];

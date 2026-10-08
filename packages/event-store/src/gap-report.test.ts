@@ -37,7 +37,8 @@ import {
 
 // ── The venue split ─────────────────────────────────────────────────────────
 // Nine weekday-venue (`twelvedata`) instruments and four daily (`binance`) ones —
-// the real registry's 9/4 shape, spelled out here rather than derived from
+// the real registry's 9/4 shape on every July date below, before mcd-mxn's
+// `expectedFrom` (2026-10-08) made it 10/4, spelled out here rather than derived from
 // `instrumentsForSource` so a registry edit that changes the split fails these
 // cases loudly instead of quietly re-shaping them. The counts are what make the
 // Saturday case bite: under the old rule the nine self-skip onto Friday's marks,
@@ -52,7 +53,6 @@ const WEEKDAY_VENUE = [
   "nu-mxn",
   "rivn-mxn",
   "sbux-mxn",
-  "mcd-mxn",
 ];
 const DAILY_VENUE = ["btc", "eth", "render", "gram"];
 const ALL_INSTRUMENTS = [...WEEKDAY_VENUE, ...DAILY_VENUE];
@@ -176,7 +176,7 @@ describe("computeGapReport — the rule: did a mark land on day D", () => {
     // instruments carry back to Friday, find Friday's marks, and count as
     // ARRIVED. 9 > 0, so `arrived > 0` returns CLEAN on a day that produced
     // nothing. This is why a test written on `arrived` cannot fire on a weekend.
-    expect(arrivedUnderOldRule(events, SATURDAY)).toBe(10);
+    expect(arrivedUnderOldRule(events, SATURDAY)).toBe(9);
 
     // The rule this slice ships counts marks LANDING ON the day, so it fires.
     const report = computeGapReport(events, { since: FRIDAY, until: SATURDAY, now: LATER });
@@ -286,7 +286,21 @@ describe("computeGapReport — the second question: did a whole venue go dark", 
     // existing verdict changes. `lost.length` is what three surfaces render.
     expect(report.lost).toEqual([]);
     expect(report.venueDark).toEqual([
-      { date: THURSDAY, source: "twelvedata", expected: 10 },
+      { date: THURSDAY, source: "twelvedata", expected: 9 },
+    ]);
+  });
+
+  it("counts what the venue owed ON THAT DATE, so a row registered later counts from its expectedFrom", () => {
+    // mcd-mxn is owed from 2026-10-08. A dark July Thursday owed nine (above); a
+    // dark Thursday after the row landed owed ten, and the line has to say ten.
+    const OCTOBER_THURSDAY = "2026-10-08";
+    const report = computeGapReport(marks(OCTOBER_THURSDAY, DAILY_VENUE), {
+      since: OCTOBER_THURSDAY,
+      until: OCTOBER_THURSDAY,
+      now: new Date("2026-10-12T12:00:00Z"),
+    });
+    expect(report.venueDark).toEqual([
+      { date: OCTOBER_THURSDAY, source: "twelvedata", expected: 10 },
     ]);
   });
 
@@ -307,7 +321,7 @@ describe("computeGapReport — the second question: did a whole venue go dark", 
     expect(report.venueDark).toEqual([{ date: SATURDAY, source: "binance", expected: 4 }]);
   });
 
-  it("does NOT fire on a partial-venue shortfall — eight of ten is not dark (D3)", () => {
+  it("does NOT fire on a partial-venue shortfall — eight of nine is not dark (D3)", () => {
     const events: PortfolioEvent[] = [
       ...marks(THURSDAY, DAILY_VENUE),
       ...marks(THURSDAY, WEEKDAY_VENUE.slice(0, 8)),
@@ -343,7 +357,7 @@ describe("computeGapReport — the second question: did a whole venue go dark", 
     expect(report.lost).toEqual([]);
     expect(report.venueDark).toEqual([
       { date: THURSDAY, source: "binance", expected: 4 },
-      { date: THURSDAY, source: "twelvedata", expected: 10 },
+      { date: THURSDAY, source: "twelvedata", expected: 9 },
     ]);
   });
 
@@ -357,7 +371,7 @@ describe("computeGapReport — the second question: did a whole venue go dark", 
     expect(report.unattributedMarks).toBe(2);
     // Two extra marks landed on the day; twelvedata is still dark.
     expect(report.venueDark).toEqual([
-      { date: THURSDAY, source: "twelvedata", expected: 10 },
+      { date: THURSDAY, source: "twelvedata", expected: 9 },
     ]);
   });
 
@@ -455,7 +469,7 @@ describe("formatGapReport / formatGapSummary", () => {
       now: LATER,
     });
     expect(formatGapReport(report)).toEqual([
-      "Numisma: 2026-07-16 (Thursday) — VENUE DARK. twelvedata owed 10 mark(s) and produced none. " +
+      "Numisma: 2026-07-16 (Thursday) — VENUE DARK. twelvedata owed 9 mark(s) and produced none. " +
         "The day is not lost; the venue was silent, or the market was closed for a holiday.",
     ]);
     expect(formatGapSummary(report)).toBe(

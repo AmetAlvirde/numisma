@@ -73,7 +73,6 @@ const EQUITIES = [
   "nu-mxn",
   "rivn-mxn",
   "sbux-mxn",
-  "mcd-mxn",
 ];
 
 function healthyDay(date: string): PortfolioEvent[] {
@@ -322,7 +321,7 @@ describe("runGapReport — the exit contract", () => {
 
     expect(run.report.lost).toEqual([]);
     expect(run.report.venueDark).toEqual([
-      { date: YESTERDAY, source: "twelvedata", expected: 10 },
+      { date: YESTERDAY, source: "twelvedata", expected: 9 },
     ]);
     expect(run.exitCode).toBe(0);
     expect(run.lines.some((line) => line.includes("VENUE DARK"))).toBe(true);

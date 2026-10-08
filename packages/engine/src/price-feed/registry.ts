@@ -43,6 +43,25 @@ export interface InstrumentRegistryEntry {
    * approximation (ADR-005), not a provider quote. Absent/false = direct quote.
    */
   derived?: boolean;
+  /**
+   * The first `YYYY-MM-DD` on which this instrument owes a mark. Absent means it has
+   * owed one since genesis, which is true of every row registered before this field
+   * existed.
+   *
+   * WHY A REGISTRY ROW NEEDS A DATE AT ALL. The glance builder expects every
+   * registered instrument on every anchor, and `pnpm backfill` refolds EVERY anchor
+   * nightly. A row added today with no date is owed on every historical anchor, none
+   * of which can ever hold its mark, so the first backfill after it lands suppresses
+   * fund value, change and Reserve % across the whole hosted history.
+   *
+   * WHY IT IS STATED HERE AND NOT DERIVED FROM THE FIRST MARK. "Expected once it has
+   * marked" never expects an instrument whose feed has never worked, which is a false
+   * *no* on exactly the day a new row is most likely to be broken. Set it to the day
+   * the row lands. That is always safe, since no earlier anchor can owe a mark the
+   * feed was not yet fetching, and it is public. Never use the day the position
+   * opened: that is trade data, and this repository is public.
+   */
+  expectedFrom?: string;
 }
 
 /**
@@ -63,10 +82,11 @@ const CRYPTO_ENTRIES: readonly InstrumentRegistryEntry[] = [
  * Vantage. Both fit this registry seam identically, but Twelve Data's free tier
  * (800 req/day, 8 req/min) comfortably covers the daily cadence, where Alpha
  * Vantage's 25 req/day free cap would be exhausted almost immediately. NOTE: the 8
- * req/min cap does NOT fit the 9 Twelve Data symbols below (3 equities + 6 `*-mxn`
- * USD legs) as 9 sequential single-symbol calls — the 9th would 429. What makes
- * them fit is BATCHING: the fetch shell packs all 9 into ONE comma-separated
- * `/time_series` request (see `fetchTwelveDataDailyCloses`). Twelve Data's
+ * req/min cap does NOT fit the 10 Twelve Data symbols below (3 equities + 7 `*-mxn`
+ * USD legs) in one minute, batched or not: a batch costs one credit PER SYMBOL. What
+ * makes them fit is BATCHING plus PACING: the fetch shell packs at most 8 symbols
+ * into each comma-separated `/time_series` request and sleeps a minute between
+ * requests (see `fetchTwelveDataDailyCloses` and `twelveDataMaxSymbolsPerMinute`). Twelve Data's
  * `/time_series?interval=1day` returns a daily OHLC row that maps cleanly onto the
  * same `ProviderObservation` shape the Binance kline already produces.
  */
@@ -89,7 +109,7 @@ const MXN_DERIVED_ENTRIES: readonly InstrumentRegistryEntry[] = [
   { instrumentId: "nu-mxn", symbol: "NU", quoteCurrency: "MXN", source: "twelvedata", derived: true },
   { instrumentId: "rivn-mxn", symbol: "RIVN", quoteCurrency: "MXN", source: "twelvedata", derived: true },
   { instrumentId: "sbux-mxn", symbol: "SBUX", quoteCurrency: "MXN", source: "twelvedata", derived: true },
-  { instrumentId: "mcd-mxn", symbol: "MCD", quoteCurrency: "MXN", source: "twelvedata", derived: true },
+  { instrumentId: "mcd-mxn", symbol: "MCD", quoteCurrency: "MXN", source: "twelvedata", derived: true, expectedFrom: "2026-10-08" },
 ];
 
 const REGISTRY: ReadonlyMap<string, InstrumentRegistryEntry> = new Map(
@@ -102,6 +122,20 @@ const REGISTRY: ReadonlyMap<string, InstrumentRegistryEntry> = new Map(
 /** Every registered instrument served by the given `source` (fetch loop input). */
 export function instrumentsForSource(source: PriceSource): InstrumentRegistryEntry[] {
   return [...REGISTRY.values()].filter((entry) => entry.source === source);
+}
+
+/**
+ * Does `entry` owe a mark on `date`? True from its `expectedFrom` onward, and always
+ * for a row without one. Lexicographic `<=` is date order on `YYYY-MM-DD`, the
+ * comparison this codebase uses throughout.
+ *
+ * Callers pass the date the mark is OWED FOR, not the anchor: the glance builder
+ * passes `lastExpectedMarkDate(source, asOf)`, so a Sunday anchor after a Friday
+ * start date still owes Friday's mark, and one after a Saturday start owes nothing
+ * until Monday.
+ */
+export function isExpectedOn(entry: InstrumentRegistryEntry, date: string): boolean {
+  return entry.expectedFrom === undefined || entry.expectedFrom <= date;
 }
 
 /**

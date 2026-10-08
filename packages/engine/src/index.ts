@@ -324,7 +324,11 @@ export type {
   PriceSource,
   InstrumentRegistryEntry,
 } from "./price-feed/registry.js";
-export { instrumentsForSource, resolveInstrument } from "./price-feed/registry.js";
+export {
+  instrumentsForSource,
+  isExpectedOn,
+  resolveInstrument,
+} from "./price-feed/registry.js";
 // The venue calendar: how often each source is expected to mark, and the last date
 // it owed one. ONE home, shared by the push glance builder and the durable log's
 // gap report — two copies would compile happily while disagreeing about whether a
