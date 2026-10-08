@@ -67,6 +67,7 @@ describe("instrument registry (R5)", () => {
       "nu-mxn",
       "rivn-mxn",
       "sbux-mxn",
+      "mcd-mxn",
     ]);
   });
 

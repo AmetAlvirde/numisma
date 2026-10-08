@@ -52,6 +52,7 @@ const WEEKDAY_VENUE = [
   "nu-mxn",
   "rivn-mxn",
   "sbux-mxn",
+  "mcd-mxn",
 ];
 const DAILY_VENUE = ["btc", "eth", "render", "gram"];
 const ALL_INSTRUMENTS = [...WEEKDAY_VENUE, ...DAILY_VENUE];
@@ -175,7 +176,7 @@ describe("computeGapReport — the rule: did a mark land on day D", () => {
     // instruments carry back to Friday, find Friday's marks, and count as
     // ARRIVED. 9 > 0, so `arrived > 0` returns CLEAN on a day that produced
     // nothing. This is why a test written on `arrived` cannot fire on a weekend.
-    expect(arrivedUnderOldRule(events, SATURDAY)).toBe(9);
+    expect(arrivedUnderOldRule(events, SATURDAY)).toBe(10);
 
     // The rule this slice ships counts marks LANDING ON the day, so it fires.
     const report = computeGapReport(events, { since: FRIDAY, until: SATURDAY, now: LATER });
@@ -285,7 +286,7 @@ describe("computeGapReport — the second question: did a whole venue go dark", 
     // existing verdict changes. `lost.length` is what three surfaces render.
     expect(report.lost).toEqual([]);
     expect(report.venueDark).toEqual([
-      { date: THURSDAY, source: "twelvedata", expected: 9 },
+      { date: THURSDAY, source: "twelvedata", expected: 10 },
     ]);
   });
 
@@ -306,7 +307,7 @@ describe("computeGapReport — the second question: did a whole venue go dark", 
     expect(report.venueDark).toEqual([{ date: SATURDAY, source: "binance", expected: 4 }]);
   });
 
-  it("does NOT fire on a partial-venue shortfall — eight of nine is not dark (D3)", () => {
+  it("does NOT fire on a partial-venue shortfall — eight of ten is not dark (D3)", () => {
     const events: PortfolioEvent[] = [
       ...marks(THURSDAY, DAILY_VENUE),
       ...marks(THURSDAY, WEEKDAY_VENUE.slice(0, 8)),
@@ -342,7 +343,7 @@ describe("computeGapReport — the second question: did a whole venue go dark", 
     expect(report.lost).toEqual([]);
     expect(report.venueDark).toEqual([
       { date: THURSDAY, source: "binance", expected: 4 },
-      { date: THURSDAY, source: "twelvedata", expected: 9 },
+      { date: THURSDAY, source: "twelvedata", expected: 10 },
     ]);
   });
 
@@ -356,7 +357,7 @@ describe("computeGapReport — the second question: did a whole venue go dark", 
     expect(report.unattributedMarks).toBe(2);
     // Two extra marks landed on the day; twelvedata is still dark.
     expect(report.venueDark).toEqual([
-      { date: THURSDAY, source: "twelvedata", expected: 9 },
+      { date: THURSDAY, source: "twelvedata", expected: 10 },
     ]);
   });
 
@@ -454,7 +455,7 @@ describe("formatGapReport / formatGapSummary", () => {
       now: LATER,
     });
     expect(formatGapReport(report)).toEqual([
-      "Numisma: 2026-07-16 (Thursday) — VENUE DARK. twelvedata owed 9 mark(s) and produced none. " +
+      "Numisma: 2026-07-16 (Thursday) — VENUE DARK. twelvedata owed 10 mark(s) and produced none. " +
         "The day is not lost; the venue was silent, or the market was closed for a holiday.",
     ]);
     expect(formatGapSummary(report)).toBe(

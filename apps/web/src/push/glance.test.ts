@@ -258,7 +258,7 @@ describe("the quiet Sunday (the case V1 exists to protect)", () => {
     expect(recorded.totals.fundValueUsd).not.toBe(report.totals.fundValueUsd);
   });
 
-  it("is the same 9-of-13 shortfall that WOULD be an outage on a weekday", async ({
+  it("is the same 10-of-14 shortfall that WOULD be an outage on a weekday", async ({
     skip,
   }) => {
     // False-pass guard for the case above. If the fold at 2026-07-26 actually
@@ -275,11 +275,11 @@ describe("the quiet Sunday (the case V1 exists to protect)", () => {
         .map((c) => c.instrumentId),
     );
     expect([...marked].sort()).toEqual([...CRYPTO_IDS].sort());
-    expect(ALL_IDS.filter((id) => !marked.has(id))).toHaveLength(9);
+    expect(ALL_IDS.filter((id) => !marked.has(id))).toHaveLength(10);
   });
 });
 
-describe("a real outage: the same 9-of-13 shortfall on a Tuesday", () => {
+describe("a real outage: the same 10-of-14 shortfall on a Tuesday", () => {
   const { data, report } = constructedAnchor(OPEN_TUESDAY, CRYPTO_IDS);
   const glance = buildGlanceBlock(data, report, 10);
 
@@ -288,9 +288,9 @@ describe("a real outage: the same 9-of-13 shortfall on a Tuesday", () => {
     // equities + 6 MXN-derived SIC entries), both `source: "twelvedata"`. A builder
     // that hand-listed "the equities" would expect 7, count 3 missing, and stay
     // silent on six dead feeds.
-    expect(glance.feedGap.expected).toBe(13);
+    expect(glance.feedGap.expected).toBe(14);
     expect(glance.feedGap.arrived).toBe(4);
-    expect(glance.feedGap.missing).toHaveLength(9);
+    expect(glance.feedGap.missing).toHaveLength(10);
     expect(glance.feedGap.missing.map((m) => m.rowId).sort()).toEqual(
       TWELVEDATA_IDS.map((id) => `instrument:${id}`).sort(),
     );
@@ -350,7 +350,7 @@ describe("R1 — the floor is never invented", () => {
     // Fund value, change and feedGap are untouched: nothing about a missing policy
     // makes NAV wrong. The shape of what is missing is itself diagnostic.
     expect(glance.suppressed).toEqual([SUPPRESSION_KEYS.reserve]);
-    expect(glance.feedGap).toEqual({ expected: 13, arrived: 13, missing: [] });
+    expect(glance.feedGap).toEqual({ expected: 14, arrived: 14, missing: [] });
   });
 
   it("stamps the floor verbatim when a policy IS in effect (C4: the wire says target)", () => {
@@ -411,7 +411,7 @@ describe("carry-forward: an unfilled expectation survives the weekend", () => {
       // Every registered instrument is expected on every anchor: carry-forward
       // resolves a last-expected date <= asOf for all thirteen. `arrived` is the
       // count of FRESH instruments, not of instruments that quoted today.
-      expect(glance.feedGap.expected).toBe(13);
+      expect(glance.feedGap.expected).toBe(14);
       expect(glance.feedGap.arrived).toBe(4);
       expect(glance.feedGap.missing.map((m) => m.rowId).sort()).toEqual(
         TWELVEDATA_IDS.map((id) => `instrument:${id}`).sort(),
@@ -430,9 +430,9 @@ describe("carry-forward: an unfilled expectation survives the weekend", () => {
   it("2026-07-03 (Friday) is a TRUE gap — the feed was already down from 06-30", () => {
     const { data, report } = stalledEquities("2026-07-03");
     const glance = buildGlanceBlock(data, report, 10);
-    expect(glance.feedGap.expected).toBe(13);
+    expect(glance.feedGap.expected).toBe(14);
     expect(glance.feedGap.arrived).toBe(4);
-    expect(glance.feedGap.missing).toHaveLength(9);
+    expect(glance.feedGap.missing).toHaveLength(10);
   });
 
   it("the quiet Sunday stays SILENT: equities fresh against Friday 2026-07-24", () => {
@@ -444,7 +444,7 @@ describe("carry-forward: an unfilled expectation survives the weekend", () => {
       ...Object.fromEntries(TWELVEDATA_IDS.map((id) => [id, ["2026-07-24"]])),
     });
     const glance = buildGlanceBlock(data, report, 10);
-    expect(glance.feedGap).toEqual({ expected: 13, arrived: 13, missing: [] });
+    expect(glance.feedGap).toEqual({ expected: 14, arrived: 14, missing: [] });
     expect(glance.suppressed).toEqual([]);
   });
 
@@ -456,8 +456,8 @@ describe("carry-forward: an unfilled expectation survives the weekend", () => {
       ...Object.fromEntries(TWELVEDATA_IDS.map((id) => [id, ["2026-07-27"]])),
     });
     const glance = buildGlanceBlock(data, report, 10);
-    expect(glance.feedGap.expected).toBe(13);
-    expect(glance.feedGap.arrived).toBe(9);
+    expect(glance.feedGap.expected).toBe(14);
+    expect(glance.feedGap.arrived).toBe(10);
     expect(glance.feedGap.missing.map((m) => m.rowId).sort()).toEqual(
       CRYPTO_IDS.map((id) => `instrument:${id}`).sort(),
     );
@@ -481,20 +481,20 @@ describe("the venue calendar", () => {
     const staleByDate: Array<[string, number]> = [
       ["2026-07-25", 4],
       ["2026-07-26", 4],
-      ["2026-07-27", 13],
-      ["2026-07-28", 13],
-      ["2026-07-29", 13],
-      ["2026-07-30", 13],
-      ["2026-07-31", 13],
+      ["2026-07-27", 14],
+      ["2026-07-28", 14],
+      ["2026-07-29", 14],
+      ["2026-07-30", 14],
+      ["2026-07-31", 14],
     ];
     for (const [asOf, staleCount] of staleByDate) {
       const { data, report } = anchorWithMarkHistory(asOf, fridayMarks);
       const glance = buildGlanceBlock(data, report, 10);
-      expect(glance.feedGap.expected, `${asOf} expected`).toBe(13);
+      expect(glance.feedGap.expected, `${asOf} expected`).toBe(14);
       expect(glance.feedGap.missing, `${asOf} stale ${staleCount}`).toHaveLength(
         staleCount,
       );
-      expect(glance.feedGap.arrived, `${asOf} arrived`).toBe(13 - staleCount);
+      expect(glance.feedGap.arrived, `${asOf} arrived`).toBe(14 - staleCount);
     }
   });
 
@@ -509,8 +509,8 @@ describe("the venue calendar", () => {
       ...Object.fromEntries(TWELVEDATA_IDS.map((id) => [id, ["2026-07-24"]])),
     });
     const glance = buildGlanceBlock(data, report, 10);
-    expect(glance.feedGap.expected).toBe(13);
-    expect(glance.feedGap.missing).toHaveLength(9);
+    expect(glance.feedGap.expected).toBe(14);
+    expect(glance.feedGap.missing).toHaveLength(10);
   });
 });
 

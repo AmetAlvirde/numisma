@@ -60,7 +60,7 @@ const DCA = {
 const GLANCE = {
   reserveTargetPct: 10,
   feedGap: {
-    expected: 13,
+    expected: 14,
     arrived: 9,
     missing: [{ rowId: "instrument:btc", label: "BTC (Bitcoin)" }],
   },
@@ -761,8 +761,8 @@ describe("what does NOT survive — every magnitude, and the fund's identity", (
     // (rather than a preserved ratio) must be absent from every output payload.
     // Preserved by design, and each one is a ratio, a count or the FX rate — never a
     // fund magnitude. `2` joins them as the dca branch's `unattributable` COUNT, which
-    // is the same class of value as `feedGap`'s 13 and 9 beside it.
-    const preserved = new Set([20, 100, 17.5, 13, 9, 10, 2, 0]);
+    // is the same class of value as `feedGap`'s 14 and 10 beside it.
+    const preserved = new Set([20, 100, 17.5, 14, 10, 13, 9, 2, 0]);
     const inputs = new Set(
       numbersIn(REAL).filter((n) => n !== 0 && !preserved.has(n)),
     );

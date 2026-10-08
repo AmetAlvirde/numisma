@@ -66,6 +66,7 @@ const WEEKDAY_VENUE = [
   "nu-mxn",
   "rivn-mxn",
   "sbux-mxn",
+  "mcd-mxn",
 ];
 
 /** Every venue reporting: no lost day, no dark venue. */
@@ -195,7 +196,7 @@ describe("writeGapReportFile", () => {
 
     expect(body.lost).toEqual([]);
     expect(body.venueDark).toEqual([
-      { date: "2026-07-15", source: "twelvedata", expected: 9 },
+      { date: "2026-07-15", source: "twelvedata", expected: 10 },
     ]);
     expect(body.summary).toContain("no lost days");
     expect(body.summary).toContain("1 venue-day(s) dark");

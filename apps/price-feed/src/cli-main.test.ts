@@ -26,7 +26,7 @@ const CRYPTO: ReadonlyArray<readonly [string, string]> = [
   ["render", "RENDERUSDT"],
   ["gram", "GRAMUSDT"],
 ];
-/** The 9 Twelve Data rows (3 US equities + the 6 MXN-derived USD legs). */
+/** The 10 Twelve Data rows (3 US equities + the 7 MXN-derived USD legs). */
 const EQUITIES: ReadonlyArray<readonly [string, string]> = [
   ["aapl", "AAPL"],
   ["googl", "GOOGL"],
@@ -37,6 +37,7 @@ const EQUITIES: ReadonlyArray<readonly [string, string]> = [
   ["nu-mxn", "NU"],
   ["rivn-mxn", "RIVN"],
   ["sbux-mxn", "SBUX"],
+  ["mcd-mxn", "MCD"],
 ];
 
 function quote(instrumentId: string, symbol: string, asOf: string, source: PriceSource): Quote {
@@ -48,7 +49,7 @@ function mark(instrumentId: string, asOf: string): PriceMarkedEvent {
 }
 
 /**
- * An authored `FetchRunResult`. The defaults describe a clean 13-instrument run;
+ * An authored `FetchRunResult`. The defaults describe a clean 14-instrument run;
  * each test overrides only the field whose consequence it is asserting, so a report
  * change shows up as one diff rather than a rewritten fixture.
  */
@@ -109,7 +110,7 @@ async function invoke(
 describe("prices:fetch — with no arguments the live daily path is unchanged", () => {
   it("passes NO asOf to the run and exits 0 on a clean run", async () => {
     const captured = await invoke([], () =>
-      Promise.resolve(runResult({ asOf: LIVE_AS_OF, quotes: [], marks: [], totalCount: 13 })),
+      Promise.resolve(runResult({ asOf: LIVE_AS_OF, quotes: [], marks: [], totalCount: 14 })),
     );
 
     // `toStrictEqual`, not `toEqual`: `toEqual` ignores undefined-valued keys, so it
@@ -200,12 +201,12 @@ describe("prices:fetch --as-of — the three-state report (R3.2)", () => {
     expect(captured.options).toEqual({ asOf: RECOVERY_AS_OF });
     expect(captured.exitCode).toBe(0);
     expect(captured.out).toMatch(
-      /recovery of 2026-08-14 — 13 owed, 13 marked, 0 absent; 0 not owed/,
+      /recovery of 2026-08-14 — 14 owed, 14 marked, 0 absent; 0 not owed/,
     );
     expect(captured.err).not.toMatch(/ABSENT/);
   });
 
-  it("reports a Saturday's 4-of-4 as complete, naming the 9 not owed by their venue", async () => {
+  it("reports a Saturday's 4-of-4 as complete, naming the 10 not owed by their venue", async () => {
     const saturday = "2026-08-15";
     const captured = await invoke(["--as-of", saturday], () =>
       Promise.resolve(
@@ -226,7 +227,7 @@ describe("prices:fetch --as-of — the three-state report (R3.2)", () => {
     );
 
     expect(captured.exitCode).toBe(0);
-    expect(captured.out).toMatch(/recovery of 2026-08-15 — 4 owed, 4 marked, 0 absent; 9 not owed/);
+    expect(captured.out).toMatch(/recovery of 2026-08-15 — 4 owed, 4 marked, 0 absent; 10 not owed/);
     expect(captured.out).toMatch(/not owed \(never attempted\).*aapl/);
   });
 
@@ -234,7 +235,7 @@ describe("prices:fetch --as-of — the three-state report (R3.2)", () => {
     const captured = await invoke(["--as-of=2026-08-14"], () =>
       Promise.resolve(
         runResult({
-          totalCount: 13,
+          totalCount: 14,
           storedCount: 12,
           emittedCount: 12,
           marks: runResult().marks.filter((m) => m.instrumentId !== "tsla"),
@@ -255,7 +256,7 @@ describe("prices:fetch --as-of — the three-state report (R3.2)", () => {
     expect(captured.err).toMatch(/ABSENT {2}tsla/);
     // R1.4's whole point: the provider's sentence, not a bare "HTTP 400".
     expect(captured.err).toMatch(/No data is available on the specified dates/);
-    expect(captured.out).toMatch(/recovery of 2026-08-14 — 13 owed, 12 marked, 1 absent/);
+    expect(captured.out).toMatch(/recovery of 2026-08-14 — 14 owed, 13 marked, 1 absent/);
   });
 
   it("says in as many words that the exit code cannot tell a holiday from a fault", async () => {
@@ -441,8 +442,8 @@ describe("prices:fetch --as-of — the run writes stored quotes and inbox marks 
     expect(written).toContain(relative(dataDir, inbox));
     // Exactly the 13 store files plus the inbox — no `job-heartbeat.json`, no
     // `events.jsonl`, no `gap-report.json`, nothing the spine or the wrapper owns.
-    expect(written.filter((f) => f.endsWith(".jsonl"))).toHaveLength(13);
-    expect(written).toHaveLength(14);
+    expect(written.filter((f) => f.endsWith(".jsonl"))).toHaveLength(14);
+    expect(written).toHaveLength(15);
     expect(written.some((f) => f.includes("heartbeat"))).toBe(false);
   });
 });

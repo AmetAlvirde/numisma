@@ -89,6 +89,7 @@ const MXN_DERIVED_ENTRIES: readonly InstrumentRegistryEntry[] = [
   { instrumentId: "nu-mxn", symbol: "NU", quoteCurrency: "MXN", source: "twelvedata", derived: true },
   { instrumentId: "rivn-mxn", symbol: "RIVN", quoteCurrency: "MXN", source: "twelvedata", derived: true },
   { instrumentId: "sbux-mxn", symbol: "SBUX", quoteCurrency: "MXN", source: "twelvedata", derived: true },
+  { instrumentId: "mcd-mxn", symbol: "MCD", quoteCurrency: "MXN", source: "twelvedata", derived: true },
 ];
 
 const REGISTRY: ReadonlyMap<string, InstrumentRegistryEntry> = new Map(
