@@ -10,7 +10,7 @@
  * future consumer, not for the package's internals. `atomic-write.ts` and
  * `price-store.ts` are internal plumbing — the three modules that use them do so by
  * relative import — so they are deliberately NOT re-exported here. And Twelve Data
- * is published only in its BATCHED form: the registry's 9 Twelve Data symbols cost
+ * is published only in its BATCHED form: the registry's 10 Twelve Data symbols cost
  * 1 credit each against a free-tier cap of 8/minute, so a consumer looping a
  * single-symbol fetch would 429 itself. `fetchTwelveDataDailyCloses` is the call
  * `runPriceFetch` itself drives. `src/index.test.ts` locks this exact set.

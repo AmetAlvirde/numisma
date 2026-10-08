@@ -440,7 +440,7 @@ describe("prices:fetch --as-of — the run writes stored quotes and inbox marks 
     const { inbox } = resolvePriceFeedPaths(dataDir);
     const written = await walk(dataDir);
     expect(written).toContain(relative(dataDir, inbox));
-    // Exactly the 13 store files plus the inbox — no `job-heartbeat.json`, no
+    // Exactly the 14 store files plus the inbox — no `job-heartbeat.json`, no
     // `events.jsonl`, no `gap-report.json`, nothing the spine or the wrapper owns.
     expect(written.filter((f) => f.endsWith(".jsonl"))).toHaveLength(14);
     expect(written).toHaveLength(15);

@@ -1,6 +1,6 @@
 // Shell reliability suite for the full price pipe (crypto + US equities + derived
 // MXN). No live network (every fetch is mocked) and never the live data files
-// (each run uses a fresh temp data dir): the happy-path store+emit across all 13
+// (each run uses a fresh temp data dir): the happy-path store+emit across all 14
 // instruments plus the FIX, the derived `USD × FIX` MXN marks with the `usdMxn`
 // snapshot, the pre-mark-time no-mark case, idempotent re-runs, per-symbol failure
 // isolation, and the loud missing/stale-FIX behavior.
@@ -150,7 +150,7 @@ async function readStore(instrumentId: string): Promise<string> {
 }
 
 describe("runPriceFetch — happy path across every provider (at/after mark time)", () => {
-  it("stores all 13 quotes and queues one deterministic-id mark per instrument", async () => {
+  it("stores all 14 quotes and queues one deterministic-id mark per instrument", async () => {
     const result = await runPriceFetch({
       config: { dataDir, markTime: "00:00" },
       fetchImpl: mockFetch(),
@@ -208,7 +208,7 @@ describe("runPriceFetch — happy path across every provider (at/after mark time
 });
 
 describe("runPriceFetch — before the mark time", () => {
-  it("upserts the store (all 13) but emits no mark and fetches no FIX", async () => {
+  it("upserts the store (all 14) but emits no mark and fetches no FIX", async () => {
     const result = await runPriceFetch({
       config: { dataDir, markTime: "23:59" },
       fetchImpl: mockFetch(),
@@ -306,7 +306,7 @@ describe("runPriceFetch — missing/stale FIX fails *-mxn loudly (ADR-005)", () 
       credentials: CREDENTIALS,
     });
 
-    // All 13 USD legs still stored (the store never depends on the FIX).
+    // All 14 USD legs still stored (the store never depends on the FIX).
     expect(result.storedCount).toBe(14);
     // The FIX outage + all seven *-mxn derivations fail, attributably.
     const failedIds = result.failures.map((f) => f.instrumentId).sort();
@@ -377,7 +377,7 @@ describe("runPriceFetch — request timeout attribution (R4)", () => {
     expect(result.failures.find((f) => f.instrumentId === "tsla")?.message).toMatch(
       /timed out after 20ms/,
     );
-    // All 9 Twelve Data symbols timed out; the 4 crypto quotes still stored.
+    // All 10 Twelve Data symbols timed out; the 4 crypto quotes still stored.
     expect(result.failures).toHaveLength(10);
     expect(result.storedCount).toBe(4);
   });
@@ -397,7 +397,7 @@ describe("runPriceFetch — Twelve Data pacing under the free-tier credit cap", 
     }) as typeof fetch;
   }
 
-  it("chunks the 9 equity symbols into ≤8-credit windows with one 60s pause between", async () => {
+  it("chunks the 10 equity symbols into ≤8-credit windows with one 60s pause between", async () => {
     const batches: string[][] = [];
     const sleeps: number[] = [];
 
@@ -416,7 +416,7 @@ describe("runPriceFetch — Twelve Data pacing under the free-tier credit cap", 
     expect(batches.every((b) => b.length <= 8)).toBe(true);
     // Exactly one pause, BETWEEN the two chunks (never after the last).
     expect(sleeps).toEqual([60_000]);
-    // Pacing changes timing, not coverage: all 13 still stored and marked.
+    // Pacing changes timing, not coverage: all 14 still stored and marked.
     expect(result.storedCount).toBe(14);
     expect(result.emittedCount).toBe(14);
     expect(result.failures).toEqual([]);
@@ -486,7 +486,7 @@ describe("runPriceFetch — crypto marks the settled UTC candle, gated uniformly
       observationDate: "2026-07-02",
       asOf: AS_OF,
     });
-    // No render mark; the other 12 instruments still marked.
+    // No render mark; the other 13 instruments still marked.
     const inbox = await readInbox();
     expect(inbox.map((e) => e.id)).not.toContain(`pm-render-${AS_OF}`);
     expect(inbox).toHaveLength(13);
@@ -586,7 +586,7 @@ describe("runPriceFetch — crypto marks the settled UTC candle, gated uniformly
 //
 // The calendar these dates rest on: 2026-08-13 Thu, 08-14 Fri, 08-15 Sat,
 // 08-16 Sun, 08-17 Mon. Twelve Data is a `weekdays` venue and Binance `daily`,
-// so a Friday owes all 13 and a Saturday owes only the 4 crypto.
+// so a Friday owes all 14 and a Saturday owes only the 4 crypto.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Mon 2026-08-17 09:00 CDMX — a real instant, and BEFORE the 18:00 mark time. */
@@ -694,7 +694,7 @@ function saturdayLiveMockFetch(urls: string[] = []): typeof fetch {
 }
 
 describe("runPriceFetch — with no asOf the live path is unchanged (R2 pin)", () => {
-  it("reports the DERIVED asOf, an empty notOwed, and all 13 instruments attempted", async () => {
+  it("reports the DERIVED asOf, an empty notOwed, and all 14 instruments attempted", async () => {
     const result = await runPriceFetch({
       config: { dataDir, markTime: "00:00" },
       fetchImpl: mockFetch(),
@@ -709,9 +709,9 @@ describe("runPriceFetch — with no asOf the live path is unchanged (R2 pin)", (
     expect(result.markEmitted).toBe(true);
   });
 
-  it("on a SATURDAY still fetches all 9 Twelve Data symbols and records 9 stale skips", async () => {
+  it("on a SATURDAY still fetches all 10 Twelve Data symbols and records 10 stale skips", async () => {
     // §8.1: the owed-set filter is scoped to the recovery path. The nightly job
-    // keeps storing Friday's close under Saturday's asOf and reporting 9 skips —
+    // keeps storing Friday's close under Saturday's asOf and reporting 10 skips —
     // an unconditional filter would silently change what the daily job stores.
     const urls: string[] = [];
     const result = await runPriceFetch({
@@ -729,7 +729,7 @@ describe("runPriceFetch — with no asOf the live path is unchanged (R2 pin)", (
     const equityRequests = urls.filter((href) => href.includes("api.twelvedata.com"));
     expect(equityRequests).toHaveLength(2);
     expect(equityRequests.every((href) => href.includes("outputsize=1"))).toBe(true);
-    // …stored under Saturday's asOf, and skipped as stale marks — all 9 of them.
+    // …stored under Saturday's asOf, and skipped as stale marks — all 10 of them.
     expect(result.staleMarkSkips).toHaveLength(10);
     expect(result.staleMarkSkips.every((skip) => skip.asOf === SATURDAY_AS_OF)).toBe(true);
     expect(result.emittedCount).toBe(4); // only the crypto marked

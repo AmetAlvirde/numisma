@@ -95,9 +95,9 @@ shared inbox, and `pnpm spine` (in `apps/tui`) owns the guarded, validated appen
   derivations loudly rather than reusing an old rate.
 - **Twelve Data pacing:** the free Basic tier caps at 8 API credits/minute; a
   batched `time_series` request costs 1 credit per symbol, and the registry
-  holds 9 Twelve Data symbols — so a single request would 429. Equities are
+  holds 10 Twelve Data symbols — so a single request would 429. Equities are
   chunked to `twelveDataMaxSymbolsPerMinute` (default 8) and paced
-  `twelveDataPauseMs` (default 60s) apart. A daily run with all 9 symbols
+  `twelveDataPauseMs` (default 60s) apart. A daily run with all 10 symbols
   therefore takes ~1 extra minute.
 - **Partial progress always kept:** a per-symbol fetch failure is recorded
   and the run continues; the process exits non-zero (`process.exitCode = 1`)

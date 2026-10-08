@@ -58,9 +58,9 @@
  * filtered through `owesMarkOn` BEFORE any request is constructed, so a Saturday
  * never asks Twelve Data for a bar that does not exist — which matters because a
  * non-ok status is a REQUEST-level failure there, and one dateless symbol would
- * collapse all nine into `failAll`. The live daily path is deliberately UNCHANGED:
- * it still fetches all 9 equity symbols on a Saturday, stores Friday's close under
- * Saturday's `asOf`, and records 9 stale-mark skips. Making the filter unconditional
+ * collapse the whole batch into `failAll`. The live daily path is deliberately UNCHANGED:
+ * it still fetches every equity symbol on a Saturday, stores Friday's close under
+ * Saturday's `asOf`, and records one stale-mark skip per symbol. Making the filter unconditional
  * would quietly change what the nightly job stores; that is a separate decision.
  */
 import {
@@ -145,8 +145,8 @@ export interface FetchRunResult {
    */
   notOwed: readonly NotOwed[];
   /**
-   * Instruments this run ATTEMPTED: the owed set under an override, all 13 without
-   * one. So a Saturday recovery reads `4/4` rather than `4/13`.
+   * Instruments this run ATTEMPTED: the owed set under an override, the whole registry
+   * without one. So a Saturday recovery reads `4/4` rather than `4/14`.
    */
   totalCount: number;
   storedCount: number;
@@ -265,8 +265,8 @@ export async function runPriceFetch(options: RunOptions = {}): Promise<FetchRunR
     fetchBinanceDailyClose(entry, { timeoutMs: config.requestTimeoutMs, fetchImpl, now, targetDate }),
   );
   // Equities (Twelve Data): batched, but PACED across minute windows. The free tier
-  // caps at 8 CREDITS/min and a batch costs 1 credit PER SYMBOL, so all 9 symbols in
-  // one request is 9 credits > 8 ⇒ 429. Chunk to `twelveDataMaxSymbolsPerMinute` and
+  // caps at 8 CREDITS/min and a batch costs 1 credit PER SYMBOL, so all 10 symbols in
+  // one request is 10 credits > 8 ⇒ 429. Chunk to `twelveDataMaxSymbolsPerMinute` and
   // sleep `twelveDataPauseMs` between chunks so each window stays under the cap. A
   // bad symbol is still per-instrument attributable within its chunk.
   const equityChunks = chunk(equityEntries, Math.max(1, config.twelveDataMaxSymbolsPerMinute));
