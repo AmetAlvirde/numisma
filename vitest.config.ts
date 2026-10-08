@@ -5,9 +5,11 @@ import { gitignoredPathGlobs } from "./ops/testkit/gitignored-path-globs.ts";
 // Test DISCOVERY is derived from what GIT IGNORES — deliberately, and it must
 // stay derived. Do not "simplify" this into a literal list of directory names.
 //
-// Why: vitest's default excludes cover node_modules/dist/.git/.cache, but not
-// `.claude/`, which this repo's execution model fills with ONE GIT WORKTREE PER
-// LANE (`.claude/worktrees/<lane>`). Each worktree is a *different branch*.
+// Why: vitest's default excludes cover only node_modules and .git (vitest 4
+// dropped dist and .cache, so `dist/` stays out only because git ignores it),
+// and never `.claude/`, which this repo's execution model fills with ONE GIT
+// WORKTREE PER LANE (`.claude/worktrees/<lane>`). Each worktree is a *different
+// branch*.
 // Without this, a repo-root `vitest run` collected every worktree's copy of the
 // suite — measured at 312 files where the branch itself has 156 — so the merge
 // gate (the full suite, run in the main checkout) was executing other lanes'
