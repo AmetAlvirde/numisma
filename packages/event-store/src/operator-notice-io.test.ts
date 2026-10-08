@@ -77,7 +77,7 @@ function event(date: string, instrumentId: string): string {
 /**
  * A WEEKEND window, narrow enough that the fixtures below decide its whole verdict.
  * Saturday and Sunday are the only days on which no venue but the daily one owes a
- * mark, so a clean fixture here is clean WITHOUT thirteen instruments — and the
+ * mark, so a clean fixture here is clean WITHOUT every registered instrument — and the
  * venue-dark side stays out of assertions that are not about it.
  */
 const WINDOW = { since: "2026-08-15", until: "2026-08-16" } as const;

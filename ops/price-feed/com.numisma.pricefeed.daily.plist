@@ -192,7 +192,7 @@
        instead of waiting for the next hour.
 
        AN OUT-OF-WINDOW LOAD IS NOT FREE, and calling it a "no-op" (as this comment
-       once did) is wrong in two ways. It costs 9 Twelve Data credits, about two
+       once did) is wrong in two ways. It costs 10 Twelve Data credits, about two
        minutes of wall time (the 60s pacing sleep runs regardless), a commit attempt
        in accumulus and a full `pnpm backfill`. It emits no MARKS, which is a
        different claim — and one the heartbeat now records explicitly (`markWindow`,

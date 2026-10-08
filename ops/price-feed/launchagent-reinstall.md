@@ -27,7 +27,7 @@ stays whatever it was until someone runs this procedure.
 `launchctl load` with `RunAtLoad true` **is a live run**. Two consequences:
 
 - **Do it at or after 18:00 CDMX**, so the run it fires lands inside the mark
-  window and actually marks the day. A load at 09:00 spends 9 Twelve Data credits
+  window and actually marks the day. A load at 09:00 spends 10 Twelve Data credits
   and ~2 minutes to emit **zero** marks.
 - **Never follow it with `launchctl start`.** That is two runs inside one minute
   against Twelve Data's 8-credit/minute cap, and the equities will 429.

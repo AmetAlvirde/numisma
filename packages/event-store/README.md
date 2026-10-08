@@ -94,7 +94,7 @@ the production entry point on purpose — test scaffolding shared with
 Workspace: `@numisma/engine` only (`resolveDataDir`,
 `normalizeDataDirOverride`, `foldEvents`, `dedupeFoldSkips`, `deriveHeadDigest`,
 `parseEvent`, `parseFundReview`, `tradingDayAsOf`, `addDays`, `weekdayName`,
-`owesMarkOn`, `instrumentsForSource`, `PRICE_SOURCES`,
+`owesMarkOn`, `instrumentsForSource`, `isExpectedOn`, `PRICE_SOURCES`,
 `TRADING_DAY_TIME_ZONE`, `INBOX_PATH_SEGMENTS`, and the
 `FundReviewData`/`PortfolioEvent`/`FoldedReview` types).
 Nothing depends on Bun, openTUI, or terminal rendering.

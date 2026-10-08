@@ -177,8 +177,8 @@ its resolution stays in place as the decision record:
   not merely over-broad but actively **wrong**: it published
   `fetchTwelveDataDailyClose` (singular, zero non-test callers) and omitted the
   batched `fetchTwelveDataDailyCloses` that `runPriceFetch` actually drives — so
-  the obvious front-door use for the registry's 9 Twelve Data symbols would issue
-  9 requests against Twelve Data's 8-credit/minute cap and 429, the exact failure
+  the obvious front-door use for the registry's 10 Twelve Data symbols would issue
+  10 requests against Twelve Data's 8-credit/minute cap and 429, the exact failure
   the chunking and 60s pacing exist to prevent.
 
   The decision (no ADR — it is a surface trim, not an architectural trade-off):

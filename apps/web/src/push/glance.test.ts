@@ -22,6 +22,7 @@ import type { CompositionReport, FundReviewData } from "@numisma/engine";
 import {
   buildCompositionReport,
   instrumentsForSource,
+  isExpectedOn,
   parseFundReview,
 } from "@numisma/engine";
 import {
@@ -39,10 +40,19 @@ const QUIET_SUNDAY = "2026-07-26";
 /** A Tuesday: every venue is open, so all thirteen instruments are expected. */
 const OPEN_TUESDAY = "2026-07-28";
 
-const CRYPTO_IDS = instrumentsForSource("binance").map((e) => e.instrumentId);
-const TWELVEDATA_IDS = instrumentsForSource("twelvedata").map(
-  (e) => e.instrumentId,
-);
+/**
+ * The registry AS OF the July cases below, not as of today. Every date in this file
+ * except the `expectedFrom` block predates 2026-10-08, so a row registered later
+ * owes nothing on them; filtering here keeps "thirteen" true for those cases without
+ * restating the registry by hand.
+ */
+const JULY = "2026-07-31";
+const CRYPTO_IDS = instrumentsForSource("binance")
+  .filter((e) => isExpectedOn(e, JULY))
+  .map((e) => e.instrumentId);
+const TWELVEDATA_IDS = instrumentsForSource("twelvedata")
+  .filter((e) => isExpectedOn(e, JULY))
+  .map((e) => e.instrumentId);
 const ALL_IDS = [...CRYPTO_IDS, ...TWELVEDATA_IDS];
 
 /**
@@ -461,6 +471,40 @@ describe("carry-forward: an unfilled expectation survives the weekend", () => {
     expect(glance.feedGap.missing.map((m) => m.rowId).sort()).toEqual(
       CRYPTO_IDS.map((id) => `instrument:${id}`).sort(),
     );
+  });
+});
+
+describe("a row registered mid-history owes nothing before its expectedFrom", () => {
+  // mcd-mxn is owed from Thu 2026-10-08. `pnpm backfill` refolds every anchor, so
+  // without the date every anchor before it would miss MCD and blank its NAV.
+  const MCD_FROM = "2026-10-08";
+  const DAY_BEFORE = "2026-10-07";
+
+  it("the day before: thirteen expected, all thirteen arrived, nothing suppressed", () => {
+    const { data, report } = constructedAnchor(DAY_BEFORE, ALL_IDS);
+    const glance = buildGlanceBlock(data, report, 10);
+    expect(glance.feedGap).toEqual({ expected: 13, arrived: 13, missing: [] });
+    expect(glance.suppressed).toEqual([]);
+  });
+
+  it("from the date on: fourteen expected, and a missing MCD fires", () => {
+    const { data, report } = constructedAnchor(MCD_FROM, ALL_IDS);
+    const glance = buildGlanceBlock(data, report, 10);
+    expect(glance.feedGap.expected).toBe(14);
+    expect(glance.feedGap.arrived).toBe(13);
+    expect(glance.feedGap.missing.map((m) => m.rowId)).toEqual(["instrument:mcd-mxn"]);
+    expect(glance.suppressed).toEqual([
+      SUPPRESSION_KEYS.fundValue,
+      SUPPRESSION_KEYS.change,
+      SUPPRESSION_KEYS.reserve,
+    ]);
+  });
+
+  it("from the date on, with MCD marked: fourteen of fourteen, silent", () => {
+    const { data, report } = constructedAnchor(MCD_FROM, [...ALL_IDS, "mcd-mxn"]);
+    const glance = buildGlanceBlock(data, report, 10);
+    expect(glance.feedGap).toEqual({ expected: 14, arrived: 14, missing: [] });
+    expect(glance.suppressed).toEqual([]);
   });
 });
 

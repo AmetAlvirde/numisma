@@ -132,9 +132,9 @@ refuses the same value for the same reason, one layer down
 ### Twelve Data free tier: why the run pauses ~1 minute
 
 The Twelve Data **Basic (free)** plan allows **8 API credits/minute** (800/day), and
-a batched `time_series` request costs **1 credit per symbol**. The registry has **9**
-Twelve Data symbols (3 US equities + 6 `*-mxn` USD legs), so fetching all 9 at once
-is 9 credits > 8 ⇒ **HTTP 429**. The fetch therefore paces equities in chunks of
+a batched `time_series` request costs **1 credit per symbol**. The registry has **10**
+Twelve Data symbols (3 US equities + 7 `*-mxn` USD legs), so fetching all 10 at once
+is 10 credits > 8 ⇒ **HTTP 429**. The fetch therefore paces equities in chunks of
 `twelveDataMaxSymbolsPerMinute` (default **8**), sleeping `twelveDataPauseMs`
 (default **60 s**) between chunks — you'll see `pausing 60s for the Twelve Data
 per-minute credit quota to reset…` in the output. **A daily run consequently takes
@@ -392,7 +392,7 @@ fail, which is expected and self-heals on the next hour.
 **Repeat fires are cheap, but not free**, which is worth stating precisely because a
 `RunAtLoad` run can land at any hour: a second run of an evening appends 0 new marks,
 commits nothing at step 3, passes step 4, and re-upserts at step 6 under
-`ON CONFLICT … DO UPDATE`. What it still spends is 9 Twelve Data credits and about
+`ON CONFLICT … DO UPDATE`. What it still spends is 10 Twelve Data credits and about
 two minutes of wall time (the 60 s pacing sleep runs regardless). "No new marks" and
 "no cost" are different claims.
 
@@ -697,19 +697,19 @@ reach.
 
 ### A weekday recovery and a weekend recovery, side by side
 
-The registry holds 13 instruments: 4 crypto (`btc` `eth` `render` `gram`,
-Binance, daily cadence — Binance trades every day) and 9 Twelve Data symbols
-(`aapl` `googl` `tsla` plus the six `*-mxn` derived rows, weekdays only). A
-Friday owes all 13. A Saturday owes only the 4 crypto — the 9 equity-sourced
+The registry holds 14 instruments: 4 crypto (`btc` `eth` `render` `gram`,
+Binance, daily cadence — Binance trades every day) and 10 Twelve Data symbols
+(`aapl` `googl` `tsla` plus the seven `*-mxn` derived rows, weekdays only). A
+Friday owes all 14. A Saturday owes only the 4 crypto — the 10 equity-sourced
 rows are **not owed** that day, not missing. Read the two reports below side by
 side: **the 4/4 Saturday report is a complete, successful recovery**, not a
-partial one, and it must never be mistaken for 9 silent failures.
+partial one, and it must never be mistaken for 10 silent failures.
 
 The output below is authored to match the CLI's real format strings — it is
 **illustrative, not a captured run** (no real recovery has been executed to
 produce it):
 
-Friday, 2026-08-14 — 13 of 13 owed:
+Friday, 2026-08-14 — 14 of 14 owed:
 
 ```
 prices:fetch — recovering 2026-08-14: marks are dated 2026-08-14, while
@@ -723,20 +723,20 @@ prices:fetch — recovering 2026-08-14: marks are dated 2026-08-14, while
   fetched googl   GOOGL       2026-08-14  <price>
   fetched tsla    TSLA        2026-08-14  <price>
   fetched eww-mxn EWW         2026-08-14  <price>
-  ...             (remaining 5 of 13 instruments omitted for brevity)
+  ...             (remaining 6 of 14 instruments omitted for brevity)
 
-prices:fetch — 13/13 quotes stored in <dataDir>/prices
-  13 new PriceMarked candidate(s) written to <dataDir>/inbox/transactions.json
+prices:fetch — 14/14 quotes stored in <dataDir>/prices
+  14 new PriceMarked candidate(s) written to <dataDir>/inbox/transactions.json
   0 already pending (same id) — skipped
 
-  recovery of 2026-08-14 — 13 owed, 13 marked, 0 absent; 0 not owed by their venue
+  recovery of 2026-08-14 — 14 owed, 14 marked, 0 absent; 0 not owed by their venue
 
 Next: run `pnpm spine` to validate + append the marks to the event log.
 ```
 
 Exit code **0**.
 
-Saturday, 2026-08-15 — 4 of 4 owed (not 9 of 13 — the other 9 were never owed):
+Saturday, 2026-08-15 — 4 of 4 owed (not 4 of 14 — the other 10 were never owed):
 
 ```
 prices:fetch — recovering 2026-08-15: marks are dated 2026-08-15, while
@@ -751,13 +751,13 @@ prices:fetch — 4/4 quotes stored in <dataDir>/prices
   4 new PriceMarked candidate(s) written to <dataDir>/inbox/transactions.json
   0 already pending (same id) — skipped
 
-  recovery of 2026-08-15 — 4 owed, 4 marked, 0 absent; 9 not owed by their venue
-  not owed (never attempted): aapl, googl, tsla, eww-mxn, intc-mxn, nke-mxn, nu-mxn, rivn-mxn, sbux-mxn
+  recovery of 2026-08-15 — 4 owed, 4 marked, 0 absent; 10 not owed by their venue
+  not owed (never attempted): aapl, googl, tsla, eww-mxn, intc-mxn, nke-mxn, nu-mxn, rivn-mxn, sbux-mxn, mcd-mxn
 
 Next: run `pnpm spine` to validate + append the marks to the event log.
 ```
 
-Exit code **0**. The 9 Twelve Data symbols in `not owed` were never requested —
+Exit code **0**. The 10 Twelve Data symbols in `not owed` were never requested —
 the run computes the owed set from the venue calendar before building any
 provider request, so there is no ambiguous "no data" response to explain away.
 

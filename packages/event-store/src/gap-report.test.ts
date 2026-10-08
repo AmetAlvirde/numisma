@@ -37,7 +37,8 @@ import {
 
 // ── The venue split ─────────────────────────────────────────────────────────
 // Nine weekday-venue (`twelvedata`) instruments and four daily (`binance`) ones —
-// the real registry's 9/4 shape, spelled out here rather than derived from
+// the real registry's 9/4 shape on every July date below, before mcd-mxn's
+// `expectedFrom` (2026-10-08) made it 10/4, spelled out here rather than derived from
 // `instrumentsForSource` so a registry edit that changes the split fails these
 // cases loudly instead of quietly re-shaping them. The counts are what make the
 // Saturday case bite: under the old rule the nine self-skip onto Friday's marks,
@@ -286,6 +287,20 @@ describe("computeGapReport — the second question: did a whole venue go dark", 
     expect(report.lost).toEqual([]);
     expect(report.venueDark).toEqual([
       { date: THURSDAY, source: "twelvedata", expected: 9 },
+    ]);
+  });
+
+  it("counts what the venue owed ON THAT DATE, so a row registered later counts from its expectedFrom", () => {
+    // mcd-mxn is owed from 2026-10-08. A dark July Thursday owed nine (above); a
+    // dark Thursday after the row landed owed ten, and the line has to say ten.
+    const OCTOBER_THURSDAY = "2026-10-08";
+    const report = computeGapReport(marks(OCTOBER_THURSDAY, DAILY_VENUE), {
+      since: OCTOBER_THURSDAY,
+      until: OCTOBER_THURSDAY,
+      now: new Date("2026-10-12T12:00:00Z"),
+    });
+    expect(report.venueDark).toEqual([
+      { date: OCTOBER_THURSDAY, source: "twelvedata", expected: 10 },
     ]);
   });
 

@@ -27,8 +27,8 @@
  * verdicts. It is also WARN-ONLY (#266 D8): nothing is suppressed and the exit code
  * does not move, which D7 below makes mandatory rather than merely preferable.
  *
- * IT REPORTS. IT NEVER FILLS. Folding an unanchored day writes a row on which all
- * thirteen instruments were expected and none arrived: `feedGap` fires, every
+ * IT REPORTS. IT NEVER FILLS. Folding an unanchored day writes a row on which every
+ * registered instrument was expected and none arrived: `feedGap` fires, every
  * header key suppresses, and NAV is permanently blank on a historical row no later
  * run can repair — a calendar-dense backfill manufactures its own graveyard
  * (`apps/web/src/push/backfill-core.ts`). This module returns dates and counts,
@@ -65,7 +65,7 @@
  * complete, not degraded, and one failed Twelve Data symbol is one blank cell that
  * the existing `feedGap` trigger already speaks to. *Day lost* is permanent; *one
  * instrument missing* is not. **`venueDark` does not overturn this**: its unit is a
- * whole venue at ZERO, never a count shortfall — eight of nine equities is still
+ * whole venue at ZERO, never a count shortfall — nine of ten equities is still
  * one blank cell and stays unreported (#266 D3).
  *
  * ── QUESTION 2, STATED ─────────────────────────────────────────────────────────
@@ -116,6 +116,7 @@ import {
   TRADING_DAY_TIME_ZONE,
   addDays,
   instrumentsForSource,
+  isExpectedOn,
   owesMarkOn,
   tradingDayAsOf,
   weekdayName,
@@ -384,7 +385,7 @@ export function computeGapReport(
       continue;
     }
     anchorsChecked += 1;
-    // Zero marks, not "fewer than thirteen". See the header.
+    // Zero marks, not "fewer than the whole registry". See the header.
     if ((marksOn.get(date) ?? 0) === 0) {
       lost.push({ date, reason: "no-marks" });
       // A lost day is not additionally a venue-dark day: one day, one verdict.
@@ -395,7 +396,7 @@ export function computeGapReport(
       if (!owesMarkOn(source, date) || (bySource?.get(source) ?? 0) > 0) {
         continue;
       }
-      venueDark.push({ date, source, expected: EXPECTED_BY_SOURCE[source] ?? 0 });
+      venueDark.push({ date, source, expected: expectedOn(source, date) });
     }
   }
 
@@ -406,7 +407,7 @@ export function computeGapReport(
  * `instrumentId` → the venue that serves it, built ONCE from `instrumentsForSource`
  * — the registry read that cannot throw. A module-level constant because the
  * registry is code-owned reference data: it cannot change between two calls of a
- * pure function, and rebuilding it per report would re-walk thirteen rows per day.
+ * pure function, and rebuilding it per report would re-walk the whole registry per day.
  */
 const SOURCE_BY_INSTRUMENT_ID: ReadonlyMap<string, PriceSource> = new Map(
   PRICE_SOURCES.flatMap((source) =>
@@ -416,11 +417,15 @@ const SOURCE_BY_INSTRUMENT_ID: ReadonlyMap<string, PriceSource> = new Map(
   ),
 );
 
-/** How many instruments each venue owes on a day it owes anything. */
-const EXPECTED_BY_SOURCE: Readonly<Partial<Record<PriceSource, number>>> =
-  Object.fromEntries(
-    PRICE_SOURCES.map((source) => [source, instrumentsForSource(source).length]),
-  );
+/**
+ * How many instruments `source` owes on `date`, a day it owes anything. Per DATE,
+ * not per venue: a row's `expectedFrom` means a dark day before it landed owed one
+ * mark fewer, and the line that says "owed N mark(s)" has to say the N that day had.
+ */
+function expectedOn(source: PriceSource, date: string): number {
+  return instrumentsForSource(source).filter((entry) => isExpectedOn(entry, date))
+    .length;
+}
 
 /**
  * One line per lost day, then one per venue-dark venue-day. EMPTY when the window

@@ -1,6 +1,6 @@
 // Shell reliability suite for the full price pipe (crypto + US equities + derived
 // MXN). No live network (every fetch is mocked) and never the live data files
-// (each run uses a fresh temp data dir): the happy-path store+emit across all 13
+// (each run uses a fresh temp data dir): the happy-path store+emit across all 14
 // instruments plus the FIX, the derived `USD × FIX` MXN marks with the `usdMxn`
 // snapshot, the pre-mark-time no-mark case, idempotent re-runs, per-symbol failure
 // isolation, and the loud missing/stale-FIX behavior.
@@ -12,7 +12,7 @@ import { runPriceFetch as runPriceFetchRaw, type RunOptions } from "./fetch-pric
 import { resolvePriceFeedPaths } from "./paths.js";
 
 // Default a no-op sleep so Twelve Data pacing never waits a real minute in the
-// suite (the default 8/min cap chunks the 9 equities into [8, 1] with a 60s pause).
+// suite (the default 8/min cap chunks the 10 equities into [8, 2] with a 60s pause).
 // A test that asserts pacing passes its own sleepImpl — spread last, so it wins.
 const runPriceFetch = (options: RunOptions = {}) =>
   runPriceFetchRaw({ sleepImpl: async () => {}, ...options });
@@ -49,6 +49,7 @@ const EQUITY_CLOSES: Record<string, number> = {
   NU: 12.6,
   RIVN: 15.5,
   SBUX: 95.3,
+  MCD: 232.99,
 };
 
 const FIX_RATE = 18.5;
@@ -149,7 +150,7 @@ async function readStore(instrumentId: string): Promise<string> {
 }
 
 describe("runPriceFetch — happy path across every provider (at/after mark time)", () => {
-  it("stores all 13 quotes and queues one deterministic-id mark per instrument", async () => {
+  it("stores all 14 quotes and queues one deterministic-id mark per instrument", async () => {
     const result = await runPriceFetch({
       config: { dataDir, markTime: "00:00" },
       fetchImpl: mockFetch(),
@@ -157,10 +158,10 @@ describe("runPriceFetch — happy path across every provider (at/after mark time
       credentials: CREDENTIALS,
     });
 
-    expect(result.totalCount).toBe(13);
-    expect(result.storedCount).toBe(13);
+    expect(result.totalCount).toBe(14);
+    expect(result.storedCount).toBe(14);
     expect(result.markEmitted).toBe(true);
-    expect(result.emittedCount).toBe(13);
+    expect(result.emittedCount).toBe(14);
     expect(result.failures).toEqual([]);
 
     const inbox = await readInbox();
@@ -178,6 +179,7 @@ describe("runPriceFetch — happy path across every provider (at/after mark time
       `pm-nu-mxn-${AS_OF}`,
       `pm-rivn-mxn-${AS_OF}`,
       `pm-sbux-mxn-${AS_OF}`,
+      `pm-mcd-mxn-${AS_OF}`,
     ]);
   });
 
@@ -206,7 +208,7 @@ describe("runPriceFetch — happy path across every provider (at/after mark time
 });
 
 describe("runPriceFetch — before the mark time", () => {
-  it("upserts the store (all 13) but emits no mark and fetches no FIX", async () => {
+  it("upserts the store (all 14) but emits no mark and fetches no FIX", async () => {
     const result = await runPriceFetch({
       config: { dataDir, markTime: "23:59" },
       fetchImpl: mockFetch(),
@@ -214,7 +216,7 @@ describe("runPriceFetch — before the mark time", () => {
       credentials: CREDENTIALS,
     });
 
-    expect(result.storedCount).toBe(13);
+    expect(result.storedCount).toBe(14);
     expect(result.markEmitted).toBe(false);
     expect(result.emittedCount).toBe(0);
     expect(result.failures).toEqual([]);
@@ -232,13 +234,13 @@ describe("runPriceFetch — idempotent re-run (spine claim)", () => {
       credentials: CREDENTIALS,
     };
     const first = await runPriceFetch(options);
-    expect(first.emittedCount).toBe(13);
+    expect(first.emittedCount).toBe(14);
 
     const second = await runPriceFetch(options);
     expect(second.emittedCount).toBe(0);
-    expect(second.skippedCount).toBe(13);
+    expect(second.skippedCount).toBe(14);
 
-    expect(await readInbox()).toHaveLength(13);
+    expect(await readInbox()).toHaveLength(14);
   });
 
   it("never clobbers a hand-authored pending inbox event", async () => {
@@ -256,7 +258,7 @@ describe("runPriceFetch — idempotent re-run (spine claim)", () => {
     });
 
     const merged = await readInbox();
-    expect(merged).toHaveLength(14);
+    expect(merged).toHaveLength(15);
     expect(merged[0]!.id).toBe("hand-authored");
     expect(merged.some((event) => event.id === `pm-sbux-mxn-${AS_OF}`)).toBe(true);
   });
@@ -277,8 +279,8 @@ describe("runPriceFetch — per-symbol failure isolation (R4)", () => {
       credentials: CREDENTIALS,
     });
 
-    // 11 of 13 succeeded; the two bad symbols each failed attributably.
-    expect(result.storedCount).toBe(11);
+    // 12 of 14 succeeded; the two bad symbols each failed attributably.
+    expect(result.storedCount).toBe(12);
     expect(result.failures.map((f) => f.instrumentId).sort()).toEqual(["aapl", "eth"]);
     expect(result.failures.find((f) => f.instrumentId === "aapl")?.message).toMatch(/symbol halted/);
     expect(result.failures.find((f) => f.instrumentId === "eth")?.message).toMatch(
@@ -289,7 +291,7 @@ describe("runPriceFetch — per-symbol failure isolation (R4)", () => {
     const inbox = await readInbox();
     expect(inbox.map((e) => e.id)).not.toContain(`pm-eth-${AS_OF}`);
     expect(inbox.map((e) => e.id)).toContain(`pm-eww-mxn-${AS_OF}`);
-    expect(inbox).toHaveLength(11);
+    expect(inbox).toHaveLength(12);
   });
 });
 
@@ -304,13 +306,14 @@ describe("runPriceFetch — missing/stale FIX fails *-mxn loudly (ADR-005)", () 
       credentials: CREDENTIALS,
     });
 
-    // All 13 USD legs still stored (the store never depends on the FIX).
-    expect(result.storedCount).toBe(13);
-    // The FIX outage + all six *-mxn derivations fail, attributably.
+    // All 14 USD legs still stored (the store never depends on the FIX).
+    expect(result.storedCount).toBe(14);
+    // The FIX outage + all seven *-mxn derivations fail, attributably.
     const failedIds = result.failures.map((f) => f.instrumentId).sort();
     expect(failedIds).toEqual([
       "eww-mxn",
       "intc-mxn",
+      "mcd-mxn",
       "nke-mxn",
       "nu-mxn",
       "rivn-mxn",
@@ -340,7 +343,7 @@ describe("runPriceFetch — missing/stale FIX fails *-mxn loudly (ADR-005)", () 
 
     expect(result.emittedCount).toBe(7);
     const mxnFailures = result.failures.filter((f) => f.instrumentId.endsWith("-mxn"));
-    expect(mxnFailures).toHaveLength(6);
+    expect(mxnFailures).toHaveLength(7);
     expect(mxnFailures[0]?.message).toMatch(/stale/);
     const inbox = await readInbox();
     expect(inbox.map((e) => e.id)).not.toContain(`pm-nke-mxn-${AS_OF}`);
@@ -374,8 +377,8 @@ describe("runPriceFetch — request timeout attribution (R4)", () => {
     expect(result.failures.find((f) => f.instrumentId === "tsla")?.message).toMatch(
       /timed out after 20ms/,
     );
-    // All 9 Twelve Data symbols timed out; the 4 crypto quotes still stored.
-    expect(result.failures).toHaveLength(9);
+    // All 10 Twelve Data symbols timed out; the 4 crypto quotes still stored.
+    expect(result.failures).toHaveLength(10);
     expect(result.storedCount).toBe(4);
   });
 });
@@ -394,7 +397,7 @@ describe("runPriceFetch — Twelve Data pacing under the free-tier credit cap", 
     }) as typeof fetch;
   }
 
-  it("chunks the 9 equity symbols into ≤8-credit windows with one 60s pause between", async () => {
+  it("chunks the 10 equity symbols into ≤8-credit windows with one 60s pause between", async () => {
     const batches: string[][] = [];
     const sleeps: number[] = [];
 
@@ -408,14 +411,14 @@ describe("runPriceFetch — Twelve Data pacing under the free-tier credit cap", 
       },
     });
 
-    // 9 symbols, 8/min cap → two windows of 8 + 1; NEVER a single 9-credit request.
-    expect(batches.map((b) => b.length)).toEqual([8, 1]);
+    // 10 symbols, 8/min cap → two windows of 8 + 2; NEVER a single 10-credit request.
+    expect(batches.map((b) => b.length)).toEqual([8, 2]);
     expect(batches.every((b) => b.length <= 8)).toBe(true);
     // Exactly one pause, BETWEEN the two chunks (never after the last).
     expect(sleeps).toEqual([60_000]);
-    // Pacing changes timing, not coverage: all 13 still stored and marked.
-    expect(result.storedCount).toBe(13);
-    expect(result.emittedCount).toBe(13);
+    // Pacing changes timing, not coverage: all 14 still stored and marked.
+    expect(result.storedCount).toBe(14);
+    expect(result.emittedCount).toBe(14);
     expect(result.failures).toEqual([]);
   });
 
@@ -435,7 +438,7 @@ describe("runPriceFetch — Twelve Data pacing under the free-tier credit cap", 
 
     // A cap ≥ the equity count collapses to one batch and disables pacing entirely.
     expect(batches).toHaveLength(1);
-    expect(batches[0]).toHaveLength(9);
+    expect(batches[0]).toHaveLength(10);
     expect(sleeps).toEqual([]);
   });
 });
@@ -483,10 +486,10 @@ describe("runPriceFetch — crypto marks the settled UTC candle, gated uniformly
       observationDate: "2026-07-02",
       asOf: AS_OF,
     });
-    // No render mark; the other 12 instruments still marked.
+    // No render mark; the other 13 instruments still marked.
     const inbox = await readInbox();
     expect(inbox.map((e) => e.id)).not.toContain(`pm-render-${AS_OF}`);
-    expect(inbox).toHaveLength(12);
+    expect(inbox).toHaveLength(13);
   });
 
   it("treats a thin (<2-row) Binance payload as a per-symbol failure (R4), others unaffected", async () => {
@@ -505,8 +508,8 @@ describe("runPriceFetch — crypto marks the settled UTC candle, gated uniformly
     expect(result.failures.find((f) => f.instrumentId === "gram")?.message).toMatch(
       /expected >=2 klines, got 1/,
     );
-    // Isolation: the thin symbol fails alone; the other 12 store and mark.
-    expect(result.storedCount).toBe(12);
+    // Isolation: the thin symbol fails alone; the other 13 store and mark.
+    expect(result.storedCount).toBe(13);
     const inbox = await readInbox();
     expect(inbox.map((e) => e.id)).not.toContain(`pm-gram-${AS_OF}`);
     expect(inbox.map((e) => e.id)).toContain(`pm-btc-${AS_OF}`);
@@ -583,7 +586,7 @@ describe("runPriceFetch — crypto marks the settled UTC candle, gated uniformly
 //
 // The calendar these dates rest on: 2026-08-13 Thu, 08-14 Fri, 08-15 Sat,
 // 08-16 Sun, 08-17 Mon. Twelve Data is a `weekdays` venue and Binance `daily`,
-// so a Friday owes all 13 and a Saturday owes only the 4 crypto.
+// so a Friday owes all 14 and a Saturday owes only the 4 crypto.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Mon 2026-08-17 09:00 CDMX — a real instant, and BEFORE the 18:00 mark time. */
@@ -691,7 +694,7 @@ function saturdayLiveMockFetch(urls: string[] = []): typeof fetch {
 }
 
 describe("runPriceFetch — with no asOf the live path is unchanged (R2 pin)", () => {
-  it("reports the DERIVED asOf, an empty notOwed, and all 13 instruments attempted", async () => {
+  it("reports the DERIVED asOf, an empty notOwed, and all 14 instruments attempted", async () => {
     const result = await runPriceFetch({
       config: { dataDir, markTime: "00:00" },
       fetchImpl: mockFetch(),
@@ -701,14 +704,14 @@ describe("runPriceFetch — with no asOf the live path is unchanged (R2 pin)", (
 
     expect(result.asOf).toBe(AS_OF);
     expect(result.notOwed).toEqual([]);
-    expect(result.totalCount).toBe(13);
-    expect(result.storedCount).toBe(13);
+    expect(result.totalCount).toBe(14);
+    expect(result.storedCount).toBe(14);
     expect(result.markEmitted).toBe(true);
   });
 
-  it("on a SATURDAY still fetches all 9 Twelve Data symbols and records 9 stale skips", async () => {
+  it("on a SATURDAY still fetches all 10 Twelve Data symbols and records 10 stale skips", async () => {
     // §8.1: the owed-set filter is scoped to the recovery path. The nightly job
-    // keeps storing Friday's close under Saturday's asOf and reporting 9 skips —
+    // keeps storing Friday's close under Saturday's asOf and reporting 10 skips —
     // an unconditional filter would silently change what the daily job stores.
     const urls: string[] = [];
     const result = await runPriceFetch({
@@ -720,14 +723,14 @@ describe("runPriceFetch — with no asOf the live path is unchanged (R2 pin)", (
 
     expect(result.asOf).toBe(SATURDAY_AS_OF);
     expect(result.notOwed).toEqual([]);
-    expect(result.totalCount).toBe(13);
-    expect(result.storedCount).toBe(13);
-    // The 9 Twelve Data symbols were REQUESTED — paced into chunks of 8 + 1.
+    expect(result.totalCount).toBe(14);
+    expect(result.storedCount).toBe(14);
+    // The 10 Twelve Data symbols were REQUESTED — paced into chunks of 8 + 2.
     const equityRequests = urls.filter((href) => href.includes("api.twelvedata.com"));
     expect(equityRequests).toHaveLength(2);
     expect(equityRequests.every((href) => href.includes("outputsize=1"))).toBe(true);
-    // …stored under Saturday's asOf, and skipped as stale marks — all 9 of them.
-    expect(result.staleMarkSkips).toHaveLength(9);
+    // …stored under Saturday's asOf, and skipped as stale marks — all 10 of them.
+    expect(result.staleMarkSkips).toHaveLength(10);
     expect(result.staleMarkSkips.every((skip) => skip.asOf === SATURDAY_AS_OF)).toBe(true);
     expect(result.emittedCount).toBe(4); // only the crypto marked
     expect(JSON.parse((await readStore("aapl")).trim())).toMatchObject({ asOf: SATURDAY_AS_OF });
@@ -778,19 +781,19 @@ describe("runPriceFetch — recovering a past trading day (R2.1/R2.3)", () => {
     });
 
     expect(result.asOf).toBe(RECOVERY_AS_OF);
-    expect(result.totalCount).toBe(13);
-    expect(result.storedCount).toBe(13);
+    expect(result.totalCount).toBe(14);
+    expect(result.storedCount).toBe(14);
     expect(result.failures).toEqual([]);
     expect(result.staleMarkSkips).toEqual([]);
 
     // Every mark is dated to the recovered day…
-    expect(result.marks.map((mark) => mark.asOf)).toEqual(Array(13).fill(RECOVERY_AS_OF));
+    expect(result.marks.map((mark) => mark.asOf)).toEqual(Array(14).fill(RECOVERY_AS_OF));
     expect((await readInbox()).map((event) => event.id)).toContain(`pm-btc-${RECOVERY_AS_OF}`);
 
     // …and every quote records the instant the recovery ACTUALLY happened.
-    expect(result.quotes.map((quote) => quote.asOf)).toEqual(Array(13).fill(RECOVERY_AS_OF));
+    expect(result.quotes.map((quote) => quote.asOf)).toEqual(Array(14).fill(RECOVERY_AS_OF));
     expect(result.quotes.map((quote) => quote.fetchedAt)).toEqual(
-      Array(13).fill(RECOVERY_NOW.toISOString()),
+      Array(14).fill(RECOVERY_NOW.toISOString()),
     );
     const stored = JSON.parse((await readStore("btc")).trim());
     expect(stored).toMatchObject({ asOf: RECOVERY_AS_OF, fetchedAt: RECOVERY_NOW.toISOString() });
@@ -808,7 +811,7 @@ describe("runPriceFetch — recovering a past trading day (R2.1/R2.3)", () => {
     });
 
     expect(result.markEmitted).toBe(true);
-    expect(result.emittedCount).toBe(13);
+    expect(result.emittedCount).toBe(14);
 
     // Same clock, no override: the gate is shut and nothing marks. This is the
     // control that proves the override — not the hour — opened it.
@@ -872,6 +875,7 @@ describe("runPriceFetch — the owed set is computed BEFORE any request (R2.4/R2
       "nu-mxn",
       "rivn-mxn",
       "sbux-mxn",
+      "mcd-mxn",
     ]);
     expect(result.notOwed.every((row) => row.source === "twelvedata")).toBe(true);
     expect(result.notOwed.find((row) => row.instrumentId === "eww-mxn")?.symbol).toBe("EWW");
@@ -926,7 +930,7 @@ describe("runPriceFetch — recovery is additive and idempotent", () => {
     const afterFirst = await readInbox();
     const second = await runPriceFetch(recovery);
     expect(second.emittedCount).toBe(0);
-    expect(second.skippedCount).toBe(13);
+    expect(second.skippedCount).toBe(14);
     expect(await readInbox()).toHaveLength(afterFirst.length);
   });
 });

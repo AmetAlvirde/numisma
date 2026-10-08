@@ -10,6 +10,8 @@ import {
   crossReferenceEvent,
   instrumentsForSource,
   isAtOrAfterMarkTime,
+  isExpectedOn,
+  lastExpectedMarkDate,
   markFromQuote,
   mergeInbox,
   parseEvent,
@@ -18,6 +20,7 @@ import {
   tradingDayAsOf,
   type FundReviewData,
   type InboxRecord,
+  type InstrumentRegistryEntry,
   type MarkClock,
   type Quote,
 } from "../index.js";
@@ -67,6 +70,7 @@ describe("instrument registry (R5)", () => {
       "nu-mxn",
       "rivn-mxn",
       "sbux-mxn",
+      "mcd-mxn",
     ]);
   });
 
@@ -87,6 +91,43 @@ describe("instrument registry (R5)", () => {
       source: "twelvedata",
       derived: true,
     });
+  });
+
+  it("dates a row registered after genesis, and only that row", () => {
+    // The rows that predate the field owe marks from genesis; mcd-mxn joined later.
+    const dated = [...instrumentsForSource("binance"), ...instrumentsForSource("twelvedata")]
+      .filter((entry) => entry.expectedFrom !== undefined)
+      .map((entry) => [entry.instrumentId, entry.expectedFrom]);
+    expect(dated).toEqual([["mcd-mxn", "2026-10-08"]]);
+  });
+});
+
+describe("isExpectedOn — a registry row owes marks from its expectedFrom on", () => {
+  const SATURDAY_START: InstrumentRegistryEntry = {
+    instrumentId: "late",
+    symbol: "LATE",
+    quoteCurrency: "USD",
+    source: "twelvedata",
+    expectedFrom: "2026-10-03",
+  };
+
+  it("owes nothing before the date and everything from it", () => {
+    expect(isExpectedOn(SATURDAY_START, "2026-10-02")).toBe(false);
+    expect(isExpectedOn(SATURDAY_START, "2026-10-03")).toBe(true);
+    expect(isExpectedOn(SATURDAY_START, "2026-10-05")).toBe(true);
+  });
+
+  it("owes from genesis when the row has no expectedFrom", () => {
+    expect(isExpectedOn(resolveInstrument("aapl"), "2020-01-01")).toBe(true);
+  });
+
+  it("asked of the date the mark is OWED FOR, a weekend start owes nothing until Monday", () => {
+    // The glance builder's question. A Sunday anchor carries a weekday venue back to
+    // Friday, which predates a Saturday start, so the new row is not yet owed.
+    const owedOn = (asOf: string) =>
+      isExpectedOn(SATURDAY_START, lastExpectedMarkDate("twelvedata", asOf));
+    expect(owedOn("2026-10-04")).toBe(false);
+    expect(owedOn("2026-10-05")).toBe(true);
   });
 });
 

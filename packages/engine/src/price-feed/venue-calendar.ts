@@ -38,13 +38,13 @@ export type VenueCadence = "daily" | "weekdays";
 
 /**
  * THE VENUE CALENDAR — keyed on the registry's OWN `source` property, which is the
- * only reason this covers all thirteen instruments.
+ * only reason this covers every registered instrument.
  *
  * READ THIS BEFORE EDITING: the non-crypto instruments are TWO registry groups, not
- * one. `EQUITY_ENTRIES` (3 US equities) and `MXN_DERIVED_ENTRIES` (6 SIC entries
+ * one. `EQUITY_ENTRIES` (3 US equities) and `MXN_DERIVED_ENTRIES` (7 SIC entries
  * priced off a US-listed underlying) are BOTH `source: "twelvedata"`. Keying on
  * `source` unions them for free; hand-listing "the equities" instead would
- * under-count the expectation by six and go silent on a real outage — a false *no*.
+ * under-count the expectation by seven and go silent on a real outage — a false *no*.
  *
  * `satisfies Record<PriceSource, VenueCadence>` is the compile-time latch: the day
  * the engine adds a third price source, this object stops compiling and somebody has
